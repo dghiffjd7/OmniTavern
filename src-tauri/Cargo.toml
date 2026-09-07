@@ -4,6 +4,7 @@ version = "0.7.2"
 description = "A cross-platform chat application"
 authors = ["you"]
 edition = "2021"
+rust-version = "1.91"
 
 [lib]
 name = "omnitavern_lib"
@@ -23,7 +24,12 @@ serde_json = "1.0"
 base64 = "0.22"
 chrono = "0.4"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "multipart"] }
-tokio = { version = "1", features = ["rt", "net", "time"] }
+tokio = { version = "1", features = ["rt", "net", "time", "sync", "macros"] }
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+futures-util = "0.3"
+tokio-stream = "0.1"
+aws-sdk-bedrockruntime = "=1.108.0"
 libc = "0.2"
 rusqlite = { version = "0.31", features = ["bundled"] }
 zip = "0.6"

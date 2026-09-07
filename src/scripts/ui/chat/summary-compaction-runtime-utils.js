@@ -35,48 +35,58 @@ export const createSessionSummaryCompactionRuntime = ({
     };
   };
 
-  return async (sid, { force = false, place = '' } = {}) => {
+  return async (sid, { force = false, place = '', signal = null, detailed = false, expectedAdapterKind = '' } = {}) => {
+    const result = (status, reason = '', error = '') => detailed ? { status, reason, error } : status === 'succeeded';
+    const skipped = reason => result('skipped', reason);
     const sessionId = String(sid || '').trim();
-    if (!sessionId) return false;
+    if (!sessionId) return skipped('missing_session');
+    if (signal?.aborted) return result('cancelled', 'aborted');
     const resolvedPlace = String(place || getDefaultPlace?.() || 'chat').trim().toLowerCase() || 'chat';
     const enabled = typeof getIsCompactionEnabled === 'function'
       ? getIsCompactionEnabled({ sessionId, place: resolvedPlace, force })
       : getIsSummaryMemoryEnabled(resolvedPlace);
-    if (!enabled) return false;
+    if (!enabled) return skipped('disabled');
     const compactKey = `${resolvedPlace}:${sessionId}`;
-    if (compacting.has(compactKey)) return false;
+    if (compacting.has(compactKey)) return skipped('already_running');
     if (typeof buildMessages !== 'function' || typeof backgroundChat !== 'function') {
-      return false;
+      return skipped('model_unavailable');
     }
-    if (!getIsConfigured()) return false;
+    if (!getIsConfigured()) return skipped('model_unavailable');
 
     let adapter = null;
     try {
       adapter = await createAdapter?.({ sessionId, place: resolvedPlace }) || createLegacyAdapter(sessionId);
     } catch (error) {
       logger?.debug?.('summary compaction adapter init failed', error);
-      return false;
+      return result('failed', 'adapter_error', String(error?.message || error));
     }
-    if (!adapter?.getItems || !adapter?.persist) return false;
+    if (!adapter?.getItems || !adapter?.persist) return skipped('adapter_unavailable');
+    // 表格内部维护不可因运行中切换模式而回退处理另一份摘要存储。
+    if (expectedAdapterKind && adapter.kind !== expectedAdapterKind) return skipped('adapter_changed');
     const list = await adapter.getItems();
-    if (!shouldCompact({ items: list, force })) return false;
+    if (!shouldCompact({ items: list, force })) return skipped('threshold_not_reached');
+    if (signal?.aborted) return result('cancelled', 'aborted');
 
     compacting.add(compactKey);
     return new Promise((resolve) => {
       setTimeoutFn(async () => {
         try {
+          signal?.throwIfAborted();
           const current = await adapter.getItems();
           const arr = Array.isArray(current) ? current : [];
           const compactedText = String(await adapter.getCompactedText?.() || '').trim();
           const context = buildSessionContext(sessionId);
+          signal?.throwIfAborted();
           const raw = await requestCompactionRaw({
             items: arr,
             compactedText,
             context,
             buildMessages,
             backgroundChat,
+            ...(signal ? { options: { signal, temperature: 0.2, maxTokens: 800, presetContext: { sessionId, uiMode: resolvedPlace === 'writing' ? 'rp' : 'chat' } } } : {}),
           });
-          if (!raw) return resolve(false);
+          signal?.throwIfAborted();
+          if (!raw) return resolve(result('failed', 'empty_response'));
           try {
             await adapter.setRaw?.(raw);
           } catch {}
@@ -86,14 +96,14 @@ export const createSessionSummaryCompactionRuntime = ({
             try {
               dispatchFailed(sessionId, 'missing_summary_tag');
             } catch {}
-            return resolve(false);
+            return resolve(result('failed', 'missing_summary_tag'));
           }
 
           if (!valid) {
             try {
               dispatchFailed(sessionId, 'format');
             } catch {}
-            return resolve(false);
+            return resolve(result('failed', 'format'));
           }
 
           const latestItems = await adapter.getItems();
@@ -101,6 +111,7 @@ export const createSessionSummaryCompactionRuntime = ({
             ? adapter.normalizeItems(latestItems)
             : normalizeItems(latestItems);
           const keep = (Array.isArray(normalizedItems) ? normalizedItems : []).slice(-2);
+          signal?.throwIfAborted();
           await adapter.persist({
             text,
             raw,
@@ -108,6 +119,7 @@ export const createSessionSummaryCompactionRuntime = ({
             keepItems: keep,
             sessionId,
             place: resolvedPlace,
+            signal,
           });
 
           try {
@@ -116,12 +128,12 @@ export const createSessionSummaryCompactionRuntime = ({
           try {
             dispatchUpdated(sessionId);
           } catch {}
-          resolve(true);
+          resolve(result('succeeded'));
         } catch (error) {
           try {
             logger?.debug?.('summary compaction failed', error);
           } catch {}
-          resolve(false);
+          resolve(result(signal?.aborted || error?.name === 'AbortError' ? 'cancelled' : 'failed', 'compaction_error', String(error?.message || error)));
         } finally {
           compacting.delete(compactKey);
         }

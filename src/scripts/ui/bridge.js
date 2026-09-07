@@ -5898,7 +5898,8 @@ class AppBridge {
     const explicitlyDisablePhoneFormat = Boolean(context?.meta?.disablePhoneFormat);
     const suppressGenericReplyPrompt = isMomentCommentTask;
     const sessionId = String(context?.session?.id || '').trim();
-    const variableRuntimeEnabled = this.isVariableRuntimeEnabled?.(sessionId) !== false;
+    const variableRuntimeEnabled = this.isVariableRuntimeEnabled?.(sessionId) !== false
+      && (!Array.isArray(context?.meta?.hopscotchFused) || context.meta.hopscotchFused.includes('variable'));
     const uiModeRaw = String(context?.meta?.uiMode || context?.uiMode || '').trim().toLowerCase();
     const uiMode = uiModeRaw === 'rp' || (!uiModeRaw && sessionId.startsWith('rp:')) ? 'rp' : 'chat';
     const presetUiMode = normalizeBridgePresetUiMode(uiModeRaw, {
@@ -6036,11 +6037,13 @@ class AppBridge {
       ? scenarioHintBase
       : '';
     const uiModeRawForAutoImage = String(context?.meta?.uiMode || context?.uiMode || '').trim().toLowerCase();
-    const autoImagePromptWritingAllowed = uiModeRawForAutoImage === 'rp'
-      ? settingsSnapshot.autoImagePromptWritingEnabled !== false
-      : true;
+    const autoImagePromptWritingAllowed = Array.isArray(context?.meta?.hopscotchFused)
+      ? context.meta.hopscotchFused.includes('image_prompt')
+      : (uiModeRawForAutoImage === 'rp' ? settingsSnapshot.autoImagePromptWritingEnabled !== false : true);
     const autoImagePromptSettingEnabled =
-      settingsSnapshot.autoImagePromptEnabled === true &&
+      (Array.isArray(context?.meta?.hopscotchFused)
+        ? context.meta.hopscotchFused.includes('image_prompt')
+        : settingsSnapshot.autoImagePromptEnabled === true) &&
       autoImagePromptWritingAllowed &&
       !isMomentCommentTask;
     let autoImagePromptActive = autoImagePromptSettingEnabled;

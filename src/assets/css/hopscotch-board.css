@@ -1,0 +1,230 @@
+.hop-dialog {
+  color: var(--app-text-primary); background: var(--app-surface-page);
+  border: 1px solid var(--app-border-default); border-radius: 22px;
+  box-shadow: var(--app-shadow-md); padding: 0; width: min(760px, calc(100vw - 48px));
+  max-height: min(880px, 90dvh); overflow: auto; margin: auto;
+}
+.hop-dialog::backdrop { background: var(--app-surface-overlay); backdrop-filter: blur(6px); }
+.hop-dialog.hop-detail { width: min(540px, calc(100vw - 48px)); }
+.hop-detail-layer { position: fixed; inset: 0; z-index: 22100; display: flex; align-items: center; justify-content: center; background: var(--app-surface-overlay); backdrop-filter: blur(6px); }
+.hop-fused-config { margin-top: 10px; border-top: 1px solid var(--app-border-default); }
+.hop-fused-config > summary { padding: 10px 0; cursor: pointer; font-size: 13px; color: var(--app-text-primary); }
+.hop-detail-layer[hidden] { display: none; }
+.hop-detail-layer > .hop-dialog { position: relative; }
+.hop-agent-shelf { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+.hop-agent-shelf .hop-agent-tile { margin: 0; width: 100%; min-height: 94px; border-radius: 12px; padding: 16px 10px; gap: 8px; }
+.hop-agent-tile .hop-title { font-size: 14px; }
+.hop-agent-tile .hop-cell-status { color: var(--app-text-muted); }
+.hop-detail-layer:has(.hop-agent-detail) { background: transparent; backdrop-filter: none; }
+.hop-detail-layer > .hop-agent-detail { position: fixed; inset: 0; width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; background: transparent; color: var(--app-text-primary); overflow: visible; }
+.hop-board-card-controls { border-top: 1px solid var(--app-border-subtle); padding-top: 16px; }
+.hop-board-card-controls .hop-footer { padding-inline: 0; }
+.hop-board-card-controls label { display: grid; gap: 7px; margin-block: 12px; font-size: 12px; color: var(--app-text-secondary); }
+.hop-board-card-controls label.hop-check { display: flex; }
+.hop-board-card-controls input:not([type=checkbox]), .hop-board-card-controls textarea, .hop-board-card-controls select { box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--app-border-default); border-radius: 12px; color: var(--app-text-primary); background: var(--app-surface-card); min-width: 0; font: inherit; }
+.hop-board-card-controls textarea { width: 100%; min-height: 110px; line-height: 1.65; resize: vertical; }
+.hop-board-card-controls button { font-family: inherit; cursor: pointer; color: var(--app-text-primary); }
+.hop-board-card-controls button:disabled { opacity: .35; cursor: not-allowed; }
+.hop-board-card-controls button.hop-danger { color: var(--app-danger-text); }
+.hop-detail .hop-remove { color: var(--app-danger-text); }
+.hop-remove .hop-button-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.hop-board-card-controls button[aria-pressed='true'] { background: var(--app-accent-soft); border-color: var(--app-accent-primary); }
+.hop-dialog.hop-embedded { width: 100%; max-width: none; max-height: none; margin: 0; border: 0; border-radius: 0; box-shadow: none; overflow: visible; background: transparent; }
+.hop-embedded .hop-board-toolbar { padding: 0 0 16px; }
+.hop-embedded .hop-board-footer { padding-inline: 0; }
+.hop-agent-library { margin-top: 24px; border-top: 1px solid var(--app-border-subtle); padding-top: 16px; }
+.hop-agent-library > summary { cursor: pointer; color: var(--app-text-muted); font-size: 12px; padding: 6px 4px; list-style: none; }
+.hop-agent-library > summary::-webkit-details-marker { display: none; }
+.hop-agent-library[open] > summary { margin-bottom: 16px; }
+.hop-house-detail:not(.hop-agent-detail)[open] { animation: hop-card-rise .2s ease-out; }
+.hop-card-stage { height: min(560px, 64dvh); perspective: 1400px; }
+.hop-card-inner { position: relative; height: 100%; transform-style: preserve-3d; transition: transform .35s ease; }
+.hop-card-inner.is-flipped { transform: rotateY(180deg); }
+.hop-card-face { position: absolute; inset: 0; overflow: auto; backface-visibility: hidden; background: var(--app-surface-page); }
+.hop-card-front { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 24px; text-align: center; }
+.hop-card-front .hop-output { text-align: left; width: 100%; min-height: 0; flex-shrink: 1; margin: 0; }
+.hop-card-mark { color: var(--app-accent-primary); font-size: 12px; letter-spacing: .2em; }
+.hop-card-name { font-size: 28px; font-weight: 600; margin: 0; overflow-wrap: anywhere; max-width: 100%; }
+.hop-card-status { margin: 0; }
+.hop-card-back { transform: rotateY(180deg); }
+.hop-card-fields { padding: 0; margin: 0; border: 0; min-width: 0; }
+@keyframes hop-card-rise { from { opacity: 0; transform: translateY(16px) scale(.97); } to { opacity: 1; transform: none; } }
+.hop-header, .hop-footer, .hop-controls { display: flex; align-items: center; gap: 10px; padding: 16px 24px; flex-wrap: wrap; }
+.hop-header { border-bottom: 1px solid var(--app-border-subtle); }
+.hop-header h2 { font-size: 16px; font-weight: 700; margin: 0; letter-spacing: .02em; }
+.hop-header small { color: var(--app-text-muted); }
+.hop-spacer { flex: 1; }
+.hop-dialog button { font-family: inherit; color: inherit; cursor: pointer; }
+.hop-dialog button:where(:not(.hop-cell):not(.hop-plus):not(.world-app-select-btn)), .hop-board-card-controls button:where(:not(.world-app-select-btn)) {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 34px; padding: 6px 12px; border: 1px solid var(--app-border-default); border-radius: 10px;
+  background: var(--app-surface-card); color: var(--app-text-secondary); font-size: 12px; font-weight: 600; line-height: 1.5;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+}
+.hop-dialog button:hover:where(:not(:disabled):not(.world-app-select-btn)), .hop-board-card-controls button:hover:where(:not(:disabled):not(.world-app-select-btn)) { background: var(--app-surface-hover); color: var(--app-text-primary); }
+.hop-dialog button:disabled { opacity: .35; cursor: not-allowed; }
+.hop-dialog button.hop-primary, .hop-board-card-controls button.hop-primary { background: var(--app-accent-primary); color: var(--app-text-on-accent); border-color: transparent; box-shadow: inset 0 1px 0 color-mix(in srgb, var(--app-text-on-accent) 12%, transparent), 0 2px 5px color-mix(in srgb, var(--app-accent-primary) 20%, transparent); }
+.hop-dialog button.hop-primary:hover:not(:disabled), .hop-board-card-controls button.hop-primary:hover:not(:disabled) { background: var(--app-accent-strong); color: var(--app-text-on-accent); }
+body[data-theme-mode='dark'] :is(.hop-dialog, .hop-board-card-controls) { --app-text-on-accent: var(--app-text-inverse); }
+.hop-dialog button.hop-danger { color: var(--app-danger-text); }
+.hop-dialog button[aria-pressed='true'] { border-color: var(--app-accent-primary); background: var(--app-accent-soft); }
+.hop-dialog :is(button, input, textarea, select):focus-visible, .hop-board-card-controls :is(button, input, textarea, select):focus-visible, .hop-cell:focus-visible { outline: 2px solid var(--app-accent-primary); outline-offset: 3px; }
+.hop-icon { width: 15px; height: 15px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.hop-dialog button.hop-icon-only { position: relative; width: 34px; padding: 0; border-color: transparent; background: transparent; flex: 0 0 auto; }
+.hop-icon-only .hop-button-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.hop-dialog button.hop-icon-only:hover { background: var(--app-surface-hover); }
+.hop-board-toolbar { padding: 16px 24px; }
+.hop-board-toolbar .hop-header { padding: 0 0 12px; border: 0; gap: 8px; }
+.hop-board-toolbar .hop-source { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; padding: 3px 8px; border-radius: 999px; background: var(--app-surface-subtle); }
+.hop-source.is-dirty::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: var(--app-accent-primary); }
+.hop-controls { padding: 0; gap: 8px; }
+.hop-scope { display: inline-flex; min-width: 0; max-width: 100%; }
+.hop-select { min-width: 0; }
+.hop-select > select[hidden] { display: none; }
+.hop-select .world-app-select-btn { min-height: 38px; font-size: 12px; }
+.hop-select [data-custom-select-label] { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hop-scope .world-app-select-btn { min-width: 148px; }
+.hop-content { padding: 18px 24px; }
+.hop-content label { display: grid; gap: 7px; margin-bottom: 16px; font-size: 13px; color: var(--app-text-secondary); }
+.hop-content label.hop-check { display: flex; align-items: center; }
+.hop-dialog input:not([type=checkbox]), .hop-dialog textarea, .hop-dialog select {
+  box-sizing: border-box; border: 1px solid var(--app-border-default); border-radius: 12px;
+  padding: 8px 10px; color: var(--app-text-primary); background: var(--app-surface-card); font: inherit; font-size: 13px; min-width: 0;
+}
+.hop-dialog textarea { resize: vertical; min-height: 110px; line-height: 1.65; width: 100%; }
+.hop-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.hop-fields > * { min-width: 0; }
+.hop-hint { color: var(--app-text-muted); font-size: 12px; line-height: 1.7; margin: 0; }
+.hop-error { padding: 0 24px; color: var(--app-danger-text); white-space: pre-wrap; font-size: 13px; }
+.hop-error:empty { display: none; }
+.hop-footer { border-top: 1px solid var(--app-border-subtle); }
+.hop-board-footer { justify-content: flex-end; margin-top: 16px; gap: 12px; }
+.hop-board-footer .hop-primary { min-height: 36px; padding-inline: 16px; }
+.hop-picker { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.hop-dialog .hop-picker button { min-height: 60px; border-radius: 14px; }
+.hop-dialog .hop-picker button:hover:not(:disabled) { border-color: var(--app-accent-primary); background: var(--app-accent-soft); color: var(--app-accent-primary); }
+/* ===== 板：平面粉笔线 + 中轴 + 石子 ===== */
+.hop-court-scroll { position: relative; overflow: auto; padding: 24px 32px; }
+.hop-court-scroll.is-scaled { overflow: hidden; padding-inline: 8px; }
+.hop-dialog > .hop-court-scroll { border: 1px solid var(--app-border-subtle); border-radius: 18px; background: var(--app-surface-subtle); scrollbar-width: thin; scrollbar-color: var(--app-border-strong) transparent; }
+.hop-court { --hop-line: color-mix(in srgb, var(--app-text-primary) 38%, var(--app-border-strong)); --hop-cell-w: 140px; position: relative; display: flex; flex-direction: column; align-items: center; min-width: 0; width: max-content; margin: auto; padding: 0 40px; transform-origin: top left; }
+.hop-court-scroll:not(.is-scaled) .hop-court { transform-origin: top center; }
+/* 中轴线：先后顺序不用解释 */
+.hop-court::before { content: ''; position: absolute; top: 4px; bottom: 34px; left: 50%; width: 1px; margin-left: -0.5px; background: color-mix(in srgb, var(--hop-line) 55%, transparent); pointer-events: none; }
+.hop-origin { position: relative; z-index: 1; width: 8px; height: 8px; margin: 0 0 14px; border-radius: 50%; background: var(--hop-line); }
+.hop-tick { position: relative; z-index: 1; width: 0; height: 0; margin: -1px 0 -1px; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid color-mix(in srgb, var(--hop-line) 70%, transparent); }
+.hop-row { position: relative; flex: none; margin-top: -1px; z-index: 1; }
+.hop-cells { display: flex; }
+.hop-cell {
+  position: relative; width: var(--hop-cell-w); min-height: 112px; border: 1px solid var(--hop-line);
+  background: var(--app-surface-card); color: var(--app-text-primary); margin: 0 0 0 -1px;
+  padding: 24px 12px 20px; display: flex; flex-direction: column; justify-content: center; align-items: center;
+  gap: 8px; cursor: pointer; border-radius: 0; box-shadow: none; font-family: inherit; transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+.hop-cell:first-child { margin-left: 0; }
+.hop-cell.hop-body { background: color-mix(in srgb, var(--app-accent-soft) 40%, var(--app-surface-card)); }
+.hop-body::after { content: ''; position: absolute; inset: 5px; border: 1px solid color-mix(in srgb, var(--app-accent-primary) 45%, transparent); pointer-events: none; }
+.hop-dialog .hop-cell:hover:not(:disabled), .hop-cell:hover { z-index: 2; border-color: var(--app-accent-primary); background: var(--app-accent-soft); }
+.hop-number { position: absolute; top: 8px; left: 10px; font-size: 10px; font-variant-numeric: tabular-nums; letter-spacing: .1em; color: var(--app-text-muted); }
+.hop-title { font-size: 16px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+/* 类型色只落在左上角的小色点 */
+.hop-cell::before { content: ''; position: absolute; top: 11px; right: 11px; width: 6px; height: 6px; border-radius: 50%; background: var(--hop-kind, transparent); }
+.hop-court .hop-cell[data-hop-kind='memory_table'] { --hop-kind: var(--app-success-text); }
+.hop-court .hop-cell[data-hop-kind='image_generation'] { --hop-kind: var(--app-info-text); }
+.hop-court .hop-cell[data-hop-kind='summary_compaction'] { --hop-kind: var(--app-warning-text); }
+.hop-court .hop-cell[data-hop-kind='format_review'] { --hop-kind: var(--app-tint-slate, var(--app-text-muted)); }
+/* 状态：底色 + 右上角标记 + 底边进度线；文字仅供辅助技术 */
+.hop-cell-status, .hop-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.hop-cell-mark { position: absolute; top: 6px; right: 8px; font-size: 12px; line-height: 1; font-weight: 700; color: var(--app-text-secondary); }
+.hop-cell.is-running .hop-cell-mark, .hop-cell.is-queued .hop-cell-mark { display: none; }
+.hop-cell.is-running::before, .hop-cell.is-succeeded::before, .hop-cell.is-failed::before, .hop-cell.is-partial::before { display: none; }
+.hop-cell.is-running { background: var(--app-accent-soft); border-color: var(--app-accent-primary); z-index: 2; }
+.hop-cell.is-running .hop-number { color: var(--app-accent-primary); }
+.hop-cell.is-succeeded { background: color-mix(in srgb, var(--app-success) 12%, var(--app-surface-card)); }
+.hop-cell.is-succeeded .hop-cell-mark { color: var(--app-success-text); }
+.hop-cell.is-failed, .hop-cell.is-partial { background: var(--app-danger-soft); border-color: var(--app-danger-border); }
+.hop-cell.is-failed .hop-cell-mark, .hop-cell.is-partial .hop-cell-mark { color: var(--app-danger-text); }
+.hop-cell.is-skipped, .hop-cell.is-cancelled { opacity: .55; }
+.hop-cell.is-running::after, .hop-cell.is-succeeded::after, .hop-cell.is-failed::after, .hop-cell.is-partial::after {
+  content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; inset-inline: 0; border: 0; background: currentColor; opacity: .9;
+}
+.hop-cell.is-running::after { background: linear-gradient(90deg, transparent, var(--app-accent-primary), transparent); background-size: 60% 100%; animation: hop-progress 1.1s linear infinite; }
+.hop-cell.is-succeeded::after { background: var(--app-success); }
+.hop-cell.is-failed::after, .hop-cell.is-partial::after { background: var(--app-danger); }
+.hop-cell.hop-body.is-running::after, .hop-cell.hop-body.is-succeeded::after, .hop-cell.hop-body.is-failed::after, .hop-cell.hop-body.is-partial::after { inset: auto 0 0 0; border: 0; }
+@keyframes hop-progress { from { background-position: -60% 0; } to { background-position: 160% 0; } }
+/* 融合组：一个房子，一个序号；正文为主，融合项次级，虚线分隔 */
+.hop-cell.hop-fusion-group { width: max-content; padding: 0; gap: 0; cursor: default; }
+.hop-fusion-group > .hop-number { z-index: 1; pointer-events: none; }
+.hop-fusion-parts { display: flex; flex: 1; padding: 0; }
+.hop-court .hop-fusion-part {
+  position: relative; display: flex; flex: 0 0 var(--hop-cell-w); width: var(--hop-cell-w); min-height: 112px;
+  align-items: center; justify-content: center; padding: 24px 12px 20px;
+  border: 0; border-radius: 0; background: transparent; color: var(--app-text-primary); font: inherit; cursor: pointer;
+}
+.hop-court .hop-fusion-part:not([data-hop-part='body']) { flex-basis: calc(var(--hop-cell-w) * .8); width: calc(var(--hop-cell-w) * .8); }
+.hop-court .hop-fusion-part:not([data-hop-part='body']) .hop-title { font-size: 13px; font-weight: 500; color: var(--app-text-secondary); }
+.hop-fusion-part + .hop-fusion-part::before { content: ''; position: absolute; inset: 22px auto 18px 0; width: 0; border-left: 1px dashed color-mix(in srgb, var(--hop-line) 60%, transparent); pointer-events: none; }
+.hop-court .hop-fusion-part:hover { background: var(--app-accent-soft); }
+.hop-court .hop-fusion-part:focus-visible { outline: 2px solid var(--app-accent-primary); outline-offset: -3px; }
+/* 石子：跳到当前行 */
+.hop-stone { position: absolute; left: -26px; top: 50%; width: 14px; height: 14px; margin-top: -7px; border-radius: 50% 50% 48% 52% / 55% 55% 45% 45%; background: var(--app-accent-primary); box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--app-text-primary) 20%, transparent); z-index: 3; animation: hop-land .45s cubic-bezier(.2,.9,.3,1.2) both; }
+.hop-stone.is-hopping::after { content: ''; position: absolute; inset: -5px; border-radius: 50%; border: 1px solid var(--app-accent-primary); opacity: .6; animation: hop-pulse 1.2s ease-out infinite; }
+@keyframes hop-land { from { transform: translateY(-34px) scale(.7); opacity: 0; } 60% { transform: translateY(3px) scale(1.05); opacity: 1; } to { transform: none; } }
+@keyframes hop-pulse { from { transform: scale(.7); opacity: .7; } to { transform: scale(1.5); opacity: 0; } }
+/* 屋顶：只放一个状态记号 */
+.hop-roof { position: relative; z-index: 1; width: var(--hop-cell-w); box-sizing: border-box; border: 1px solid var(--hop-line); border-top: 0; border-radius: 0 0 90px 90px; height: 54px; display: grid; place-items: center; color: var(--app-text-secondary); font-size: 16px; font-weight: 700; margin-top: -1px; background: var(--app-surface-card); }
+.hop-roof.is-running::before { content: ''; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--app-accent-primary); border-top-color: transparent; animation: hop-spin .9s linear infinite; }
+.hop-roof.is-succeeded { color: var(--app-success-text); background: color-mix(in srgb, var(--app-success) 12%, var(--app-surface-card)); }
+.hop-roof.is-failed, .hop-roof.is-partial { color: var(--app-danger-text); background: var(--app-danger-soft); }
+.hop-roof.is-cancelled { color: var(--app-warning-text); }
+@keyframes hop-spin { to { transform: rotate(360deg); } }
+/* ＋：行末（并行）与行间（加一行） */
+.hop-plus { position: relative; z-index: 2; border: 0; box-shadow: inset 0 0 0 1px var(--app-border-default); color: var(--app-text-muted); padding: 0; background: var(--app-surface-card); font-size: 18px; line-height: 24px; width: 26px; height: 26px; border-radius: 50%; cursor: pointer; transition: opacity 160ms ease; }
+.hop-dialog .hop-plus:hover { color: var(--app-accent-primary); background: var(--app-accent-soft); box-shadow: inset 0 0 0 1px var(--app-accent-primary); }
+.hop-plus::before { content: ''; position: absolute; inset: -9px; border-radius: 50%; }
+.hop-gap { margin: -13px 0; flex: none; align-self: center; }
+.hop-side { position: absolute; top: calc(50% - 13px); right: -32px; }
+@media (hover: hover) and (pointer: fine) {
+  .hop-plus { opacity: 0; }
+  .hop-plus:hover, .hop-plus:focus-visible { opacity: 1; }
+}
+@media (any-pointer: coarse) {
+  .hop-plus { opacity: 1; }
+}
+/* 顶栏：模式芯片 + 图标动作 + 溢出菜单 */
+.hop-source { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; padding: 5px 11px; border-radius: 999px; background: var(--app-surface-subtle); color: var(--app-text-primary); }
+.hop-source i { width: 6px; height: 6px; border-radius: 50%; background: var(--app-border-strong); }
+.hop-source.is-custom i { background: var(--app-success); }
+.hop-source.is-dirty i { background: var(--app-accent-primary); box-shadow: 0 0 0 3px var(--app-accent-soft); }
+.hop-board-toolbar .hop-header { position: relative; }
+.hop-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 6; display: flex; flex-direction: column; gap: 4px; min-width: 168px; padding: 6px; border-radius: 12px; background: var(--app-surface-card); border: 1px solid var(--app-border-default); box-shadow: var(--app-shadow-md); }
+.hop-menu[hidden] { display: none; }
+.hop-dialog .hop-menu button { justify-content: flex-start; border: 0; background: transparent; }
+.hop-dialog .hop-menu button:hover:not(:disabled) { background: var(--app-surface-hover); }
+.hop-dialog button[data-action='run-mode'][aria-pressed='true'], .hop-dialog button[data-action='edit-mode'][aria-pressed='true'] { color: var(--app-accent-primary); background: var(--app-accent-soft); }
+.hop-output { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.8; max-height: 320px; overflow: auto; user-select: text; }
+.hop-move { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+@media (max-width: 600px) {
+  .hop-dialog, .hop-dialog.hop-detail { width: 100%; max-width: 100%; margin: auto 0 0; max-height: 92dvh; border-radius: 20px 20px 0 0; padding-bottom: env(safe-area-inset-bottom); }
+  .hop-header, .hop-footer, .hop-content { padding-inline: 18px; }
+  .hop-board-toolbar { padding-inline: 18px; }
+  .hop-board-toolbar .hop-header { padding-inline: 0; }
+  .hop-select .world-app-select-btn { min-height: 40px; }
+    .hop-board-footer { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .hop-board-footer .hop-primary { width: 100%; min-height: 44px; }
+  .hop-dialog button.hop-icon-only { width: 40px; min-height: 40px; }
+  .hop-court { --hop-cell-w: 112px; }
+  .hop-cell, .hop-court .hop-fusion-part { min-height: 100px; }
+  .hop-title { font-size: 15px; }
+  .hop-court-scroll { padding: 20px 0; }
+  /* 窄屏：融合项在正文下方堆叠，避免整组过宽 */
+  .hop-fusion-parts { flex-direction: column; }
+  .hop-court .hop-fusion-part:not([data-hop-part='body']) { width: var(--hop-cell-w); flex-basis: auto; min-height: 44px; padding: 8px 12px; }
+  .hop-fusion-part + .hop-fusion-part::before { inset: 0 18px auto 18px; width: auto; height: 0; border-left: 0; border-top: 1px dashed color-mix(in srgb, var(--hop-line) 60%, transparent); }
+  .hop-fields { grid-template-columns: 1fr; gap: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .hop-dialog, .hop-dialog *, .hop-court * { animation: none !important; transition: none !important; } }
+body[data-reduced-motion='on'] .hop-dialog,
+body[data-reduced-motion='on'] .hop-dialog *,
+body[data-reduced-motion='on'] .hop-court * { animation: none !important; transition: none !important; }

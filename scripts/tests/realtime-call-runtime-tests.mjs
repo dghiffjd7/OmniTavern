@@ -66,6 +66,7 @@ const runtime = createRealtimeCallRuntime({
 
 assert.equal(await runtime.start(), true);
 assert.equal(runtime.getState().status, 'listening');
+assert.equal(runtime.getState().provider, 'openai');
 assert.equal(fakeClient.connectPayload.sessionConfig.instructions, 'snapshot:initial');
 assert.equal(fakeClient.connectPayload.sessionConfig.audio.input.transcription.language, 'zh');
 assert.equal(fakeClient.connectPayload.sessionConfig.audio.input.turn_detection.create_response, false);

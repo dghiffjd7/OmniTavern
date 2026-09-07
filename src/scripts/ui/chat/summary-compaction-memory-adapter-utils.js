@@ -118,8 +118,9 @@ export const createMemoryTableSummaryCompactionAdapter = ({
       const row = findCompactedRow(await loadRows());
       return getSummaryText(row);
     },
-    async persist({ text, raw, items = [], keepItems = [] } = {}) {
+    async persist({ text, raw, items = [], keepItems = [], signal = null } = {}) {
       const tid = await ensureTemplateId();
+      signal?.throwIfAborted();
       if (!tid || !memoryTableStore?.createMemory || !memoryTableStore?.updateMemory) {
         throw new Error('memory summary compaction store unavailable');
       }
@@ -129,6 +130,7 @@ export const createMemoryTableSummaryCompactionAdapter = ({
       // 停用时打系统标记：召回准入只认带标记的 inactive 行（区分用户手动禁用）。
       // update_memory 对 row_data 是整体替换，必须携带原数据合并；拿不到原数据就只停用不打标。
       const deactivateAsCompactionArchive = async (rowId, rowData) => {
+        signal?.throwIfAborted();
         const payload = { id: rowId, is_active: false };
         if (rowData && typeof rowData === 'object') {
           payload.row_data = { ...rowData, _archived_by: 'compaction' };
@@ -159,6 +161,7 @@ export const createMemoryTableSummaryCompactionAdapter = ({
         ? coveredIntervals[coveredIntervals.length - 1].to
         : null;
       const scopeFields = resolveScopeFields({ sessionId: sid, place, isGroup });
+      signal?.throwIfAborted();
       const created = await memoryTableStore.createMemory({
         template_id: tid,
         table_id: tableId,

@@ -672,6 +672,7 @@ export const resolveMemoryActionBatchPermissions = (updateMode = 'full') => {
 };
 
 export const executeMemoryActionBatchMutation = async ({
+  signal = null,
   actions = [],
   actionContext = null,
   updateMode = 'full',
@@ -743,6 +744,7 @@ export const executeMemoryActionBatchMutation = async ({
       const archivedRowData = row?.row_data && typeof row.row_data === 'object'
         ? { ...row.row_data, _archived_by: 'outline_migration' }
         : null;
+      signal?.throwIfAborted();
       await memoryTableStore.updateMemory({
         id: rowId,
         is_active: false,
@@ -809,6 +811,7 @@ export const executeMemoryActionBatchMutation = async ({
       resolveRowIdByData,
       rowsById,
     });
+    signal?.throwIfAborted();
     const result = await executeMemoryActionMutationPlan({
       plan,
       memoryTableStore,
@@ -825,6 +828,7 @@ export const executeMemoryActionBatchMutation = async ({
   }
 
   if (createInputs.length && typeof createMemories === 'function') {
+    signal?.throwIfAborted();
     const created = await createMemories(createInputs);
     totals.inserted = Number.isFinite(Number(created)) ? Number(created) : 0;
   }

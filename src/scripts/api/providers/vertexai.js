@@ -222,7 +222,8 @@ export class VertexAIProvider {
   /**
    * Get OAuth2 access token from Service Account JSON
    */
-  async getAccessToken() {
+  async getAccessToken({ signal } = {}) {
+    if (signal?.aborted) throw makeAbortError();
     // Check if we have a cached valid token
     if (this.accessToken && Date.now() < this.tokenExpiry) {
       return this.accessToken;
@@ -296,6 +297,7 @@ export class VertexAIProvider {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: form.toString(),
         timeoutMs: this.timeout,
+        signal,
         allowProxy: false,
       });
 
@@ -309,6 +311,7 @@ export class VertexAIProvider {
       return this.accessToken;
 
     } catch (error) {
+      if (error.name === 'AbortError') throw error;
       throw new Error(`Failed to authenticate with Service Account: ${error.message}`);
     }
   }

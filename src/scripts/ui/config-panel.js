@@ -2,6 +2,8 @@
  * 配置面板 UI
  */
 
+import { RealtimeSettingsPanel } from './realtime/realtime-settings-panel.js';
+import { getRealtimeProfileStore } from '../storage/realtime-profile-store.js';
 import { ConfigManager } from '../storage/config.js';
 import { LLMClient } from '../api/client.js';
 import { VoiceClient } from '../api/voice-client.js';
@@ -243,6 +245,7 @@ export class ConfigPanel {
      * 隐藏配置面板
      */
     hide() {
+        this.realtimeSettingsPanel?.hide();
         if (this.modelFilterDebounceTimer !== null) {
             clearTimeout(this.modelFilterDebounceTimer);
             this.modelFilterDebounceTimer = null;
@@ -633,22 +636,18 @@ export class ConfigPanel {
                 <section id="config-voice-routing" class="api-config-voice-routing" style="display:none;">
                     <div class="api-config-voice-routing-heading">
                         <div>
-                            <strong>语音配置</strong>
-                            <small>朗读/转写与实时通话彼此独立；切换分页不会改动另一类配置</small>
+                            <strong class="has-help" data-help="共用连接为朗读和转写使用同一服务；分别配置可各选服务。实时通话单独配置。" data-help-mode="tap">语音配置</strong>
                         </div>
                     </div>
                     <div class="api-config-voice-mode-grid has-realtime" role="group" aria-label="语音配置类型">
                         <button type="button" class="api-config-voice-mode is-active" data-voice-config-view="shared" data-voice-connection-mode="shared" aria-pressed="true">
                             <strong>共用连接</strong>
-                            <small>同一服务商与凭证</small>
                         </button>
                         <button type="button" class="api-config-voice-mode" data-voice-config-view="split" data-voice-connection-mode="split" aria-pressed="false">
                             <strong>分别配置</strong>
-                            <small>TTS / STT 可用不同服务</small>
                         </button>
                         <button type="button" class="api-config-voice-mode" data-voice-config-view="realtime" aria-pressed="false">
                             <strong>实时通话</strong>
-                            <small>持续双向语音</small>
                         </button>
                     </div>
                     <div id="config-voice-capability-tabs" class="api-config-voice-capability-tabs" style="display:none;" role="group" aria-label="语音能力">
@@ -743,7 +742,7 @@ export class ConfigPanel {
 
                 <div class="api-config-field">
                     <label class="api-config-field-label">
-                        <span>API Key</span>
+                        <span id="apikey-help" class="has-help" data-help="可在 Key 管理中保存多个凭证" data-help-mode="tap">API Key</span>
                         <div class="api-config-field-tools">
                             <button id="toggle-apikey" class="api-config-text-action">${API_CONFIG_ICONS.eye}<span>显示</span></button>
                             <button id="manage-keys" class="api-config-icon-action" title="管理已保存的 Key" aria-label="管理已保存的 Key">${API_CONFIG_ICONS.key}</button>
@@ -751,7 +750,6 @@ export class ConfigPanel {
                     </label>
                     <input type="password" id="config-apikey" data-maid-guide-target="config-api-key-input" placeholder="sk-..."
                            style="width: 100%; padding: 10px; border-radius: 5px; border: 1px solid var(--app-border-default); font-size: 14px; box-sizing: border-box;">
-                    <small id="apikey-help" style="color: var(--app-text-secondary);">保存后 Key 以遮罩显示（不可复制）；可在 Key 管理中保存多个</small>
                 </div>
                 </div>
 
@@ -786,19 +784,18 @@ export class ConfigPanel {
 
                     <div id="vertexai-service-account-field" class="api-config-field">
                         <label class="api-config-field-label">
-                            <span class="has-help" data-help="粘贴从 Google Cloud 下载的 Service Account JSON；Project ID 会自动识别">Service Account JSON</span>
+                            <span class="has-help" data-help="粘贴从 Google Cloud 下载的 Service Account JSON；Project ID 会自动识别。凭证保存在本机加密 Keyring。" data-help-mode="tap">Service Account JSON</span>
                             <button id="toggle-sa" class="api-config-text-action">${API_CONFIG_ICONS.eye}<span>显示</span></button>
                         </label>
                         <textarea id="config-serviceaccount" data-maid-guide-target="config-service-account-input" placeholder='{"type": "service_account", "project_id": "your-project", ...}'
                                   style="width: 100%; padding: 10px; border-radius: 5px; border: 1px solid var(--app-border-default); font-size: 12px; box-sizing: border-box; font-family: monospace; min-height: 100px; resize: vertical;"></textarea>
-                        <small>凭证会写入本机加密 Keyring；已保存内容不会再次显示。</small>
                     </div>
                 </div>
 
                 <div id="config-voice-shared-models" class="api-config-voice-model-grid" style="display:none;">
                     <div class="api-config-field">
                         <label class="api-config-field-label">
-                            <span>TTS 模型</span>
+                            <span class="has-help" data-help="负责把角色回复转换成语音" data-help-mode="tap">TTS 模型</span>
                             <button type="button" id="refresh-voice-tts-models" class="api-config-refresh-action">
                                 ${API_CONFIG_ICONS.refresh}<span>刷新列表</span>
                             </button>
@@ -807,11 +804,11 @@ export class ConfigPanel {
                             <input type="text" id="config-voice-tts-model" placeholder="gpt-4o-mini-tts">
                             <div id="voice-tts-model-options" class="api-config-model-options" aria-label="可用 TTS 模型列表" style="display:none;"></div>
                         </div>
-                        <small id="config-voice-tts-model-help">负责把角色回复转换成语音</small>
+                        <small id="config-voice-tts-model-help" class="api-config-field-status" role="status"></small>
                     </div>
                     <div class="api-config-field">
                         <label class="api-config-field-label">
-                            <span>STT 模型</span>
+                            <span class="has-help" data-help="负责把麦克风录音转换成文字" data-help-mode="tap">STT 模型</span>
                             <button type="button" id="refresh-voice-stt-models" class="api-config-refresh-action">
                                 ${API_CONFIG_ICONS.refresh}<span>刷新列表</span>
                             </button>
@@ -820,20 +817,18 @@ export class ConfigPanel {
                             <input type="text" id="config-voice-stt-model" placeholder="gpt-transcribe">
                             <div id="voice-stt-model-options" class="api-config-model-options" aria-label="可用 STT 模型列表" style="display:none;"></div>
                         </div>
-                        <small id="config-voice-stt-model-help">负责把麦克风录音转换成文字</small>
+                        <small id="config-voice-stt-model-help" class="api-config-field-status" role="status"></small>
                     </div>
                 </div>
 
                 <div id="config-voice-tts-settings" class="api-config-field" style="display:none;">
-                    <label class="api-config-field-label">默认声音</label>
+                    <label class="api-config-field-label"><span id="config-voice-tts-voice-help" class="has-help" data-help="OpenAI 声音名称；推荐 marin 或 cedar" data-help-mode="tap">默认声音</span></label>
                     <input type="text" id="config-voice-tts-voice" placeholder="marin" autocomplete="off">
                     <div id="config-voice-tts-voice-presets" class="api-config-voice-presets" role="group" aria-label="声音快捷选择"></div>
-                    <small id="config-voice-tts-voice-help">OpenAI 声音名称；推荐 marin 或 cedar</small>
-                    <small class="api-config-voice-ai-disclosure">朗读内容使用 AI 合成语音，并非真人发声。</small>
                 </div>
 
                 <div id="config-voice-stt-language-settings" class="api-config-field" style="display:none;">
-                    <label class="api-config-field-label" for="config-voice-stt-language">输入识别语言</label>
+                    <label class="api-config-field-label" for="config-voice-stt-language"><span class="has-help" data-help="用于普通录音转写的语言提示，保存在当前连线档。" data-help-mode="tap">输入识别语言</span></label>
                     <select id="config-voice-stt-language" style="display:none;">
                         <option value="">自动识别</option>
                         <option value="zh">普通话／中文</option>
@@ -846,7 +841,6 @@ export class ConfigPanel {
                         <span class="config-custom-select-label">自动识别</span>
                         <span class="world-app-select-btn-chevron">${API_CONFIG_ICONS.chevronDown}</span>
                     </button>
-                    <small>保存在当前连线档；普通录音转写会沿用此语言提示。</small>
                 </div>
 
                 <div id="config-voice-library-entry" class="api-config-field" style="display:none;">
@@ -855,7 +849,7 @@ export class ConfigPanel {
                             <span class="api-config-row-icon">${API_CONFIG_ICONS.voice}</span>
                             <span class="api-config-row-copy">
                                 <strong>人物声音库</strong>
-                                <small id="config-voice-library-summary">建立可绑定到联系人与创意写作角色的声音</small>
+                                <small id="config-voice-library-summary"></small>
                             </span>
                         </span>
                         ${API_CONFIG_ICONS.chevronRight}
@@ -866,19 +860,17 @@ export class ConfigPanel {
                     <div class="api-config-realtime-heading">
                         <span class="api-config-row-icon">${API_CONFIG_ICONS.cable}</span>
                         <div>
-                            <strong>OpenAI 实时语音通话</strong>
-                            <small>创意写作与私聊可持续双向通话；沿用既有 OpenAI 设置档与 Key</small>
+                            <strong class="has-help" data-help="为创意写作和私聊配置双向语音通话。" data-help-mode="tap">实时语音通话</strong>
                         </div>
                     </div>
                     <div class="api-config-realtime-grid">
                         <label class="api-config-realtime-field is-wide">
-                            <span>OpenAI 连线设置档</span>
+                            <span class="has-help" data-help="使用已保存的官方 OpenAI 设置档与凭证。" data-help-mode="tap">OpenAI 连线设置档</span>
                             <select id="config-realtime-profile"></select>
-                            <small>只列出官方 OpenAI 设置档；不会复制保存 API Key</small>
                         </label>
                         <div class="api-config-realtime-field">
                             <label class="api-config-field-label" for="config-realtime-model">
-                                <span>Realtime 模型</span>
+                                <span class="has-help" data-help="负责持续理解语音并生成角色回复。输入与输出音频发送给 OpenAI。" data-help-mode="tap">Realtime 模型</span>
                                 <button type="button" id="refresh-realtime-models" class="api-config-refresh-action">
                                     ${API_CONFIG_ICONS.refresh}<span>刷新列表</span>
                                 </button>
@@ -887,11 +879,10 @@ export class ConfigPanel {
                                 <input type="text" id="config-realtime-model" placeholder="gpt-realtime-2.1" autocomplete="off">
                                 <div id="realtime-model-options" class="api-config-model-options" aria-label="可用 Realtime 模型列表" style="display:none;"></div>
                             </div>
-                            <small>负责持续理解语音并生成角色回复</small>
                         </div>
                         <div class="api-config-realtime-field">
                             <label class="api-config-field-label" for="config-realtime-transcription-model">
-                                <span>输入转写模型</span>
+                                <span class="has-help" data-help="把用户语音转成文字记录，按转写模型独立计费。" data-help-mode="tap">输入转写模型</span>
                                 <button type="button" id="refresh-realtime-transcription-models" class="api-config-refresh-action">
                                     ${API_CONFIG_ICONS.refresh}<span>刷新列表</span>
                                 </button>
@@ -900,10 +891,9 @@ export class ConfigPanel {
                                 <input type="text" id="config-realtime-transcription-model" placeholder="gpt-4o-mini-transcribe" autocomplete="off">
                                 <div id="realtime-transcription-model-options" class="api-config-model-options" aria-label="可用输入转写模型列表" style="display:none;"></div>
                             </div>
-                            <small>负责把用户语音转成可保存的文字记录</small>
                         </div>
                         <div class="api-config-realtime-field">
-                            <span>输入识别语言</span>
+                            <span class="has-help" data-help="用于实时通话的输入转写。" data-help-mode="tap">输入识别语言</span>
                             <select id="config-realtime-transcription-language" style="display:none;">
                                 <option value="">自动识别</option>
                                 <option value="zh">普通话／中文</option>
@@ -916,7 +906,6 @@ export class ConfigPanel {
                                 <span class="config-custom-select-label">自动识别</span>
                                 <span class="world-app-select-btn-chevron">${API_CONFIG_ICONS.chevronDown}</span>
                             </button>
-                            <small>保存在 Realtime 设置中，不影响普通录音转写</small>
                         </div>
                         <label class="api-config-realtime-field">
                             <span>声音</span>
@@ -941,12 +930,12 @@ export class ConfigPanel {
                             ${API_CONFIG_ICONS.save}<span>保存实时通话</span>
                         </button>
                     </div>
-                    <small id="config-realtime-status" class="api-config-realtime-status">输入与输出音频会发送给 OpenAI；转写模型会独立计费。</small>
+                    <small id="config-realtime-status" class="api-config-realtime-status" role="status"></small>
                 </section>
 
                 <div id="config-model-section" class="api-config-field" data-maid-guide-target="config-model-section">
                     <label class="api-config-field-label">
-                        <span id="config-model-label">模型</span>
+                        <span id="config-model-label" class="has-help" data-help="要使用的模型 ID（可输入或从列表选择）" data-help-mode="tap">模型</span>
                         <button id="refresh-models" class="api-config-refresh-action" data-maid-guide-target="config-refresh-models">
                             ${API_CONFIG_ICONS.refresh}<span>刷新列表</span>
                         </button>
@@ -956,7 +945,7 @@ export class ConfigPanel {
                                style="width: 100%; padding: 10px 12px; border-radius: 5px; border: 1px solid var(--app-border-default); font-size: 14px; box-sizing: border-box;">
                         <div id="model-options" class="api-config-model-options" aria-label="可用模型列表" style="display:none;"></div>
                     </div>
-                    <small id="model-help" style="color: var(--app-text-secondary);">要使用的模型 ID（可输入或从列表选择）</small>
+                    <small id="model-help" class="api-config-field-status" role="status" style="color: var(--app-text-secondary);"></small>
                 </div>
 
                 <div id="openrouter-provider-routing" class="api-config-field" style="display:none;">
@@ -2797,13 +2786,13 @@ export class ConfigPanel {
             `).join('');
         }
         if (help) {
-            help.textContent = normalized === 'elevenlabs'
-                ? '填写 ElevenLabs「My Voices」中的 Voice ID；默认值可直接替换'
+            help.dataset.help = t('朗读使用 AI 合成语音。') + ' ' + (normalized === 'elevenlabs'
+                ? t('填写 ElevenLabs「My Voices」中的 Voice ID；默认值可直接替换')
                 : normalized === 'qwen_local'
-                    ? 'Qwen CustomVoice 内建音色；Serena 为默认中文女声，也可选择 Vivian 或直接输入其他 speaker'
+                    ? t('Qwen CustomVoice 内建音色；Serena 为默认中文女声，也可选择 Vivian 或直接输入其他 speaker')
                 : normalized === 'custom'
-                    ? '填写兼容服务支持的 voice 值'
-                    : 'OpenAI 声音名称；推荐 marin 或 cedar，可直接输入其他支持值';
+                    ? t('填写兼容服务支持的 voice 值')
+                    : t('OpenAI 声音名称；推荐 marin 或 cedar，可直接输入其他支持值'));
         }
         if (input) input.placeholder = this.getProviderDefaults(normalized).ttsVoice || 'Voice ID';
         this.syncVoicePresetSelection();
@@ -2813,9 +2802,7 @@ export class ConfigPanel {
         const summary = this.element?.querySelector?.('#config-voice-library-summary');
         if (!summary) return;
         const count = this.voiceRegistryStore?.list?.().length || 0;
-        summary.textContent = count
-            ? `已建立 ${count} 个声音；可绑定到联系人或创意写作角色`
-            : '建立可绑定到联系人与创意写作角色的声音';
+        summary.textContent = t('{count} 个声音', { count });
     }
 
     syncVoicePresetSelection() {
@@ -2859,9 +2846,9 @@ export class ConfigPanel {
             if (vertexaiFields) vertexaiFields.style.display = 'none';
             if (apiKeyHelp) {
                 const mode = panel.querySelector('#config-ollama-mode')?.value || 'cloud';
-                apiKeyHelp.textContent = mode === 'local'
-                    ? '本地 Ollama 可不填写 API Key；若服务端启用鉴权再保存 Key。'
-                    : '云端 ollama.com 需保存账号 API Key。';
+                apiKeyHelp.dataset.help = mode === 'local'
+                    ? t('本地 Ollama 可不填写 API Key；若服务端启用鉴权再保存 Key。')
+                    : t('云端 ollama.com 需保存账号 API Key。');
             }
             this.refreshAllCustomSelects();
             return;
@@ -2876,24 +2863,24 @@ export class ConfigPanel {
             if (vertexRegionField) vertexRegionField.style.display = usesExpress ? 'none' : 'block';
             if (vertexServiceAccountField) vertexServiceAccountField.style.display = usesExpress ? 'none' : 'block';
             if (apiKeyHelp) {
-                apiKeyHelp.textContent = usesExpress
+                apiKeyHelp.dataset.help = usesExpress
                     ? t('Express 模式使用 Vertex AI 专用 API Key，不需要 Project ID 或 Region。')
                     : t('完整模式使用 Service Account 与 Google Cloud 项目额度；此处 API Key 不参与鉴权。');
             }
         } else if (provider === 'kimi') {
             vertexaiFields.style.display = 'none';
             if (apiKeyHelp) {
-                apiKeyHelp.textContent = '请使用所选开放平台站点创建的 API Key；全球站、中国大陆站与 Kimi Code Key 不通用。';
+                apiKeyHelp.dataset.help = t('请使用所选开放平台站点创建的 API Key；全球站、中国大陆站与 Kimi Code Key 不通用。');
             }
         } else if (!this.providerRequiresApiKey(provider)) {
             vertexaiFields.style.display = 'none';
             if (apiKeyHelp) {
-                apiKeyHelp.textContent = '此渠道可不填写 API Key；若服务端启用鉴权再保存 Key。';
+                apiKeyHelp.dataset.help = t('此渠道可不填写 API Key；若服务端启用鉴权再保存 Key。');
             }
         } else {
             vertexaiFields.style.display = 'none';
             if (apiKeyHelp) {
-                apiKeyHelp.textContent = '保存后 Key 以遮罩显示（不可复制）；可在 Key 管理中保存多个';
+                apiKeyHelp.dataset.help = t('可在 Key 管理中保存多个凭证');
             }
         }
         if (this.activeTab === 'voice') this.updateVoiceTtsSettings(provider);
@@ -3042,7 +3029,7 @@ export class ConfigPanel {
         const btn = panel.querySelector('#toggle-sa');
         if (!input || !btn) return;
         if (input.dataset.hasKey === 'true' && input.value === VERTEX_SERVICE_ACCOUNT_MASK) {
-            this.showStatus('已保存的 Service Account 不会回显；直接粘贴新的 JSON 即可替换', 'info');
+            this.showStatus(t('粘贴新的 Service Account JSON 即可替换已保存凭证'), 'info');
             return;
         }
 
@@ -3539,6 +3526,10 @@ export class ConfigPanel {
 
     async renderRealtimeVoiceSettings() {
         if (!this.element) return;
+        const card = this.element.querySelector('#config-voice-realtime-card');
+        if (card && !this.realtimeSettingsPanel) this.realtimeSettingsPanel = new RealtimeSettingsPanel({ card });
+        await this.realtimeSettingsPanel?.ready;
+        this.realtimeSettingsPanel?.refresh();
         const settings = normalizeRealtimeVoiceSettings(appSettings.get().realtimeVoiceSettings);
         const profileSelect = this.element.querySelector('#config-realtime-profile');
         const options = await this.getRealtimeVoiceProfileOptions();
@@ -3566,7 +3557,7 @@ export class ConfigPanel {
         setValue('#config-realtime-idle-timeout', settings.idleTimeoutMinutes);
         this.refreshCustomSelect('config-realtime-transcription-language');
         this.setRealtimeVoiceStatus(options.length
-            ? '输入与输出音频会发送给 OpenAI；转写模型会独立计费。'
+            ? ''
             : '请先建立并保存一个官方 OpenAI 连线设置档。', options.length ? '' : 'warning');
     }
 
@@ -3575,6 +3566,7 @@ export class ConfigPanel {
         const resolved = await resolveRealtimeConfigReference({
             settings,
             managers: this.getRealtimeVoiceManagers(),
+            profileStore: { resolve: async () => null },
         });
         if (!resolved.ok) {
             const messages = {
@@ -3590,6 +3582,7 @@ export class ConfigPanel {
             this.setRealtimeVoiceStatus(messages[resolved.reason] || '实时通话配置无效', 'error');
             return false;
         }
+        await getRealtimeProfileStore().activate('');
         appSettings.update({ realtimeVoiceSettings: settings });
         this.setRealtimeVoiceStatus('实时通话设置已保存', 'success');
         try {
@@ -3623,6 +3616,7 @@ export class ConfigPanel {
             const resolved = await resolveRealtimeConfigReference({
                 settings,
                 managers: this.getRealtimeVoiceManagers(),
+                profileStore: { resolve: async () => null },
             });
             if (!resolved.ok) throw new Error('请先选择具备 API Key 的 OpenAI 官方设置档');
             const client = new VoiceClient();
@@ -3737,7 +3731,7 @@ export class ConfigPanel {
             this.showStatus(`获取${capabilityLabel}模型列表失败: ${error.message}`, 'error');
             logger.error(`获取 ${capabilityLabel} 模型列表失败:`, error);
             if (modelHelp) {
-                modelHelp.textContent = '获取失败，请检查配置后重试；当前模型不会被覆盖';
+                modelHelp.textContent = '获取失败，请检查配置后重试';
                 modelHelp.style.color = 'var(--app-danger-text)';
             }
             setTimeout(() => {
@@ -3867,7 +3861,7 @@ export class ConfigPanel {
             }
             modelHelp.textContent = fallbackModels.length > 0
                 ? '目录获取失败，已显示内建候选；请检查权限，或直接填写模型 ID'
-                : '获取失败，请检查配置后重试；当前模型不会被覆盖';
+                : '获取失败，请检查配置后重试';
             modelHelp.style.color = 'var(--app-danger-text)';
 
             // 5秒后恢复原始提示

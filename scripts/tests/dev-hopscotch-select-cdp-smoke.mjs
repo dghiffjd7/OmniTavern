@@ -1,0 +1,81 @@
+// Windows WebView：复用原 APP 选单，只写隔离的内存板。
+import assert from 'node:assert/strict';
+import { evaluateInApp } from '../dev/cdp-client.mjs';
+
+const result = await evaluateInApp(`(async () => {
+  const check = (value, message) => { if (!value) throw new Error(message); };
+  const tick = () => new Promise(resolve => setTimeout(resolve, 60));
+  const registry = window.appBridge.debugUiRegistry;
+  check(registry.panels.agentCenterPanel.hide() !== false, '真实 AC 有草稿，停止烟测');
+  const { AgentCenterPanel } = await import('/scripts/ui/agent-center-panel.js');
+  const { createHopscotchBoardPanel } = await import('/scripts/ui/chat/hopscotch-board-panel.js');
+  const { createHopscotchBoardStore } = await import('/scripts/storage/hopscotch-board-store.js');
+  const { createHopscotchTurnRuntime, createHopscotchExecutors } = await import('/scripts/ui/chat/hopscotch-turn-runtime.js');
+  const local = new Map(), sessions = new Map();
+  let board, writes = 0;
+  const store = createHopscotchBoardStore({ storage: { getItem: k => local.get(k), setItem: (k, v) => local.set(k, v) }, getSessionSettings: sid => sessions.get(sid), setSessionSettings: (sid, value) => { writes++; sessions.set(sid, value); return true; } });
+  check((await store.setGlobalBoard({ rows: [{ houses: [{ id: 'body', kind: 'body', fused: ['image_prompt'] }] }, { houses: [{ id: 'custom', kind: 'custom_prompt', label: 'Notes' }, { id: 'image', kind: 'image_generation' }] }] })).ok, 'invalid fixture');
+  const runtime = createHopscotchTurnRuntime({ boardStore: store, getSettings: () => ({ creativeHopscotchEnabled: true }), createExecutors: info => createHopscotchExecutors(info) });
+  const ac = new AgentCenterPanel({ getHopscotchPanel: () => board });
+  board = createHopscotchBoardPanel({ embedded: true, boardStore: store, runtime, getSessionId: () => 'rp:select-smoke', getProfiles: () => [{ id: 'p1', name: 'Test model' }], mountAgentCard: (host, options) => ac.mountHopscotchAgentCard(host, options) });
+  try {
+    ac.show(); await ac.refresh();
+    const root = ac.contentElement.querySelector('.hop-embedded');
+    const click = (selector, host = root) => { const node = host.querySelector(selector); check(node, 'missing ' + selector); node.click(); return node; };
+    const selectButton = (selector, host = root) => {
+      const select = host.querySelector(selector), button = select?.closest('.hop-select')?.querySelector('.world-app-select-btn');
+      check(select?.hidden && button?.getAttribute('aria-label'), '原生选单没有转换或丢失标签 ' + selector);
+      return button;
+    };
+    const choose = (selector, value, host = root) => {
+      selectButton(selector, host).click();
+      const menu = document.querySelector('.world-app-select-menu');
+      check(menu?.style.display !== 'none', '没有使用 APP 浮层选单');
+      const selected = menu.querySelector('.is-selected');
+      check(selected?.dataset.value === host.querySelector(selector).value, '当前选项标记错误');
+      click('[data-value="' + value + '"]', menu);
+    };
+    selectButton('[data-hop-target]').focus(); selectButton('[data-hop-target]').click();
+    check(board.isOpen() && board.closeTopLayer(), '保存范围选单未接入 APP 返回检查');
+    check(ac.isVisible() && document.querySelector('.world-app-select-menu').style.display === 'none', '范围选单返回应保留 AC');
+    choose('[data-hop-target]', 'global'); check(root.querySelector('[data-hop-target]').value === 'global', '范围切换失败');
+    choose('[data-hop-target]', 'session');
+    click('[data-hop-house="custom"]');
+    let detail = document.querySelector('.hop-house-detail[open]');
+    click('.agent-center-floating-face-front [data-agent-float-flip]', detail);
+    detail.querySelector('details').open = true;
+    const button = selectButton('[name="model"]', detail);
+    const prompt = detail.querySelector('[name="prompt"]'); prompt.value = 'unsaved note';
+    choose('[name="model"]', 'p1', detail);
+    choose('[name="includeContext"]', 'full', detail);
+    choose('[name="outputMode"]', 'note', detail);
+    await ac.refresh();
+    check(selectButton('[name="model"]', detail) === button && button.textContent.includes('Test model') && detail.querySelector('[name="prompt"]') === prompt && prompt.value === 'unsaved note', '刷新丢失编排表单或标签');
+    selectButton('[name="model"]', detail).click();
+    check(board.closeTopLayer(), '返回未接入');
+    check(detail.open && document.querySelector('.world-app-select-menu').style.display === 'none', '返回应先关闭选单');
+    click('[data-action="apply"]', detail);
+    choose('[data-hop-target]', 'global');
+    check(root.querySelector('[data-hop-target]').value === 'session' && selectButton('[data-hop-target]').textContent.includes('本会话'), '脏草稿切范围后标签与实际范围不一致');
+    check(document.querySelector('.hop-detail[open] [data-action="discard-switch"]'), '脏草稿缺少确认');
+    board.closeTopLayer();
+    click('[data-action="settings"]'); detail = document.querySelector('.hop-detail[open]');
+    choose('[name="failure"]', 'stop_following_rows', detail); click('[data-action="apply-policy"]', detail);
+    check(writes === 0, '浏览选单/编辑草稿提前写入设置');
+    click('[data-action="save"]'); await tick();
+    const saved = store.getSessionOverride('rp:select-smoke');
+    const config = saved.rows.flatMap(row => row.houses).find(h => h.id === 'custom').config;
+    check(writes === 1 && config.modelProfileId === 'p1' && config.includeContext === 'full' && config.output.mode === 'note' && saved.policy.onHouseFailure === 'stop_following_rows', '下拉值没有沿原保存链生效');
+    click('[data-hop-house="custom"]'); detail = document.querySelector('.hop-house-detail[open]');
+    const turn = runtime.prepareTurn({ sessionId: 'rp:select-smoke', rpUiMode: true }); await turn.waitForBodyStart();
+    check(selectButton('[name="model"]', detail).matches(':disabled'), '运行中可编辑下拉');
+    turn.resolveBody({ status: 'succeeded', messageId: 'test' }); await turn.turnPromise; board.closeTopLayer();
+    click('[data-action="run-mode"]'); click('[data-hop-house="custom"]'); detail = document.querySelector('.hop-house-detail[open]');
+    check([...detail.querySelectorAll('.hop-select button')].every(n => n.matches(':disabled')), '运行快照下拉不只读'); board.closeTopLayer();
+    selectButton('[data-hop-target]').click(); ac.hide();
+    check(document.querySelector('.world-app-select-menu').style.display === 'none', '关闭 AC 遗留了范围菜单');
+    return { selects: ['scope', 'model', 'context', 'output', 'failure'], draftsPreserved: true, closeOrder: true, runtimeReadOnly: true, writes };
+  } finally { runtime.clearScope(); ac.destroy(); board.dispose(); registry.panels.agentCenterPanel.show(); }
+})()`);
+assert.equal(result.writes, 1);
+console.log('ok - APP dropdowns preserve board values, drafts, scopes, return order and readonly state', result);

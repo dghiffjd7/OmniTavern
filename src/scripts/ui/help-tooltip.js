@@ -186,6 +186,8 @@ export const initHelpTooltips = (options = {}) => {
     if (moved) return;
     if (trigger === 'tap') {
       // 纯标题/标签：点一下 toggle
+      // 说明点按只打开浮层，阻止 label 聚焦输入框或触发父级按钮。
+      suppressNextClick = true;
       if (currentAnchor === el) hide();
       else show(el);
     }
@@ -195,7 +197,7 @@ export const initHelpTooltips = (options = {}) => {
 
   doc.addEventListener('pointercancel', () => { clearPress(); });
 
-  // 长按触发后，吞掉那一次 click（capture 阶段）
+  // 说明触发后，吞掉那一次 click（capture 阶段）
   doc.addEventListener('click', (e) => {
     if (suppressNextClick) {
       suppressNextClick = false;

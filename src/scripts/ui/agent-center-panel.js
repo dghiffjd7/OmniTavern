@@ -4,10 +4,11 @@ import { findAgentCenterResource } from './agent-center-resource-contract.js';
 import { WRITE_PREVIEW_PROVIDER_MODEL_CONTEXT_TOOLS } from '../agent/provider-tool-request-schema.js';
 import { PROVIDER_TOOL_PERMISSION_ACTIONS } from '../agent/provider-tool-permission-actions.js';
 import { appSettings } from '../storage/app-settings.js';
-import { getCurrentLocale, translateUiText } from '../i18n/index.js';
+import { getCurrentLocale, t, translateUiText } from '../i18n/index.js';
 import { getLocalizedPromptText } from '../i18n/prompt-locale.js';
 import { appChoice, appConfirm, appPromptText } from './app-confirm.js';
 import { bindBackdropActivation } from './backdrop-activation-utils.js';
+import { captureAgentEditorDrafts, restoreAgentEditorDrafts } from './agent-editor-draft-utils.js';
 import { bindCustomSelectButton, closeCustomSelectMenu } from './custom-select.js';
 import { buildDebugTextFilename } from './debug-panel-utils.js';
 import { exportDebugTextFile } from './debug-panel-export-utils.js';
@@ -3137,6 +3138,7 @@ export class AgentCenterPanel {
         }),
         getFailureSeenAt = () => 0,
         markFailureSeen = () => {},
+        getHopscotchPanel = () => null,
     } = {}) {
         this.getActions = getActions;
         this.confirm = confirm;
@@ -3149,6 +3151,9 @@ export class AgentCenterPanel {
         this.exportTextFile = exportTextFile;
         this.getFailureSeenAt = getFailureSeenAt;
         this.markFailureSeen = markFailureSeen;
+        this.getHopscotchPanel = getHopscotchPanel;
+        this.agentLibraryOpen = false;
+        this.sharedAgentConfig = null;
         this.overlayElement = null;
         this.panelElement = null;
         this.contentElement = null;
@@ -3386,10 +3391,11 @@ export class AgentCenterPanel {
 
     show(options = {}) {
         const opts = options && typeof options === 'object' ? options : {};
-        const tab = Object.prototype.hasOwnProperty.call(opts, 'tab') ? opts.tab : this.activeTab;
+        const tab = Object.prototype.hasOwnProperty.call(opts, 'tab') ? opts.tab : (this.getHopscotchPanel() ? 'agents' : this.activeTab);
         const agentId = trim(opts.agentId || opts.cardId);
         this.ensureDom();
         const wasVisible = this.isVisible();
+        if (!wasVisible || opts.library === true) this.agentLibraryOpen = opts.library === true;
         this.activeTab = trim(tab, 'agents');
         this.activityStatus = normalizeActivityStatus(opts.activityStatus || opts.status || '');
         this.surface = normalizeSurface(opts.surface || '');
@@ -3408,7 +3414,11 @@ export class AgentCenterPanel {
         this.refresh();
     }
 
-    hide() {
+    hide({ force = false } = {}) {
+        if (!force && !this.requestAgentCardClose(() => { this.closeFloatingAgentCard({ force: true }); this.hide(); })) return false;
+        const boardPanel = this.getHopscotchPanel();
+        if (!force && boardPanel?.requestClose(() => this.hide({ force: true })) === false) return false;
+        boardPanel?.close();
         closeCustomSelectMenu();
         clearTimeout(this.globalPromptLivePreviewTimer);
         this.globalPromptLivePreviewTimer = null;
@@ -3424,9 +3434,19 @@ export class AgentCenterPanel {
         this.globalPromptPreviewRequestId += 1;
         this.overlayElement?.classList?.remove?.('is-above-maid-guide');
         if (this.overlayElement) this.overlayElement.style.display = 'none';
+        return true;
+    }
+
+    closeTopLayer() {
+        if (this.floatingAgentId) {
+            this.closeFloatingAgentCard();
+            return true;
+        }
+        return this.hide();
     }
 
     destroy() {
+        this.getHopscotchPanel()?.close();
         const target = globalThis.window;
         target?.removeEventListener?.('config-profile-changed', this.boundConfigProfileChanged);
         target?.removeEventListener?.('memory-storage-mode-changed', this.boundMemoryStorageModeChanged);
@@ -3965,7 +3985,7 @@ export class AgentCenterPanel {
     }
 
     renderAgentEnabledSetting(agent = {}) {
-        if (!isFeatureAgentCard(agent) || !agent.implemented) return '';
+        if (!agent.implemented || agent.id === 'memory_table_agent' || trim(agent.cardGroup || agent.category) === 'diagnostic') return '';
         const action = agent.enabled === true ? 'disable' : 'enable';
         const title = agent.title || displayAgentFeature(agent.id);
         return `
@@ -3978,8 +3998,7 @@ export class AgentCenterPanel {
                     role="switch"
                     aria-checked="${agent.enabled === true}"
                     aria-label="${escapeHtml(formatToggleTargetLabel(action, title))}"
-                    data-agent-feature-action="${action}"
-                    data-agent-feature-id="${escapeHtml(agent.id)}"
+                    ${isFeatureAgentCard(agent) ? `data-agent-feature-action="${action}" data-agent-feature-id="${escapeHtml(agent.id)}"` : `data-agent-card-action="${action}" data-agent-card-id="${escapeHtml(agent.id)}"`}
                 ><span class="agent-center-switch-track" aria-hidden="true"><span class="agent-center-switch-thumb"></span></span></button>
             </div>
         `;
@@ -4068,7 +4087,7 @@ export class AgentCenterPanel {
         `;
     }
 
-    renderFloatingAgentFront(agent = {}) {
+    renderFloatingAgentFront(agent = {}, { toolbarExtra = '' } = {}) {
         const detail = Array.isArray(agent.detail) ? agent.detail : [];
         const isDiagnosticView = trim(agent.cardGroup || agent.category) === 'diagnostic';
         const promptCount = Array.isArray(agent.promptRefs) ? agent.promptRefs.length : 0;
@@ -4083,6 +4102,7 @@ export class AgentCenterPanel {
                     </div>
                 </div>
                 <div class="agent-center-floating-toolbar">
+                    ${toolbarExtra}
                     <button type="button" class="agent-center-icon-button" data-agent-float-flip title="切换到配置" aria-label="切换到配置" aria-pressed="false">${ICONS.refresh}</button>
                     <button type="button" class="agent-center-icon-button" data-agent-float-close data-maid-guide-target="agent-center-detail-close" data-maid-guide-back="agent-center-detail" title="关闭" aria-label="关闭">${ICONS.close}</button>
                 </div>
@@ -4103,24 +4123,31 @@ export class AgentCenterPanel {
         `;
     }
 
-    renderFloatingAgentBack(agent = {}) {
+    renderFloatingAgentBack(agent = {}, { configuration = this.renderAgentConfiguration(agent), subtitle = t('配置 · 修改后即时生效'), toolbarExtra = '' } = {}) {
         return `
             <div class="agent-center-agent-title-row">
                 <div class="agent-center-agent-title-main">
                     <span class="agent-center-agent-badge">${escapeHtml(displayAgentCardGlyph(agent))}</span>
                     <div>
                         <div class="agent-center-card-title">${escapeHtml(agent.title || displayAgentFeature(agent.id))}</div>
-                        <div class="agent-center-card-sub">配置 · 修改后即时生效</div>
+                        <div class="agent-center-card-sub">${escapeHtml(subtitle)}</div>
                     </div>
                 </div>
                 <div class="agent-center-floating-toolbar">
+                    ${toolbarExtra}
                     <button type="button" class="agent-center-icon-button" data-agent-float-flip title="切换到详情" aria-label="切换到详情" aria-pressed="true">${ICONS.refresh}</button>
                     <button type="button" class="agent-center-icon-button" data-agent-float-close data-maid-guide-target="agent-center-detail-close" data-maid-guide-back="agent-center-detail" title="关闭" aria-label="关闭">${ICONS.close}</button>
                 </div>
             </div>
+            ${configuration}
+        `;
+    }
+
+    renderAgentConfiguration(agent = {}, { preview = true } = {}) {
+        return `
             ${this.renderAgentEnabledSetting(agent)}
             ${this.renderAgentFeatureSettings(agent)}
-            ${this.renderAgentPromptPreviewAction(agent)}
+            ${preview ? this.renderAgentPromptPreviewAction(agent) : ''}
             ${this.renderReplyCheckPromptInfo(agent)}
             ${this.renderMemoryAgentEditor(agent)}
             ${this.renderAgentPromptRefs(agent)}
@@ -4131,24 +4158,99 @@ export class AgentCenterPanel {
         `;
     }
 
-    renderFloatingAgentCard() {
-        const agent = this.getAgentCardById(this.floatingAgentId);
+    mountHopscotchAgentCard(host, { agentId = '', card, frontExtra = '', toolbarExtra = '', content, configure = false, readOnly = false, onClose, fusedConfigs = [], onOpenVariables = null } = {}) {
+        if (!host) return null;
+        const entry = { host, agentId, card, frontExtra, toolbarExtra, content, readOnly, onClose, fusedConfigs, onOpenVariables, flipped: configure, entering: true };
+        this.sharedAgentConfig = entry;
+        this.refreshSharedAgentConfig();
+        return {
+            hasDraft: () => captureAgentEditorDrafts(host).editors.length > 0,
+            setReadOnly: () => {
+                entry.readOnly = true;
+                host.querySelector('[data-hop-agent-config]')?.setAttribute('disabled', '');
+                host.querySelectorAll('[data-action="remove"]').forEach(button => { button.disabled = true; });
+            },
+            dispose: () => { if (this.sharedAgentConfig === entry) this.sharedAgentConfig = null; },
+        };
+    }
+
+    refreshSharedAgentConfig() {
+        const entry = this.sharedAgentConfig;
+        if (!entry || !entry.host.isConnected) return;
+        const linkedAgent = entry.agentId && this.getAgentCardById(entry.agentId);
+        const agent = linkedAgent || entry.card;
+        if (!agent) return;
+        const snapshot = captureAgentEditorDrafts(entry.host);
+        const expanded = [...entry.host.querySelectorAll('[data-hop-fused-config][open]')].map(node => node.dataset.hopFusedConfig);
+        const focusedConfig = entry.host.ownerDocument.activeElement?.closest('summary')?.parentElement?.dataset.hopFusedConfig;
+        const focusedField = entry.content?.contains(entry.host.ownerDocument.activeElement) ? entry.host.ownerDocument.activeElement : null;
+        const scrollPositions = [...entry.host.querySelectorAll('.agent-center-floating-face')].map(face => face.scrollTop);
+        // 编排表单保留原节点；AC 后台刷新不得重建房子的未提交输入。
+        entry.content?.remove();
+        const fusedConfiguration = entry.fusedConfigs.map(config => {
+            const related = config.agentId && this.getAgentCardById(config.agentId);
+            const fields = related ? `<p class="agent-center-card-sub">${escapeHtml(t('共享设置会影响使用此 Agent 的其他会话。'))}</p>${this.renderAgentConfiguration(related, { preview: false })}`
+                : config.id === 'variable' ? `<button type="button" class="agent-center-card-action" data-hop-variable-config ${entry.onOpenVariables ? '' : 'disabled'}>${escapeHtml(t('打开变量面板'))}</button>` : '';
+            return `<details class="hop-fused-config" data-hop-fused-config="${escapeHtml(config.id)}"><summary>${escapeHtml(config.label)}</summary>${fields}</details>`;
+        }).join('');
+        const configuration = linkedAgent
+            ? `<p class="agent-center-card-sub">${escapeHtml(t('共享设置会影响使用此 Agent 的其他会话。'))}</p>${this.renderAgentConfiguration(agent)}`
+            : agent.id === 'body' ? this.renderAgentPromptPreviewAction(agent) + fusedConfiguration : '';
+        entry.host.innerHTML = this.renderFloatingAgentCard({
+            agent, flipped: entry.flipped, entering: entry.entering,
+            toolbarExtra: entry.readOnly ? '' : entry.toolbarExtra,
+            frontExtra: entry.frontExtra + (entry.fusedConfigs.length ? `<div class="agent-center-card-actions">${entry.fusedConfigs.map(config => `<button type="button" class="agent-center-card-action" data-hop-fused-open="${escapeHtml(config.id)}">${escapeHtml(config.label)}</button>`).join('')}</div>` : ''),
+            configuration: `<fieldset data-hop-agent-config class="hop-card-fields" ${entry.readOnly ? 'disabled' : ''}>${configuration}</fieldset><p class="hop-error" role="alert">${escapeHtml(this.lastError)}</p>`,
+            subtitle: entry.readOnly ? t('本轮') : linkedAgent ? t('配置 · 修改后即时生效') : entry.fusedConfigs.length ? t('配置') : t('修改仅对下一轮生效，未保存不改变设置。'),
+        });
+        entry.entering = false;
+        if (entry.content) entry.host.querySelector('.agent-center-floating-face-back').append(entry.content);
+        this.bindAgentCardEvents(entry.host, {
+            onFlip: () => {
+                entry.flipped = !entry.flipped;
+                this.updateFloatingAgentFace(entry.host.querySelector('.agent-center-floating-card'), entry.flipped);
+            },
+            onClose: entry.onClose,
+        });
+        entry.host.querySelectorAll('[data-hop-fused-config]').forEach(node => { node.open = expanded.includes(node.dataset.hopFusedConfig); });
+        entry.host.querySelectorAll('[data-hop-fused-open]').forEach(button => {
+            button.onclick = () => {
+                const section = [...entry.host.querySelectorAll('[data-hop-fused-config]')].find(node => node.dataset.hopFusedConfig === button.dataset.hopFusedOpen);
+                if (!section) return;
+                entry.host.querySelectorAll('[data-hop-fused-config]').forEach(node => { node.open = node === section; });
+                entry.flipped = true;
+                this.updateFloatingAgentFace(entry.host.querySelector('.agent-center-floating-card'), true);
+                entry.host.querySelector('.agent-center-floating-face-back').scrollTop = 0;
+                section.querySelector('summary')?.focus({ preventScroll: true });
+            };
+        });
+        entry.host.querySelector('[data-hop-variable-config]')?.addEventListener('click', () => {
+            if (!entry.readOnly) entry.onOpenVariables?.();
+        });
+        restoreAgentEditorDrafts(entry.host, snapshot);
+        if (focusedConfig) [...entry.host.querySelectorAll('[data-hop-fused-config]')].find(node => node.dataset.hopFusedConfig === focusedConfig)?.querySelector('summary')?.focus({ preventScroll: true });
+        entry.host.querySelectorAll('.agent-center-floating-face').forEach((face, index) => { face.scrollTop = scrollPositions[index] || 0; });
+        focusedField?.focus({ preventScroll: true });
+    }
+
+    renderFloatingAgentCard({ agent = this.getAgentCardById(this.floatingAgentId), flipped = this.floatingAgentFlipped, entering = this.floatingAgentEntryPending, frontExtra = '', toolbarExtra = '', configuration, subtitle } = {}) {
         if (!agent) return '';
         return `
             <div class="agent-center-floating-layer" data-agent-float-layer>
                 <section
-                    class="agent-center-floating-card${this.floatingAgentEntryPending ? ' is-entering' : ''}${this.floatingAgentFlipped ? ' is-flipped' : ''}"
+                    class="agent-center-floating-card${entering ? ' is-entering' : ''}${flipped ? ' is-flipped' : ''}"
                     data-agent-accent="${escapeHtml(agent.accent || '')}"
                     role="dialog"
                     aria-modal="true"
                     aria-label="${escapeHtml(agent.title || displayAgentFeature(agent.id))}"
                 >
                     <div class="agent-center-floating-inner">
-                        <div class="agent-center-floating-face agent-center-floating-face-front">
-                            ${this.renderFloatingAgentFront(agent)}
+                        <div class="agent-center-floating-face agent-center-floating-face-front" ${flipped ? 'inert aria-hidden="true"' : 'aria-hidden="false"'}>
+                            ${this.renderFloatingAgentFront(agent, { toolbarExtra })}
+                            ${frontExtra}
                         </div>
-                        <div class="agent-center-floating-face agent-center-floating-face-back">
-                            ${this.renderFloatingAgentBack(agent)}
+                        <div class="agent-center-floating-face agent-center-floating-face-back" ${flipped ? 'aria-hidden="false"' : 'inert aria-hidden="true"'}>
+                            ${this.renderFloatingAgentBack(agent, { configuration, subtitle, toolbarExtra })}
                         </div>
                     </div>
                 </section>
@@ -4159,6 +4261,13 @@ export class AgentCenterPanel {
     renderCardList(cards = [], emptyMessage = '还没有可用卡片。') {
         const agents = Array.isArray(cards) ? cards : [];
         if (!agents.length) return renderEmpty(emptyMessage);
+        if (this.getHopscotchPanel()) {
+            return `<div class="hop-agent-shelf">${agents.map(agent => `
+                <button type="button" class="agent-center-card agent-center-agent-card hop-cell hop-agent-tile" data-agent-accent="${escapeHtml(agent.accent || '')}" data-agent-card-open="${escapeHtml(agent.id)}" data-maid-guide-target="agent-center-card">
+                    <span class="hop-title">${escapeHtml(agent.title || displayAgentFeature(agent.id))}</span>
+                    <span class="hop-cell-status">${escapeHtml(translateUiText(trim(agent.cardGroup || agent.category) === 'diagnostic' ? '诊断视图' : !agent.implemented ? '规划中' : agent.enabled ? '已开启' : '已关闭'))}</span>
+                </button>`).join('')}</div>`;
+        }
         const animate = this.cardEntryAnimationUntil === Number.POSITIVE_INFINITY;
         if (animate) {
             this.cardEntryAnimationUntil = Date.now() + 650;
@@ -4179,7 +4288,9 @@ export class AgentCenterPanel {
     }
 
     renderAgents() {
-        return this.renderCardList(this.getAgentCards(), '还没有可启用的 Agent');
+        const cards = this.renderCardList(this.getAgentCards(), '还没有可启用的 Agent');
+        if (!this.getHopscotchPanel()) return cards;
+        return `<div data-agent-hopscotch-host></div><details class="hop-agent-library" data-agent-library${this.agentLibraryOpen ? ' open' : ''}><summary>${escapeHtml(t('全部 Agent'))}</summary>${cards}</details>`;
     }
 
     renderPromptModules() {
@@ -4569,11 +4680,22 @@ export class AgentCenterPanel {
         this.render();
     }
 
-    closeFloatingAgentCard() {
+    requestAgentCardClose(continuation) {
+        if (!this.getHopscotchPanel() || !this.floatingAgentId || !captureAgentEditorDrafts(this.contentElement).editors.length) return true;
+        const id = this.floatingAgentId;
+        void this.confirm({ title: t('未保存的修改'), message: t('共享设置尚未保存，关闭将丢弃这些修改。'), confirmText: t('丢弃并关闭'), danger: true }).then(accepted => {
+            if (accepted && this.floatingAgentId === id && this.isVisible()) continuation();
+        });
+        return false;
+    }
+
+    closeFloatingAgentCard({ force = false } = {}) {
+        if (!force && !this.requestAgentCardClose(() => this.closeFloatingAgentCard({ force: true }))) return false;
         this.floatingAgentId = '';
         this.floatingAgentFlipped = false;
         this.floatingAgentEntryPending = false;
         this.render();
+        return true;
     }
 
     toggleFloatingAgentCard() {
@@ -4581,16 +4703,26 @@ export class AgentCenterPanel {
         this.floatingAgentFlipped = !this.floatingAgentFlipped;
         const card = this.contentElement?.querySelector?.('.agent-center-floating-card');
         if (card) {
-            card.classList?.toggle?.('is-flipped', this.floatingAgentFlipped);
-            card.querySelectorAll?.('[data-agent-float-flip]')?.forEach?.((button) => {
-                const nextLabel = this.floatingAgentFlipped ? '切换到详情' : '切换到配置';
-                button.setAttribute?.('aria-label', nextLabel);
-                button.setAttribute?.('title', nextLabel);
-                button.setAttribute?.('aria-pressed', String(this.floatingAgentFlipped));
-            });
+            this.updateFloatingAgentFace(card, this.floatingAgentFlipped);
             return;
         }
         this.render();
+    }
+
+    updateFloatingAgentFace(card, flipped) {
+        const hadFocus = card.contains?.(card.ownerDocument?.activeElement);
+        card.classList?.toggle?.('is-flipped', flipped);
+        for (const [selector, hidden] of [['.agent-center-floating-face-front', flipped], ['.agent-center-floating-face-back', !flipped]]) {
+            const face = card.querySelector?.(selector);
+            if (face) { face.inert = hidden; face.setAttribute('aria-hidden', String(hidden)); }
+        }
+        card.querySelectorAll?.('[data-agent-float-flip]')?.forEach?.((button) => {
+            const nextLabel = flipped ? '切换到详情' : '切换到配置';
+            button.setAttribute?.('aria-label', nextLabel);
+            button.setAttribute?.('title', nextLabel);
+            button.setAttribute?.('aria-pressed', String(flipped));
+        });
+        if (hadFocus) card.querySelector?.(`${flipped ? '.agent-center-floating-face-back' : '.agent-center-floating-face-front'} [data-agent-float-flip]`)?.focus?.({ preventScroll: true });
     }
 
     setAgentQuickToggleVisual(button = null, enabled = false, agentTitle = 'Agent') {
@@ -4863,6 +4995,10 @@ export class AgentCenterPanel {
         const agent = this.getAgentCardById(id);
         if (!agent?.supportsModel || !agent?.implemented || typeof this.openConfig !== 'function') return;
         closeCustomSelectMenu();
+        if (this.getHopscotchPanel()) {
+            this.openConfig({ tab: 'chat', onHide: () => this.refresh() });
+            return;
+        }
         this.hide();
         this.openConfig({
             tab: 'chat',
@@ -4875,14 +5011,15 @@ export class AgentCenterPanel {
     openAgentModelSelect(featureId = '') {
         const id = trim(featureId);
         if (!id || !this.contentElement || !this.getAgentCardById(id)) return false;
-        if (this.floatingAgentId !== id || this.floatingAgentFlipped !== true) {
+        const sharedRoot = this.sharedAgentConfig?.agentId === id && this.sharedAgentConfig.host.isConnected ? this.sharedAgentConfig.host : null;
+        if (!sharedRoot && (this.floatingAgentId !== id || this.floatingAgentFlipped !== true)) {
             const mountedCard = this.contentElement.querySelector?.('.agent-center-floating-card');
             this.floatingAgentEntryPending = !mountedCard || this.floatingAgentId !== id;
             this.floatingAgentId = id;
             this.floatingAgentFlipped = true;
             this.render();
         }
-        const button = Array.from(this.contentElement.querySelectorAll('[data-agent-feature-model-button]'))
+        const button = Array.from((sharedRoot || this.contentElement).querySelectorAll('[data-agent-feature-model-button]'))
             .find(item => item?.dataset?.agentFeatureModelButton === id);
         if (!button || button.disabled || typeof button.click !== 'function') return false;
         button.focus?.();
@@ -6489,10 +6626,156 @@ export class AgentCenterPanel {
         </div>`;
     }
 
+    bindAgentCardEvents(root = this.contentElement, { onFlip = () => this.toggleFloatingAgentCard(), onClose = () => this.closeFloatingAgentCard() } = {}) {
+        if (!root) return;
+        root.querySelectorAll('[data-agent-card-open]').forEach((card) => {
+            const open = () => this.openFloatingAgentCard(card.dataset.agentCardOpen || '');
+            card.addEventListener('click', (event) => {
+                const interactive = event.target?.closest?.(AGENT_CARD_INTERACTIVE_SELECTOR);
+                if (interactive && interactive !== card) return;
+                open();
+            });
+            card.addEventListener('keydown', (event) => {
+                if (event.target !== card) return;
+                if (event.key !== 'Enter' && event.key !== ' ') return;
+                event.preventDefault();
+                open();
+            });
+        });
+        root.querySelectorAll('[data-agent-card-action]').forEach((button) => {
+            button.addEventListener('click', (event) => {
+                event.stopPropagation();
+                this.handleAgentCardToggle(
+                button.dataset.agentCardAction || '',
+                button.dataset.agentCardId || '',
+                button,
+                );
+            });
+        });
+        root.querySelectorAll('[data-agent-resource-open]').forEach((button) => {
+            button.addEventListener('click', () => this.handleResourceOpen(button.dataset.agentResourceOpen || ''));
+        });
+        root.querySelectorAll('[data-agent-prompt-save]').forEach((button) => {
+            button.addEventListener('click', () => this.handleAgentPromptSave(
+                button.dataset.agentPromptSave || '',
+                button,
+            ));
+        });
+        root.querySelectorAll('[data-agent-prompt-open-position]').forEach((button) => {
+            button.addEventListener('click', () => {
+                void openDefaultAgentResourceTarget({ panel: 'presetPanel', section: 'sysprompt' });
+            });
+        });
+        root.querySelectorAll('[data-memory-agent-save]').forEach((button) => {
+            button.addEventListener('click', () => this.handleMemoryAgentSave(button));
+        });
+        root.querySelectorAll('[data-memory-storage-mode]').forEach((button) => {
+            button.addEventListener('click', () => this.handleMemoryStorageMode(button.dataset.memoryStorageMode || 'table'));
+        });
+        root.querySelectorAll('[data-agent-prompt-preview]').forEach((button) => {
+            button.addEventListener('click', () => this.handleAgentPromptPreview(button.dataset.agentPromptPreview || ''));
+        });
+        root.querySelectorAll('[data-reply-check-preview-target]').forEach((select) => {
+            select.addEventListener('change', () => this.handleReplyCheckPreviewTargetChange(select.value || 'auto'));
+        });
+        root.querySelectorAll('[data-agent-feature-action]').forEach((button) => {
+            button.addEventListener('click', (event) => {
+                event.stopPropagation();
+                this.handleAgentFeatureToggle(
+                button.dataset.agentFeatureAction || '',
+                button.dataset.agentFeatureId || '',
+                button,
+                );
+            });
+        });
+        root.querySelectorAll('[data-agent-feature-model-override]').forEach((input) => {
+            input.addEventListener('change', async () => {
+                const id = input.dataset.agentFeatureModelOverride || '';
+                const agent = this.getAgentCardById(id);
+                if (!agent) return;
+                const chosen = input.value.trim();
+                const profileModel = (input.dataset.profileModel || '').trim();
+                await this.callAgentFeatureMutation('setAgentFeatureModel', {
+                    id,
+                    modelMode: 'profile',
+                    modelProfileId: agent.modelProfileId,
+                    // 与配置保存的模型相同 = 维持原样（存空覆盖）
+                    modelOverride: chosen && chosen !== profileModel ? chosen : '',
+                }, null);
+                await this.refresh();
+            });
+            input.addEventListener('click', event => event.stopPropagation());
+        });
+        root.querySelectorAll('[data-agent-model-pick]').forEach((btn) => {
+            btn.addEventListener('click', async (event) => {
+                event.stopPropagation();
+                const id = btn.dataset.agentModelPick || '';
+                const agent = this.getAgentCardById(id);
+                const menu = root?.querySelector?.(`[data-agent-model-menu="${id}"]`);
+                const input = root?.querySelector?.(`[data-agent-feature-model-override="${id}"]`);
+                if (!agent?.modelProfileId || !menu || !input) return;
+                if (!menu.hidden) { menu.hidden = true; menu.innerHTML = ''; return; }
+                menu.hidden = false;
+                menu.innerHTML = '<div class="agent-center-model-menu-item is-loading">加载模型列表…</div>';
+                const models = await this.callAction('listProfileModels', agent.modelProfileId, []);
+                if (menu.hidden) return;
+                const renderOptions = () => {
+                    if (menu.hidden) return;
+                    const ranked = rankModelCandidates(models || [], input.value || '');
+                    menu.innerHTML = ranked.length
+                        ? ranked.map(m => `<button type="button" class="agent-center-model-menu-item" data-model-option="${escapeHtml(String(m))}">${escapeHtml(String(m))}</button>`).join('')
+                        : '<div class="agent-center-model-menu-item is-loading">该渠道未返回模型列表，可手动输入</div>';
+                    menu.querySelectorAll('[data-model-option]').forEach((option) => {
+                        option.addEventListener('click', (ev) => {
+                            ev.stopPropagation();
+                            input.value = option.dataset.modelOption || '';
+                            menu.hidden = true;
+                            menu.innerHTML = '';
+                            input.dispatchEvent(new Event('change', { bubbles: false }));
+                        });
+                    });
+                };
+                input.addEventListener('input', renderOptions);
+                renderOptions();
+            });
+        });
+        root.querySelectorAll('[data-agent-feature-model-select]').forEach((select) => {
+            const id = select.dataset.agentFeatureModelSelect || '';
+            const button = Array.from(root.querySelectorAll('[data-agent-feature-model-button]'))
+                .find(item => item?.dataset?.agentFeatureModelButton === id);
+            bindCustomSelectButton({
+                buttonEl: button,
+                selectEl: select,
+                fallback: '不调用模型',
+            });
+            select.addEventListener('change', () => this.handleAgentFeatureModelSelect(
+                select.dataset.agentFeatureModelSelect || '',
+                select.value || '',
+                select,
+            ));
+        });
+        root.querySelectorAll('[data-agent-feature-model-manage]').forEach((button) => {
+            button.addEventListener('click', () => this.handleAgentFeatureModelManage(button.dataset.agentFeatureModelManage || ''));
+        });
+        root.querySelectorAll('[data-agent-feature-trigger]').forEach((button) => {
+            button.addEventListener('click', () => this.handleAgentFeatureTriggerMode(button.dataset.agentFeatureTrigger || ''));
+        });
+        root.querySelectorAll('[data-agent-float-flip]').forEach((button) => {
+            button.addEventListener('click', onFlip);
+        });
+        root.querySelectorAll('[data-agent-float-close]').forEach((button) => {
+            button.addEventListener('click', onClose);
+        });
+        root.querySelector('[data-agent-float-layer]')?.addEventListener('click', (event) => {
+            if (event.target?.dataset?.agentFloatLayer !== undefined) onClose();
+        });
+    }
+
     render() {
         this.renderMeta();
         this.renderTabs();
         if (!this.contentElement) return;
+        const editorDrafts = captureAgentEditorDrafts(this.contentElement);
         const globalPromptsActive = this.activeTab === 'global_prompts';
         this.contentElement.classList?.toggle?.('is-global-prompts', globalPromptsActive);
         const error = this.lastError
@@ -6514,6 +6797,14 @@ export class AgentCenterPanel {
                                 ? this.renderActivity()
                                 : this.renderSafety();
         this.contentElement.innerHTML = `${error}${body}${this.renderFloatingAgentCard()}`;
+        const library = this.contentElement.querySelector('[data-agent-library]');
+        library?.addEventListener('toggle', () => { if (library.isConnected) this.agentLibraryOpen = library.open; });
+        const boardPanel = this.getHopscotchPanel();
+        if (this.activeTab === 'agents' && this.isVisible()) {
+            boardPanel?.mount(this.contentElement.querySelector('[data-agent-hopscotch-host]'));
+        } else {
+            boardPanel?.suspend();
+        }
         this.floatingAgentEntryPending = false;
         const enteringList = this.contentElement.querySelector('.agent-center-agent-list.is-entering');
         if (enteringList) {
@@ -6581,147 +6872,10 @@ export class AgentCenterPanel {
             this.bindGlobalPromptLibraryEvents();
         }
         if (['agents', 'prompts', 'diagnostics'].includes(this.activeTab)) {
-            this.contentElement.querySelectorAll('[data-agent-card-open]').forEach((card) => {
-                const open = () => this.openFloatingAgentCard(card.dataset.agentCardOpen || '');
-                card.addEventListener('click', (event) => {
-                    if (event.target?.closest?.(AGENT_CARD_INTERACTIVE_SELECTOR)) return;
-                    open();
-                });
-                card.addEventListener('keydown', (event) => {
-                    if (event.target !== card) return;
-                    if (event.key !== 'Enter' && event.key !== ' ') return;
-                    event.preventDefault();
-                    open();
-                });
-            });
-            this.contentElement.querySelectorAll('[data-agent-card-action]').forEach((button) => {
-                button.addEventListener('click', (event) => {
-                    event.stopPropagation();
-                    this.handleAgentCardToggle(
-                    button.dataset.agentCardAction || '',
-                    button.dataset.agentCardId || '',
-                    button,
-                    );
-                });
-            });
-            this.contentElement.querySelectorAll('[data-agent-resource-open]').forEach((button) => {
-                button.addEventListener('click', () => this.handleResourceOpen(button.dataset.agentResourceOpen || ''));
-            });
-            this.contentElement.querySelectorAll('[data-agent-prompt-save]').forEach((button) => {
-                button.addEventListener('click', () => this.handleAgentPromptSave(
-                    button.dataset.agentPromptSave || '',
-                    button,
-                ));
-            });
-            this.contentElement.querySelectorAll('[data-agent-prompt-open-position]').forEach((button) => {
-                button.addEventListener('click', () => {
-                    void openDefaultAgentResourceTarget({ panel: 'presetPanel', section: 'sysprompt' });
-                });
-            });
-            this.contentElement.querySelectorAll('[data-memory-agent-save]').forEach((button) => {
-                button.addEventListener('click', () => this.handleMemoryAgentSave(button));
-            });
-            this.contentElement.querySelectorAll('[data-memory-storage-mode]').forEach((button) => {
-                button.addEventListener('click', () => this.handleMemoryStorageMode(button.dataset.memoryStorageMode || 'table'));
-            });
-            this.contentElement.querySelectorAll('[data-agent-prompt-preview]').forEach((button) => {
-                button.addEventListener('click', () => this.handleAgentPromptPreview(button.dataset.agentPromptPreview || ''));
-            });
-            this.contentElement.querySelectorAll('[data-reply-check-preview-target]').forEach((select) => {
-                select.addEventListener('change', () => this.handleReplyCheckPreviewTargetChange(select.value || 'auto'));
-            });
-            this.contentElement.querySelectorAll('[data-agent-feature-action]').forEach((button) => {
-                button.addEventListener('click', (event) => {
-                    event.stopPropagation();
-                    this.handleAgentFeatureToggle(
-                    button.dataset.agentFeatureAction || '',
-                    button.dataset.agentFeatureId || '',
-                    button,
-                    );
-                });
-            });
-            this.contentElement.querySelectorAll('[data-agent-feature-model-override]').forEach((input) => {
-                input.addEventListener('change', async () => {
-                    const id = input.dataset.agentFeatureModelOverride || '';
-                    const agent = this.getAgentCardById(id);
-                    if (!agent) return;
-                    const chosen = input.value.trim();
-                    const profileModel = (input.dataset.profileModel || '').trim();
-                    await this.callAgentFeatureMutation('setAgentFeatureModel', {
-                        id,
-                        modelMode: 'profile',
-                        modelProfileId: agent.modelProfileId,
-                        // 与配置保存的模型相同 = 维持原样（存空覆盖）
-                        modelOverride: chosen && chosen !== profileModel ? chosen : '',
-                    }, null);
-                    await this.refresh();
-                });
-                input.addEventListener('click', event => event.stopPropagation());
-            });
-            this.contentElement.querySelectorAll('[data-agent-model-pick]').forEach((btn) => {
-                btn.addEventListener('click', async (event) => {
-                    event.stopPropagation();
-                    const id = btn.dataset.agentModelPick || '';
-                    const agent = this.getAgentCardById(id);
-                    const menu = this.contentElement?.querySelector?.(`[data-agent-model-menu="${id}"]`);
-                    const input = this.contentElement?.querySelector?.(`[data-agent-feature-model-override="${id}"]`);
-                    if (!agent?.modelProfileId || !menu || !input) return;
-                    if (!menu.hidden) { menu.hidden = true; menu.innerHTML = ''; return; }
-                    menu.hidden = false;
-                    menu.innerHTML = '<div class="agent-center-model-menu-item is-loading">加载模型列表…</div>';
-                    const models = await this.callAction('listProfileModels', agent.modelProfileId, []);
-                    if (menu.hidden) return;
-                    const renderOptions = () => {
-                        if (menu.hidden) return;
-                        const ranked = rankModelCandidates(models || [], input.value || '');
-                        menu.innerHTML = ranked.length
-                            ? ranked.map(m => `<button type="button" class="agent-center-model-menu-item" data-model-option="${escapeHtml(String(m))}">${escapeHtml(String(m))}</button>`).join('')
-                            : '<div class="agent-center-model-menu-item is-loading">该渠道未返回模型列表，可手动输入</div>';
-                        menu.querySelectorAll('[data-model-option]').forEach((option) => {
-                            option.addEventListener('click', (ev) => {
-                                ev.stopPropagation();
-                                input.value = option.dataset.modelOption || '';
-                                menu.hidden = true;
-                                menu.innerHTML = '';
-                                input.dispatchEvent(new Event('change', { bubbles: false }));
-                            });
-                        });
-                    };
-                    input.addEventListener('input', renderOptions);
-                    renderOptions();
-                });
-            });
-            this.contentElement.querySelectorAll('[data-agent-feature-model-select]').forEach((select) => {
-                const id = select.dataset.agentFeatureModelSelect || '';
-                const button = Array.from(this.contentElement.querySelectorAll('[data-agent-feature-model-button]'))
-                    .find(item => item?.dataset?.agentFeatureModelButton === id);
-                bindCustomSelectButton({
-                    buttonEl: button,
-                    selectEl: select,
-                    fallback: '不调用模型',
-                });
-                select.addEventListener('change', () => this.handleAgentFeatureModelSelect(
-                    select.dataset.agentFeatureModelSelect || '',
-                    select.value || '',
-                    select,
-                ));
-            });
-            this.contentElement.querySelectorAll('[data-agent-feature-model-manage]').forEach((button) => {
-                button.addEventListener('click', () => this.handleAgentFeatureModelManage(button.dataset.agentFeatureModelManage || ''));
-            });
-            this.contentElement.querySelectorAll('[data-agent-feature-trigger]').forEach((button) => {
-                button.addEventListener('click', () => this.handleAgentFeatureTriggerMode(button.dataset.agentFeatureTrigger || ''));
-            });
-            this.contentElement.querySelectorAll('[data-agent-float-flip]').forEach((button) => {
-                button.addEventListener('click', () => this.toggleFloatingAgentCard());
-            });
-            this.contentElement.querySelectorAll('[data-agent-float-close]').forEach((button) => {
-                button.addEventListener('click', () => this.closeFloatingAgentCard());
-            });
-            this.contentElement.querySelector('[data-agent-float-layer]')?.addEventListener('click', (event) => {
-                if (event.target?.dataset?.agentFloatLayer !== undefined) this.closeFloatingAgentCard();
-            });
+            this.bindAgentCardEvents();
+            restoreAgentEditorDrafts(this.contentElement, editorDrafts);
         }
+        this.refreshSharedAgentConfig();
         if (this.activeTab === 'safety') {
             this.contentElement.querySelectorAll('[data-session-gate-action]').forEach((button) => {
                 button.addEventListener('click', () => this.handleSessionGateAction(button.dataset.sessionGateAction || ''));

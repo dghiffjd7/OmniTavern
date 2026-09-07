@@ -64,6 +64,7 @@ export const createMemoryUpdateRuntime = ({
   const abortMemoryUpdate = (sessionId) => {
     const queue = memoryUpdateQueues.get(sessionId);
     if (queue?.pending?.length) {
+      queue.pending.forEach(task => task.resolve?.({ status: 'cancelled', reason: 'aborted' }));
       queue.pending = [];
     }
     const ac = memoryUpdateAbortControllers.get(sessionId);
@@ -159,6 +160,7 @@ export const createMemoryUpdateRuntime = ({
         errorMessage,
       }));
       await finishAgentMemoryRun(agentRun, { status, reason, errorMessage });
+      return { status: toAgentStatus(status), reason, error: errorMessage };
     };
     emitMemoryRuntimeTrace(recordTraceEvent, buildMemoryUpdateTaskStartTraceEvent({
       sessionId,
@@ -167,37 +169,30 @@ export const createMemoryUpdateRuntime = ({
     }));
     try {
       if (signal?.aborted) {
-        await finishTrace({ status: 'cancelled', reason: 'aborted' });
-        return;
+        return finishTrace({ status: 'cancelled', reason: 'aborted' });
       }
       if (!isOnline()) {
-        await finishTrace({ status: 'skipped', reason: 'offline' });
-        return;
+        return finishTrace({ status: 'skipped', reason: 'offline' });
       }
       const plan = await buildMemoryUpdatePlan(sessionId, isGroup, baseContext);
       setLastMemoryPlan(appBridge, plan);
       if (!plan?.enabled || !plan.promptText) {
-        await finishTrace({ status: 'skipped', reason: plan?.enabled ? 'prompt-missing' : 'plan-disabled' });
-        return;
+        return finishTrace({ status: 'skipped', reason: plan?.enabled ? 'prompt-missing' : 'plan-disabled' });
       }
       if (signal?.aborted) {
-        await finishTrace({ status: 'cancelled', reason: 'aborted' });
-        return;
+        return finishTrace({ status: 'cancelled', reason: 'aborted' });
       }
       const historyText = buildMemoryUpdateHistoryText(sessionId);
       if (!historyText.trim()) {
-        await finishTrace({ status: 'skipped', reason: 'empty-history' });
-        return;
+        return finishTrace({ status: 'skipped', reason: 'empty-history' });
       }
       const config = await resolveMemoryUpdateConfig();
       if (!config || !canInitClient(config)) {
         logger.warn('memory update config missing or invalid');
-        await finishTrace({ status: 'skipped', reason: 'config-invalid' });
-        return;
+        return finishTrace({ status: 'skipped', reason: 'config-invalid' });
       }
       if (signal?.aborted) {
-        await finishTrace({ status: 'cancelled', reason: 'aborted' });
-        return;
+        return finishTrace({ status: 'cancelled', reason: 'aborted' });
       }
       const request = buildMemoryUpdateRequest({
         promptText: plan.promptText,
@@ -206,8 +201,7 @@ export const createMemoryUpdateRuntime = ({
       const client = createClient(config);
       const response = await client.chat(request.messages, { signal });
       if (signal?.aborted) {
-        await finishTrace({ status: 'cancelled', reason: 'aborted' });
-        return;
+        return finishTrace({ status: 'cancelled', reason: 'aborted' });
       }
       if (checkpointMessageId) {
         let targetCurrent = true;
@@ -218,31 +212,32 @@ export const createMemoryUpdateRuntime = ({
           logger?.warn?.('memory update target validation failed', err);
         }
         if (!targetCurrent) {
-          await finishTrace({ status: 'skipped', reason: 'stale-checkpoint' });
-          return;
+          return finishTrace({ status: 'skipped', reason: 'stale-checkpoint' });
         }
       }
       await handleMemoryEditsFromRaw(response, {
+        signal,
+        throwOnError: true,
         sessionId,
         isGroup,
         timelineMessageId: checkpointMessageId,
         force: true,
         requestPrompt: request.requestPrompt,
       });
+      if (signal?.aborted) return finishTrace({ status: 'cancelled', reason: 'aborted' });
       if (checkpointMessageId) {
         await syncTurnCheckpointForMessage(sessionId, checkpointMessageId, {
           captureCurrentActiveState: true,
         });
       }
-      await finishTrace({ status: 'success' });
+      return finishTrace({ status: 'success' });
     } catch (err) {
       if (err?.name === 'AbortError') {
         logger.info('memory update aborted', sessionId);
-        await finishTrace({ status: 'cancelled', reason: 'aborted' });
-        return;
+        return finishTrace({ status: 'cancelled', reason: 'aborted' });
       }
       logger.warn('memory update failed', err);
-      await finishTrace({
+      return finishTrace({
         status: 'error',
         reason: 'exception',
         errorMessage: err?.message ? String(err.message) : String(err || ''),
@@ -281,7 +276,7 @@ export const createMemoryUpdateRuntime = ({
             cancel: () => abortMemoryUpdate(sessionId),
           });
           try {
-            await runMemoryUpdateTask(sessionId, task.isGroup, task.baseContext, task.checkpointMessageId, ac.signal);
+            task.resolve(await runMemoryUpdateTask(sessionId, task.isGroup, task.baseContext, task.checkpointMessageId, ac.signal));
           } finally {
             workLease?.settle?.();
             if (memoryUpdateAbortControllers.get(sessionId) === ac) {
@@ -299,12 +294,14 @@ export const createMemoryUpdateRuntime = ({
 
   const enqueueMemoryUpdate = (sessionId, isGroup, baseContext, checkpointMessageId) => {
     const queue = ensureMemoryQueue(sessionId);
-    queue.pending.push({ isGroup, baseContext, checkpointMessageId });
-    return queue.running ? (queue.promise || Promise.resolve()) : drainMemoryQueue(sessionId);
+    const completion = new Promise(resolve => queue.pending.push({ isGroup, baseContext, checkpointMessageId, resolve }));
+    if (!queue.running) void drainMemoryQueue(sessionId);
+    return completion;
   };
 
   const runMemoryUpdateAfterChat = async (sessionId, isGroup, baseContext, options = {}) => {
-    if (!isMemoryAutoExtractSeparate()) return;
+    // forceSeparate：跳房子板把记忆表格作为独立房子时，以板的本轮有效配置为准（不回写全局设置）
+    if (!(options?.forceSeparate === true || isMemoryAutoExtractSeparate())) return;
     if (!sessionId) return;
     const trigger = resolveMemoryUpdateTrigger(
       appSettings.get(),
@@ -318,11 +315,18 @@ export const createMemoryUpdateRuntime = ({
         nextCounter: trigger.nextCounter,
         everyN: trigger.everyN,
       }));
+      // 仅跳房子显式调用需要区分“按频率跳过”与“已执行”；旧调用方保持 undefined
+      if (options?.forceSeparate === true) {
+        return { skipped: true, reason: 'cadence', nextCounter: trigger.nextCounter, everyN: trigger.everyN };
+      }
       return;
     }
     memoryFillSessionCounters.set(sessionId, trigger.nextCounter);
     const checkpointMessageId = String(options?.checkpointMessageId || '').trim();
-    return enqueueMemoryUpdate(sessionId, isGroup, baseContext, checkpointMessageId);
+    const completion = enqueueMemoryUpdate(sessionId, isGroup, baseContext, checkpointMessageId);
+    if (options?.forceSeparate === true) return completion;
+    // 旧调用方仍等待队列排空并返回 undefined；房子只等待自己这一个任务。
+    await ensureMemoryQueue(sessionId).promise;
   };
 
   return {

@@ -1,3 +1,4 @@
+import { getRealtimeProvider } from './realtime-provider-catalog.js';
 import { normalizeVoiceTranscriptionLanguages } from '../../api/voice-client.js';
 
 const REALTIME_CONFIG_SCOPES = new Set(['chat', 'voice_shared', 'voice_tts', 'voice_stt']);
@@ -44,6 +45,9 @@ const normalizeModelId = (value, fallback) => String(value || fallback).trim() |
 
 export const normalizeRealtimeVoiceSettings = (value = {}) => {
   const input = value && typeof value === 'object' ? value : {};
+  if (input.provider && input.provider !== 'openai' && getRealtimeProvider(input.provider)) {
+    return { ...normalizeRealtimeVoiceSettings({}), ...input, voice: String(input.voice || '').trim(), contextMode: 'session_snapshot' };
+  }
   const configRefInput = input.configRef && typeof input.configRef === 'object' ? input.configRef : {};
   const rawScope = String(configRefInput.scope || '').trim().toLowerCase();
   const scope = REALTIME_CONFIG_SCOPES.has(rawScope)
@@ -189,7 +193,13 @@ export const buildOpenAiRealtimeSessionConfig = (value = {}) => {
   };
 };
 
-export const resolveRealtimeConfigReference = async ({ settings, managers = {} } = {}) => {
+export const resolveRealtimeConfigReference = async ({ settings, managers = {}, profileStore = null } = {}) => {
+  if (!profileStore && globalThis.localStorage) {
+    const { getRealtimeProfileStore } = await import('../../storage/realtime-profile-store.js');
+    profileStore = getRealtimeProfileStore();
+  }
+  const selected = await profileStore?.resolve();
+  if (selected) return selected;
   const normalized = normalizeRealtimeVoiceSettings(settings);
   if (!isRealtimeModelId(normalized.realtimeModel)) {
     return { ok: false, reason: 'realtime_model_invalid', settings: normalized };

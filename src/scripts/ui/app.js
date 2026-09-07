@@ -107,7 +107,7 @@ import { MaidSettingsStore } from '../storage/maid-settings-store.js';
 import { appSettings } from '../storage/app-settings.js';
 import { bootstrapAppLanguage } from '../i18n/app-language-bootstrap.js';
 import { requestAppLanguageRestart } from '../i18n/app-language-restart.js';
-import { translateUiText } from '../i18n/index.js';
+import { t, translateUiText } from '../i18n/index.js';
 import { getLocalizedPromptText } from '../i18n/prompt-locale.js';
 import { chatFcLocalCapabilityStore } from '../storage/chat-fc-local-capability-store.js';
 import { chatStructuredRouteEvidenceStore } from '../storage/chat-structured-route-evidence-store.js';
@@ -490,6 +490,11 @@ import {
   zoomLineageMapCameraAtPoint,
 } from './chat/lineage-graph-view-utils.js';
 import { createCreativeExecutionLaneRuntime } from './chat/creative-execution-lane-runtime-utils.js';
+import { createCreativeTurnTracker } from './chat/creative-turn-tracker.js';
+import { createHopscotchExecutors, createHopscotchTurnRuntime } from './chat/hopscotch-turn-runtime.js';
+import { resolveHopscotchBoardSettings } from './chat/hopscotch-settings-utils.js';
+import { createHopscotchBoardStore } from '../storage/hopscotch-board-store.js';
+import { createHopscotchBoardPanel } from './chat/hopscotch-board-panel.js';
 import { createExecutionFlowRuntime } from './chat/execution-flow-runtime-utils.js';
 import { createPromptPreviewRuntime } from './chat/prompt-preview-runtime-utils.js';
 import {
@@ -1748,6 +1753,9 @@ const initApp = async () => {
   }
   activePersonaId = personaStore.getActive?.()?.id || 'default';
   const initialScopeKey = getPersonaScopeKey(activePersonaId);
+  let hopscotchBoardStore = null;
+  let hopscotchTurnRuntime = null;
+  let hopscotchBoardPanel = null;
   markBootPhase('scope-stores');
   await Promise.all([
     chatStore.setScope?.(initialScopeKey),
@@ -2501,6 +2509,9 @@ const initApp = async () => {
       };
     } catch {}
     logger.debug(`[Persona_test] applyPersonaScope start persona=${pid} scope=${nextKey || 'default'}`);
+    hopscotchTurnRuntime?.clearScope();
+    hopscotchBoardPanel?.close();
+    await hopscotchBoardStore?.setScope(nextKey);
     const scopeSettlement = await settlePersonaScopeStores({
       scopeId: nextKey,
       stores: buildPersonaScopeStoreTargets({
@@ -4286,6 +4297,7 @@ const initApp = async () => {
   });
   let hasRejectedFormatRepairAgentRunCandidate = () => false;
   const agentCenterPanel = new AgentCenterPanel({
+    getHopscotchPanel: () => hopscotchBoardPanel,
     getFailureSeenAt: ({ surface = '' } = {}) => getAgentFailureSeenAt({ surface }),
     markFailureSeen: ({ surface = '', at = Date.now() } = {}) => markAgentFailuresSeen({ surface, at }),
     openConfig: (options = {}) => configPanel.show({ tab: 'chat', ...(options || {}) }),
@@ -5009,7 +5021,7 @@ const initApp = async () => {
         toastr: window.toastr,
       });
       const compactionPlace = resolveMemoryTablePlace(memoryUiMode || 'chat');
-      if (getMemoryStorageMode(compactionPlace) === 'table') {
+      if (getMemoryStorageMode(compactionPlace) === 'table' && !hopscotchTurnRuntime?.isSessionBusy(sid)) {
         Promise.resolve(requestSummaryCompaction(sid, { place: compactionPlace }))
           .catch(error => logger.debug('table memory summary compaction request failed', error));
       }
@@ -16949,6 +16961,8 @@ const initApp = async () => {
       lineagePlainText = String(lineageText || '').trim() || '暂无上下文血缘图记录';
       if (lineageTextarea) lineageTextarea.value = lineagePlainText;
       if (metaEl) metaEl.textContent = meta || '';
+      // AC 与预览同属应用浮层；重新打开预览也须位于后来打开的 AC 之上。
+      document.body.appendChild(overlay);
       overlay.style.display = 'block';
       switchTab(initialTab);
       scheduleLineageFrame(() => { void renderLineageGraph(); });
@@ -20508,14 +20522,18 @@ const initApp = async () => {
     return updated || null;
   };
   const runWritingAutoImagePromptGenerationForMessage = (message, targetSessionId, prompts = [], {
+    signal = null,
     source = 'after_receive',
     fallbackSource = '',
     bypassRateLimit = false,
+    onItemsScheduled = null,
     onItemDone = null,
     onItemFailed = null,
   } = {}) => {
     const sessionId = String(targetSessionId || '').trim();
     const messageId = String(message?.id || '').trim();
+    const targetScope = activePersonaScopeKey;
+    const isCurrent = () => !signal?.aborted && (!signal || (activePersonaScopeKey === targetScope && Boolean(chatStore.findMessage(messageId, sessionId))));
     const items = (Array.isArray(prompts) ? prompts : [])
       .map((item, index) => ({
         prompt: String(item?.prompt || item || '').trim(),
@@ -20580,8 +20598,16 @@ const initApp = async () => {
       source,
       at: Date.now(),
     });
+    if (typeof onItemsScheduled === 'function') {
+      try {
+        onItemsScheduled({ count: items.length, items: items.map(item => ({ index: item.index, pendingToken: item.pendingToken })) });
+      } catch (callbackErr) {
+        logger.debug?.('writing auto image scheduled callback failed', callbackErr);
+      }
+    }
     items.forEach(item => setTimeout(async () => {
       try {
+        if (!isCurrent()) return;
         traceWritingAutoImagePrompt('generate-start', {
           sessionId,
           messageId,
@@ -20607,11 +20633,13 @@ const initApp = async () => {
         });
         if (!canInitClient(config)) throw new Error('图片配置不可用');
         await imageGenerationParamsStore.ready;
+        if (!isCurrent()) return;
         const generationOptions = mergeImageGenerationRequestOptions({
           config,
           preset: imageGenerationParamsStore.getActive(),
         });
         const asset = await enqueueAutoImageGeneration(() => mediaGenerationService.generateImage({
+          signal,
           prompt: item.prompt,
           config,
           sessionId,
@@ -20622,6 +20650,7 @@ const initApp = async () => {
           },
           options: generationOptions,
         }));
+        if (!isCurrent()) return;
         const token = buildGeneratedImageToken(asset);
         traceWritingAutoImagePrompt('generate-done', {
           sessionId,
@@ -20670,6 +20699,7 @@ const initApp = async () => {
           }
         }
       } catch (err) {
+        if (!isCurrent()) return;
         traceWritingAutoImagePrompt('generate-failed', {
           sessionId,
           messageId,
@@ -20838,7 +20868,17 @@ const initApp = async () => {
   const scheduleAutoImagePromptGenerationForMessage = (
     message,
     targetSessionId,
-    { rawText = '', source = 'after_receive', force = false } = {},
+    {
+      rawText = '',
+      source = 'after_receive',
+      force = false,
+      // 跳房子生图房子：等待整组图片任务与回填结束（计划 §6.1）
+      signal = null,
+      boardEnabled = false,
+      onItemsScheduled = null,
+      onItemDone = null,
+      onItemFailed = null,
+    } = {},
   ) => {
     const sessionId = String(targetSessionId || '').trim();
     const messageId = String(message?.id || '').trim();
@@ -20872,7 +20912,7 @@ const initApp = async () => {
         rawTextHasTag: /<\s*image_prompt\b/i.test(String(rawText || '')),
       });
     }
-    if (!(force || isSurfaceAutoImagePromptEnabled()) || !sessionId || !messageId) {
+    if (signal?.aborted || !(force || boardEnabled || isSurfaceAutoImagePromptEnabled()) || !sessionId || !messageId) {
       if (isWritingSurface) traceWritingAutoImagePrompt('schedule-skip-basic', { sessionId, messageId, enabled: force || isSurfaceAutoImagePromptEnabled(), force });
       logEditSchedule('skip-basic', { enabled: force || isSurfaceAutoImagePromptEnabled() });
       return false;
@@ -20966,9 +21006,13 @@ const initApp = async () => {
       });
       autoImagePromptProcessedSourceIds.add(key);
       return runWritingAutoImagePromptGenerationForMessage(message, sessionId, placeholderItems, {
+        signal,
         source,
         fallbackSource: preparedFallback.text,
         bypassRateLimit: force,
+        onItemsScheduled,
+        onItemDone,
+        onItemFailed,
       });
     }
     const guard = force
@@ -24967,11 +25011,11 @@ const initApp = async () => {
     switchPage,
     openMaidCommand: () => maidCommandInputRuntime?.open?.(),
     closeMaidCommand: () => maidCommandInputRuntime?.close?.(),
-    openAgentCenter: () => agentCenterPanel.show(),
+    openAgentCenter: () => agentCenterPanel.show({ library: true }),
     closeAgentCenter: () => agentCenterPanel.hide(),
     closeAgentCenterDetail: () => agentCenterPanel.closeFloatingAgentCard(),
     openAgentCenterDetail: async () => {
-      agentCenterPanel.show();
+      agentCenterPanel.show({ library: true });
       await agentCenterPanel.refresh?.();
       const card = agentCenterPanel.contentElement?.querySelector?.('[data-maid-guide-target="agent-center-card"]');
       const agentId = String(card?.dataset?.agentCardOpen || '').trim();
@@ -26324,6 +26368,8 @@ const initApp = async () => {
   ui.onSwipeChange(async ({ msgId, message, index, previousIndex }) => {
     const sid = chatStore.getCurrent();
     if (!sid || !msgId) return;
+    const turn = hopscotchTurnRuntime?.getActiveTurn(sid);
+    if (turn) { turn.abort('swipe_changed'); await turn.turnPromise.catch(() => {}); }
     const stored = chatStore.findMessage(msgId, sid) || message;
     const storedMeta = stored?.meta && typeof stored.meta === 'object' ? stored.meta : {};
     const renderMeta = message?.meta && typeof message.meta === 'object' ? message.meta : {};
@@ -26442,6 +26488,8 @@ const initApp = async () => {
     }
     const sid = chatStore.getCurrent();
     if (!sid) return;
+    const turn = hopscotchTurnRuntime?.getActiveTurn(sid);
+    if (turn) { turn.abort('regenerate'); await turn.turnPromise.catch(() => {}); }
     const msgs = chatStore.getMessages(sid);
     const msgIdx = msgs.findIndex(m => String(m?.id || '') === String(msgId || ''));
     if (msgIdx === -1) return;
@@ -26937,6 +26985,8 @@ const initApp = async () => {
   // 女仆 chat.send_message 需要区分「用户点了停止」和管线故障：记录最近一次用户取消的时间。
   let lastUserGenerationCancelAt = 0;
   const cancelActiveGeneration = (reason = 'user') => {
+    const cancelTargetSessionId = String(activeGeneration?.sessionId || '').trim();
+    const boardCancelled = hopscotchTurnRuntime?.abortSessionTurn(cancelTargetSessionId || chatStore.getCurrent?.(), reason);
     const result = runActiveGenerationCancelFlow({
       generation: activeGeneration,
       reason,
@@ -26953,8 +27003,9 @@ const initApp = async () => {
       setStreamingState: value => ui.setStreamingState?.(value),
       setSendingState: value => ui.setSendingState(value),
     });
-    if (!result.cancelled) return false;
+    if (!result.cancelled) return Boolean(boardCancelled);
     if (reason === 'user') lastUserGenerationCancelAt = Date.now();
+    hopscotchTurnRuntime?.abortSessionTurn?.(cancelTargetSessionId || chatStore.getCurrent?.(), reason);
     creativeExecutionLaneRuntime?.cancelRun?.(reason);
     if (activeGeneration?.id === result.generation?.id) {
       activeGeneration = null;
@@ -27479,6 +27530,202 @@ const initApp = async () => {
   } catch (err) {
     logger.debug('maid format profile hydrate skipped', err);
   }
+
+  // ===== 跳房子编排（创意写作）：板存储 + 单轮运行时；默认关闭，无用户板时沿用固定流程 =====
+  hopscotchBoardStore = createHopscotchBoardStore({
+    loadKv: name => safeInvoke('load_kv', { name }),
+    saveKv: (name, data) => safeInvoke('save_kv', { name, data }),
+    scopeId: initialScopeKey,
+    getSessionSettings: sid => chatStore.getSessionSettings?.(sid),
+    setSessionSettings: (sid, settings) => chatStore.setSessionSettings?.(sid, settings),
+    logger,
+  });
+  try {
+    await hopscotchBoardStore.hydrate();
+  } catch (err) {
+    logger.debug('hopscotch board hydrate skipped', err);
+  }
+  const getHopscotchBoardSettings = (sid = chatStore.getCurrent?.(), place = 'writing') => {
+    const featureState = agentFeatureSettingsStore.getSettings()?.features?.[AGENT_FEATURE_IDS.replyCheck] || {};
+    return resolveHopscotchBoardSettings({
+      settings: appSettings.get(), place,
+      replyCheck: {
+        enabled: agentFeatureSettingsStore.isEnabled(AGENT_FEATURE_IDS.replyCheck),
+        triggerMode: featureState.triggerMode,
+        modelMode: featureState.modelMode,
+      },
+      autoImageEnabled: isWritingAutoImagePromptEnabled(),
+      variablesEnabled: isVariableRuntimeEnabled(sid),
+    });
+  };
+  // 格式复核房子：复用手动检查的选项（强制模型复核）+ 完成回调；signal 贯通 backgroundChat
+  const runHopscotchFormatReview = async ({ sessionId = '', messageId = '', signal = null } = {}) => {
+    const sid = String(sessionId || '').trim();
+    const message = chatStore.findMessage(String(messageId || '').trim(), sid);
+    if (!message || message.role !== 'assistant') return { status: 'skipped', reason: 'message_missing' };
+    const repairTarget = await resolveChatFormatRepairTarget(message, sid);
+    if (signal?.aborted) return { status: 'cancelled', reason: 'user_cancelled' };
+    const sourceContent = String(message.content || '');
+    const targetScope = activePersonaScopeKey;
+    const canCommit = () => !signal?.aborted && activePersonaScopeKey === targetScope && String(chatStore.findMessage(messageId, sid)?.content ?? '') === sourceContent;
+    if (!repairTarget?.ok) return { status: 'skipped', reason: repairTarget?.reason || 'target_unavailable' };
+    const options = {
+      ...buildManualChatFormatGuardianOptions(sid),
+      baseRevision: createFormatPatchRevisionToken(),
+      sourceSnapshot: repairTarget.sourceText,
+      repairTarget: { ...repairTarget, sessionId: repairTarget.targetSessionId || sid },
+      sourceMessageId: String(message.id || '').trim(),
+    };
+    if (options?.modelReview?.enabled !== true || typeof options?.modelReview?.backgroundChat !== 'function') {
+      return { status: 'skipped', reason: 'model_unavailable' };
+    }
+    options.modelReview = {
+      ...options.modelReview,
+      requestOptions: { ...(options.modelReview.requestOptions || {}), ...(signal ? { signal } : {}) },
+    };
+    let settle = null;
+    const completion = new Promise((resolve) => { settle = resolve; });
+    const preview = runChatFormatGuardianPreview({
+      message: { ...message, rawOriginal: repairTarget.sourceText },
+      sessionId: sid,
+      chatFormatGuardian: options,
+      onChatFormatGuardianPreview: payload => { if (canCommit()) handleChatFormatGuardianPreview(payload); },
+      onChatFormatGuardianRun: handleChatFormatGuardianAgentRun,
+      onChatFormatGuardianModelReviewQueued: payload => { if (canCommit()) handleChatFormatGuardianModelReviewQueued(payload); },
+      onChatFormatGuardianModelReviewCompleted: payload => settle?.(payload || {}),
+      logger,
+    });
+    if (!preview) return { status: 'skipped', reason: 'no_source' };
+    if (!preview.modelReviewQueued) {
+      return { status: 'succeeded', reason: 'local_only', artifact: { kind: 'format_review', payload: { status: preview?.result?.status || '' } } };
+    }
+    const payload = await completion;
+    if (signal?.aborted) return { status: 'cancelled', reason: 'user_cancelled' };
+    const failed = payload?.failed === true || payload?.agentRun?.status === 'failed';
+    if (failed) return { status: 'failed', reason: 'review_failed', error: String(payload?.agentRun?.errorMessage || payload?.error || t('格式复核失败')) };
+    return {
+      status: 'succeeded',
+      artifact: {
+        kind: 'format_review',
+        payload: {
+          status: payload?.result?.modelReview?.status || payload?.result?.status || 'completed',
+          hasCandidate: Boolean(payload?.result?.modelReview?.canRepair || payload?.result?.repairCandidate),
+        },
+      },
+    };
+  };
+  // 生图房子：等待整组图片任务与回填结束；无提示 → skipped；部分失败 → failed(partial)
+  const runHopscotchAutoImage = ({ sessionId = '', messageId = '', signal = null } = {}) => new Promise((resolve) => {
+    const sid = String(sessionId || '').trim();
+    const message = chatStore.findMessage(String(messageId || '').trim(), sid);
+    if (!message) return resolve({ status: 'skipped', reason: 'message_missing' });
+    let total = 0;
+    let done = 0;
+    let failed = 0;
+    let settled = false;
+    const children = [];
+    const finish = () => {
+      if (settled || done + failed < total) return;
+      settled = true;
+      if (!total) return resolve({ status: 'skipped', reason: 'no_prompt' });
+      if (failed) return resolve({ status: 'failed', reason: failed === total ? 'all_failed' : 'partial', error: t('{value}/{value2} 张图片生成失败', { value: failed, value2: total }), childResults: children });
+      resolve({ status: 'succeeded', artifact: { kind: 'image_generation', payload: { count: total } }, childResults: children });
+    };
+    signal?.addEventListener?.('abort', () => {
+      if (settled) return;
+      settled = true;
+      resolve({ status: 'cancelled', reason: 'user_cancelled', childResults: children });
+    }, { once: true });
+    const scheduled = scheduleAutoImagePromptGenerationForMessage(message, sid, {
+      signal,
+      boardEnabled: true,
+      rawText: String(message.rawOriginal || message.rawSource || message.content || ''),
+      source: 'hopscotch',
+      onItemsScheduled: ({ count }) => { total = Number(count) || 0; if (!total) finish(); },
+      onItemDone: ({ item, asset }) => { done += 1; children.push({ index: item?.index, status: 'succeeded', assetId: asset?.id || '' }); finish(); },
+      onItemFailed: (err, { item } = {}) => { failed += 1; children.push({ index: item?.index, status: 'failed', error: String(err?.message || err || '') }); finish(); },
+    });
+    if (!scheduled && !settled) { settled = true; resolve({ status: 'skipped', reason: 'no_prompt' }); }
+  });
+  hopscotchTurnRuntime = createHopscotchTurnRuntime({
+    sessionAsyncWorkRuntime,
+    getCurrentSessionId: () => chatStore.getCurrent?.(),
+    getSettings: () => appSettings.get(),
+    boardStore: hopscotchBoardStore,
+    resolveWritingSettings: getHopscotchBoardSettings,
+    getLaneRuntime: () => creativeExecutionLaneRuntime,
+    createExecutors: info => createHopscotchExecutors({
+      ...info,
+      memory: {
+        runMemoryUpdateAfterChat: (...args) => (info.memoryUpdateRuntime || currentMemoryUpdateRuntime)?.runMemoryUpdateAfterChat?.(...args),
+        runTimelineRepair: (...args) => info.memoryTimelineRepair?.(...args),
+        abortMemoryUpdate: sid => (info.memoryUpdateRuntime || currentMemoryUpdateRuntime)?.abortMemoryUpdate?.(sid),
+      },
+      compaction: {
+        request: (sid, options) => requestSummaryCompaction(sid, options),
+        place: resolveMemoryTablePlace('writing'),
+      },
+      formatReview: { run: runHopscotchFormatReview, place: 'writing' },
+      image: { run: runHopscotchAutoImage },
+      custom: {
+        runtimeConfig: info.runtimeConfig,
+        backgroundChat: (messages, options) => window.appBridge.backgroundChat(messages, options),
+        getRuntimeConfigByProfileId: id => chatConfigManager.getRuntimeConfigByProfileId(id),
+        getRecentMessages: (sid, count) => (chatStore.getMessages(sid) || []).slice(-Math.max(1, Number(count) || 8)),
+        getBodyText: (sid, mid) => String(chatStore.findMessage(mid, sid)?.content || ''),
+        charName: String(info.charName || ''),
+        userName: String(info.userName || ''),
+        recordRun: ({ house, modelSource }) => {
+          const run = agentTaskRuntime.startRun({
+            kind: 'hopscotch_custom_house',
+            title: t('跳房子 · {value}', { value: house.label || house.id }),
+            sessionId: info.sessionId,
+            surface: 'creative',
+            trigger: 'hopscotch',
+            source: 'hopscotch-turn-runtime',
+            summary: `custom house ${house.id}`,
+            metadata: { turnRunId: info.turnRunId, houseId: house.id, modelSource },
+          });
+          return {
+            id: run.id,
+            finish: (result) => agentTaskRuntime.finishRun(run.id, {
+              status: result?.status === 'succeeded' ? 'succeeded' : (result?.status === 'cancelled' ? 'cancelled' : 'failed'),
+              summary: result?.status === 'succeeded' ? 'custom house succeeded' : (result?.error || result?.reason || 'custom house failed'),
+              errorMessage: result?.status === 'failed' ? String(result?.error || result?.reason || '') : '',
+              output: result?.artifact || null,
+              metadata: { turnRunId: info.turnRunId, houseId: house.id, modelSource, usage: result?.usage || null },
+            }),
+          };
+        },
+      },
+      logger,
+    }),
+    logger,
+  });
+  hopscotchBoardPanel = createHopscotchBoardPanel({
+    embedded: true,
+    onOpen: () => agentCenterPanel.show({ tab: 'agents' }),
+    mountAgentCard: (host, options) => agentCenterPanel.mountHopscotchAgentCard(host, options),
+    openVariables: ({ sessionId }) => {
+      if (sessionId !== chatStore.getCurrent?.()) return false;
+      blurComposerInput();
+      variablePanel.show();
+      return true;
+    },
+    closeRelatedLayer: () => variablePanel.hasVisibleLayer() && variablePanel.closeTopLayer(),
+    boardStore: hopscotchBoardStore,
+    runtime: hopscotchTurnRuntime,
+    getSessionId: () => chatStore.getCurrent?.(),
+    getPlace: () => uiMode === 'rp' ? 'writing' : 'chat',
+    getProfiles: () => chatConfigManager.getProfiles?.() || [],
+    getEnabled: () => appSettings.get().creativeHopscotchEnabled === true,
+    enable: value => appSettings.update({ creativeHopscotchEnabled: value === true }),
+  });
+  patchDebugUiRegistry((registry) => {
+    registry.stores.hopscotchBoardStore = hopscotchBoardStore;
+    registry.stores.hopscotchTurnRuntime = hopscotchTurnRuntime;
+    registry.stores.hopscotchBoardPanel = hopscotchBoardPanel;
+  });
 
   // §4.6 协议修复文本重新解析进消息流：复用最近一轮发送链装配的协议事件分发器
   // （协议事件自带目标名，跨会话安全；发送链尚未跑过时返回不可用）。
@@ -28890,9 +29137,17 @@ const initApp = async () => {
       skipScripts: skipThisScripts,
       defaultSkipScripts = false,
       applyUpdateVariable = null,
+      // 跳房子板接管本轮时，格式复核模型请求与自动生图由板的房子执行器单一触发（计划 §6.2）
+      suppressFormatGuardianModelReview = false,
+      suppressAutoImagePrompt = false,
     } = {},
   ) => {
     const suppressReplayedFunctionalEffects = Boolean(activeFormatRepairFunctionPlan);
+    const buildGuardianOptionsForDispatch = () => {
+      const base = buildChatFormatGuardianOptions(targetSessionId);
+      if (!suppressFormatGuardianModelReview) return base;
+      return { ...base, modelReview: { enabled: false } };
+    };
     dispatchAfterReceiveEffects({
       message,
       sessionId: targetSessionId,
@@ -28915,7 +29170,7 @@ const initApp = async () => {
       recordTraceEvent: recordDebugTraceEvent,
       chatFormatGuardian: suppressReplayedFunctionalEffects
         ? null
-        : buildChatFormatGuardianOptions(targetSessionId),
+        : buildGuardianOptionsForDispatch(),
       onChatFormatGuardianPreview: handleChatFormatGuardianPreview,
       onChatFormatGuardianRun: handleChatFormatGuardianAgentRun,
       onChatFormatGuardianModelReviewQueued: handleChatFormatGuardianModelReviewQueued,
@@ -28925,7 +29180,7 @@ const initApp = async () => {
       onChatBodyQualityPreview: handleChatFormatGuardianPreview,
       onChatBodyQualityRun: handleChatBodyQualityAgentRun,
     });
-    if (!suppressReplayedFunctionalEffects) {
+    if (!suppressReplayedFunctionalEffects && !suppressAutoImagePrompt) {
       scheduleAutoImagePromptGenerationForMessage(message, targetSessionId, {
         source: 'after_receive',
       });
@@ -29003,6 +29258,10 @@ const initApp = async () => {
     const sessionId = previewOnly && previewSessionId
       ? previewSessionId
       : chatStore.getCurrent();
+    if (rpUiMode && !previewOnly && hopscotchTurnRuntime?.isSessionBusy?.(sessionId)) {
+      window.toastr?.info?.('上一轮跳房子流程还在进行，请等待完成或先停止');
+      return false;
+    }
     const messagesBeforeSend = chatStore.getMessages(sessionId) || [];
     const protocolHistoryFacts = inspectProtocolHistory(messagesBeforeSend, {
       lastRawResponse: chatStore.getLastRawResponse(sessionId),
@@ -29129,40 +29388,20 @@ const initApp = async () => {
     let protocolDiagnosticTurnId = '';
     let protocolDiagnosticRequest = null;
     let protocolDiagnosticFailure = null;
-    let creativeExecutionRunActive = false;
-    let creativeExecutionMemoryTask = null;
-    const creativeExecutionPlace = rpUiMode ? 'writing' : 'chat';
-    const getCreativeExecutionMemoryPhase = () => {
-      if (isMemoryAutoExtractInline(creativeExecutionPlace)) return 'sync';
-      if (isMemoryAutoExtractSeparate(creativeExecutionPlace)) return 'async';
-      return 'none';
-    };
-    const isCreativeExecutionTaskTerminal = taskId => {
-      const status = String(
-        creativeExecutionLaneRuntime?.getState?.()?.tasks?.find(task => task.id === taskId)?.status || '',
-      );
-      return status === 'succeeded' || status === 'failed' || status === 'cancelled' || status === 'skipped';
-    };
-    const isCreativeExecutionRunCurrent = () => {
-      const run = creativeExecutionLaneRuntime?.getState?.()?.run;
-      if (!run) return false;
-      return (Number(run.generationId) || 0) === (Number(generationId) || 0);
-    };
-    const syncCreativeExecutionPostModelTasks = () => {
-      if (!creativeExecutionRunActive || !isCreativeExecutionRunCurrent()) return;
-      const memoryPhase = getCreativeExecutionMemoryPhase();
-      if (memoryPhase === 'sync') {
-        creativeExecutionLaneRuntime?.finishTask?.('memory', 'succeeded', {
-          summary: '记忆表已随正文同步处理',
-        });
-      } else if (memoryPhase === 'async') {
-        creativeExecutionLaneRuntime?.markPostModelTasksRunning?.('同步记忆表与轮次快照');
-      } else {
-        creativeExecutionLaneRuntime?.skipTask?.('memory', {
-          summary: '本次未触发记忆表同步',
-        });
-      }
-    };
+    // 跳房子板接管本轮时赋值（见下方 prepareTurn）；固定泳道追踪器随之静默
+    let hopscotchTurn = null;
+    const creativeTurn = createCreativeTurnTracker({
+      laneRuntime: creativeExecutionLaneRuntime,
+      getGenerationId: () => generationId,
+      sessionId,
+      rpUiMode,
+      place: rpUiMode ? 'writing' : 'chat',
+      isMemoryAutoExtractInline,
+      isMemoryAutoExtractSeparate,
+      completeIfIdle: completeCreativeExecutionIfIdle,
+      isSuppressed: () => Boolean(hopscotchTurn),
+      logger,
+    });
     if (activeGeneration && !activeGeneration.cancelled) {
       // 流挂死等异常路径可能留下僵尸记录（finally 未执行）：超龄强制回收，避免发送被永久锁死。
       if (isGenerationRecordStale(activeGeneration)) {
@@ -29603,6 +29842,7 @@ const initApp = async () => {
       return countMemoryTimelineTurns(sid);
     };
     const applyMemoryEdits = async ({
+      signal = null,
       actions,
       sessionId,
       isGroup,
@@ -29669,6 +29909,7 @@ const initApp = async () => {
           }
         : null;
       const result = await executeMemoryActionBatchMutation({
+        signal,
         actions,
         actionContext,
         updateMode: plan?.updateMode,
@@ -29708,7 +29949,7 @@ const initApp = async () => {
           toastr: window.toastr,
         });
         const compactionPlace = resolveMemoryTablePlace(memoryUiMode || uiMode);
-        if (getMemoryStorageMode(compactionPlace) === 'table') {
+        if (getMemoryStorageMode(compactionPlace) === 'table' && !hopscotchTurn) {
           Promise.resolve(requestSummaryCompaction(sessionId, { place: compactionPlace }))
             .catch(error => logger.debug('table memory summary compaction request failed', error));
         }
@@ -29750,7 +29991,8 @@ const initApp = async () => {
       writeMemoryTimelineAutoRepairState(nextState);
       return nextState;
     };
-    const runMemoryTimelineAutoRepairOnceAfterSend = async (targetSessionId = sessionId, targetIsGroup = isGroupChat) => {
+    const runMemoryTimelineAutoRepairOnceAfterSend = async (targetSessionId = sessionId, targetIsGroup = isGroupChat, { signal = null } = {}) => {
+      signal?.throwIfAborted();
       const sid = String(targetSessionId || '').trim();
       if (!sid) return null;
       if (getMemoryStorageMode() !== 'table') return null;
@@ -29817,6 +30059,7 @@ const initApp = async () => {
 
         let changed = 0;
         for (const item of repairable) {
+          signal?.throwIfAborted();
           await memoryTableStore.updateMemory({
             id: item.rowId,
             row_data: item.rowData,
@@ -29826,6 +30069,7 @@ const initApp = async () => {
         }
 
         if (changed > 0) {
+          signal?.throwIfAborted();
           await syncCurrentMemoryStateAfterTimelineRepair(sid, {
             source: 'auto_timeline_repair',
           });
@@ -30006,7 +30250,7 @@ const initApp = async () => {
       rawPlan: () => getLastMemoryPlan(window.appBridge),
       appConfirm,
       toastr: window.toastr,
-      isMemoryAutoExtractInline,
+      isMemoryAutoExtractInline: place => hopscotchTurn ? hopscotchTurn.memoryInline : isMemoryAutoExtractInline(place),
       extractTableEditBlocks,
       appBridge: window.appBridge,
       buildRequestPrompt: buildRequestPromptTextCore,
@@ -30116,20 +30360,13 @@ const initApp = async () => {
       });
     };
     const applyUpdateVariableForCreativeExecution = (message, targetSessionId) => {
+      if (hopscotchTurn && !hopscotchTurn.fused.includes('variable')) return false;
       const changed = applyUpdateVariableFromMessage(message, targetSessionId);
-      if (
-        changed &&
-        creativeExecutionRunActive &&
-        String(targetSessionId || '').trim() === sessionId &&
-        isCreativeExecutionRunCurrent()
-      ) {
-        creativeExecutionLaneRuntime?.finishTask?.('variable', 'succeeded', {
-          summary: '回复内变量编辑已应用',
-          output: {
-            messageId: String(message?.id || ''),
-          },
-        });
-      }
+      creativeTurn.variableApplied({
+        changed,
+        targetSessionId,
+        messageId: message?.id,
+      });
       return changed;
     };
     const emitPluginAfterReceive = (message, targetSessionId, { skipScripts: skipThisScripts } = {}) => {
@@ -30145,6 +30382,8 @@ const initApp = async () => {
         skipScripts: skipThisScripts,
         defaultSkipScripts: skipScripts,
         applyUpdateVariable: applyUpdateVariableForCreativeExecution,
+        suppressFormatGuardianModelReview: Boolean(hopscotchTurn),
+        suppressAutoImagePrompt: Boolean(hopscotchTurn),
       });
     };
     const processProtocolRetryEvent = async (ev, {
@@ -30365,8 +30604,12 @@ const initApp = async () => {
       getRpBridgeSessionId: () => getRpSessionId(getEffectivePersona(sessionId)?.id || activePersonaId),
       getLastChatBridgeSessionId: () => lastChatState?.sessionId,
       getMemoryStorageMode,
-      isMemoryAutoExtractInline,
+      // 板模式：记忆是否内联抽取以本轮板为准（融合进正文 = 内联），不回写全局设置
+      isMemoryAutoExtractInline: place => (hopscotchTurn
+        ? hopscotchTurn.memoryInline
+        : isMemoryAutoExtractInline(place)),
       getAutoImagePromptModelHint: () => imagePromptModelHintCache,
+      getHopscotchFused: () => hopscotchTurn?.fused || null,
       attachmentParts,
       getOpenAIPreset: getRequestOpenAIPreset,
       getSettings: () => appSettings.get(),
@@ -30376,6 +30619,8 @@ const initApp = async () => {
       getInjectedPromptBlocks: () => [
         ...peekPromptInjections(sessionId),
         ...(scriptRuntime?.getScriptPromptInjections?.(sessionId) || []),
+        // 跳房子前置房子产物（本轮局部，固定锚点 before_latest_user，不进一次性注入队列）
+        ...(hopscotchTurn?.getPromptBlocks?.() || []),
       ],
       skipTemplate,
       skipScripts,
@@ -31092,7 +31337,7 @@ const initApp = async () => {
         ),
         extractSummaryBlock,
         addSummary: (summary, targetSessionId) => chatStore.addSummary(summary, targetSessionId),
-        requestSummaryCompaction,
+        requestSummaryCompaction: hopscotchTurn ? () => false : requestSummaryCompaction,
         logger,
       });
       if (mutatedMoments) {
@@ -31132,16 +31377,11 @@ const initApp = async () => {
       return result;
     };
     const requestAssistantGeneration = async () => {
-      if (creativeExecutionRunActive) {
-        creativeExecutionLaneRuntime?.activateTask?.('model', {
-          summary: '模型请求已发送',
-          detail: {
-            generationId,
-            stream: Boolean(config.stream),
-            protocolEnabled,
-          },
-        });
-      }
+      creativeTurn.modelRequested({
+        generationId,
+        stream: Boolean(config.stream),
+        protocolEnabled,
+      });
       const previousRequest = window.appBridge?.lastRequest || null;
       try {
         return await runAssistantGenerationRequest({
@@ -31176,19 +31416,33 @@ const initApp = async () => {
         }
       }
     };
-    if (rpUiMode) {
-      creativeExecutionRunActive = Boolean(creativeExecutionLaneRuntime?.startRun?.({
+    if (rpUiMode && !previewOnly && hopscotchTurnRuntime) {
+      hopscotchTurn = hopscotchTurnRuntime.prepareTurn({
         sessionId,
+        isGroupChat,
+        rpUiMode,
+        previewOnly,
+        text,
         generationId,
+        title: continueTarget ? t('续写流程') : (swipeTarget ? t('重新生成流程') : t('跳房子流程')),
+        parentSignal: abortSignal,
+        executorContext: {
+          runtimeConfig: { ...config },
+          abortBody: () => {
+            if (activeGeneration?.id === generationId) cancelActiveGeneration('hopscotch_cancelled');
+          },
+          charName: characterName,
+          userName: promptUserName,
+          memoryUpdateRuntime,
+          memoryTimelineRepair: runMemoryTimelineAutoRepairOnceAfterSend,
+        },
+      });
+    }
+    if (rpUiMode) {
+      creativeTurn.start({
         title: continueTarget ? '续写流程' : (swipeTarget ? '重新生成流程' : '创意写作流程'),
         text,
-        executionPlan: {
-          memoryPhase: getCreativeExecutionMemoryPhase(),
-          variablePhase: 'sync',
-        },
-      }));
-      if (creativeExecutionRunActive) {
-        creativeExecutionLaneRuntime?.finishTask?.('input', 'succeeded', {
+        input: {
           summary: hasRequestAttachments ? '输入与参考附件已整理' : '输入已整理',
           output: {
             textLength: String(text || '').length,
@@ -31197,8 +31451,8 @@ const initApp = async () => {
             continue: Boolean(continueTarget),
             regenerate: Boolean(swipeTarget),
           },
-        });
-        creativeExecutionLaneRuntime?.finishTask?.('context', 'succeeded', {
+        },
+        context: {
           summary: '上下文与请求配置已就绪',
           detail: {
             sessionId,
@@ -31214,16 +31468,16 @@ const initApp = async () => {
               presetStore?.getResolvedActiveId?.('openai', requestPresetContext)?.presetId || '',
             ),
           },
-        });
-        creativeExecutionLaneRuntime?.activateTask?.('model', {
+        },
+        model: {
           summary: config.stream ? '等待流式模型响应' : '等待模型完整响应',
           detail: {
             provider: String(config.provider || ''),
             model: String(config.model || ''),
             stream: Boolean(config.stream),
           },
-        });
-      }
+        },
+      });
     }
     // 部分 provider 把 usage / 联网来源放在内容之后的尾部 SSE chunk，消息可能已经 finalize。
     // 生成完全结束后兜底 patch 末条回复；非竞态路径已在构建时 consume，不会重复挂。
@@ -31254,14 +31508,25 @@ const initApp = async () => {
       } catch {}
     };
     try {
+      if (hopscotchTurn) {
+        // 等待板上正文之前的行全部到终态（行屏障）；前置行失败停止或被取消时不发正文
+        const bodyStart = await hopscotchTurn.waitForBodyStart();
+        if (!bodyStart?.proceed) {
+          if (!isGenerationInterrupted(generationId)) window.toastr?.warning?.('跳房子前置房子未完成，本次未发送正文');
+          stopGenerationIndicatorsIfActive();
+          return;
+        }
+        if (isGenerationInterrupted(generationId)) {
+          stopGenerationIndicatorsIfActive();
+          return;
+        }
+      }
       if (config.stream) {
         if (rpUiMode) {
           // RP/创意写作界面：完整长文输出，不解析线上格式
           if (!startDeliveryAndTypingIfCurrent()) return;
           const stream = await requestAssistantGeneration();
-          if (creativeExecutionRunActive) {
-            creativeExecutionLaneRuntime?.activateTask?.('model', '正在接收流式内容');
-          }
+          creativeTurn.modelStreaming();
           if (isGenerationInterrupted(generationId)) {
             stopGenerationIndicatorsIfActive();
             return;
@@ -31313,7 +31578,7 @@ const initApp = async () => {
             summaryEnabled: isSummaryMemoryEnabled,
             extractSummaryBlock,
             addSummary: summary => chatStore.addSummary(summary, sessionId),
-            requestSummaryCompaction,
+            requestSummaryCompaction: hopscotchTurn ? () => false : requestSummaryCompaction,
             buildCreativeAssistantMessageParts: buildCreativeAssistantMessagePartsCore,
             buildCreativeAssistantMessage: buildCreativeAssistantMessageFromPartsCore,
             normalizeCreativeLineBreaks,
@@ -31321,7 +31586,7 @@ const initApp = async () => {
             resolveReasoningState,
             applyOutputRegexPairSafe,
             appBridge: window.appBridge,
-            preserveAutoImagePromptPlaceholders: resolveWritingAutoImagePromptPreserveState(sessionId),
+            preserveAutoImagePromptPlaceholders: hopscotchTurn ? hopscotchTurn.fused.includes('image_prompt') : resolveWritingAutoImagePromptPreserveState(sessionId),
             autoImagePromptPlaceholderOptions: buildAutoImagePromptLimitOptions('writing_auto_image_prompt_limit'),
             pushAssistantStreamText,
             captureAssistantMemoryState,
@@ -31345,16 +31610,7 @@ const initApp = async () => {
             window.toastr?.warning?.('网络传输中断，已保留已生成的部分回复');
           }
           checkpointTargetMessageId = creativeStreamState.checkpointTargetMessageId;
-          if (creativeExecutionRunActive) {
-            creativeExecutionLaneRuntime?.finishTask?.('model', 'succeeded', {
-              summary: '模型回复已生成',
-              output: {
-                checkpointTargetMessageId,
-                stream: true,
-              },
-            });
-            syncCreativeExecutionPostModelTasks();
-          }
+          creativeTurn.modelDone({ checkpointTargetMessageId, stream: true });
           sendSucceeded = true;
         } else if (protocolEnabled) {
           // 对话协议回复先完整收集并验收，避免尾部损坏时留下已解析的半轮副作用。
@@ -31438,9 +31694,7 @@ const initApp = async () => {
       } else {
         if (!startDeliveryAndTypingIfCurrent()) return;
         const resultRaw = await requestAssistantGeneration();
-        if (creativeExecutionRunActive) {
-          creativeExecutionLaneRuntime?.activateTask?.('model', '已收到完整模型回复，正在保存与解析');
-        }
+        creativeTurn.modelBuffered();
         if (isGenerationInterrupted(generationId)) {
           stopGenerationIndicatorsIfActive();
           return;
@@ -31472,13 +31726,13 @@ const initApp = async () => {
             mode: 'buffered',
           }),
           addSummary: summary => chatStore.addSummary(summary, sessionId),
-          requestSummaryCompaction,
+          requestSummaryCompaction: hopscotchTurn ? () => false : requestSummaryCompaction,
           buildCreativeAssistantMessage: buildCreativeAssistantMessageCore,
           normalizeCreativeLineBreaks,
           extractReasoningFromContent,
           applyOutputRegexPairSafe,
           appBridge: window.appBridge,
-          preserveAutoImagePromptPlaceholders: resolveWritingAutoImagePromptPreserveState(sessionId),
+          preserveAutoImagePromptPlaceholders: hopscotchTurn ? hopscotchTurn.fused.includes('image_prompt') : resolveWritingAutoImagePromptPreserveState(sessionId),
           autoImagePromptPlaceholderOptions: buildAutoImagePromptLimitOptions('writing_auto_image_prompt_limit'),
           captureAssistantMemoryState,
           attachAssistantMemoryStateToMeta,
@@ -31500,17 +31754,11 @@ const initApp = async () => {
         if (bufferedResponseState.checkpointTargetMessageId) {
           checkpointTargetMessageId = bufferedResponseState.checkpointTargetMessageId;
         }
-        if (creativeExecutionRunActive) {
-          creativeExecutionLaneRuntime?.finishTask?.('model', 'succeeded', {
-            summary: '模型回复已生成',
-            output: {
-              checkpointTargetMessageId,
-              branch: bufferedResponseState.branch || '',
-              stream: false,
-            },
-          });
-          syncCreativeExecutionPostModelTasks();
-        }
+        creativeTurn.modelDone({
+          checkpointTargetMessageId,
+          stream: false,
+          branch: bufferedResponseState.branch || '',
+        });
         if (bufferedResponseState.branch === 'protocol') {
           maidProtocolAccepted = bufferedResponseState.protocolState?.handled === true ||
             bufferedResponseState.protocolState?.didAnything === true;
@@ -31526,6 +31774,15 @@ const initApp = async () => {
       // 生成成功完成后兜底挂 usage / 联网来源（覆盖尾部到达的流式协议路径）
       patchTrailingAssistantGenerationMeta(sessionId);
       if (sendSucceeded) notifyAssistantDelivered();
+      if (hopscotchTurn) {
+        hopscotchTurn.setBodyContext({
+          buildMemoryContext: () => llmContext(''),
+          checkpointMessageId: checkpointTargetMessageId,
+          messageId: checkpointTargetMessageId,
+          isGroupChat,
+        });
+        if (sendSucceeded) hopscotchTurn.resolveBody({ status: 'succeeded', messageId: checkpointTargetMessageId });
+      }
     } catch (error) {
       protocolDiagnosticFailure = classifyProtocolGenerationError(error);
       const catchResult = runSendCatchFlow({
@@ -31546,6 +31803,13 @@ const initApp = async () => {
       if (suppressErrorUI) return;
     } finally {
       const interruptedBeforeFinally = isGenerationInterrupted(generationId);
+      if (hopscotchTurn && !sendSucceeded) {
+        if (interruptedBeforeFinally) hopscotchTurn.abort('interrupted');
+        hopscotchTurn.resolveBody({
+          status: interruptedBeforeFinally ? 'cancelled' : 'failed',
+          error: sendErrorMessage || '',
+        });
+      }
       if (!sendSucceeded && protocolDiagnosticRequest?.requestId) {
         await window.appBridge?.finalizeChatStructuredEvidence?.({
           requestId: protocolDiagnosticRequest.requestId,
@@ -31577,94 +31841,39 @@ const initApp = async () => {
         movePendingFromHistoryToQueue,
         refreshChatAndContacts,
         scriptRuntime,
-        runMemoryUpdateAfterChat: (targetSessionId, targetIsGroup, baseContext, options) => {
-          const trackCreativeMemoryTask = isMemoryAutoExtractSeparate(creativeExecutionPlace);
-          if (creativeExecutionRunActive && trackCreativeMemoryTask) {
-            creativeExecutionLaneRuntime?.activateTask?.('memory', {
-              summary: '同步记忆表与轮次快照',
-              detail: {
-                targetSessionId,
-                targetIsGroup: Boolean(targetIsGroup),
-              },
-            });
-          }
-          const memoryTask = Promise.resolve(
-            memoryUpdateRuntime.runMemoryUpdateAfterChat(targetSessionId, targetIsGroup, baseContext, options),
-          ).then(
-            async (memoryResult) => {
-              const repairResult = await runMemoryTimelineAutoRepairOnceAfterSend(targetSessionId, targetIsGroup);
-              if (creativeExecutionRunActive && trackCreativeMemoryTask && isCreativeExecutionRunCurrent()) {
-                creativeExecutionLaneRuntime?.finishTask?.('memory', 'succeeded', {
-                  summary: '记忆表同步完成',
-                  output: {
-                    memoryResult,
-                    repairResult,
-                  },
-                });
-              }
-              return repairResult;
-            },
-            (err) => {
-              logger.warn('memory update before timeline auto repair failed', err);
-              if (creativeExecutionRunActive && trackCreativeMemoryTask && isCreativeExecutionRunCurrent()) {
-                creativeExecutionLaneRuntime?.failTask?.('memory', err);
-              }
-              throw err;
-            },
-          );
-          if (creativeExecutionRunActive && trackCreativeMemoryTask) {
-            creativeExecutionMemoryTask = memoryTask;
-          }
-          return memoryTask;
-        },
+        // 板模式：独立记忆由板的记忆房子单一触发（§6.2），旧收尾入口不再发起
+        runMemoryUpdateAfterChat: hopscotchTurn ? () => null : ((targetSessionId, targetIsGroup, baseContext, options) => creativeTurn.runMemoryTask({
+          targetSessionId,
+          targetIsGroup,
+          run: () => memoryUpdateRuntime.runMemoryUpdateAfterChat(targetSessionId, targetIsGroup, baseContext, options),
+          afterSuccess: () => runMemoryTimelineAutoRepairOnceAfterSend(targetSessionId, targetIsGroup),
+        })),
         buildMemoryContext: () => llmContext(''),
         updatePendingFloat,
         getActiveGeneration: () => activeGeneration,
         setActiveGeneration: next => {
           activeGeneration = next;
         },
-        setSendingState: value => ui.setSendingState(value),
+        // 板模式（用户板）：正文落地后继续输入可编辑，但发送键等整轮终态后再解锁（§16.1）
+        setSendingState: value => {
+          if (value === false && hopscotchTurn) return;
+          ui.setSendingState(value);
+        },
         recordTraceEvent: recordSendFlowTraceEvent,
       });
+      if (hopscotchTurn) {
+        Promise.resolve(hopscotchTurn.turnPromise).catch(() => {}).finally(() => {
+          if (isSessionActive(sessionId) && (!activeGeneration || activeGeneration.id === generationId)) ui.setSendingState(false);
+        });
+      }
       if (sendSucceeded) {
-        const imagePromptScheduled = scheduleAutoImagePromptGenerationFromLastRaw(sessionId);
-        if (creativeExecutionRunActive) {
-          if (imagePromptScheduled) {
-            creativeExecutionLaneRuntime?.finishTask?.('image', 'succeeded', {
-              summary: '图片提示词已进入生成队列',
-            });
-          } else {
-            creativeExecutionLaneRuntime?.finishTask?.('image', 'skipped', {
-              summary: '本次未触发图片提示词任务',
-            });
-          }
-          if (!isCreativeExecutionTaskTerminal('variable')) {
-            creativeExecutionLaneRuntime?.finishTask?.('variable', 'skipped', {
-              summary: '本次未触发变量更新',
-            });
-          }
-          if (!isCreativeExecutionTaskTerminal('profile')) {
-            creativeExecutionLaneRuntime?.finishTask?.('profile', 'skipped', {
-              summary: '本次未触发画像任务',
-            });
-          }
-          const completeCreativeExecutionRun = () => {
-            if (!isCreativeExecutionRunCurrent()) return;
-            // 生图等异步任务可能仍在跑：全部终态才收尾，未完成的由对应任务完成时补收尾。
-            completeCreativeExecutionIfIdle();
-          };
-          if (creativeExecutionMemoryTask?.then) {
-            creativeExecutionMemoryTask.then(completeCreativeExecutionRun, () => {});
-          } else {
-            completeCreativeExecutionRun();
-          }
-        }
-      } else if (creativeExecutionRunActive) {
-        if (suppressErrorUI || interruptedBeforeFinally) {
-          creativeExecutionLaneRuntime?.cancelRun?.('interrupted');
-        } else {
-          creativeExecutionLaneRuntime?.failRun?.(sendErrorMessage || '发送失败');
-        }
+        const imagePromptScheduled = hopscotchTurn ? false : scheduleAutoImagePromptGenerationFromLastRaw(sessionId);
+        creativeTurn.afterSendSucceeded({ imagePromptScheduled });
+      } else {
+        creativeTurn.afterSendFailed({
+          interrupted: Boolean(suppressErrorUI || interruptedBeforeFinally),
+          message: sendErrorMessage,
+        });
       }
       if (!returnMaidCompletionOutcome) {
         generationWorkLease?.settle();
@@ -32053,6 +32262,13 @@ const initApp = async () => {
   });
   ui.onMessageAction(async (action, message, payload) => {
     const sessionId = chatStore.getCurrent();
+    if (['regenerate', 'delete', 'delete-selected', 'delete-current-swipe', 'retract', 'edit-assistant-raw', 'edit-confirm'].includes(action)) {
+      const turn = hopscotchTurnRuntime?.getActiveTurn(sessionId);
+      if (turn) {
+        turn.abort('message_changed');
+        await turn.turnPromise.catch(() => {});
+      }
+    }
     const isSyntheticUser = m => m?.role === 'user' && m?.meta?.generatedByAssistant === true;
     const collectRenderedMessageEntries = () => (
       Array.from(ui?.scrollEl?.querySelectorAll?.('.QQ_chat_mymsg, .QQ_chat_charmsg') || [])
@@ -34440,7 +34656,8 @@ const initApp = async () => {
     () => rawReplyModal.hide(),
     () => promptPreviewModal.hide(),
     () => worldDebugLocatorModal.hide(),
-    () => agentCenterPanel.hide(),
+    () => hopscotchBoardPanel?.closeTopLayer(),
+    () => agentCenterPanel.closeTopLayer(),
     () => presetPanel.hide(),
     () => configPanel.hide(),
     () => generalSettingsPanel.hide(),
@@ -34469,6 +34686,7 @@ const initApp = async () => {
     () => isBackLayerVisible(document.getElementById('raw-reply-overlay')),
     () => isBackLayerVisible(document.getElementById('prompt-preview-overlay')),
     () => isBackLayerVisible(document.getElementById('world-debug-locator-overlay')),
+    () => hopscotchBoardPanel?.isOpen(),
     () => isBackLayerVisible(agentCenterPanel.overlayElement),
     () => isBackLayerVisible(presetPanel.overlayElement) || isBackLayerVisible(presetPanel.element),
     () => isBackLayerVisible(configPanel.overlayElement) || isBackLayerVisible(configPanel.element),

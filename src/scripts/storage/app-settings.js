@@ -47,6 +47,8 @@ const defaults = {
   creativeReadingSize: 'standard',
   creativeNarrativeFont: 'serif',
   creativeDialogueHighlightEnabled: true,
+  // 跳房子编排（创意写作）：默认关闭；关闭或无用户板时沿用既有固定流程
+  creativeHopscotchEnabled: false,
   reasoningAutoParse: false,
   reasoningAutoExpand: false,
   reasoningShowHidden: false,
@@ -367,6 +369,7 @@ const migrateSettings = (settings = {}) => {
     postInstructionsTokens: Math.round(clampRealtimeNumber(realtimeInput.postInstructionsTokens, 8000, 1000, 16000)),
   };
   next.creativeDialogueHighlightEnabled = next.creativeDialogueHighlightEnabled !== false;
+  next.creativeHopscotchEnabled = next.creativeHopscotchEnabled === true;
   return next;
 };
 

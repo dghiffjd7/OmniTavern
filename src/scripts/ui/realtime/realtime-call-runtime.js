@@ -1,3 +1,4 @@
+import { t } from '../../i18n/index.js';
 import {
   buildOpenAiRealtimeSessionConfig,
   normalizeRealtimeVoiceSettings,
@@ -53,6 +54,7 @@ export const createRealtimeCallRuntime = ({
     elapsedMs: 0,
     target: null,
     sessionId: '',
+    provider: '',
     error: '',
   };
   let sessionClient = null;
@@ -70,6 +72,12 @@ export const createRealtimeCallRuntime = ({
   let endingPromise = null;
   let startGeneration = 0;
   let connectAbortController = null;
+  let suppressAssistantCommit = false;
+  const pendingNaturalInputs = new Set();
+  const deferredNaturalResponses = new Map();
+  const isNatural = () => connection?.settings?.contextMode === 'session_snapshot';
+  const generationChannel = () => connection?.config?.provider && connection.config.provider !== 'openai'
+    ? connection.config.provider : 'openai_realtime';
 
   const emitState = (status, patch = {}) => {
     state = { ...state, ...patch, status };
@@ -88,6 +96,9 @@ export const createRealtimeCallRuntime = ({
       if (typeof task === 'function') await task();
     }).catch(error => {
       try { onError?.(error); } catch {}
+      if (isNatural() && ['user_message_commit_failed', 'assistant_message_commit_failed'].includes(error?.code)) {
+        suppressAssistantCommit = true; void end('persistence_failed'); return;
+      }
       if (state.status !== 'ending' && state.status !== 'idle') emitState('listening');
     });
     return eventQueue;
@@ -115,20 +126,22 @@ export const createRealtimeCallRuntime = ({
     interrupted = false,
   } = {}) => {
     const record = getResponseRecord(responseId);
-    if (!record || record.committed) return false;
+    if (!record || record.committed || suppressAssistantCommit) return false;
+    if (isNatural() && pendingNaturalInputs.size && !interrupted) { deferredNaturalResponses.set(responseId, { response, interrupted }); return false; }
     if (response?.usage) record.usage = normalizeUsage(response.usage);
     reportResponseUsage(record);
     if (!record.transcript) record.transcript = extractResponseTranscript(response);
     record.interrupted = record.interrupted || interrupted;
     const transcript = String(record.transcript || '').trim();
     if (!transcript || !isCapturedTargetCurrent()) return false;
-    record.committed = true;
     if (activeResponseId === record.id) activeResponseId = '';
     const committed = await commitAssistantMessage?.({
       target,
       text: transcript,
       meta: {
-        generationChannel: 'openai_realtime',
+        generationChannel: generationChannel(),
+        realtimeProvider: connection?.config?.provider || 'openai',
+        realtimeContextMode: isNatural() ? 'session_snapshot' : 'per_turn',
         realtimeModel: connection?.settings?.realtimeModel || '',
         transcriptionModel: connection?.settings?.transcriptionModel || '',
         realtimeVoice: connection?.settings?.voice || '',
@@ -139,6 +152,8 @@ export const createRealtimeCallRuntime = ({
         ...(record.usage ? { usage: record.usage } : {}),
       },
     });
+    if (!committed) { const error = new Error(t('语音回复保存失败')); error.code = 'assistant_message_commit_failed'; throw error; }
+    record.committed = true;
     const committedId = String(committed?.messageId || committed?.id || '').trim();
     if (committedId) committedMessageIds.add(committedId);
     return true;
@@ -152,13 +167,13 @@ export const createRealtimeCallRuntime = ({
     if (event?.usage) {
       try { onUsage?.({ type: 'transcription', usage: normalizeUsage(event.usage), itemId }); } catch {}
     }
-    if (!transcript) return;
+    if (!transcript) { pendingNaturalInputs.delete(itemId); await flushNaturalResponses(); return; }
     if (state.status === 'ending' || state.status === 'idle') return;
     if (!isCapturedTargetCurrent()) return;
     touchActivity();
     emitState('thinking');
     try { onCaption?.({ role: 'user', text: transcript, final: true }); } catch {}
-    const snapshot = await buildSemanticSnapshot?.({
+    const snapshot = isNatural() ? null : await buildSemanticSnapshot?.({
       target,
       inputText: transcript,
       realtimeSessionId: state.sessionId || '',
@@ -170,7 +185,9 @@ export const createRealtimeCallRuntime = ({
       target,
       text: transcript,
       meta: {
-        generationChannel: 'openai_realtime',
+        generationChannel: generationChannel(),
+        realtimeProvider: connection?.config?.provider || 'openai',
+        realtimeContextMode: isNatural() ? 'session_snapshot' : 'per_turn',
         realtimeModel: connection?.settings?.realtimeModel || '',
         transcriptionModel: connection?.settings?.transcriptionModel || '',
         realtimeSessionId: state.sessionId || '',
@@ -181,6 +198,7 @@ export const createRealtimeCallRuntime = ({
     if (!committed) {
       if (state.status === 'ending' || state.status === 'idle') return;
       if (!isCapturedTargetCurrent()) return;
+      if (isNatural()) { suppressAssistantCommit = true; try { sessionClient?.sendEvent?.({ type: 'response.cancel' }); } catch {} }
       const error = new Error('语音消息保存失败，已停止生成');
       error.code = 'user_message_commit_failed';
       throw error;
@@ -189,6 +207,7 @@ export const createRealtimeCallRuntime = ({
     if (committedId) committedMessageIds.add(committedId);
     if (state.status === 'ending' || state.status === 'idle') return;
     if (!isCapturedTargetCurrent()) return;
+    if (isNatural()) { pendingNaturalInputs.delete(itemId); await flushNaturalResponses(); return; }
     const instructions = String(snapshot?.instructions || '').trim();
     if (!instructions) throw new Error('本轮语义上下文为空，已停止生成');
     sessionClient?.sendEvent?.({
@@ -204,9 +223,17 @@ export const createRealtimeCallRuntime = ({
     });
   };
 
+  const flushNaturalResponses = async () => {
+    if (pendingNaturalInputs.size) return;
+    for (const [id, options] of deferredNaturalResponses) { deferredNaturalResponses.delete(id); await finalizeAssistant(id, options); }
+  };
+
   const handleServerEvent = event => {
     const type = String(event?.type || '').trim();
-    if (!type) return;
+    if (!type || state.status === 'idle' || state.status === 'ending') return;
+    if (type === 'warning') { onWarning?.(event.message); return; }
+    if (type === 'usage.delta') { onUsage?.({ type: 'response', usage: event.usage }); return; }
+    if (type === 'input.transcript.preview') { onCaption?.({ role: 'user', text: event.text, final: false }); return; }
     if (type === 'session.created' || type === 'session.updated') {
       const realtimeSessionId = String(event?.session?.id || state.sessionId || '').trim();
       if (realtimeSessionId && realtimeSessionId !== state.sessionId) {
@@ -215,15 +242,17 @@ export const createRealtimeCallRuntime = ({
       return;
     }
     if (type === 'input_audio_buffer.speech_started') {
+      if (isNatural() && event.item_id) pendingNaturalInputs.add(event.item_id);
       touchActivity();
+      const interruptedResponseId = activeResponseId;
       enqueue(async () => {
-        const responseId = activeResponseId;
-        if (responseId) await finalizeAssistant(responseId, { interrupted: true });
+        if (interruptedResponseId) await finalizeAssistant(interruptedResponseId, { interrupted: true });
         emitState('listening');
       });
       return;
     }
     if (type === 'input_audio_buffer.speech_stopped') {
+      if (event.reason === 'turn_invalid') { pendingNaturalInputs.delete(event.item_id); enqueue(flushNaturalResponses); emitState('listening'); return; }
       touchActivity();
       emitState('thinking');
       return;
@@ -238,6 +267,7 @@ export const createRealtimeCallRuntime = ({
     }
     if (type === 'conversation.item.input_audio_transcription.failed') {
       enqueue(async () => {
+        pendingNaturalInputs.delete(event.item_id); await flushNaturalResponses();
         emitState('listening');
         const error = new Error(String(event?.error?.message || '语音转写失败，请重说一次'));
         error.code = 'input_transcription_failed';
@@ -285,10 +315,9 @@ export const createRealtimeCallRuntime = ({
       }
       enqueue(async () => {
         const status = String(response?.status || '').trim().toLowerCase();
-        await finalizeAssistant(responseId, {
-          response,
-          interrupted: status === 'cancelled' || status === 'incomplete',
-        });
+        const options = { response, interrupted: status === 'cancelled' || status === 'incomplete' };
+        if (isNatural() && pendingNaturalInputs.size) deferredNaturalResponses.set(responseId, options);
+        else await finalizeAssistant(responseId, options);
         if (state.status !== 'ending' && state.status !== 'idle') emitState('listening');
       });
       return;
@@ -375,7 +404,7 @@ export const createRealtimeCallRuntime = ({
     committedMessageIds = new Set();
     activeResponseId = '';
     connection = null;
-    emitState('requesting_permission', { target: { ...target }, error: '' });
+    emitState('requesting_permission', { target: { ...target }, error: '', provider: '' });
     const startedAt = now();
     try {
       const resolved = await resolveConnection?.({ target });
@@ -394,14 +423,15 @@ export const createRealtimeCallRuntime = ({
       const instructions = String(snapshot?.instructions || '').trim();
       if (!instructions) throw new Error('无法构建当前角色的语音上下文');
       sessionClient = createSessionClient?.({
-        onEvent: handleServerEvent,
-        onConnectionState: handleConnectionState,
+        provider: connection.config.provider || 'openai',
+        onEvent: event => { if (generation === startGeneration) handleServerEvent(event); },
+        onConnectionState: value => { if (generation === startGeneration) handleConnectionState(value); },
       });
       if (!sessionClient) throw new Error('实时语音客户端初始化失败');
-      emitState('connecting', { startedAt, elapsedMs: 0 });
+      emitState('connecting', { startedAt, elapsedMs: 0, provider: connection.config.provider || 'openai' });
       await sessionClient.connect({
         config: connection.config,
-        sessionConfig: buildOpenAiRealtimeSessionConfig({
+        sessionConfig: isNatural() ? { ...connection.settings, instructions } : buildOpenAiRealtimeSessionConfig({
           ...connection.settings,
           instructions,
         }),
@@ -434,9 +464,10 @@ export const createRealtimeCallRuntime = ({
   };
 
   const interrupt = async () => {
-    if (!activeResponseId || !sessionClient || state.status === 'ending' || state.status === 'idle') return false;
+    if (!sessionClient || state.status === 'ending' || state.status === 'idle') return false;
     try { sessionClient.sendEvent({ type: 'response.cancel' }); } catch {}
-    await enqueue(() => finalizeAssistant(activeResponseId, { interrupted: true }));
+    const interruptedResponseId = activeResponseId;
+    if (interruptedResponseId) await enqueue(() => finalizeAssistant(interruptedResponseId, { interrupted: true }));
     emitState('listening');
     return true;
   };
@@ -460,6 +491,7 @@ export const createRealtimeCallRuntime = ({
       sessionClient = null;
       target = null;
       connection = null;
+      pendingNaturalInputs.clear(); deferredNaturalResponses.clear(); suppressAssistantCommit = false;
       responseRecords.clear();
       activeResponseId = '';
       completedInputItems.clear();

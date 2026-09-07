@@ -1,4 +1,5 @@
 import { translateUiText } from '../../i18n/index.js';
+import { renderHopscotchCourt } from './hopscotch-court-view.js';
 
 const TERMINAL_TASK_STATUSES = new Set(['succeeded', 'failed', 'cancelled', 'skipped']);
 const RUNNING_TASK_STATUSES = new Set(['running', 'queued']);
@@ -225,11 +226,17 @@ export const createCreativeExecutionInitialState = ({
   title = '创意写作执行',
   text = '',
   executionPlan = {},
+  lanes: laneOverrides = null,
+  tasks: taskOverrides = null,
+  board = null,
   now = Date.now(),
 } = {}) => {
   const startedAt = Math.max(0, Math.trunc(toFiniteNumber(now, 0)));
   const id = normalizeId(runId) || `creative-execution:${startedAt || Date.now()}`;
-  const tasks = buildCreativeExecutionDefaultTasks({ executionPlan }).map((task, index) => normalizeCreativeExecutionTask({
+  // 跳房子板可传入按板生成的 lanes/tasks（compileBoardToLaneTasks）；缺省沿用固定 7 泳道
+  const useOverrides = Array.isArray(taskOverrides) && taskOverrides.length > 0;
+  const sourceTasks = useOverrides ? taskOverrides : buildCreativeExecutionDefaultTasks({ executionPlan });
+  const tasks = sourceTasks.map((task, index) => normalizeCreativeExecutionTask({
     ...task,
     status: 'queued',
     input: task.id === 'input'
@@ -247,6 +254,7 @@ export const createCreativeExecutionInitialState = ({
     fullscreen: false,
     selectedTaskId: '',
     userPanned: false,
+    ...(board ? { board: structuredClone(board) } : {}),
     run: {
       id,
       sessionId: normalizeId(sessionId),
@@ -258,7 +266,7 @@ export const createCreativeExecutionInitialState = ({
       updatedAt: startedAt,
       finishedAt: 0,
     },
-    lanes: CREATIVE_EXECUTION_DEFAULT_LANES.map(normalizeLane),
+    lanes: (useOverrides && Array.isArray(laneOverrides) && laneOverrides.length ? laneOverrides : CREATIVE_EXECUTION_DEFAULT_LANES).map(normalizeLane),
     tasks,
   };
 };
@@ -691,7 +699,7 @@ const renderPanelHtml = (view, state, options = {}) => `
       </div>
     </div>
     <div class="creative-execution-stack-body" data-ef-scroll="1">
-      ${renderStackRowsHtml(view, options)}
+      ${state.board ? renderHopscotchCourt(state.board, { states: Object.fromEntries(state.tasks.map(task => [task.id, task])), status: view.status, taskAttribute: 'data-cel-task-id' }) : renderStackRowsHtml(view, options)}
       ${renderDetailsHtml(view)}
     </div>
   </section>
@@ -952,7 +960,7 @@ export const createCreativeExecutionLaneRuntime = ({
     root.dataset.status = view.status;
     root.dataset.orientation = orientation;
     const structureKey = computeStructureKey(view, state.expanded);
-    const canPatch = structureKey === prevStructureKey && rowStepDirection === 0 && !opening && root.firstElementChild;
+    const canPatch = !state.board && structureKey === prevStructureKey && rowStepDirection === 0 && !opening && root.firstElementChild;
     if (!canPatch || !patchDom(view, { enteringTaskIds, justDoneTaskIds })) {
       root.innerHTML = `${state.expanded ? renderPanelHtml(view, state, { enteringTaskIds, justDoneTaskIds, opening, windowStart: rowWindowStart, windowSize: ROWS_WINDOW_SIZE }) : renderStripHtml(view, state)}`;
       const sel = view.selectedTask;

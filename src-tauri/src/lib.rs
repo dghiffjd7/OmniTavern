@@ -4,6 +4,7 @@ mod commands;
 mod external_links;
 mod memory_db;
 mod microphone_permission;
+mod realtime_transport;
 mod screenshot;
 mod storage;
 
@@ -83,6 +84,9 @@ pub fn run() {
             commands::http_stream_request_close,
             commands::http_abort_request,
             commands::openai_realtime_create_call,
+            realtime_transport::realtime_transport_open,
+            realtime_transport::realtime_transport_send,
+            realtime_transport::realtime_transport_close,
             microphone_permission::prepare_microphone_permission_retry,
             microphone_permission::open_microphone_permission_settings,
             commands::log_js,
@@ -112,6 +116,7 @@ pub fn run() {
             _app.manage(AttachmentStreamState::default());
             _app.manage(HttpAbortState::default());
             _app.manage(HttpStreamState::default());
+            _app.manage(realtime_transport::RealtimeTransportState::default());
             #[cfg(all(debug_assertions, not(any(target_os = "android", target_os = "ios"))))]
             {
                 use tauri::Manager;

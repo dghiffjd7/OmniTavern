@@ -200,7 +200,6 @@ test('API settings expose independent shared, split, and realtime voice views', 
   assert.match(source, /<select id="config-voice-stt-language" style="display:none;">/);
   assert.match(source, /id="config-voice-stt-language-btn"[^>]+data-select-id="config-voice-stt-language"/);
   assert.match(source, /中文 \+ 英文/);
-  assert.match(source, /普通录音转写会沿用此语言提示/);
   assert.match(source, /id="refresh-voice-tts-models"/);
   assert.match(source, /id="refresh-voice-stt-models"/);
   assert.match(source, /id="voice-tts-model-options"/);
@@ -213,7 +212,6 @@ test('API settings expose independent shared, split, and realtime voice views', 
   assert.match(source, /id="refresh-realtime-transcription-models"/);
   assert.match(source, /<select id="config-realtime-transcription-language" style="display:none;">/);
   assert.match(source, /id="config-realtime-transcription-language-btn"[^>]+data-select-id="config-realtime-transcription-language"/);
-  assert.match(source, /保存在 Realtime 设置中，不影响普通录音转写/);
   assert.doesNotMatch(source, /<select[^>]+id="config-realtime-(?:transcription-)?model"/);
   assert.match(source, /new VoiceClient/);
   assert.match(source, /id="config-voice-tts-voice"/);

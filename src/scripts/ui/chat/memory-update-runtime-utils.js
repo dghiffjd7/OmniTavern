@@ -376,6 +376,8 @@ export const confirmMemoryEditsWithUi = async ({
 };
 
 export const handleMemoryEditsFromRawWithUi = async ({
+  signal = null,
+  throwOnError = false,
   raw = '',
   sessionId = '',
   isGroup = false,
@@ -397,6 +399,7 @@ export const handleMemoryEditsFromRawWithUi = async ({
   logger = null,
   recordTraceEvent = null,
 } = {}) => {
+  signal?.throwIfAborted();
   const resolvedMemoryPlace = String(
     memoryPlace ||
       (String(uiMode || '').trim().toLowerCase() === 'rp'
@@ -445,11 +448,13 @@ export const handleMemoryEditsFromRawWithUi = async ({
     });
     try {
       const confirmedActions = await confirmMemoryEdits(parsed.actions);
+      signal?.throwIfAborted();
       if (confirmedActions.length) {
         const payload = {
           actions: confirmedActions,
           sessionId,
           isGroup,
+          ...(signal ? { signal } : {}),
         };
         if (contextType) payload.contextType = contextType;
         if (uiMode) payload.uiMode = uiMode;
@@ -496,6 +501,7 @@ export const handleMemoryEditsFromRawWithUi = async ({
         },
       });
       logger?.warn?.('apply memory edits failed', err);
+      if (throwOnError || signal?.aborted) throw err;
     }
   }
   return parsed;
@@ -540,9 +546,13 @@ export const createMemoryEditUiRuntime = ({
       resolveTimelineTurnNumber = null,
       force = false,
       requestPrompt,
+      signal = null,
+      throwOnError = false,
     } = {},
   ) =>
     handleMemoryEditsFromRawWithUi({
+      signal,
+      throwOnError,
       raw,
       sessionId,
       isGroup,

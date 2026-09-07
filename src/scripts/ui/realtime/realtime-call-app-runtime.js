@@ -1,3 +1,6 @@
+import { getRealtimeProfileStore } from '../../storage/realtime-profile-store.js';
+import { registerRealtimeSettingsTarget } from './realtime-settings-target.js';
+import { NativeRealtimeSessionClient } from './native-realtime-session-client.js';
 import { OpenAiRealtimeSessionClient } from './openai-realtime-session-client.js';
 import { createRealtimeCallPanel } from './realtime-call-panel.js';
 import { createRealtimeCallRuntime } from './realtime-call-runtime.js';
@@ -68,7 +71,8 @@ export const createRealtimeCallAppRuntime = ({
   toast = null,
   createPanel = createRealtimeCallPanel,
   createRuntime = createRealtimeCallRuntime,
-  createSessionClient = callbacks => new OpenAiRealtimeSessionClient(callbacks),
+  createSessionClient = callbacks => callbacks.provider && callbacks.provider !== 'openai'
+    ? new NativeRealtimeSessionClient(callbacks) : new OpenAiRealtimeSessionClient(callbacks),
 } = {}) => {
   let usageTotals = createRealtimeUsageTotals();
   let runtime = null;
@@ -95,7 +99,10 @@ export const createRealtimeCallAppRuntime = ({
 
   runtime = createRuntime({
     createSessionClient,
-    resolveConnection,
+    resolveConnection: async options => {
+      const bound = globalThis.localStorage ? await getRealtimeProfileStore().resolveBinding(options?.target) : null;
+      return bound || resolveConnection?.(options);
+    },
     buildSemanticSnapshot,
     getCallTarget,
     isTargetCurrent,
@@ -151,6 +158,8 @@ export const createRealtimeCallAppRuntime = ({
     return started;
   };
 
+  const unregisterSettingsTarget = registerRealtimeSettingsTarget(getCallTarget, handleButtonClick);
+
   const handlePageHide = () => {
     onLifecycleInvalidated?.('page_hidden');
     void runtime.end('page_hidden');
@@ -172,6 +181,7 @@ export const createRealtimeCallAppRuntime = ({
     syncButtonAvailability,
     endAndHide,
     destroy: async () => {
+      unregisterSettingsTarget();
       button?.removeEventListener?.('click', handleButtonClick);
       windowLike?.removeEventListener?.('pagehide', handlePageHide);
       documentRef?.removeEventListener?.('visibilitychange', handleVisibilityChange);

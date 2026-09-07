@@ -13,6 +13,8 @@ export const normalizePromptInjectionBlock = (input = {}) => {
     depth: Number.isFinite(depthRaw) ? Math.max(0, depthRaw) : 0,
     order: Number.isFinite(orderRaw) ? orderRaw : 0,
     source: String(input?.source || 'prompt_injection').trim() || 'prompt_injection',
+    ...(input?.houseId ? { houseId: String(input.houseId) } : {}),
+    ...(input?.preRendered === true ? { preRendered: true } : {}),
   };
 };
 

@@ -318,12 +318,11 @@ body #config-panel.api-config-panel .api-config-voice-capability {
 }
 
 body #config-panel.api-config-panel .api-config-voice-mode {
-  min-height: 58px;
+  min-height: 44px;
   display: grid;
-  justify-items: start;
-  gap: 3px;
+  place-items: center;
   padding: 10px 12px;
-  text-align: left;
+  text-align: center;
 }
 
 body #config-panel.api-config-panel .api-config-voice-capability {
@@ -426,7 +425,7 @@ body #config-panel.api-config-panel :is(.api-config-voice-mode, .api-config-voic
   grid-column: 1 / -1;
 }
 
-#config-panel.api-config-panel .api-config-realtime-field :is(input, select) {
+#config-panel.api-config-panel .api-config-realtime-field :is(input, select, textarea) {
   width: 100%;
   min-width: 0;
   min-height: 40px;
@@ -451,16 +450,19 @@ body #config-panel.api-config-panel :is(.api-config-voice-mode, .api-config-voic
   margin-top: 9px;
 }
 
+.api-config-field-status:empty,
+.api-config-realtime-status:empty { display: none; }
+
 .api-config-realtime-status[data-type="success"] {
   color: var(--app-accent-strong);
 }
 
 .api-config-realtime-status[data-type="warning"] {
-  color: var(--app-warning-text, #9a6700);
+  color: var(--app-warning-text);
 }
 
-.api-config-realtime-status[data-type="error"] {
-  color: var(--app-danger-text);
+#config-panel.api-config-panel .api-config-realtime-status[data-type="error"] {
+  color: var(--app-danger-text) !important;
 }
 
 .api-config-voice-presets {
@@ -1385,4 +1387,129 @@ body[data-reduced-motion='on'] .world-app-select-menu[data-select-id^='config-']
   animation: none !important;
   scroll-behavior: auto !important;
   transition: none !important;
+}
+
+/* Independent realtime profiles and enrollment share the voice settings surface. */
+.api-config-realtime-card > [hidden] { display: none !important; }
+.api-config-realtime-profiles { min-width: 0; display: grid; gap: 12px; }
+.api-config-realtime-profiles p { margin: 0; font-size: 12px; line-height: 1.65; opacity: .8; }
+.rt-enrollment { border: 1px solid var(--app-border-default); border-radius: 16px; background: var(--app-surface-card); overflow: hidden; }
+.rt-enrollment summary { cursor: pointer; list-style: none; }
+.rt-enrollment summary::-webkit-details-marker { display: none; }
+.rt-enrollment-heading { display: flex; align-items: center; gap: 10px; padding: 15px 16px; }
+.rt-enrollment-heading strong { font-size: 13px; margin-right: auto; }
+.rt-enrollment-emblem { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; color: var(--app-accent-primary); background: color-mix(in srgb, var(--app-accent-primary) 9%, transparent); }
+.rt-enrollment-count { display: inline-flex; min-width: 22px; padding: 3px 6px; justify-content: center; border-radius: 6px; background: var(--app-surface-subtle); color: var(--app-text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.rt-enrollment-chevron { display: flex; color: var(--app-text-muted); transition: transform .18s ease; }
+.rt-enrollment[open] > summary .rt-enrollment-chevron { transform: rotate(180deg); }
+.rt-enrollment[open] > summary { border-bottom: 1px solid var(--app-border-default); }
+.rt-enrollment-body { padding: 16px; display: grid; gap: 16px; }
+.rt-enrollment-name { grid-template-columns: 1fr; }
+.rt-clone-card { padding: 16px; border: 1px solid var(--app-border-default); border-radius: 12px; display: grid; gap: 14px; background: var(--app-surface-subtle); }
+.rt-enrollment-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.rt-enrollment-section-heading h4 { margin: 0; font-size: 12px; font-weight: 700; color: var(--app-text-primary); }
+.rt-audio-upload { position: relative; border: 1px dashed color-mix(in srgb, var(--app-accent-primary) 28%, var(--app-border-default)); border-radius: 11px; padding: 18px 14px; background: var(--app-surface-card); transition: border-color .15s, background .15s; }
+.rt-audio-upload:hover, .rt-audio-upload:focus-within, .rt-audio-upload.is-dragover { border-color: var(--app-accent-primary); background: color-mix(in srgb, var(--app-accent-primary) 4%, var(--app-surface-card)); }
+.rt-audio-upload.is-dragover { outline: 2px solid color-mix(in srgb, var(--app-accent-primary) 24%, transparent); outline-offset: 3px; }
+#config-panel.api-config-panel .rt-audio-native-input { display: none !important; }
+.rt-audio-choose { border: 0; background: transparent; color: var(--app-text-primary); width: 100%; display: flex; align-items: center; justify-content: center; gap: 12px; padding: 4px; font: inherit; cursor: pointer; border-radius: 8px; }
+.rt-audio-choose strong { display: inline; color: var(--app-accent-strong); font-size: 12px; font-weight: 650; }
+.rt-upload-icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; background: var(--app-surface-subtle); color: var(--app-accent-primary); }
+.rt-audio-selected { border-top: 1px solid var(--app-border-default); padding-top: 14px; margin-top: 14px; display: grid; gap: 12px; }
+.rt-audio-selected[hidden] { display: none; }
+.rt-audio-file-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.rt-audio-file-icon { color: var(--app-accent-primary); display: flex; }
+.rt-audio-file-copy { flex: 1; min-width: 0; display: grid; gap: 4px; }
+.rt-audio-file-copy strong { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rt-audio-file-copy small { font-variant-numeric: tabular-nums; }
+.rt-audio-selected audio { width: 100%; height: 34px; }
+.rt-enrollment-transcript textarea { width: 100%; resize: vertical; min-height: 66px; font: inherit; }
+.rt-enrollment-action-row { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
+.rt-enrollment-action-row > button { flex-shrink: 0; }
+.rt-enrollment-import { border-top: 1px solid var(--app-border-default); padding-top: 12px; }
+.rt-enrollment-import summary { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--app-text-secondary); }
+.rt-enrollment-import[open] summary > svg { transform: rotate(180deg); }
+.rt-enrollment-import-body { display: grid; gap: 12px; margin-top: 14px; }
+.rt-registered-voices { display: grid; gap: 10px; border-top: 1px solid var(--app-border-default); padding-top: 14px; }
+.rt-registered-voices ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.rt-registered-voice { display: flex; align-items: center; gap: 8px; padding: 10px; border: 1px solid var(--app-border-default); border-radius: 9px; }
+.rt-registered-voice-copy { min-width: 0; flex: 1; display: grid; gap: 4px; }
+.rt-registered-voice-copy strong { font-size: 12px; overflow-wrap: anywhere; }
+.rt-registered-voice-copy code { font-size: 10.5px; color: var(--app-text-muted); overflow-wrap: anywhere; }
+.rt-voice-state { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; color: var(--app-text-muted); white-space: nowrap; }
+.rt-voice-state::before { content: ''; width: 4px; height: 4px; border-radius: 50%; background: currentColor; }
+.rt-voice-state[data-state='ready'] { color: var(--app-accent-strong); }
+.rt-voice-state[data-state='failed'] { color: var(--app-danger-text); }
+.rt-registered-voice-actions { display: flex; }
+.rt-enrollment-empty { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 14px; color: var(--app-text-muted); font-size: 11.5px; }
+.rt-enrollment-status { font-size: 12px; overflow-wrap: anywhere; padding: 10px 12px; border-radius: 8px; background: var(--app-surface-card); line-height: 1.6; }
+.rt-enrollment-status[data-type='error'] { background: color-mix(in srgb, var(--app-danger-text) 6%, var(--app-surface-card)); }
+.rt-enrollment-status:empty { display: none; }
+.rt-enrollment :is(summary, button):focus-visible { outline: 2px solid var(--app-accent-primary); outline-offset: 3px; }
+.rt-audio-choose:disabled { opacity: .5; cursor: default; }
+@media (max-width: 480px) {
+  .rt-enrollment-heading, .rt-enrollment-body { padding: 12px; }
+  .rt-enrollment-heading { gap: 8px; }
+  .rt-enrollment-heading > .rt-enrollment-count { display: none; }
+  .rt-clone-card { padding: 12px; }
+  .rt-enrollment-action-row { flex-wrap: wrap; }
+  .rt-enrollment-action-row > button { width: 100%; }
+  .rt-registered-voice { flex-wrap: wrap; }
+}
+@media (prefers-reduced-motion: reduce) { .rt-enrollment-chevron, .rt-audio-upload { transition: none; } }
+
+.api-config-realtime-target { border-top: 1px solid var(--app-border-default); padding-top: 12px; display: grid; gap: 8px; font-size: 12px; overflow-wrap: anywhere; }
+
+.rt-voice-picker { gap: 10px; }
+.rt-voice-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.rt-voice-heading label { margin-right: auto; }
+.rt-voice-heading small { font-weight: 400; }
+.api-config-model-options.rt-voice-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(145px, 1fr));
+  max-height: 240px;
+  gap: 8px;
+  overscroll-behavior: contain;
+}
+#config-panel.api-config-panel .api-config-model-chip.rt-voice-option {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 4px;
+  min-height: 58px;
+  padding: 9px 10px;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-family: inherit;
+  font-size: 12px;
+}
+#config-panel.api-config-panel .rt-voice-option small { color: inherit !important; opacity: .8; font-weight: 400; }
+#config-panel.api-config-panel .rt-voice-option.is-selected small { opacity: 1; }
+#config-panel.api-config-panel .rt-voice-option:focus-visible { outline: 2px solid var(--app-accent-primary); outline-offset: 2px; }
+.rt-voice-detail, .rt-voice-tooltip { display: grid; gap: 4px; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.rt-voice-detail { padding: 10px 12px; border-left: 3px solid var(--app-accent-primary); background: var(--app-surface-subtle); border-radius: 0 8px 8px 0; font-weight: 400; }
+.rt-voice-detail code { display: none; }
+.rt-voice-detail span, .rt-voice-id-label { color: var(--app-text-muted); font-size: 11.5px; }
+.rt-voice-tooltip {
+  position: fixed;
+  z-index: 2147483647;
+  width: max-content;
+  max-width: min(300px, calc(100vw - 24px));
+  box-sizing: border-box;
+  padding: 12px 14px;
+  background: var(--app-surface-card);
+  color: var(--app-text-primary);
+  border: 1px solid var(--app-border-default);
+  border-radius: 10px;
+  box-shadow: 0 6px 24px color-mix(in srgb, var(--app-shadow-color) 45%, transparent);
+  pointer-events: none;
+}
+.rt-voice-tooltip p { margin: 0; }
+.rt-voice-tooltip span, .rt-voice-tooltip code { color: var(--app-text-muted); font-size: 11px; }
+.rt-voice-empty { grid-column: 1 / -1; padding: 8px; font-weight: 400; }
+@media (max-width: 600px) {
+  .api-config-model-options.rt-voice-options { grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: 252px; }
+  #config-panel.api-config-panel .api-config-model-chip.rt-voice-option { min-height: 64px; }
 }

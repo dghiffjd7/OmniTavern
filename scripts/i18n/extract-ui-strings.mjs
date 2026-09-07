@@ -8,12 +8,21 @@ export const PROJECT_ROOT = path.resolve(SCRIPT_DIR, '../..');
 const UI_ROOT = path.join(PROJECT_ROOT, 'src/scripts/ui');
 const MANUAL_SOURCE_FILE = path.join(PROJECT_ROOT, 'scripts/i18n/manual-ui-source-keys.json');
 const EXTRA_UI_FILES = [
+  path.join(PROJECT_ROOT, 'src/scripts/storage/realtime-profile-store.js'),
   path.join(PROJECT_ROOT, 'src/scripts/agent/agent-feature-settings.js'),
   path.join(PROJECT_ROOT, 'src/scripts/memory/default-template.js'),
   path.join(PROJECT_ROOT, 'src/scripts/memory/outline-section-utils.js'),
   path.join(PROJECT_ROOT, 'src/scripts/variables/variable-templates.js'),
 ];
 const FULL_UI_DEFINITION_FILES = new Set([
+  path.join(PROJECT_ROOT, 'src/scripts/ui/realtime/realtime-call-panel.js'),
+  path.join(PROJECT_ROOT, 'src/scripts/ui/realtime/realtime-settings-panel.js'),
+  path.join(PROJECT_ROOT, 'src/scripts/ui/realtime/realtime-enrollment-view.js'),
+  path.join(PROJECT_ROOT, 'src/scripts/ui/realtime/realtime-provider-catalog.js'),
+  path.join(PROJECT_ROOT, 'src/scripts/ui/realtime/realtime-voice-catalog.js'),
+  path.join(PROJECT_ROOT, 'src/scripts/ui/realtime/realtime-voice-picker.js'),
+  path.join(PROJECT_ROOT, 'src/scripts/ui/realtime/realtime-voice-enrollment.js'),
+  path.join(PROJECT_ROOT, 'src/scripts/storage/realtime-profile-store.js'),
   path.join(PROJECT_ROOT, 'src/scripts/agent/agent-feature-settings.js'),
   path.join(PROJECT_ROOT, 'src/scripts/memory/default-template.js'),
   path.join(PROJECT_ROOT, 'src/scripts/memory/outline-section-utils.js'),

@@ -1,9 +1,11 @@
 import { formatRealtimeUsageText } from './realtime-usage-utils.js';
+import { t, translateUiText } from '../../i18n/index.js';
+import { getRealtimeProvider } from './realtime-provider-catalog.js';
 
 const STATUS_LABELS = Object.freeze({
   idle: '通话已结束',
   requesting_permission: '正在请求麦克风权限…',
-  connecting: '正在连接 OpenAI…',
+  connecting: '正在连接语音服务…',
   listening: '正在听',
   thinking: '正在准备回应',
   speaking: '正在说话',
@@ -80,7 +82,7 @@ export const createRealtimeCallPanel = ({
           </button>
         </div>
         <div class="realtime-call-usage">本次用量会分别记录语音模型与输入转写</div>
-        <small class="realtime-call-disclosure">你与角色的语音由 AI 生成；麦克风音频会发送给 OpenAI 处理。</small>
+        <small class="realtime-call-disclosure"></small>
       </section>`;
     documentRef.body.appendChild(overlay);
     panel = overlay.querySelector('.realtime-call-panel');
@@ -104,8 +106,12 @@ export const createRealtimeCallPanel = ({
     state = { ...state, ...(nextState || {}) };
     if (!panel) return;
     panel.dataset.state = state.status || 'idle';
+    const provider = translateUiText(getRealtimeProvider(state.provider)?.label || '当前实时语音服务');
     const status = panel.querySelector('.realtime-call-status');
-    if (status) status.textContent = STATUS_LABELS[state.status] || '通话中';
+    if (status) status.textContent = state.status === 'connecting' && state.provider
+      ? t('正在连接 {provider}…', { provider }) : translateUiText(STATUS_LABELS[state.status] || '通话中');
+    const disclosure = panel.querySelector('.realtime-call-disclosure');
+    if (disclosure) disclosure.textContent = t('你与角色的语音由 AI 生成；麦克风音频会发送给 {provider} 处理。', { provider });
     const duration = panel.querySelector('.realtime-call-duration');
     if (duration) duration.textContent = formatDuration(state.elapsedMs);
     const mute = panel.querySelector('[data-call-action="mute"]');

@@ -75,6 +75,7 @@ export const createLlmContextBuilder = ({
   getReplyPromptHint = null,
   getStagePromptBlocks = null,
   getInjectedPromptBlocks = null,
+  getHopscotchFused = null,
   skipTemplate = false,
   skipScripts = false,
   groupMembers = [],
@@ -124,6 +125,7 @@ export const createLlmContextBuilder = ({
     const maxOutputTokens = Math.trunc(Number(openaiPreset?.openai_max_tokens));
     payload.meta = {
       ...(payload.meta || {}),
+      ...(getHopscotchFused?.() ? { hopscotchFused: getHopscotchFused() } : {}),
       formatProfileEnabled: getFormatProfileEnabled?.() === true,
       inputBudgetContext: {
         maxContextTokens: Number.isFinite(maxContextTokens) && maxContextTokens > 0
