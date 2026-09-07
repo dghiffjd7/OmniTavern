@@ -4,7 +4,8 @@
 // 未编辑的推导默认板继续走既有固定流程（creative-turn-tracker），保证默认行为等价。
 
 import { t, translateUiText } from '../../i18n/index.js';
-import { buildDefaultHopscotchBoard, compileBoardToLaneTasks, findBodyRowIndex, getHopscotchHouseDisplayStatus } from './hopscotch-board-utils.js';
+import { getActiveHopscotchFused, resolveHopscotchActivation } from './hopscotch-activation-utils.js';
+import { buildDefaultHopscotchBoard, projectHopscotchVariableRules, compileBoardToLaneTasks, findBodyRowIndex, getHopscotchHouseDisplayStatus } from './hopscotch-board-utils.js';
 import { createCreativeTurnOrchestrator } from './creative-turn-orchestrator.js';
 import { estimateTokens } from '../../memory/memory-prompt-utils.js';
 
@@ -93,6 +94,7 @@ export const createHopscotchExecutors = ({
   tableMemoryEnabled = false,
   formatReview = null,    // { run({ sessionId, messageId, signal }) }
   image = null,           // { run({ sessionId, messageId, signal }) }
+  sidecars = null,        // 独立图片提示、变量更新及分阶段原生规则
   custom = null,          // { backgroundChat, getRuntimeConfigByProfileId, getRecentMessages, getBodyText, charName, userName, recordRun }
   logger = console,
 } = {}) => {
@@ -105,6 +107,7 @@ export const createHopscotchExecutors = ({
   const historySnapshot = historyLimit > 0 ? structuredClone(custom?.getRecentMessages?.(sessionId, historyLimit) || []) : [];
   const profileConfigs = new Map();
   for (const house of board?.rows?.flatMap(row => row.houses) || []) {
+    if (house.kind !== 'custom_prompt') continue;
     const id = house.config?.modelMode === 'profile' ? house.config.modelProfileId : '';
     if (id && !profileConfigs.has(id)) profileConfigs.set(id, Promise.resolve(custom?.getRuntimeConfigByProfileId?.(id)).then(value => value ? { ...value } : null).catch(() => null));
   }
@@ -183,8 +186,8 @@ export const createHopscotchExecutors = ({
     const houses = board?.rows?.flatMap(row => row.houses) || [];
     if (board?.policy?.tableSummaryMaintenance === true && tableMemoryEnabled
       && !houses.some(house => house.kind === 'summary_compaction')) {
-      const host = houses.find(house => house.kind === 'memory_table'
-        || (house.kind === 'body' && house.fused?.includes('memory_table')));
+      const host = houses.find(house => house.enabled !== false && (house.kind === 'memory_table'
+        || (house.kind === 'body' && house.fused?.includes('memory_table'))));
       if (host && executors[host.kind]) {
         executors[host.kind].maintenance = {
           kind: 'summary_compaction',
@@ -205,10 +208,13 @@ export const createHopscotchExecutors = ({
   }
   if (image) {
     executors.image_generation = {
-      run: async ({ signal }) => {
+      run: async ({ signal, rowInput }) => {
         const ctx = getTurnContext()?.body;
         if (!ctx?.messageId) return { status: 'skipped', reason: 'body_message_missing' };
-        return image.run({ sessionId, messageId: ctx.messageId, signal });
+        const prompt = board?.rows.flatMap(row => row.houses).find(h => h.kind === 'image_prompt');
+        const artifact = prompt ? rowInput?.artifacts?.[prompt.id] : null;
+        if (prompt && artifact?.kind !== 'image_prompt') return { status: 'skipped', reason: 'image_prompt_missing' };
+        return image.run({ sessionId, messageId: ctx.messageId, signal, ...(prompt ? { promptArtifact: artifact } : {}) });
       },
     };
   }
@@ -286,6 +292,7 @@ export const createHopscotchExecutors = ({
       },
     };
   }
+  if (sidecars) Object.assign(executors, sidecars);
   return executors;
 };
 
@@ -342,12 +349,29 @@ export const createHopscotchTurnRuntime = ({
   const resolveLane = () => (typeof getLaneRuntime === 'function' ? getLaneRuntime() : laneRuntime);
 
   const isEnabled = () => getSettings()?.creativeHopscotchEnabled === true;
-  const resolveBoard = (sessionId, { place = 'writing' } = {}) => {
+  const resolveBoard = (sessionId, { place = 'writing', contextSessionId = sessionId } = {}) => {
     if (!boardStore) return { board: null, source: 'derived' };
-    const derived = buildDefaultHopscotchBoard({ ...resolveWritingSettings(sessionId, place), place });
+    const settings = resolveWritingSettings(contextSessionId, place);
+    const derived = buildDefaultHopscotchBoard({ ...settings, place });
     // 聊天不能读到创意写作的自定义板，也不能借此接管聊天发送。
     if (place === 'chat') return { board: derived, source: 'derived' };
-    return boardStore.resolveEffectiveBoard({ sessionId, derivedBoard: derived });
+    const resolved = boardStore.resolveEffectiveBoard({ sessionId, derivedBoard: derived });
+    return { ...resolved, board: projectHopscotchVariableRules(resolved.board, settings?.variables?.activity) };
+  };
+
+  const resolveActivation = (board, sessionId, { place = 'writing' } = {}) => resolveHopscotchActivation(board, resolveWritingSettings(sessionId, place));
+  const resolveFusionCapabilities = (sessionId, { place = 'writing' } = {}) => {
+    const settings = resolveWritingSettings(sessionId, place);
+    return {
+      memory_table: { reason: settings.memory?.independentModel ? t('记忆使用独立模型配置，需先改为跟随正文') : '' },
+      variable_rules: { reason: t('变量规则按触发阶段独立执行') },
+    };
+  };
+  const resolveExecutionPlan = (sessionId, { place = 'writing' } = {}) => {
+    const resolved = resolveBoard(sessionId, { place });
+    const settings = resolveWritingSettings(sessionId, place);
+    const activation = resolveHopscotchActivation(resolved.board, settings);
+    return { ...resolved, activation, memory: structuredClone(settings?.memory || {}), fused: getActiveHopscotchFused(resolved.board, activation), custom: place === 'writing' && isEnabled() && resolved.source !== 'derived' };
   };
 
   const isSessionBusy = sessionId => activeTurns.has(trim(sessionId));
@@ -367,14 +391,22 @@ export const createHopscotchTurnRuntime = ({
     generationId = 0,
     title = '',
     parentSignal = null,
-    executorContext = {},
+    executorContext = {}, executionPlan = null,
   } = {}) => {
     const sid = trim(sessionId);
     if (!sid || !rpUiMode || previewOnly || !isEnabled()) return null;
-    const resolved = resolveBoard(sid);
+    const resolved = executionPlan || resolveExecutionPlan(sid);
     if (!resolved.board || resolved.source === 'derived') return null;
     if (activeTurns.has(sid)) return null;
-    const board = resolved.board;
+    const board = structuredClone(resolved.board);
+    const activation = structuredClone(resolved.activation || resolveActivation(board, sid));
+    const fused = getActiveHopscotchFused(board, activation);
+    // 执行器只拿有效成员；运行页仍保留完整原板与逐项启停原因。
+    const executionBoard = structuredClone(board);
+    for (const row of executionBoard.rows) for (const house of row.houses) {
+      house.enabled = activation.houses[house.id]?.enabled !== false;
+      if (house.kind === 'body') house.fused = fused.slice();
+    }
     const turnRunId = `hopscotch:${now()}:${++sequence}`;
     const controller = new AbortController();
     const onParentAbort = () => controller.abort(parentSignal.reason);
@@ -383,16 +415,14 @@ export const createHopscotchTurnRuntime = ({
       else parentSignal.addEventListener('abort', onParentAbort, { once: true });
     }
     const turnContext = { sessionId: sid, isGroupChat, userInput: text, body: null };
-    const memorySettings = resolveWritingSettings(sid, 'writing')?.memory;
+    const memorySettings = resolved.memory || resolveWritingSettings(sid, 'writing')?.memory;
     const tableMemoryEnabled = memorySettings?.storageMode === 'table' && memorySettings.placeEnabled !== false && memorySettings.writingEnabled !== false;
-    const executorInfo = { sessionId: sid, turnRunId, board, isGroupChat, userInput: text, getTurnContext: () => turnContext, ...(isPlainObject(executorContext) ? executorContext : {}), tableMemoryEnabled };
+    const executorInfo = { sessionId: sid, turnRunId, board: executionBoard, isGroupChat, userInput: text, getTurnContext: () => turnContext, ...(isPlainObject(executorContext) ? executorContext : {}), tableMemoryEnabled };
     const executors = typeof createExecutors === 'function'
       ? createExecutors(executorInfo)
       : createHopscotchExecutors({ ...executorInfo, logger });
     const bodyHandle = executors.__body;
     const bodyRowIndex = findBodyRowIndex(board);
-    const bodyHouse = board.rows[bodyRowIndex]?.houses.find(h => h.kind === 'body');
-    const fused = bodyHouse?.fused || [];
     const promptBlocks = [];
     const houseOrder = board.rows.flatMap(row => row.houses).map(house => house.id);
     const ownsLane = () => {
@@ -404,6 +434,7 @@ export const createHopscotchTurnRuntime = ({
     try {
       orchestrator = createCreativeTurnOrchestrator({
         board,
+        activation,
         executors,
         signal: controller.signal,
         now,
@@ -426,7 +457,7 @@ export const createHopscotchTurnRuntime = ({
       return null;
     }
     const { lanes, tasks } = compileBoardToLaneTasks(board);
-    const memoryPhase = fused.includes('memory_table') ? 'sync' : (board.rows.some(r => r.houses.some(h => h.kind === 'memory_table')) ? 'async' : 'none');
+    const memoryPhase = fused.includes('memory_table') ? 'sync' : (executionBoard.rows.some(r => r.houses.some(h => h.kind === 'memory_table' && h.enabled)) ? 'async' : 'none');
     let laneActive = false;
     const laneRef = resolveLane();
     const startLane = () => {
@@ -436,7 +467,7 @@ export const createHopscotchTurnRuntime = ({
         generationId,
         title: title || t('跳房子流程'),
         text,
-        executionPlan: { memoryPhase, variablePhase: 'sync' },
+        executionPlan: { memoryPhase, variablePhase: fused.includes('variable') ? 'sync' : 'none' },
         lanes,
         tasks,
         board,
@@ -453,6 +484,7 @@ export const createHopscotchTurnRuntime = ({
       generationId,
       board,
       boardSource: resolved.source,
+      activation,
       fused,
       // 板决定是否内联抽取，但记忆表格总开关/写作位置关闭时不注入（计划 §5.1）
       memoryInline: fused.includes('memory_table') && tableMemoryEnabled,
@@ -514,5 +546,6 @@ export const createHopscotchTurnRuntime = ({
       latestTurns.clear();
     },
     getActiveTurn: sessionId => activeTurns.get(trim(sessionId)) || null,
+    resolveActivation, resolveExecutionPlan, resolveFusionCapabilities,
   };
 };

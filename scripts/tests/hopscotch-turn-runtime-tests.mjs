@@ -218,7 +218,8 @@ const makeDeps = (overrides = {}) => {
     createExecutors: info => createHopscotchExecutors({ ...info, ...deps, logger: { warn() {} } }),
   });
   const turn = disabled.prepareTurn({ sessionId: 'rp:a', rpUiMode: true, text: 'x', generationId: 9 });
-  assert.equal(turn.fused.includes('memory_table'), true);
+  assert.equal(turn.fused.includes('memory_table'), false, '停用项不进入本轮有效融合项');
+  assert.equal(turn.board.rows[1].houses[0].fused.includes('memory_table'), true, '原始布局仍保留记忆融合格');
   assert.equal(turn.memoryInline, false, '写作位置关闭时不内联注入记忆提示');
   assert.deepEqual(requested, [3], '历史快照只按板内 recentMessageCount 上限读取');
   turn.abort('test');

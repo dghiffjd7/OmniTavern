@@ -10,8 +10,30 @@ globalThis.localStorage = {
 
 const {
   createScenePresetAccess,
+  createScenePromptPreviewRequestBuilder,
   evaluateScenePreviewMacro,
 } = await import('../../src/scripts/ui/scene-prompt-preview-utils.js');
+
+{
+  const calls = [];
+  const request = { messages: [{ role: 'user', content: 'draft' }] };
+  const build = createScenePromptPreviewRequestBuilder({ handleSend: async (...args) => { calls.push(args); return request; } });
+  assert.equal(await build(), request);
+  assert.deepEqual(calls[0], [null, {
+    previewOnly: true, ignorePending: true, previewUiMode: '', previewScenario: '',
+    previewChatFormat: true, previewInjectMemory: true, previewInjectImage: true,
+    previewInjectMomentCreate: true, previewSuppressHistory: true,
+    previewRawBlocks: false, previewForceLegacyText: false, skipScripts: true,
+  }], '抽出组装器后预设默认参数保持等价');
+  await build({ includeHistory: true, previewUiMode: 'rp', rawBlocks: false });
+  assert.equal(calls[1][1].previewSuppressHistory, false, '正文预览包含会话历史');
+  assert.equal(calls[1][1].previewUiMode, 'rp');
+  assert.equal(calls[1][1].previewOnly, true);
+  assert.equal(calls[1][1].skipScripts, true);
+  assert.equal(await createScenePromptPreviewRequestBuilder({ handleSend: async () => false })(), null);
+  assert.equal(await createScenePromptPreviewRequestBuilder({ handleSend: async () => { throw new Error('unavailable'); } })(), null);
+  console.log('ok - shared preview builder preserves preset defaults, includes body history and contains failures');
+}
 
 {
   const calls = [];
@@ -87,8 +109,8 @@ const {
     '创意写作执行记录应使用本次场景实际解析的 OpenAI 预设 ID',
   );
   assert.match(
-    appSource,
-    /buildScenePromptPreviewRequest[\s\S]*?skipScripts:\s*true/,
+    await readFile(path.join(repoRoot, 'src/scripts/ui/scene-prompt-preview-utils.js'), 'utf8'),
+    /createScenePromptPreviewRequestBuilder[\s\S]*?skipScripts:\s*true/,
     '场景预览必须显式跳过会产生真实副作用的脚本钩子',
   );
   assert.match(

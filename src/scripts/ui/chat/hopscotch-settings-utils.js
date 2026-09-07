@@ -2,7 +2,7 @@ import { deriveMemoryStorageMode } from '../memory-storage-mode-utils.js';
 
 // 只解析当前作用域的设置，不保存配置或将聊天功能扩展到创意写作。
 export const resolveHopscotchBoardSettings = ({
-  settings = {}, place = 'writing', replyCheck = {}, autoImageEnabled = false, variablesEnabled = false,
+  settings = {}, place = 'writing', replyCheck = {}, autoImageEnabled = false, variablesEnabled = false, variableActivity = null,
 } = {}) => {
   const scope = place === 'chat' ? 'chat' : 'writing';
   const placeEnabled = scope === 'writing'
@@ -15,10 +15,11 @@ export const resolveHopscotchBoardSettings = ({
       storageMode: storageMode === 'table' && !placeEnabled ? 'off' : storageMode,
       autoExtract: settings.memoryAutoExtract === true,
       autoExtractMode: settings.memoryAutoExtractMode,
+      independentModel: settings.memoryUpdateApiMode === 'profile',
       placeEnabled,
     },
     replyCheck: { ...replyCheck, enabled: scope === 'chat' && replyCheck.enabled === true },
     autoImage: { enabled: scope === 'writing' && autoImageEnabled === true },
-    variables: { enabled: variablesEnabled === true },
+    variables: { enabled: variableActivity ? variableActivity.enabled : variablesEnabled === true, ...(variableActivity ? { activity: variableActivity } : {}) },
   };
 };

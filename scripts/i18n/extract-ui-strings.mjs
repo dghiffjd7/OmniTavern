@@ -13,6 +13,7 @@ const EXTRA_UI_FILES = [
   path.join(PROJECT_ROOT, 'src/scripts/memory/default-template.js'),
   path.join(PROJECT_ROOT, 'src/scripts/memory/outline-section-utils.js'),
   path.join(PROJECT_ROOT, 'src/scripts/variables/variable-templates.js'),
+  path.join(PROJECT_ROOT, 'src/scripts/variables/variable-rule-engine.js'),
 ];
 const FULL_UI_DEFINITION_FILES = new Set([
   path.join(PROJECT_ROOT, 'src/scripts/ui/realtime/realtime-call-panel.js'),

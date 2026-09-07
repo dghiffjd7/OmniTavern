@@ -1,5 +1,6 @@
 import { logger } from '../utils/logger.js';
 import { getLocalizedPromptText } from '../i18n/prompt-locale.js';
+import { t } from '../i18n/index.js';
 import { buildVariableContext } from './variable-path-utils.js';
 import { evaluateBooleanExpression } from './safe-expression-evaluator.js';
 import { buildRuleConditionDiagnostics } from './expression-compat-diagnostics.js';
@@ -107,18 +108,21 @@ export class VariableRuleEngine {
     return normalized;
   }
 
-  async handleBeforeSend({ sessionId, content, useGlobalVariables = false }) {
-    await this.runRules(sessionId, { type: 'keyword', content, useGlobalVariables });
+  async handleBeforeSend({ sessionId, content, useGlobalVariables = false, execution = {} }) {
+    return this.runRules(sessionId, { ...execution, type: 'keyword', content, useGlobalVariables });
   }
 
-  async handleAfterReceive({ sessionId, message, useGlobalVariables = false }) {
+  async handleAfterReceive({ sessionId, message, useGlobalVariables = false, execution = {} }) {
     const sid = String(sessionId || '').trim();
     if (!sid || !this.isVariableRuntimeEnabled(sid)) return;
     const next = (this.turnCounts.get(sid) || 0) + 1;
     this.turnCounts.set(sid, next);
-    await this.runRules(sid, { type: 'every_turn', turn: next, message, useGlobalVariables });
-    await this.runRules(sid, { type: 'every_n_turns', turn: next, message, useGlobalVariables });
-    await this.runRules(sid, { type: 'condition', turn: next, message, useGlobalVariables });
+    let executed = 0;
+    for (const type of ['every_turn', 'every_n_turns', 'condition']) {
+      const result = await this.runRules(sid, { ...execution, type, turn: next, message, useGlobalVariables });
+      executed += result?.executed || 0;
+    }
+    return { executed };
   }
 
   async runManual(sessionId, ruleId = '') {
@@ -128,8 +132,11 @@ export class VariableRuleEngine {
   async runRules(sessionId, context) {
     const sid = String(sessionId || '').trim();
     if (!sid || !this.isVariableRuntimeEnabled(sid)) return;
-    if (this.running.has(sid)) return;
-    const rules = this.getRules(sid).filter(r => r.enabled);
+    if (this.running.has(sid)) {
+      if (context?.strict) throw new Error(t('变量规则正在执行，请稍后重试'));
+      return;
+    }
+    const rules = (context?.rulesOverride || this.getRules(sid)).filter(r => r.enabled);
     if (!rules.length) return;
 
     const ctx = context || {};
@@ -174,14 +181,19 @@ export class VariableRuleEngine {
     this.running.add(sid);
     try {
       for (const rule of eligible) {
-        await this.applyAction(rule, { sessionId: sid, vars, context: ctx, useGlobalVariables: useGlobal });
+        if (ctx.signal?.aborted || ctx.canCommit?.() === false) throw Object.assign(new Error('variable task cancelled'), { name: 'AbortError' });
+        const local = ctx.strict ? this.chatStore?.listVariables?.(sid) || {} : localVars;
+        const global = ctx.strict ? this.chatStore?.listGlobalVariables?.() || {} : globalVars;
+        const currentVars = ctx.strict ? buildVariableContext({ baseVars: useGlobal ? global : local, globalVars: global, localVars: local }).variableContext : vars;
+        await this.applyAction(rule, { sessionId: sid, vars: currentVars, useGlobalVariables: useGlobal, signal: ctx.signal, canCommit: ctx.canCommit, strict: ctx.strict, requestOptions: ctx.requestOptions });
       }
+      return { executed: eligible.length };
     } finally {
       this.running.delete(sid);
     }
   }
 
-  async applyAction(rule, { sessionId, vars, useGlobalVariables = false }) {
+  async applyAction(rule, { sessionId, vars, useGlobalVariables = false, signal = null, canCommit = null, strict = false, requestOptions = {} }) {
     const action = rule.action || {};
     const type = String(action.type || '').trim().toLowerCase();
     const needsTarget = !['notify', 'switch_persona', 'inject_prompt'].includes(type);
@@ -189,7 +201,7 @@ export class VariableRuleEngine {
     if (needsTarget && !target) return;
     const cur = target ? vars?.[target] : undefined;
     const setVar = (name, value) => (
-      useGlobalVariables
+      signal?.aborted || canCommit?.() === false ? false : useGlobalVariables
         ? this.chatStore?.setGlobalVariable?.(name, value)
         : this.chatStore?.setVariable?.(name, value, sessionId)
     );
@@ -271,6 +283,7 @@ export class VariableRuleEngine {
     if (type === 'ai_evaluate') {
       const bridge = this.appBridge;
       if (!bridge?.backgroundChat || !bridge?.buildMessages) {
+        if (strict) throw new Error(t('变量模型不可用'));
         logger.warn('ai_evaluate skipped: backgroundChat/buildMessages unavailable');
         return;
       }
@@ -288,10 +301,15 @@ export class VariableRuleEngine {
           { role: 'system', content: system },
           { role: 'user', content: user },
         ];
-        const response = await bridge.backgroundChat(messages, { temperature: 0.2, maxTokens: 40 });
+        const variables = () => useGlobalVariables ? this.chatStore?.listGlobalVariables?.() || {} : this.chatStore?.listVariables?.(sessionId) || {};
+        const variableSnapshot = JSON.stringify(variables());
+        const response = await bridge.backgroundChat(messages, { ...requestOptions, temperature: 0.2, maxTokens: 40, ...(signal ? { signal } : {}) });
+        if (signal?.aborted || canCommit?.() === false) throw Object.assign(new Error('variable task cancelled'), { name: 'AbortError' });
+        if (strict && variableSnapshot !== JSON.stringify(variables())) throw new Error(t('变量已发生变化，请重新执行'));
         const text = String(response || '').trim();
-        const match = text.match(/-?\d+(?:\.\d+)?/);
+        const match = text.match(strict ? /^-?\d+(?:\.\d+)?$/ : /-?\d+(?:\.\d+)?/);
         if (!match) {
+          if (strict) throw new Error(t('模型未返回有效的变量更新'));
           logger.warn('ai_evaluate: no number found', text);
           return;
         }
@@ -305,6 +323,7 @@ export class VariableRuleEngine {
           setVar(target, curNum + num);
         }
       } catch (err) {
+        if (strict || err?.name === 'AbortError') throw err;
         logger.warn('ai_evaluate failed', err);
       }
     }

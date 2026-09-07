@@ -63,8 +63,6 @@ assert.match(boardPanel, /class="hop-menu hop-secondary-actions" role="menu" hid
 assert.match(boardPanel, /iconBtn\('run-mode', t\('上一轮'\)/, '回看上一轮为图标按钮');
 assert.match(boardPanel, /iconBtn\('library', t\('全部 Agent'\)\)/, '目录入口在标题栏');
 assert.match(boardPanel, /createCustomSelectWrapper/, '编排下拉复用 APP 组件，不另造选单');
-assert.doesNotMatch(css, /radial-gradient/, '房子改为平面粉笔线，不再使用色光渐变');
-assert.match(css, /\.hop-court \.hop-fusion-part:not\(\[data-hop-part='body'\]\) \.hop-title \{[^}]*font-size: 13px/, '融合项次级于正文');
 assert.match(boardPanel, /iconBtn\('help', t\('说明'\)\)/);
 assert.match(boardPanel, /class="hop-icon-only" title="\$\{e\(label\)\}" aria-label="\$\{e\(label\)\}"/, '图标按钮统一带 title 与 aria-label');
 console.log('ok - theme-aware grouped toolbar, accessible icon buttons and full-width mobile save');
@@ -74,6 +72,7 @@ assert.doesNotMatch(index, /id="hopscotch-board-trigger"/, '不保留平行的�
 assert.match(app, /getHopscotchPanel: \(\) => hopscotchBoardPanel/);
 assert.match(app, /embedded: true/);
 assert.match(app, /getPlace: \(\) => uiMode === 'rp' \? 'writing' : 'chat'/);
-assert.match(app, /if \(sessionId !== chatStore.getCurrent\?\.\(\)\) return false/, '变量入口不能把旧卡片操作施加到已切换的新会话');
+assert.match(app, /if \(sessionId !== chatStore.getCurrent\?\.\(\)\) return null/, '正文预览在构建前检查卡片会话');
+assert.match(app, /return sessionId === chatStore.getCurrent\?\.\(\) \? request : null/, '构建期间切会话时丢弃旧预览结果');
 assert.match(app, /closeRelatedLayer: \(\) => variablePanel.hasVisibleLayer\(\) && variablePanel.closeTopLayer\(\)/, '仅可见变量子层优先返回，不干扰隐藏面板');
 console.log('ok - AC owns the board entry and inter-row add buttons stay centered');

@@ -1,10 +1,10 @@
 {
   "name": "omnitavern",
-  "version": "0.7.2",
+  "version": "0.7.2-diagnose-1",
   "description": "A cross-platform chat application with LLM integration",
   "type": "module",
   "scripts": {
-    "test:hopscotch": "node scripts/tests/hopscotch-board-utils-tests.mjs && node scripts/tests/hopscotch-board-store-tests.mjs && node scripts/tests/creative-turn-orchestrator-tests.mjs && node scripts/tests/hopscotch-turn-runtime-tests.mjs && node scripts/tests/hopscotch-board-editor-tests.mjs && node scripts/tests/hopscotch-lifecycle-tests.mjs && node scripts/tests/agent-center-hopscotch-tests.mjs && node scripts/tests/agent-center-migration-tests.mjs",
+    "test:hopscotch": "node scripts/tests/hopscotch-drag-tests.mjs && node scripts/tests/hopscotch-sidecar-tests.mjs && node scripts/tests/variable-workflow-tests.mjs && node scripts/tests/hopscotch-activation-tests.mjs && node scripts/tests/hopscotch-board-utils-tests.mjs && node scripts/tests/hopscotch-board-store-tests.mjs && node scripts/tests/creative-turn-orchestrator-tests.mjs && node scripts/tests/hopscotch-turn-runtime-tests.mjs && node scripts/tests/hopscotch-board-editor-tests.mjs && node scripts/tests/hopscotch-lifecycle-tests.mjs && node scripts/tests/agent-center-hopscotch-tests.mjs && node scripts/tests/agent-center-migration-tests.mjs",
     "pretest:all": "npm run test:hopscotch",
     "test:brand": "node scripts/tests/omnitavern-brand-contract-tests.mjs",
     "prepare": "bash scripts/download-deps.sh && node scripts/fix-paths.js",

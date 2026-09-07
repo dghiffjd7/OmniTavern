@@ -412,8 +412,9 @@ export class VariablePanel extends VariablePanelRuntime {
         this.updateViewToggle({ animate: false });
     }
 
-    show() {
+    show({ onClose = null } = {}) {
         this.ensureUI();
+        this.onClose = onClose;
         const { sid, scope } = this.resolveScope();
         this.term = '';
         this.templateTerm = '';
@@ -442,6 +443,8 @@ export class VariablePanel extends VariablePanelRuntime {
 
     hide() {
         this.visibilityRevision += 1;
+        const onClose = this.onClose;
+        this.onClose = null;
         this.schemaEditor.hide();
         this.hideRuleEditor();
         this.hideDataModal();
@@ -451,6 +454,7 @@ export class VariablePanel extends VariablePanelRuntime {
         const finish = () => {
             if (this.overlay && !this.overlay.classList.contains('is-open')) {
                 this.overlay.style.display = 'none';
+                onClose?.();
             }
         };
         if (isReducedMotion()) finish();

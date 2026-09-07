@@ -1,5 +1,21 @@
 /* API 配置：迁移 roleplay-app-api-design 的纸张卡片、层级与轻动效。 */
 
+#config-panel.api-config-panel,
+.api-param-filter-dialog,
+.api-fc-compat-modal {
+  --api-config-vh: 1vh;
+}
+
+/* env() defers invalid-unit checks, so a preceding vh declaration is not enough.
+   Select dvh only after a simple feature query that older WebViews can reject. */
+@supports (height: 100dvh) {
+  #config-panel.api-config-panel,
+  .api-param-filter-dialog,
+  .api-fc-compat-modal {
+    --api-config-vh: 1dvh;
+  }
+}
+
 #config-overlay.api-config-overlay {
   position: fixed;
   inset: 0;
@@ -32,7 +48,7 @@
 #config-panel.api-config-panel > .api-config-modal {
   width: min(672px, 100%);
   max-height: min(
-    90dvh,
+    calc(90 * var(--api-config-vh, 1vh)),
     calc(100vh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 40px)
   );
   display: flex;
@@ -1250,7 +1266,7 @@ body[data-theme-mode='dark'] #config-panel.api-config-panel :is(
 
   #config-panel.api-config-panel > .api-config-modal {
     max-height: calc(
-      100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 24px
+      100 * var(--api-config-vh, 1vh) - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 24px
     );
   }
 
@@ -1286,7 +1302,7 @@ body[data-theme-mode='dark'] #config-panel.api-config-panel :is(
 
   #config-panel.api-config-panel > .api-config-modal {
     max-height: calc(
-      100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 16px
+      100 * var(--api-config-vh, 1vh) - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 16px
     );
     border-radius: 18px;
   }

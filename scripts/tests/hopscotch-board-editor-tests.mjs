@@ -52,7 +52,7 @@ console.log('ok - atomic board operations, fusion dependencies, shared safe cour
   const html = renderHopscotchCourt(fusedBoard, { editable: true });
   assert.match(html, /<div[^>]*hop-fusion-group[^>]*role="group"/, '融合组是一个容器，不在按钮中嵌套按钮');
   for (const kind of ['body', 'memory_table', 'image_prompt', 'variable']) {
-    assert.match(html, new RegExp('<button[^>]*data-hop-part="' + kind + '"[^>]*>\\s*<span class="hop-title"'), '每个融合成员都有同级标题和独立点击区域');
+    assert.match(html, new RegExp('<button[^>]*data-hop-part="' + kind + '"[^>]*>(?:(?!</button>)[\\s\\S])*?<span class="hop-title"'), '每个融合成员都有可读名称和独立点击区域');
   }
   assert.equal((html.match(/data-hop-house="body"/g) || []).length, 1, '融合成员不能被计为额外房子');
   assert.doesNotMatch(html, /class="hop-fused"/, '融合组不再使用小标签');
@@ -73,7 +73,7 @@ console.log('ok - atomic board operations, fusion dependencies, shared safe cour
   const memoryId = board.rows.flatMap(row => row.houses).find(h => h.kind === 'memory_table').id;
   const live = renderHopscotchCourt(board, { states: { body: { status: 'succeeded' }, [memoryId]: { status: 'running' } }, status: 'running' });
   assert.equal((live.match(/hop-stone/g) || []).length, 1, '石子只落在当前执行行');
-  assert.match(live, /<div class="hop-row has-stone" data-hop-row="1">/, '石子在正在执行的第二行');
+  assert.match(live, /<div class="hop-row has-stone" data-hop-row="1" data-hop-row-id="[^"]+">/, '石子在正在执行的第二行');
   assert.match(live, /hop-tick/, '非编辑态行间用刻度表示先后');
   assert.match(live, /is-succeeded[^>]*data-hop-house="body"[\s\S]*?hop-cell-mark" aria-hidden="true">✓</, '完成用记号而非文字');
   assert.match(live, /class="hop-roof is-running"/);

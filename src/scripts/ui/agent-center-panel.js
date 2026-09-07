@@ -9,6 +9,7 @@ import { getLocalizedPromptText } from '../i18n/prompt-locale.js';
 import { appChoice, appConfirm, appPromptText } from './app-confirm.js';
 import { bindBackdropActivation } from './backdrop-activation-utils.js';
 import { captureAgentEditorDrafts, restoreAgentEditorDrafts } from './agent-editor-draft-utils.js';
+import { mountAgentRequestPreview } from './chat/agent-request-preview.js';
 import { bindCustomSelectButton, closeCustomSelectMenu } from './custom-select.js';
 import { buildDebugTextFilename } from './debug-panel-utils.js';
 import { exportDebugTextFile } from './debug-panel-export-utils.js';
@@ -2841,6 +2842,7 @@ const AGENT_CARD_GLYPHS = Object.freeze({
     phone_format_agent: '▯',
     reply_check: '✓',
     write_preview: '⌁',
+    variable: 'Δ',
     text_completion: '…',
     prompt_manager: '¶',
     memory_manager: '◇',
@@ -4108,16 +4110,16 @@ export class AgentCenterPanel {
                 </div>
             </div>
             ${renderChips([
-                { label: displayCardCategory(agent.category), className: statusChipClass('pending') },
-                { label: agent.implemented ? '可使用' : '规划中', className: statusChipClass(agent.implemented ? 'succeeded' : 'pending') },
-                isDiagnosticView ? { label: '诊断视图' } : { label: agent.enabled ? '已开启' : '已关闭', className: statusChipClass(agent.enabled ? 'running' : 'denied') },
+                agent.contextual ? null : { label: displayCardCategory(agent.category), className: statusChipClass('pending') },
+                agent.contextual ? null : { label: agent.implemented ? '可使用' : '规划中', className: statusChipClass(agent.implemented ? 'succeeded' : 'pending') },
+                isDiagnosticView ? { label: '诊断视图' } : { label: agent.workflowState ? (agent.workflowState.enabled ? t('已启用') : t('已停用')) : agent.statusLabel || (agent.enabled ? '已开启' : '已关闭'), className: statusChipClass((agent.workflowState?.enabled ?? agent.enabled) ? 'running' : agent.workflowState ? 'idle' : 'denied') },
                 promptCount ? { label: `提示词 ${promptCount}` } : null,
                 runtimeState ? { label: displayStatusLabel(runtimeState.status), className: statusChipClass(runtimeState.status) } : null,
             ])}
-            <div class="agent-center-agent-section">
+            ${agent.contextual ? '' : `<div class="agent-center-agent-section">
                 <div class="agent-center-agent-section-title">说明</div>
                 ${(detail.length ? detail : [agent.summary]).filter(Boolean).map(line => `<div class="agent-center-card-sub">${escapeHtml(line)}</div>`).join('')}
-            </div>
+            </div>`}
             ${this.renderAgentSettingRefs(agent)}
             ${this.renderAgentRuntimeState(agent)}
         `;
@@ -4158,19 +4160,21 @@ export class AgentCenterPanel {
         `;
     }
 
-    mountHopscotchAgentCard(host, { agentId = '', card, frontExtra = '', toolbarExtra = '', content, configure = false, readOnly = false, onClose, fusedConfigs = [], onOpenVariables = null } = {}) {
+    mountHopscotchAgentCard(host, { agentId = '', card, frontExtra = '', toolbarExtra = '', content, configure = false, readOnly = false, onClose, fusedConfigs = [], onOpenFused = null, buildPromptPreview = null, workflowState = null } = {}) {
         if (!host) return null;
-        const entry = { host, agentId, card, frontExtra, toolbarExtra, content, readOnly, onClose, fusedConfigs, onOpenVariables, flipped: configure, entering: true };
+        const entry = { host, agentId, card, frontExtra, toolbarExtra, content, readOnly, onClose, fusedConfigs, onOpenFused, buildPromptPreview, workflowState, preview: null, flipped: configure, entering: true };
         this.sharedAgentConfig = entry;
         this.refreshSharedAgentConfig();
         return {
             hasDraft: () => captureAgentEditorDrafts(host).editors.length > 0,
             setReadOnly: () => {
                 entry.readOnly = true;
+                entry.preview?.close();
                 host.querySelector('[data-hop-agent-config]')?.setAttribute('disabled', '');
-                host.querySelectorAll('[data-action="remove"]').forEach(button => { button.disabled = true; });
+                host.querySelectorAll('[data-action="remove"], [data-action="toggle-enabled"], [data-action="variable-settings"], [data-action="variable-preview-tools"], [data-request-action]').forEach(button => { button.disabled = true; });
             },
-            dispose: () => { if (this.sharedAgentConfig === entry) this.sharedAgentConfig = null; },
+            closePreview: () => entry.preview?.close() || false,
+            dispose: () => { entry.preview?.dispose(); if (this.sharedAgentConfig === entry) this.sharedAgentConfig = null; },
         };
     }
 
@@ -4178,57 +4182,41 @@ export class AgentCenterPanel {
         const entry = this.sharedAgentConfig;
         if (!entry || !entry.host.isConnected) return;
         const linkedAgent = entry.agentId && this.getAgentCardById(entry.agentId);
-        const agent = linkedAgent || entry.card;
-        if (!agent) return;
+        if (!linkedAgent && !entry.card) return;
+        const agent = { ...(linkedAgent || entry.card), workflowState: entry.workflowState };
         const snapshot = captureAgentEditorDrafts(entry.host);
-        const expanded = [...entry.host.querySelectorAll('[data-hop-fused-config][open]')].map(node => node.dataset.hopFusedConfig);
-        const focusedConfig = entry.host.ownerDocument.activeElement?.closest('summary')?.parentElement?.dataset.hopFusedConfig;
+        const previewState = entry.preview?.snapshot();
+        entry.preview?.dispose(); entry.preview = null;
         const focusedField = entry.content?.contains(entry.host.ownerDocument.activeElement) ? entry.host.ownerDocument.activeElement : null;
         const scrollPositions = [...entry.host.querySelectorAll('.agent-center-floating-face')].map(face => face.scrollTop);
         // 编排表单保留原节点；AC 后台刷新不得重建房子的未提交输入。
         entry.content?.remove();
-        const fusedConfiguration = entry.fusedConfigs.map(config => {
-            const related = config.agentId && this.getAgentCardById(config.agentId);
-            const fields = related ? `<p class="agent-center-card-sub">${escapeHtml(t('共享设置会影响使用此 Agent 的其他会话。'))}</p>${this.renderAgentConfiguration(related, { preview: false })}`
-                : config.id === 'variable' ? `<button type="button" class="agent-center-card-action" data-hop-variable-config ${entry.onOpenVariables ? '' : 'disabled'}>${escapeHtml(t('打开变量面板'))}</button>` : '';
-            return `<details class="hop-fused-config" data-hop-fused-config="${escapeHtml(config.id)}"><summary>${escapeHtml(config.label)}</summary>${fields}</details>`;
-        }).join('');
+        const fusedLinks = entry.fusedConfigs.length ? `<div class="agent-center-card-actions">${entry.fusedConfigs.map(config => `<button type="button" class="agent-center-card-action" data-hop-fused-open="${escapeHtml(config.id)}">${escapeHtml(config.label)}</button>`).join('')}</div>` : '';
         const configuration = linkedAgent
             ? `<p class="agent-center-card-sub">${escapeHtml(t('共享设置会影响使用此 Agent 的其他会话。'))}</p>${this.renderAgentConfiguration(agent)}`
-            : agent.id === 'body' ? this.renderAgentPromptPreviewAction(agent) + fusedConfiguration : '';
+            : agent.id === 'body' ? this.renderAgentPromptPreviewAction(agent) + fusedLinks : '';
         entry.host.innerHTML = this.renderFloatingAgentCard({
             agent, flipped: entry.flipped, entering: entry.entering,
             toolbarExtra: entry.readOnly ? '' : entry.toolbarExtra,
-            frontExtra: entry.frontExtra + (entry.fusedConfigs.length ? `<div class="agent-center-card-actions">${entry.fusedConfigs.map(config => `<button type="button" class="agent-center-card-action" data-hop-fused-open="${escapeHtml(config.id)}">${escapeHtml(config.label)}</button>`).join('')}</div>` : ''),
+            frontExtra: entry.frontExtra + fusedLinks,
             configuration: `<fieldset data-hop-agent-config class="hop-card-fields" ${entry.readOnly ? 'disabled' : ''}>${configuration}</fieldset><p class="hop-error" role="alert">${escapeHtml(this.lastError)}</p>`,
-            subtitle: entry.readOnly ? t('本轮') : linkedAgent ? t('配置 · 修改后即时生效') : entry.fusedConfigs.length ? t('配置') : t('修改仅对下一轮生效，未保存不改变设置。'),
+            subtitle: entry.readOnly ? t('本轮') : agent.contextual ? t('当前角色') : linkedAgent ? t('配置 · 修改后即时生效') : entry.fusedConfigs.length ? t('配置') : t('修改仅对下一轮生效，未保存不改变设置。'),
         });
         entry.entering = false;
         if (entry.content) entry.host.querySelector('.agent-center-floating-face-back').append(entry.content);
+        if (entry.buildPromptPreview && !entry.readOnly) entry.preview = mountAgentRequestPreview({ host: entry.host, buildRequest: entry.buildPromptPreview, savedState: previewState });
         this.bindAgentCardEvents(entry.host, {
             onFlip: () => {
                 entry.flipped = !entry.flipped;
                 this.updateFloatingAgentFace(entry.host.querySelector('.agent-center-floating-card'), entry.flipped);
             },
             onClose: entry.onClose,
+            onPromptPreview: id => entry.preview && id === 'body' ? entry.preview.open() : this.handleAgentPromptPreview(id),
         });
-        entry.host.querySelectorAll('[data-hop-fused-config]').forEach(node => { node.open = expanded.includes(node.dataset.hopFusedConfig); });
         entry.host.querySelectorAll('[data-hop-fused-open]').forEach(button => {
-            button.onclick = () => {
-                const section = [...entry.host.querySelectorAll('[data-hop-fused-config]')].find(node => node.dataset.hopFusedConfig === button.dataset.hopFusedOpen);
-                if (!section) return;
-                entry.host.querySelectorAll('[data-hop-fused-config]').forEach(node => { node.open = node === section; });
-                entry.flipped = true;
-                this.updateFloatingAgentFace(entry.host.querySelector('.agent-center-floating-card'), true);
-                entry.host.querySelector('.agent-center-floating-face-back').scrollTop = 0;
-                section.querySelector('summary')?.focus({ preventScroll: true });
-            };
-        });
-        entry.host.querySelector('[data-hop-variable-config]')?.addEventListener('click', () => {
-            if (!entry.readOnly) entry.onOpenVariables?.();
+            button.onclick = () => { void entry.onOpenFused?.(button.dataset.hopFusedOpen); };
         });
         restoreAgentEditorDrafts(entry.host, snapshot);
-        if (focusedConfig) [...entry.host.querySelectorAll('[data-hop-fused-config]')].find(node => node.dataset.hopFusedConfig === focusedConfig)?.querySelector('summary')?.focus({ preventScroll: true });
         entry.host.querySelectorAll('.agent-center-floating-face').forEach((face, index) => { face.scrollTop = scrollPositions[index] || 0; });
         focusedField?.focus({ preventScroll: true });
     }
@@ -6626,7 +6614,7 @@ export class AgentCenterPanel {
         </div>`;
     }
 
-    bindAgentCardEvents(root = this.contentElement, { onFlip = () => this.toggleFloatingAgentCard(), onClose = () => this.closeFloatingAgentCard() } = {}) {
+    bindAgentCardEvents(root = this.contentElement, { onFlip = () => this.toggleFloatingAgentCard(), onClose = () => this.closeFloatingAgentCard(), onPromptPreview = id => this.handleAgentPromptPreview(id) } = {}) {
         if (!root) return;
         root.querySelectorAll('[data-agent-card-open]').forEach((card) => {
             const open = () => this.openFloatingAgentCard(card.dataset.agentCardOpen || '');
@@ -6673,7 +6661,7 @@ export class AgentCenterPanel {
             button.addEventListener('click', () => this.handleMemoryStorageMode(button.dataset.memoryStorageMode || 'table'));
         });
         root.querySelectorAll('[data-agent-prompt-preview]').forEach((button) => {
-            button.addEventListener('click', () => this.handleAgentPromptPreview(button.dataset.agentPromptPreview || ''));
+            button.addEventListener('click', () => onPromptPreview(button.dataset.agentPromptPreview || ''));
         });
         root.querySelectorAll('[data-reply-check-preview-target]').forEach((select) => {
             select.addEventListener('change', () => this.handleReplyCheckPreviewTargetChange(select.value || 'auto'));

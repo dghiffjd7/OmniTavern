@@ -89,7 +89,7 @@ const bodyRow = (fused = []) => ({ id: 'rb', houses: [{ id: 'body', kind: 'body'
   assert.ok(codes(r2).includes('multiple_body'));
   const r3 = validateHopscotchBoard({ rows: [] });
   assert.ok(codes(r3).includes('empty_board'));
-  const r4 = validateHopscotchBoard({ version: 2, rows: [bodyRow()] });
+  const r4 = validateHopscotchBoard({ version: 99, rows: [bodyRow()] });
   assert.ok(codes(r4).includes('unsupported_version'));
   console.log('ok - body anchor, version and empty board errors');
 }

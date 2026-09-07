@@ -1,0 +1,126 @@
+// Windows WebView，隔离内存工作流；使用真实鼠标/触摸输入，不写用户配置、不请求模型。
+import assert from 'node:assert/strict';
+import { writeFileSync } from 'node:fs';
+import { createWsClient, findAppPageTarget, evaluateInApp } from '../dev/cdp-client.mjs';
+const target = await findAppPageTarget(), pending = new Map();
+let client, seq = 0;
+await new Promise((resolve, reject) => {
+  client = createWsClient(target.webSocketDebuggerUrl, { onOpen: resolve, onError: reject, onMessage: raw => {
+    const msg = JSON.parse(raw), job = pending.get(msg.id); if (!job) return;
+    pending.delete(msg.id); msg.error ? job.reject(new Error(JSON.stringify(msg.error))) : job.resolve(msg.result);
+  } });
+});
+const command = (method, params = {}) => new Promise((resolve, reject) => { const id = ++seq; pending.set(id, { resolve, reject }); client.send(JSON.stringify({ id, method, params })); });
+const settle = (ms = 350) => new Promise(resolve => setTimeout(resolve, ms));
+const ev = source => evaluateInApp(`(() => { const f = window.__hopDragSmoke; ${source} })()`);
+const point = (selector, dx = .5, dy = .5) => ev(`const el = f.root().querySelector(${JSON.stringify(selector)}); if (!el) throw new Error('Missing drag element'); const r = el.getBoundingClientRect(); return { x: r.x + r.width * ${dx}, y: r.y + r.height * ${dy} };`);
+const mouse = (type, p, down = false) => command('Input.dispatchMouseEvent', { type, ...p, button: type === 'mouseMoved' ? 'none' : 'left', buttons: down ? 1 : 0, clickCount: type === 'mouseMoved' ? 0 : 1 });
+const press = async selector => { const p = await point(selector); await mouse('mouseMoved', p); await mouse('mousePressed', p, true); await settle(); return p; };
+const glide = async (from, to, touch = false) => { for (let i = 1; i <= 8; i++) { const p = { x: from.x + (to.x - from.x) * i / 8, y: from.y + (to.y - from.y) * i / 8 }; if (touch) await command('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [p] }); else await mouse('mouseMoved', p, true); await settle(20); } await settle(); };
+const layout = () => ev(`return [...f.root().querySelectorAll('[data-hop-row]')].map(row => [...row.querySelectorAll('[data-hop-house]')].map(h => h.dataset.hopHouse));`);
+const capture = async name => { if (!process.env.HOP_SCREENSHOT_DIR) return; const { data } = await command('Page.captureScreenshot', { format: 'png' }); writeFileSync(`${process.env.HOP_SCREENSHOT_DIR}/drag-${name}.png`, Buffer.from(data, 'base64')); };
+try {
+  await command('Emulation.setDeviceMetricsOverride', { width: 1200, height: 1100, deviceScaleFactor: 1, mobile: false });
+  await evaluateInApp(`(async () => {
+    const registry = window.appBridge.debugUiRegistry;
+    if (registry.panels.agentCenterPanel.hide() === false) throw new Error('Existing unsaved AC draft');
+    const { AgentCenterPanel } = await import('/scripts/ui/agent-center-panel.js');
+    const { createHopscotchBoardPanel } = await import('/scripts/ui/chat/hopscotch-board-panel.js');
+    const { createHopscotchBoardStore } = await import('/scripts/storage/hopscotch-board-store.js');
+    const { createHopscotchTurnRuntime } = await import('/scripts/ui/chat/hopscotch-turn-runtime.js');
+    const storage = new Map(), store = createHopscotchBoardStore({ storage: { getItem: k => storage.get(k), setItem: (k,v) => storage.set(k,v) } });
+    const initial = { rows: [
+      { id: 'ideas', houses: [{ id: 'a', kind: 'custom_prompt', label: '灵感', config: { prompt: 'Prepare inspiration' } }, { id: 'b', kind: 'custom_prompt', label: '检索', config: { prompt: 'Find references' } }] },
+      { id: 'main', houses: [{ id: 'body', kind: 'body', fused: ['memory_table', 'image_prompt', 'variable'], fusedEnabled: { variable: false } }] },
+      { id: 'post', houses: [{ id: 'image', kind: 'image_generation' }] },
+    ] };
+    await store.setGlobalBoard(initial);
+    const f = { registry, store, initial, requests: 0, enabled: 0, scope: 'rp:drag-smoke' };
+    f.runtime = createHopscotchTurnRuntime({ boardStore: store, getSettings: () => ({ creativeHopscotchEnabled: true }), resolveWritingSettings: () => ({ memory: { storageMode: 'table' }, variables: { activity: { available: true, enabled: true, updateModes: ['inline'], rulePhases: [], effects: ['values'], kinds: ['app'] } } }) });
+    f.ac = new AgentCenterPanel({ getActions: () => ({}), getHopscotchPanel: () => f.board });
+    f.board = createHopscotchBoardPanel({ embedded: true, boardStore: store, runtime: f.runtime, getSessionId: () => f.scope, getPlace: () => 'writing', enable: () => { f.enabled++; }, getProfiles: () => [{ id: 'fixture-text', name: '独立文本配置' }], mountAgentCard: (host, options) => f.ac.mountHopscotchAgentCard(host, options) });
+    f.ac.show(); await f.ac.refresh();
+    f.root = () => f.ac.contentElement.querySelector('.hop-embedded');
+    f.click = selector => { const el = f.root().querySelector(selector); if (!el) throw new Error('Missing ' + selector); el.click(); };
+    f.reset = async () => { f.board.close(); await store.setGlobalBoard(initial); await f.ac.refresh(); };
+    window.__hopDragSmoke = f;
+  })()`);
+  await settle();
+  assert.equal(await ev(`return document.querySelectorAll('.hop-drop-target').length;`), 0, 'idle has no drop affordances');
+  await capture('desktop-idle');
+  let from = await press('[data-hop-node="body__memory_table"]');
+  assert(await ev(`return !!f.root().querySelector('.is-drag-source') && document.querySelectorAll('.hop-drop-target:not([hidden])').length > 0;`), 'hold lifts the house and reveals valid destinations');
+  await capture('desktop-held');
+  let to = await point('[data-hop-house="image"]', 1.08);
+  await glide(from, to); await mouse('mouseReleased', to); await settle();
+  assert.deepEqual((await layout()).at(-1), ['image', 'body__memory_table'], 'split joins a parallel row');
+  assert.equal(await ev(`return f.store.getGlobalBoard().rows.at(-1).houses.length;`), 1, 'drop remains an unsaved draft');
+  assert.equal(await ev(`return !!document.querySelector('.hop-house-detail[open]');`), false, 'drop does not also open the card');
+  from = await press('[data-hop-node="body__memory_table"]');
+  to = await point('[data-hop-house="body"]');
+  await glide(from, to); await capture('desktop-fusion'); await mouse('mouseReleased', to); await settle();
+  assert.equal(await ev(`return f.root().querySelector('[data-hop-node="body__memory_table"]').dataset.hopPart;`), 'memory_table');
+  await ev(`f.click('[data-action="undo"]');`);
+  assert.deepEqual((await layout()).at(-1), ['image', 'body__memory_table']);
+  await ev(`f.click('[data-action="undo"]');`);
+  assert.deepEqual((await layout()).at(-1), ['image']);
+  assert.equal(await ev(`return f.root().querySelector('[data-hop-node="body__variable"]').dataset.hopEnabled;`), 'false');
+  const beforeCancel = await layout();
+  from = await press('[data-hop-node="b"]');
+  await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' });
+  await mouse('mouseReleased', from); await settle();
+  assert.deepEqual(await layout(), beforeCancel); assert.equal(await ev(`return document.querySelectorAll('.hop-drop-target').length;`), 0);
+  from = await press('[data-hop-node="b"]'); to = await point('[data-hop-node="a"]', -.07);
+  await glide(from, to); await mouse('mouseReleased', to); await settle();
+  assert.deepEqual((await layout())[0], ['b', 'a'], 'horizontal drop preserves a parallel row and changes order');
+  await ev(`f.click('[data-action="save"]');`); await settle();
+  assert.deepEqual(await ev(`return f.store.getGlobalBoard().rows[0].houses.map(h => h.id);`), ['b', 'a']);
+  assert.equal(await ev(`return f.root().querySelector('.hop-source').classList.contains('is-dirty');`), false);
+  await ev(`f.root().querySelector('[data-hop-node="a"]').focus();`);
+  await command('Input.dispatchKeyEvent', { type: 'keyDown', key: ' ', code: 'Space' });
+  await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'End', code: 'End' });
+  await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', text: '\r' });
+  await settle(); assert.deepEqual((await layout()).at(-1), ['a'], 'keyboard can create a later row');
+  from = await press('[data-hop-node="body__variable"]'); to = await point('[data-hop-house="image"]', 1.08);
+  await glide(from, to); await mouse('mouseReleased', to); await settle();
+  const variablePoint = await point('[data-hop-node="body__variable"]');
+  await mouse('mousePressed', variablePoint, true); await mouse('mouseReleased', variablePoint); await settle();
+  await ev(`const detail = document.querySelector('.hop-house-detail[open]'); if (!detail) throw new Error('Variable card missing'); detail.querySelector('.agent-center-floating-face:not([inert]) [data-agent-float-flip]').click();`);
+  await settle();
+  await ev(`const detail = document.querySelector('.hop-house-detail[open]'); detail.querySelector('[name="model"]').value = 'fixture-text'; detail.querySelector('[name="modelOverride"]').value = 'chosen-text-model'; detail.querySelector('[data-action="apply"]').click();`);
+  await settle();
+  const beforeInvalid = await layout();
+  from = await press('[data-hop-node="body__variable"]'); to = await point('[data-hop-house="body"]');
+  await glide(from, to);
+  assert(await ev(`return document.querySelector('.hop-drop-tip').classList.contains('is-invalid');`), 'incompatible text profile explains why merging is unavailable');
+  await mouse('mouseReleased', to); await settle(); assert.deepEqual(await layout(), beforeInvalid);
+  await ev(`f.click('[data-action="save"]');`); await settle();
+  const configuredVariable = await ev(`return f.store.getGlobalBoard().rows.flatMap(r => r.houses).find(h => h.id === 'body__variable');`);
+  assert.equal(configuredVariable.enabled, false); assert.equal(configuredVariable.config.modelProfileId, 'fixture-text'); assert.equal(configuredVariable.config.modelOverride, 'chosen-text-model');
+  await evaluateInApp('window.__hopDragSmoke.reset()'); await settle();
+  await command('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
+  await command('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
+  await settle(); await capture('mobile-idle');
+  assert(await ev(`return f.root().querySelector('[data-hop-grip]').getBoundingClientRect().width >= 43;`));
+  from = await point('[data-hop-node="b"]');
+  await command('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [from] }); await settle(430);
+  assert(await ev(`return f.root().classList.contains('is-dragging');`));
+  await capture('mobile-held');
+  to = await point('[data-hop-node="a"]', -.07);
+  await glide(from, to, true); await command('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await settle();
+  assert.deepEqual((await layout())[0], ['b', 'a'], 'long-press touch drop rearranges houses');
+  await capture('mobile-result');
+  assert.equal(await ev(`return document.querySelectorAll('.hop-drop-target').length;`), 0);
+  const beforePan = await ev(`let el = f.root(); while (el && !(el.scrollHeight > el.clientHeight + 1 && /(auto|scroll)/.test(getComputedStyle(el).overflowY))) el = el.parentElement; f.scrollEl = el; return el?.scrollTop || 0;`);
+  from = await point('[data-hop-node="b"]', .35, .7);
+  await command('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [from] });
+  await command('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: from.x, y: from.y - 80 }] });
+  await command('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await settle();
+  const pan = await ev(`return { scroll: f.scrollEl?.scrollTop || 0, drag: f.root().classList.contains('is-dragging'), overflow: document.documentElement.scrollWidth > innerWidth + 1 };`);
+  assert.equal(pan.drag, false); assert.equal(pan.overflow, false); assert(pan.scroll > beforePan, 'ordinary swipe scrolls the mobile view');
+  console.log('ok - real pointer/touch lift, hidden idle targets, split/fuse/undo, reorder, keyboard, explicit save, scroll and mobile bounds');
+} finally {
+  await command('Emulation.setTouchEmulationEnabled', { enabled: false }); await command('Emulation.clearDeviceMetricsOverride');
+  await evaluateInApp(`(() => { const f = window.__hopDragSmoke; if (!f) return; f.runtime.clearScope(); f.ac.destroy(); f.board.dispose(); f.registry.panels.agentCenterPanel.show(); delete window.__hopDragSmoke; })()`);
+  client.close();
+}

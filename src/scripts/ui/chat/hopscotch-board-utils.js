@@ -3,7 +3,7 @@
 
 import { t, translateUiText } from '../../i18n/index.js';
 
-export const HOPSCOTCH_BOARD_VERSION = 1;
+export const HOPSCOTCH_BOARD_VERSION = 2;
 
 export const HOPSCOTCH_HOUSE_KINDS = Object.freeze({
   body: 'body',
@@ -11,6 +11,9 @@ export const HOPSCOTCH_HOUSE_KINDS = Object.freeze({
   summaryCompaction: 'summary_compaction',
   formatReview: 'format_review',
   imageGeneration: 'image_generation',
+  imagePrompt: 'image_prompt',
+  variable: 'variable',
+  variableRules: 'variable_rules',
   customPrompt: 'custom_prompt',
 });
 
@@ -20,6 +23,9 @@ export const HOPSCOTCH_FUSED_KINDS = Object.freeze(['memory_table', 'image_promp
 export const HOPSCOTCH_HOUSE_CATALOG = Object.freeze([
   { kind: 'body', label: '正文生成', icon: 'bolt', position: 'anchor', unique: true },
   { kind: 'memory_table', label: '记忆表格', icon: 'table', position: 'post', unique: true, fusable: true },
+  { kind: 'image_prompt', label: '图片提示', icon: 'image', position: 'post', unique: true, fusable: true },
+  { kind: 'variable', label: '变量更新', icon: 'sliders', position: 'post', unique: true, fusable: true },
+  { kind: 'variable_rules', label: '变量规则', icon: 'sliders', position: 'phase', unique: false },
   { kind: 'summary_compaction', label: '摘要压缩', icon: 'compress', position: 'post', unique: true },
   { kind: 'format_review', label: '格式复核', icon: 'check', position: 'post', unique: true },
   { kind: 'image_generation', label: '图片生成', icon: 'image', position: 'post', unique: true },
@@ -93,7 +99,7 @@ export const normalizeCustomHouseConfig = (config = {}) => {
   };
 };
 
-const normalizeHouse = (house = {}, rowIndex = 0, houseIndex = 0) => {
+const normalizeHouse = (house = {}, rowIndex = 0, houseIndex = 0, allocateMemberId = value => value) => {
   const src = isPlainObject(house) ? house : {};
   const kind = trim(src.kind);
   const id = trim(src.id) || (kind === 'body' ? 'body' : `h_${rowIndex + 1}_${houseIndex + 1}`);
@@ -101,28 +107,44 @@ const normalizeHouse = (house = {}, rowIndex = 0, houseIndex = 0) => {
     id,
     kind,
     label: trim(src.label) || CATALOG_BY_KIND.get(kind)?.label || kind || t('未知房子'),
+    enabled: src.enabled !== false,
   };
-  if (kind === 'body') out.fused = uniqueStrings(src.fused);
+  if (kind === 'body') {
+    out.fused = uniqueStrings(src.fused);
+    out.fusedEnabled = Object.fromEntries(out.fused.map(kind => [kind, (src.fusedEnabled?.[kind] ?? src.fusedMembers?.[kind]?.enabled) !== false]));
+    out.fusedMembers = Object.fromEntries(out.fused.map(memberKind => [memberKind, normalizeHouse({
+      ...src.fusedMembers?.[memberKind], id: src.fusedMembers?.[memberKind]?.id || allocateMemberId(`${id}__${memberKind}`),
+      kind: memberKind, enabled: out.fusedEnabled[memberKind],
+    }, rowIndex, houseIndex)]));
+  }
   if (kind === 'custom_prompt') out.config = normalizeCustomHouseConfig(src.config);
+  if (FUSED_SET.has(kind)) out.config = {
+    modelMode: src.config?.modelMode === 'profile' ? 'profile' : 'follow_current',
+    modelProfileId: src.config?.modelMode === 'profile' ? trim(src.config.modelProfileId) : '',
+    modelOverride: trim(src.config?.modelOverride),
+  };
+  if (kind === 'variable_rules') out.config = { phase: src.config?.phase === 'before' ? 'before' : 'after' };
   return out;
 };
 
 export const normalizeHopscotchBoard = (board = {}) => {
   const src = isPlainObject(board) ? board : {};
   const policySrc = isPlainObject(src.policy) ? src.policy : {};
+  const claimedIds = new Set((Array.isArray(src.rows) ? src.rows : []).flatMap((row, ri) => (Array.isArray(row?.houses) ? row.houses : []).flatMap((house, hi) => [trim(house?.id) || (house?.kind === 'body' ? 'body' : `h_${ri + 1}_${hi + 1}`), ...Object.values(house?.fusedMembers || {}).map(member => trim(member?.id))])));
+  const allocateMemberId = base => { let id = base, suffix = 1; while (claimedIds.has(id)) id = `${base}_${suffix++}`; claimedIds.add(id); return id; };
   const rows = (Array.isArray(src.rows) ? src.rows : [])
     .map((row, rowIndex) => {
       const rowSrc = isPlainObject(row) ? row : {};
       return {
         id: trim(rowSrc.id) || `r${rowIndex + 1}`,
         houses: (Array.isArray(rowSrc.houses) ? rowSrc.houses : [])
-          .map((house, houseIndex) => normalizeHouse(house, rowIndex, houseIndex)),
+          .map((house, houseIndex) => normalizeHouse(house, rowIndex, houseIndex, allocateMemberId)),
       };
     })
     // 编辑器的空落点不算执行行（§5.3）
     .filter(row => row.houses.length > 0);
   return {
-    version: toInt(src.version, HOPSCOTCH_BOARD_VERSION),
+    version: Number(src.version) === 1 ? HOPSCOTCH_BOARD_VERSION : toInt(src.version, HOPSCOTCH_BOARD_VERSION),
     id: trim(src.id) || 'board_default',
     name: trim(src.name) || '默认',
     source: trim(src.source) === 'user' ? 'user' : 'builtin-default',
@@ -133,6 +155,7 @@ export const normalizeHopscotchBoard = (board = {}) => {
       onHouseFailure: trim(policySrc.onHouseFailure) === 'stop_following_rows' ? 'stop_following_rows' : 'continue',
       houseTimeoutMs: toInt(policySrc.houseTimeoutMs, HOPSCOTCH_DEFAULT_POLICY.houseTimeoutMs),
       ...(policySrc.tableSummaryMaintenance === true ? { tableSummaryMaintenance: true } : {}),
+      ...(Array.isArray(policySrc.variableRuleExclusions) && policySrc.variableRuleExclusions.length ? { variableRuleExclusions: uniqueStrings(policySrc.variableRuleExclusions).filter(phase => phase === 'before' || phase === 'after') } : {}),
     },
   };
 };
@@ -154,6 +177,29 @@ export const findBodyRowIndex = (board = {}) => {
   return rows.findIndex(row => (row?.houses || []).some(house => house?.kind === 'body'));
 };
 
+// 原生模型规则是真实的独立请求。旧板的变量开关承接到对应触发阶段，读取时仅作投影。
+export const projectHopscotchVariableRules = (input, activity) => {
+  const board = normalizeHopscotchBoard(input);
+  const houses = board.rows.flatMap(row => row.houses), body = houses.find(h => h.kind === 'body');
+  if (!body || !activity?.rulePhases?.length) return board;
+  const variable = houses.find(h => h.kind === 'variable');
+  if (!body.fused.includes('variable') && !variable && !houses.some(h => h.kind === 'variable_rules')) return board;
+  const enabled = variable ? variable.enabled : body.fusedEnabled.variable !== false;
+  for (const phase of activity.rulePhases) {
+    if (board.policy.variableRuleExclusions?.includes(phase)) continue;
+    if (houses.some(h => h.kind === 'variable_rules' && h.config.phase === phase)) continue;
+    const bodyIndex = findBodyRowIndex(board);
+    const variableIndex = board.rows.findIndex(row => row.houses.includes(variable));
+    const index = phase === 'before' ? bodyIndex : Math.max(bodyIndex, variableIndex) + 1;
+    const base = `${body.id}__rules_${phase}`;
+    let id = base, suffix = 1;
+    while (houses.some(h => h.id === id) || board.rows.some(row => row.id === `r_${id}`)) id = `${base}_${suffix++}`;
+    board.rows.splice(index, 0, { id: `r_${id}`, houses: [{ id, kind: 'variable_rules', enabled, config: { phase } }] });
+  }
+  // 保留兼容变量格，切到有内联协议的角色时可恢复；原生规则的请求由独立房子承担。
+  return normalizeHopscotchBoard(board);
+};
+
 // 房子的主产物可已交付，内部维护仍在运行或失败；仅用于呈现，不改写交付终态。
 export const getHopscotchHouseDisplayStatus = (state = {}) => {
   if (state.status !== 'succeeded') return state.status;
@@ -173,7 +219,7 @@ export const validateHopscotchBoard = (input = {}) => {
     push('unsupported_version', t('不支持的板版本 {value}', { value: board.version }), { field: 'version' });
   }
   if (!board.rows.length) push('empty_board', t('板至少需要一行'));
-  if (board.rows.length > HOPSCOTCH_LIMITS.maxRows) {
+  if (board.rows.filter(row => row.houses.some(h => h.kind !== 'variable_rules')).length > HOPSCOTCH_LIMITS.maxRows || board.rows.length > HOPSCOTCH_LIMITS.maxRows + 2) {
     push('too_many_rows', t('行数超过上限 {value}', { value: HOPSCOTCH_LIMITS.maxRows }), { field: 'rows' });
   }
   if (board.policy.rowConcurrencyMax < HOPSCOTCH_LIMITS.minConcurrency || board.policy.rowConcurrencyMax > HOPSCOTCH_LIMITS.maxConcurrency) {
@@ -207,9 +253,14 @@ export const validateHopscotchBoard = (input = {}) => {
       }
       kindCount.set(house.kind, (kindCount.get(house.kind) || 0) + 1);
       if (house.kind === 'body') {
+        if (!house.enabled) push('body_required', t('正文生成需保持启用'), { houseId: house.id, field: 'enabled' });
         if (bodyHouse) push('multiple_body', t('正文房子只能有一个'), { houseId: house.id });
         bodyHouse = house;
         bodyRowIndex = rowIndex;
+        for (const member of Object.values(house.fusedMembers || {})) {
+          if (seenIds.has(member.id)) push('duplicate_house_id', t('房子 ID 重复：{value}', { value: member.id }), { houseId: member.id });
+          seenIds.add(member.id);
+        }
       }
       if (house.kind === 'custom_prompt') customCount += 1;
     });
@@ -230,8 +281,8 @@ export const validateHopscotchBoard = (input = {}) => {
     bodyHouse.fused.forEach((fused) => {
       if (!FUSED_SET.has(fused)) push('invalid_fused', t('正文不能融合「{value}」', { value: fused }), { houseId: bodyHouse.id, field: 'fused' });
     });
-    if (bodyHouse.fused.includes('memory_table') && (kindCount.get('memory_table') || 0) > 0) {
-      push('memory_fused_and_standalone', t('记忆表格不能同时融合进正文又独立成房'), { field: 'memory_table' });
+    for (const kind of HOPSCOTCH_FUSED_KINDS) if (bodyHouse.fused.includes(kind) && (kindCount.get(kind) || 0) > 0) {
+      push(kind === 'memory_table' ? 'memory_fused_and_standalone' : 'fused_and_standalone', t('「{value}」已在正文融合组中', { value: CATALOG_BY_KIND.get(kind)?.label || kind }), { field: kind });
     }
     // 位置约束
     let memoryRow = -1;
@@ -240,7 +291,9 @@ export const validateHopscotchBoard = (input = {}) => {
     board.rows.forEach((row, rowIndex) => {
       row.houses.forEach((house) => {
         if (house.kind === 'body') return;
-        if (house.kind !== 'custom_prompt' && house.kind !== 'body') {
+        if (house.kind === 'variable_rules' && house.config.phase === 'before') {
+          if (rowIndex >= bodyRowIndex) push('rules_before_body', t('发送前变量规则须位于正文之前'), { houseId: house.id });
+        } else if (house.kind !== 'custom_prompt' && house.kind !== 'body') {
           if (rowIndex <= bodyRowIndex) {
             push('builtin_before_body', t('「{value}」必须位于正文之后的行', { value: translateUiText(house.label) }), { houseId: house.id, rowId: row.id });
           }
@@ -253,9 +306,17 @@ export const validateHopscotchBoard = (input = {}) => {
     if (memoryRow >= 0 && compactionRow >= 0 && compactionRow <= memoryRow) {
       push('compaction_not_after_memory', t('摘要压缩必须位于独立记忆表格之后的行'), { field: 'summary_compaction' });
     }
-    if (imageRow >= 0 && !bodyHouse.fused.includes('image_prompt')) {
-      push('image_without_prompt', t('图片生成房子需要正文产出图片提示（fused: image_prompt）'), { field: 'image_generation' });
+    const promptRow = board.rows.findIndex(row => row.houses.some(h => h.kind === 'image_prompt'));
+    if (imageRow >= 0 && !bodyHouse.fused.includes('image_prompt') && promptRow < 0) {
+      push('image_without_prompt', t('图片生成需要位于前方的图片提示'), { field: 'image_generation' });
     }
+    if (imageRow >= 0 && promptRow >= imageRow) push('image_prompt_not_earlier', t('图片提示须位于图片生成之前'), { field: 'image_generation' });
+    for (const phase of ['before', 'after']) {
+      if (board.rows.flatMap(row => row.houses).filter(h => h.kind === 'variable_rules' && h.config.phase === phase).length > 1) push('duplicate_variable_phase', t('同阶段的变量规则只需一个房子'), { field: 'variable_rules' });
+    }
+    const variableRow = board.rows.findIndex(row => row.houses.some(h => h.kind === 'variable'));
+    const rulesRow = board.rows.findIndex(row => row.houses.some(h => h.kind === 'variable_rules' && h.config.phase === 'after'));
+    if (variableRow >= 0 && rulesRow >= 0 && variableRow >= rulesRow) push('variable_write_order', t('变量规则须位于变量更新之后'), { field: 'variable_rules' });
     // 正文之外不能有 fused（normalize 已剥离，但原始输入若带 fused 需报错）
     const rawRows = Array.isArray(input?.rows) ? input.rows : [];
     rawRows.forEach((row) => {
@@ -326,7 +387,8 @@ export const buildDefaultHopscotchBoard = (resolved = {}) => {
   const fused = [];
   if (tableAutoExtract && extractMode === 'inline') fused.push('memory_table');
   if (imageEnabled) fused.push('image_prompt');
-  if (variablesEnabled) fused.push('variable');
+  // 变量格固定保留，实际可用性由当前角色/会话能力投影；空角色也能看见停用原因。
+  if (variablesEnabled || src.variables?.activity) fused.push('variable');
 
   const rows = [{ id: 'r_body', houses: [{ id: 'body', kind: 'body', fused }] }];
   const post = [];
@@ -339,14 +401,14 @@ export const buildDefaultHopscotchBoard = (resolved = {}) => {
     else rows[rows.length - 1].houses.push({ id: 'compaction', kind: 'summary_compaction' });
   }
 
-  return normalizeHopscotchBoard({
+  return projectHopscotchVariableRules({
     version: HOPSCOTCH_BOARD_VERSION,
     id: 'board_builtin_default',
     name: '默认',
     source: 'builtin-default',
     rows,
     policy: { ...HOPSCOTCH_DEFAULT_POLICY, ...(tableAutoExtract ? { tableSummaryMaintenance: true } : {}) },
-  });
+  }, variables.activity);
 };
 
 // 编译为泳道投影（lanes/tasks）。胶水 input/context 保留为细条；房子 task.id = house.id；

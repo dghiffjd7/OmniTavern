@@ -1,5 +1,25 @@
 import { buildPresetContext, resolveResolvedPreset } from './chat/prompt-context-utils.js';
 
+// 预设与正文卡共用正式发送链的只读请求组装入口。
+export const createScenePromptPreviewRequestBuilder = ({ handleSend, logger } = {}) => async ({
+  previewUiMode = '', previewScenario = '', previewChatFormat = true,
+  previewInjectMemory = true, previewInjectImage = true, previewInjectMomentCreate = true,
+  includeHistory = false, rawBlocks = false, forceLegacyText = false,
+} = {}) => {
+  try {
+    const request = await handleSend(null, {
+      previewOnly: true, ignorePending: true, previewUiMode, previewScenario,
+      previewChatFormat, previewInjectMemory, previewInjectImage, previewInjectMomentCreate,
+      previewSuppressHistory: !includeHistory, previewRawBlocks: Boolean(rawBlocks),
+      previewForceLegacyText: Boolean(forceLegacyText), skipScripts: true,
+    });
+    return request && Array.isArray(request.messages) ? request : null;
+  } catch (err) {
+    logger?.warn?.('build scene preview request failed', err);
+    return null;
+  }
+};
+
 const normalizeScenePreviewMacroToken = token =>
   String(token ?? '').trim().replace(/：：/g, '::');
 

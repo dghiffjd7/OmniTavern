@@ -1,10 +1,12 @@
 import { normalizeHopscotchBoard, validateHopscotchBoard } from './hopscotch-board-utils.js';
+import { applyHopscotchDrop } from './hopscotch-drag-utils.js';
 
 let sequence = 0;
 const newId = prefix => `${prefix}_${Date.now().toString(36)}_${++sequence}`;
 
 // 所有输入方式共用同一套原子操作；非法移动不改变草稿。
 export const editHopscotchBoard = (board, action = {}) => {
+  if (action.type === 'drop') return applyHopscotchDrop(board, action.id, action.target, { capabilities: action.capabilities });
   const next = normalizeHopscotchBoard(board);
   const rows = next.rows;
   const sourceRow = rows.find(row => row.houses.some(h => h.id === action.id));
@@ -16,9 +18,13 @@ export const editHopscotchBoard = (board, action = {}) => {
     else rows[index].houses.splice(action.houseIndex ?? rows[index].houses.length, 0, item);
   };
   switch (action.type) {
-    case 'add': insert({ id: newId('house'), kind: action.kind, ...action.house }); break;
+    case 'add':
+      insert({ id: newId('house'), kind: action.kind, ...action.house });
+      if (action.kind === 'variable_rules') next.policy.variableRuleExclusions = (next.policy.variableRuleExclusions || []).filter(phase => phase !== (action.house?.config?.phase || 'after'));
+      break;
     case 'remove':
       if (!house || house.kind === 'body') return { ok: false, reason: 'body_required' };
+      if (house.kind === 'variable_rules') next.policy.variableRuleExclusions = [...new Set([...(next.policy.variableRuleExclusions || []), house.config.phase])];
       sourceRow.houses.splice(sourceRow.houses.indexOf(house), 1);
       break;
     case 'move':
@@ -34,11 +40,24 @@ export const editHopscotchBoard = (board, action = {}) => {
       if (!house) return { ok: false, reason: 'house_missing' };
       Object.assign(house, action.patch, { id: house.id, kind: house.kind });
       break;
+    case 'toggle':
+      if (!house) return { ok: false, reason: 'house_missing' };
+      if (action.member) {
+        if (house.kind !== 'body' || !house.fused.includes(action.member)) return { ok: false, reason: 'fused_missing' };
+        house.fusedEnabled[action.member] = action.enabled !== false;
+      } else {
+        if (house.kind === 'body') return { ok: false, reason: 'body_required' };
+        house.enabled = action.enabled !== false;
+      }
+      break;
     case 'fuse':
       if (!body) return { ok: false, reason: 'body_required' };
       if (action.enabled) {
+        const standalone = rows.flatMap(row => row.houses).find(h => h.kind === action.kind);
+        if (standalone) return applyHopscotchDrop(next, standalone.id, { type: 'fuse', hostId: body.id }, { capabilities: action.capabilities });
+        if (action.capabilities?.[action.kind]?.reason) return { ok: false, reason: action.capabilities[action.kind].reason };
         body.fused = [...new Set([...body.fused, action.kind])];
-        if (action.kind === 'memory_table') rows.forEach(row => { row.houses = row.houses.filter(h => h.kind !== 'memory_table'); });
+        body.fusedEnabled[action.kind] = true;
       } else body.fused = body.fused.filter(kind => kind !== action.kind);
       break;
     case 'policy': Object.assign(next.policy, action.patch); break;

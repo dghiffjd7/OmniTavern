@@ -1549,7 +1549,7 @@
   {
     "source": "{value}/{value2} 张图片生成失败",
     "references": [
-      "src/scripts/ui/app.js#ui-call"
+      "src/scripts/ui/chat/hopscotch-image-executor.js#ui-call"
     ]
   },
   {
@@ -1714,6 +1714,12 @@
     "source": "「{value}」已有头像。这个动作会替换现有头像。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "「{value}」已在正文融合组中",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-utils.js#ui-call"
     ]
   },
   {
@@ -2383,6 +2389,18 @@
     ]
   },
   {
+    "source": "按当前会话、输入草稿与已保存设置组装；发送脚本和前置 Agent 的新产物在执行时加入。",
+    "references": [
+      "src/scripts/ui/chat/agent-request-preview.js#ui-call"
+    ]
+  },
+  {
+    "source": "按当前角色的变量、更新约定和启用规则判断；条件规则在触发时执行。",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-variable-card-view.js#ui-call"
+    ]
+  },
+  {
     "source": "按当前模型的接口显式附加推理参数；关闭则不额外请求。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -2434,6 +2452,18 @@
     "source": "按需召回",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "按住房子查看落点；中心融合，左右并行，上下换行。手机可长按或拖动右上角把手。",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "按住拖动；空格键选择落点",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-court-view.js#ui-call"
     ]
   },
   {
@@ -2994,6 +3024,12 @@
     ]
   },
   {
+    "source": "保存后用于后续轮次，房子的位置与配置保留。",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "保存画像",
     "references": [
       "src/scripts/ui/agent-center-panel.js#html-text"
@@ -3477,6 +3513,12 @@
     ]
   },
   {
+    "source": "本地规则更新",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-variable-card-view.js#ui-call"
+    ]
+  },
+  {
     "source": "本地规则无效。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -3908,6 +3950,12 @@
     ]
   },
   {
+    "source": "变更预览工具",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-variable-card-view.js#ui-call"
+    ]
+  },
+  {
     "source": "变更摘要：{value}{value2}",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -3919,6 +3967,7 @@
       "src/scripts/ui/agent-center-resource-contract.js#ui-property",
       "src/scripts/ui/app.js#ui-property",
       "src/scripts/ui/chat/creative-execution-lane-runtime-utils.js#ui-property",
+      "src/scripts/ui/chat/hopscotch-variable-card-view.js#ui-call",
       "src/scripts/ui/variable-panel.js#html-attribute",
       "src/scripts/ui/variable-panel.js#html-text",
       "src/scripts/ui/world-editor.js#ui-property",
@@ -4004,9 +4053,22 @@
     ]
   },
   {
+    "source": "变量更新",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-utils.js#ui-property",
+      "src/scripts/ui/chat/hopscotch-variable-card-view.js#ui-call"
+    ]
+  },
+  {
     "source": "变量更新格式",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "变量功能已关闭",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-activation-utils.js#ui-call"
     ]
   },
   {
@@ -4034,7 +4096,26 @@
     "source": "变量规则",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/chat/hopscotch-board-utils.js#ui-property",
       "src/scripts/ui/variable-panel.js#html-text"
+    ]
+  },
+  {
+    "source": "变量规则按触发阶段独立执行",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-turn-runtime.js#ui-call"
+    ]
+  },
+  {
+    "source": "变量规则须位于变量更新之后",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-utils.js#ui-call"
+    ]
+  },
+  {
+    "source": "变量规则正在执行，请稍后重试",
+    "references": [
+      "src/scripts/variables/variable-rule-engine.js#ui-call"
     ]
   },
   {
@@ -4091,6 +4172,12 @@
     ]
   },
   {
+    "source": "变量模型不可用",
+    "references": [
+      "src/scripts/variables/variable-rule-engine.js#ui-call"
+    ]
+  },
+  {
     "source": "变量配置",
     "references": [
       "src/scripts/ui/variable-panel-runtime.js#html-text"
@@ -4106,6 +4193,12 @@
     "source": "变量配置已保存",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "变量设置",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-variable-card-view.js#ui-call"
     ]
   },
   {
@@ -4151,6 +4244,13 @@
     ]
   },
   {
+    "source": "变量已发生变化，请重新执行",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-sidecar-executors.js#ui-call",
+      "src/scripts/variables/variable-rule-engine.js#ui-call"
+    ]
+  },
+  {
     "source": "变量已更新",
     "references": [
       "src/scripts/ui/world-editor/world-variable-picker.js#ui-call"
@@ -4178,6 +4278,12 @@
     "source": "变量运行设置保存失败",
     "references": [
       "src/scripts/ui/variable-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "变量值",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-variable-card-view.js#ui-call"
     ]
   },
   {
@@ -4382,6 +4488,13 @@
     "source": "并非全部命中",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "并行",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-court-view.js#ui-call",
+      "src/scripts/ui/chat/hopscotch-pointer-drag.js#ui-call"
     ]
   },
   {
@@ -4944,6 +5057,12 @@
     ]
   },
   {
+    "source": "参与此流程",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "参与者",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
@@ -5479,6 +5598,12 @@
     "source": "撤销权限授权",
     "references": [
       "src/scripts/ui/plugin-panel.js#ui-property"
+    ]
+  },
+  {
+    "source": "撤销上一步",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
   },
   {
@@ -6247,6 +6372,19 @@
     ]
   },
   {
+    "source": "此处无法放置",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-drag-utils.js#ui-call"
+    ]
+  },
+  {
+    "source": "此房子需要独立请求",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-drag-utils.js#ui-call",
+      "src/scripts/ui/chat/hopscotch-pointer-drag.js#ui-call"
+    ]
+  },
+  {
     "source": "此服务商请直接登记已有 Voice ID",
     "references": [
       "src/scripts/ui/realtime/realtime-voice-enrollment.js#ui-definition"
@@ -6277,6 +6415,12 @@
     ]
   },
   {
+    "source": "此角色使用独立变量规则",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-activation-utils.js#ui-call"
+    ]
+  },
+  {
     "source": "此接入方式暂不支持在线模型列表；已显示内建候选，也可手动填写",
     "references": [
       "src/scripts/ui/realtime/realtime-model-discovery.js#ui-call"
@@ -6286,6 +6430,12 @@
     "source": "此渠道可不填写 API Key；若服务端启用鉴权再保存 Key。",
     "references": [
       "src/scripts/ui/config-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "此融合组已包含相同功能",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-drag-utils.js#ui-call"
     ]
   },
   {
@@ -6613,12 +6763,6 @@
     "source": "打开编辑器失败",
     "references": [
       "src/scripts/ui/world-panel.js#ui-call"
-    ]
-  },
-  {
-    "source": "打开变量面板",
-    "references": [
-      "src/scripts/ui/agent-center-panel.js#ui-call"
     ]
   },
   {
@@ -7181,6 +7325,12 @@
     "source": "当前比较链路仍缺少上游输入。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "当前变量暂无更新请求",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-activation-utils.js#ui-call"
     ]
   },
   {
@@ -7844,6 +7994,13 @@
     ]
   },
   {
+    "source": "当前角色",
+    "references": [
+      "src/scripts/ui/agent-center-panel.js#ui-call",
+      "src/scripts/ui/chat/hopscotch-variable-card-view.js#ui-call"
+    ]
+  },
+  {
     "source": "当前角色/会话默认的记忆结构。",
     "references": [
       "src/scripts/ui/general-settings-panel.js#html-attribute"
@@ -7907,6 +8064,18 @@
     "source": "当前角色已切换，请返回原角色后再处理候选",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "当前角色暂无变量",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-activation-utils.js#ui-call"
+    ]
+  },
+  {
+    "source": "当前角色暂无此阶段的变量规则",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-activation-utils.js#ui-call"
     ]
   },
   {
@@ -9566,6 +9735,12 @@
     "source": "第 {value} 行",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/chat/hopscotch-pointer-drag.js#ui-call"
+    ]
+  },
+  {
+    "source": "第 {value} 行 · {value2}",
+    "references": [
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
   },
@@ -10555,13 +10730,7 @@
     ]
   },
   {
-    "source": "独立到后一行",
-    "references": [
-      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
-    ]
-  },
-  {
-    "source": "独立到前一行",
+    "source": "独立到第 {value} 行",
     "references": [
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
@@ -10579,9 +10748,21 @@
     ]
   },
   {
+    "source": "独立模型配置需先改为跟随正文",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-drag-utils.js#ui-call"
+    ]
+  },
+  {
     "source": "独立请求",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "独立请求更新",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-variable-card-view.js#ui-call"
     ]
   },
   {
@@ -10997,6 +11178,18 @@
     ]
   },
   {
+    "source": "发送前变量规则",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-court-view.js#ui-call"
+    ]
+  },
+  {
+    "source": "发送前变量规则须位于正文之前",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-utils.js#ui-call"
+    ]
+  },
+  {
     "source": "发送失败",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -11149,6 +11342,7 @@
       "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/scripts/ui/agent-center-panel.js#html-attribute",
       "src/scripts/ui/agent-center-panel.js#html-text",
+      "src/scripts/ui/chat/agent-request-preview.js#ui-call",
       "src/scripts/ui/preset-panel.js#html-attribute"
     ]
   },
@@ -12738,6 +12932,12 @@
     ]
   },
   {
+    "source": "跟随正文",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "跟随主模型",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -12845,6 +13045,12 @@
     "source": "更新冻结群聊成员",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "更新方式",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-variable-card-view.js#ui-call"
     ]
   },
   {
@@ -13117,6 +13323,7 @@
     "source": "构建失败：请确认当前有可用会话。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/chat/agent-request-preview.js#ui-call",
       "src/scripts/ui/preset-panel.js#html-text"
     ]
   },
@@ -13446,6 +13653,7 @@
     "source": "关闭预览",
     "references": [
       "src/scripts/ui/agent-center-panel.js#html-attribute",
+      "src/scripts/ui/chat/agent-request-preview.js#ui-call",
       "src/scripts/ui/preset-panel.js#html-attribute"
     ]
   },
@@ -14631,6 +14839,12 @@
     ]
   },
   {
+    "source": "回复后变量规则",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-court-view.js#ui-call"
+    ]
+  },
+  {
     "source": "回复内变量编辑已应用",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -15244,15 +15458,15 @@
     ]
   },
   {
-    "source": "记忆表格不能同时融合进正文又独立成房",
-    "references": [
-      "src/scripts/ui/chat/hopscotch-board-utils.js#ui-call"
-    ]
-  },
-  {
     "source": "记忆表格的后备行数上限。Token 模式下通常只在异常规模时触发。",
     "references": [
       "src/scripts/ui/general-settings-panel.js#html-attribute"
+    ]
+  },
+  {
+    "source": "记忆表格功能已关闭",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-activation-utils.js#ui-call"
     ]
   },
   {
@@ -15470,6 +15684,12 @@
     "source": "记忆模式替代",
     "references": [
       "src/scripts/ui/preset-panel.js#ui-property"
+    ]
+  },
+  {
+    "source": "记忆使用独立模型配置，需先改为跟随正文",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-turn-runtime.js#ui-call"
     ]
   },
   {
@@ -16400,6 +16620,12 @@
     ]
   },
   {
+    "source": "角色变量",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-variable-card-view.js#ui-call"
+    ]
+  },
+  {
     "source": "角色标签",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -16711,6 +16937,12 @@
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/scripts/ui/world-editor.js#html-text"
+    ]
+  },
+  {
+    "source": "角色与剧情阶段",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-variable-card-view.js#ui-call"
     ]
   },
   {
@@ -18275,6 +18507,12 @@
     ]
   },
   {
+    "source": "空格开始拖动，方向键选择落点，回车放置，Esc 取消。保存后用于后续轮次。",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "空行过多",
     "references": [
       "src/scripts/ui/chat/chat-body-quality-guardian-utils.js#ui-property"
@@ -18388,6 +18626,7 @@
   {
     "source": "拉出全屏预览",
     "references": [
+      "src/scripts/ui/chat/agent-request-preview.js#ui-call",
       "src/scripts/ui/preset-panel.js#html-attribute"
     ]
   },
@@ -18544,6 +18783,7 @@
     "source": "类型",
     "references": [
       "src/scripts/memory/default-template.js#ui-definition",
+      "src/scripts/ui/chat/hopscotch-variable-card-view.js#ui-call",
       "src/scripts/ui/variable-panel-runtime.js#html-text",
       "src/scripts/ui/variable-schema-editor.js#html-text"
     ]
@@ -19402,7 +19642,7 @@
     ]
   },
   {
-    "source": "聊天模式跟随当前设置；点击房子配置 Agent，不启用创意写作编排。",
+    "source": "聊天模式跟随当前设置；点击房子配置 Agent。",
     "references": [
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
@@ -21003,6 +21243,12 @@
     ]
   },
   {
+    "source": "模型规则评估",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-variable-card-view.js#ui-call"
+    ]
+  },
+  {
     "source": "模型回复格式修复失败，未提交回复副作用。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -21132,6 +21378,25 @@
     ]
   },
   {
+    "source": "模型未返回完整的变量更新",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-sidecar-executors.js#ui-call"
+    ]
+  },
+  {
+    "source": "模型未返回有效的变量更新",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-sidecar-executors.js#ui-call",
+      "src/scripts/variables/variable-rule-engine.js#ui-call"
+    ]
+  },
+  {
+    "source": "模型未返回有效的图片提示",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-sidecar-executors.js#ui-call"
+    ]
+  },
+  {
     "source": "模型修复返回",
     "references": [
       "src/scripts/ui/agent-center-panel.js#html-text"
@@ -21142,6 +21407,12 @@
     "references": [
       "src/scripts/ui/agent-center-panel.js#ui-property",
       "src/scripts/ui/app.js#ui-property"
+    ]
+  },
+  {
+    "source": "末尾",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
   },
   {
@@ -23401,6 +23672,12 @@
     ]
   },
   {
+    "source": "请求参数",
+    "references": [
+      "src/scripts/ui/chat/agent-request-preview.js#ui-call"
+    ]
+  },
+  {
     "source": "请求参数过滤",
     "references": [
       "src/scripts/ui/config-panel.js#html-text"
@@ -23489,6 +23766,7 @@
   {
     "source": "请求预览",
     "references": [
+      "src/scripts/ui/chat/agent-request-preview.js#ui-call",
       "src/scripts/ui/preset-panel.js#html-text"
     ]
   },
@@ -26044,6 +26322,18 @@
     "source": "容差",
     "references": [
       "src/scripts/ui/app.js#html-text"
+    ]
+  },
+  {
+    "source": "融合",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-court-view.js#ui-call"
+    ]
+  },
+  {
+    "source": "融合 · 共享请求",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-pointer-drag.js#ui-call"
     ]
   },
   {
@@ -28888,6 +29178,7 @@
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/scripts/ui/agent-center-panel.js#html-attribute",
+      "src/scripts/ui/chat/agent-request-preview.js#ui-call",
       "src/scripts/ui/preset-panel.js#html-attribute"
     ]
   },
@@ -30069,6 +30360,12 @@
     ]
   },
   {
+    "source": "随正文更新",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-variable-card-view.js#ui-call"
+    ]
+  },
+  {
     "source": "缩放",
     "references": [
       "src/index.html#html-text",
@@ -30275,6 +30572,12 @@
     "references": [
       "src/scripts/ui/app.js#html-text",
       "src/scripts/ui/app.js#ui-property"
+    ]
+  },
+  {
+    "source": "提示词条件",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-variable-card-view.js#ui-call"
     ]
   },
   {
@@ -31305,6 +31608,12 @@
     ]
   },
   {
+    "source": "同阶段的变量规则只需一个房子",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-utils.js#ui-call"
+    ]
+  },
+  {
     "source": "同名角色已存在",
     "references": [
       "src/scripts/ui/character-card-importer.js#ui-property"
@@ -31573,12 +31882,6 @@
     ]
   },
   {
-    "source": "图片生成房子需要正文产出图片提示（fused: image_prompt）",
-    "references": [
-      "src/scripts/ui/chat/hopscotch-board-utils.js#ui-call"
-    ]
-  },
-  {
     "source": "图片生成接口未就绪",
     "references": [
       "src/scripts/ui/command-runner.js#ui-call"
@@ -31623,6 +31926,12 @@
     ]
   },
   {
+    "source": "图片生成需要位于前方的图片提示",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-utils.js#ui-call"
+    ]
+  },
+  {
     "source": "图片生成已取消",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -31655,7 +31964,8 @@
   {
     "source": "图片提示",
     "references": [
-      "src/scripts/ui/chat/creative-execution-lane-runtime-utils.js#ui-property"
+      "src/scripts/ui/chat/creative-execution-lane-runtime-utils.js#ui-property",
+      "src/scripts/ui/chat/hopscotch-board-utils.js#ui-property"
     ]
   },
   {
@@ -31686,6 +31996,18 @@
     "source": "图片提示词已进入生成队列",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "图片提示须位于图片生成之前",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-utils.js#ui-call"
+    ]
+  },
+  {
+    "source": "图片提示已停用",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-activation-utils.js#ui-call"
     ]
   },
   {
@@ -31911,6 +32233,12 @@
     "source": "拖到比较节点左侧“左值”口，或右侧“右值”口。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "拖到亮起的位置",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-pointer-drag.js#ui-call"
     ]
   },
   {
@@ -32244,6 +32572,12 @@
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/scripts/ui/session-config-panel.js#html-text"
+    ]
+  },
+  {
+    "source": "为给定正文生成图片提示。只输出 <{tag}> 标签；无需配图时输出 <{tag}>none</{tag}>。",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-sidecar-executors.js#ui-call"
     ]
   },
   {
@@ -34488,7 +34822,8 @@
   {
     "source": "消息",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/chat/agent-request-preview.js#ui-call"
     ]
   },
   {
@@ -35119,7 +35454,8 @@
   {
     "source": "新增一行",
     "references": [
-      "src/scripts/ui/chat/hopscotch-court-view.js#ui-call"
+      "src/scripts/ui/chat/hopscotch-court-view.js#ui-call",
+      "src/scripts/ui/chat/hopscotch-pointer-drag.js#ui-call"
     ]
   },
   {
@@ -36071,6 +36407,18 @@
     ]
   },
   {
+    "source": "依据本轮正文和变量规则更新当前变量。只输出完整的 {open} 块，使用规则约定的命令或 JSONPatch；无变化时输出 {empty}。",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-sidecar-executors.js#ui-call"
+    ]
+  },
+  {
+    "source": "依赖的房子已停用",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-activation-utils.js#ui-call"
+    ]
+  },
+  {
     "source": "壹",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -36178,6 +36526,12 @@
     "source": "移动联系人失败",
     "references": [
       "src/scripts/ui/contact-drag-manager.js#ui-call"
+    ]
+  },
+  {
+    "source": "移动目标已失效",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-drag-utils.js#ui-call"
     ]
   },
   {
@@ -37253,7 +37607,9 @@
   {
     "source": "已启用",
     "references": [
+      "src/scripts/ui/agent-center-panel.js#ui-call",
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call",
+      "src/scripts/ui/chat/hopscotch-variable-card-view.js#ui-call",
       "src/scripts/ui/plugin-panel.js#dom-assignment"
     ]
   },
@@ -37592,6 +37948,10 @@
   {
     "source": "已停用",
     "references": [
+      "src/scripts/ui/agent-center-panel.js#ui-call",
+      "src/scripts/ui/chat/hopscotch-activation-utils.js#ui-call",
+      "src/scripts/ui/chat/hopscotch-court-view.js#ui-call",
+      "src/scripts/ui/chat/hopscotch-variable-card-view.js#ui-call",
       "src/scripts/ui/plugin-panel.js#dom-assignment"
     ]
   },
@@ -38477,7 +38837,8 @@
     "source": "影响",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
-      "src/scripts/memory/default-template.js#ui-definition"
+      "src/scripts/memory/default-template.js#ui-definition",
+      "src/scripts/ui/chat/hopscotch-variable-card-view.js#ui-call"
     ]
   },
   {
@@ -39138,12 +39499,6 @@
     ]
   },
   {
-    "source": "右侧加并行格，行间加一行；点格子配置或移动。",
-    "references": [
-      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
-    ]
-  },
-  {
     "source": "右侧尚未连接值节点或变量节点。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -39177,12 +39532,6 @@
     "source": "右下",
     "references": [
       "src/scripts/ui/theme-manager.js#ui-property"
-    ]
-  },
-  {
-    "source": "右移",
-    "references": [
-      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
   },
   {
@@ -40546,7 +40895,8 @@
   {
     "source": "暂无可预览的 Prompt",
     "references": [
-      "src/scripts/ui/app.js#ui-call"
+      "src/scripts/ui/app.js#ui-call",
+      "src/scripts/ui/chat/agent-request-preview.js#ui-call"
     ]
   },
   {
@@ -41047,6 +41397,7 @@
   {
     "source": "展开请求预览",
     "references": [
+      "src/scripts/ui/chat/agent-request-preview.js#ui-call",
       "src/scripts/ui/preset-panel.js#html-attribute"
     ]
   },
@@ -41801,6 +42152,12 @@
     ]
   },
   {
+    "source": "正文生成需保持启用",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-utils.js#ui-call"
+    ]
+  },
+  {
     "source": "正文为空",
     "references": [
       "src/scripts/ui/chat/chat-body-quality-guardian-utils.js#ui-property"
@@ -42032,6 +42389,7 @@
     "source": "正在构建预览…",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/chat/agent-request-preview.js#ui-call",
       "src/scripts/ui/preset-panel.js#html-text"
     ]
   },
@@ -42851,6 +43209,7 @@
     "source": "指定的模型配置不存在",
     "references": [
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call",
+      "src/scripts/ui/chat/hopscotch-sidecar-executors.js#ui-call",
       "src/scripts/ui/chat/hopscotch-turn-runtime.js#ui-call"
     ]
   },
@@ -43177,6 +43536,7 @@
     "source": "重新构建",
     "references": [
       "src/scripts/ui/agent-center-panel.js#html-attribute",
+      "src/scripts/ui/chat/agent-request-preview.js#ui-call",
       "src/scripts/ui/preset-panel.js#html-attribute"
     ]
   },
@@ -43709,6 +44069,12 @@
     ]
   },
   {
+    "source": "状态显示",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-variable-card-view.js#ui-call"
+    ]
+  },
+  {
     "source": "追加 {value}",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -44012,12 +44378,6 @@
     "source": "自定义 OpenAI 兼容图片参数",
     "references": [
       "src/scripts/ui/image-generation-params-utils.js#ui-property"
-    ]
-  },
-  {
-    "source": "自定义板等整轮结束后解锁发送。修改仅对下一轮生效，未保存不改变设置。",
-    "references": [
-      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
   },
   {
@@ -44769,12 +45129,6 @@
     ]
   },
   {
-    "source": "左移",
-    "references": [
-      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
-    ]
-  },
-  {
     "source": "左已连",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -45463,6 +45817,12 @@
     "source": "APP 本地补丁候选（已截断）",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "App 变量",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-variable-card-view.js#ui-call"
     ]
   },
   {
@@ -46785,6 +47145,12 @@
     "source": "ST 的 story_string 模板，支持 {{#if}} 与变量",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "ST 兼容变量",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-variable-card-view.js#ui-call"
     ]
   },
   {

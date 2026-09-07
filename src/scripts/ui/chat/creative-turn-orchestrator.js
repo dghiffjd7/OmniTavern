@@ -8,6 +8,7 @@
 
 import { t } from '../../i18n/index.js';
 import { validateHopscotchBoard } from './hopscotch-board-utils.js';
+import { resolveHopscotchActivation } from './hopscotch-activation-utils.js';
 
 export const HOUSE_STATUS = Object.freeze({
   queued: 'queued',
@@ -80,6 +81,7 @@ const runWithLimit = async (items, limit, worker) => {
 
 export const createCreativeTurnOrchestrator = ({
   board = null,
+  activation = null,
   executors = {},
   signal = null,
   now = () => Date.now(),
@@ -97,6 +99,7 @@ export const createCreativeTurnOrchestrator = ({
     throw err;
   }
   const normalized = validation.board;
+  const active = structuredClone(activation || resolveHopscotchActivation(normalized));
   const policy = normalized.policy;
   const houses = new Map();
   const artifacts = {};
@@ -108,6 +111,7 @@ export const createCreativeTurnOrchestrator = ({
         id: house.id,
         kind: house.kind,
         label: house.label,
+        enabled: active.houses[house.id]?.enabled !== false,
         rowIndex,
         rowId: row.id,
         status: HOUSE_STATUS.queued,
@@ -255,6 +259,9 @@ export const createCreativeTurnOrchestrator = ({
 
   const runTurn = async (turnContext = {}) => {
     const startedAt = now();
+    for (const state of houses.values()) {
+      if (!state.enabled) settle(state, HOUSE_STATUS.skipped, { reason: active.houses[state.id]?.reason || 'disabled' });
+    }
     let bodyStatus = '';
     let stopped = false;
     for (let rowIndex = 0; rowIndex < normalized.rows.length; rowIndex += 1) {
@@ -280,7 +287,7 @@ export const createCreativeTurnOrchestrator = ({
       if (typeof onRowStart === 'function') {
         try { onRowStart({ rowIndex, rowId: row.id, houseIds: row.houses.map(h => h.id) }); } catch {}
       }
-      await runWithLimit(row.houses, policy.rowConcurrencyMax, house => runHouse(house, rowInput, turnContext));
+      await runWithLimit(row.houses.filter(house => houses.get(house.id).enabled), policy.rowConcurrencyMax, house => runHouse(house, rowInput, turnContext));
       row.houses.forEach((house) => {
         const state = houses.get(house.id);
         if (house.kind === 'body') bodyStatus = state.status;

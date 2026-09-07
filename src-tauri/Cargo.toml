@@ -1,6 +1,6 @@
 [package]
 name = "omnitavern"
-version = "0.7.2"
+version = "0.7.2-diagnose-1"
 description = "A cross-platform chat application"
 authors = ["you"]
 edition = "2021"
