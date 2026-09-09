@@ -7,6 +7,7 @@
 // - 执行器必须返回真实终态；resolve 的 status 只接受 succeeded/failed/cancelled/skipped。
 
 import { t } from '../../i18n/index.js';
+import { cloneData } from '../../utils/clone-data.js';
 import { validateHopscotchBoard } from './hopscotch-board-utils.js';
 import { resolveHopscotchActivation } from './hopscotch-activation-utils.js';
 
@@ -41,7 +42,7 @@ const freezeTree = value => {
 const freezeArtifacts = (artifacts, order = Object.keys(artifacts)) => {
   const out = {};
   order.filter(key => Object.hasOwn(artifacts, key)).forEach((key) => {
-    out[key] = freezeTree(structuredClone(artifacts[key]));
+    out[key] = freezeTree(cloneData(artifacts[key]));
   });
   return Object.freeze(out);
 };
@@ -99,7 +100,7 @@ export const createCreativeTurnOrchestrator = ({
     throw err;
   }
   const normalized = validation.board;
-  const active = structuredClone(activation || resolveHopscotchActivation(normalized));
+  const active = cloneData(activation || resolveHopscotchActivation(normalized));
   const policy = normalized.policy;
   const houses = new Map();
   const artifacts = {};

@@ -2799,7 +2799,7 @@ const AGENT_KIND_LABELS = Object.freeze({
 const AGENT_FEATURE_LABELS = Object.freeze({
     reply_check: '检查回复格式',
     write_preview: '预览记忆和变量变更',
-    text_completion: '文本补全',
+    text_completion: '文本建议',
 });
 
 const displayToolName = toolName => TOOL_LABELS[trim(toolName)] || trim(toolName, 'Agent 工具');
@@ -3614,7 +3614,7 @@ export class AgentCenterPanel {
         const selectedValue = this.getAgentModelSelectValue(agent);
         const profiles = Array.isArray(this.view.agentModelProfiles) ? this.view.agentModelProfiles : [];
         const options = [
-            { value: 'follow_current', label: '跟随当前聊天模型' },
+            ...(agent.id === 'text_completion' ? [] : [{ value: 'follow_current', label: '跟随当前聊天模型' }]),
             { value: 'none', label: '不调用模型' },
             ...profiles.map(profile => ({
                 value: `profile:${trim(profile.id)}`,
@@ -4194,13 +4194,13 @@ export class AgentCenterPanel {
         const fusedLinks = entry.fusedConfigs.length ? `<div class="agent-center-card-actions">${entry.fusedConfigs.map(config => `<button type="button" class="agent-center-card-action" data-hop-fused-open="${escapeHtml(config.id)}">${escapeHtml(config.label)}</button>`).join('')}</div>` : '';
         const configuration = linkedAgent
             ? `<p class="agent-center-card-sub">${escapeHtml(t('共享设置会影响使用此 Agent 的其他会话。'))}</p>${this.renderAgentConfiguration(agent)}`
-            : agent.id === 'body' ? this.renderAgentPromptPreviewAction(agent) + fusedLinks : '';
+            : agent.id === 'body' ? this.renderAgentPromptPreviewAction(agent) + (fusedLinks ? `<div class="agent-center-agent-section"><div class="agent-center-agent-section-title">${escapeHtml(t('配置'))}</div>${fusedLinks}</div>` : '') : '';
         entry.host.innerHTML = this.renderFloatingAgentCard({
             agent, flipped: entry.flipped, entering: entry.entering,
             toolbarExtra: entry.readOnly ? '' : entry.toolbarExtra,
             frontExtra: entry.frontExtra + fusedLinks,
             configuration: `<fieldset data-hop-agent-config class="hop-card-fields" ${entry.readOnly ? 'disabled' : ''}>${configuration}</fieldset><p class="hop-error" role="alert">${escapeHtml(this.lastError)}</p>`,
-            subtitle: entry.readOnly ? t('本轮') : agent.contextual ? t('当前角色') : linkedAgent ? t('配置 · 修改后即时生效') : entry.fusedConfigs.length ? t('配置') : t('修改仅对下一轮生效，未保存不改变设置。'),
+            subtitle: entry.readOnly ? t('本轮') : agent.contextual ? t('当前角色') : linkedAgent ? t('配置 · 修改后即时生效') : t('配置'),
         });
         entry.entering = false;
         if (entry.content) entry.host.querySelector('.agent-center-floating-face-back').append(entry.content);
@@ -4878,6 +4878,14 @@ export class AgentCenterPanel {
         const originalEnabled = agent.enabled === true;
         this.setAgentQuickTogglePending(button, true);
         try {
+            if (enabling && id === 'text_completion') {
+                if (agent.modelMode !== 'profile' || !trim(agent.modelProfileId)) {
+                    this.notifyError?.(t('请先为文本建议选择模型配置'));
+                    this.openAgentModelSelect(id);
+                    return false;
+                }
+                if (!agent.inputConsent && !await this.confirm({ title: t('启用文本建议'), message: t('输入停顿时，会将当前输入的光标前后文发送给所选模型，生成可采纳的短句建议。'), confirmText: t('启用') })) return false;
+            }
             if (id === 'write_preview') {
                 const ok = await this.confirm({
                     title: enabling ? `开启${agent.title}` : `关闭${agent.title}`,

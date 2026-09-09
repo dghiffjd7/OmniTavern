@@ -75,7 +75,7 @@ const normalizeProvider = (provider = '') => {
   const value = trim(provider).toLowerCase();
   if (value.includes('anthropic') || value.includes('claude')) return 'anthropic';
   if (value.includes('gemini') || value.includes('maker') || value.includes('vertex')) return 'gemini';
-  if (value.includes('openai') || value.includes('deepseek') || value.includes('custom')) return 'openai';
+  if (value.includes('openai') || value.includes('deepseek') || value.includes('custom') || value === 'opencode') return 'openai';
   return value || 'generic';
 };
 

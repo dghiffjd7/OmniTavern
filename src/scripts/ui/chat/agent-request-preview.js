@@ -1,3 +1,4 @@
+import { renderRequestParamReport } from '../request-param-report-view.js';
 import { t } from '../../i18n/index.js';
 import { buildFullPromptDocument } from './prompt-preview-view-utils.js';
 import { createLatestPreviewBuildQueue } from '../preset-preview-utils.js';
@@ -15,11 +16,17 @@ export const renderAgentRequestPreview = request => {
     return `<article class="hop-request-message"><header><span>${escapeHtml(message.role || 'message')}</span><small>${String(index + 1).padStart(2, '0')}</small></header><pre data-i18n-skip="true">${escapeHtml(plain.slice(plain.indexOf('\n') + 1))}</pre></article>`;
   });
   if (request.responsePrefix) items.push(`<article class="hop-request-message"><header>assistant prefill</header><pre data-i18n-skip="true">${escapeHtml(request.responsePrefix)}</pre></article>`);
-  const options = { ...(request.options || {}), ...(request.requestOptions || {}) };
-  const params = Object.fromEntries(['temperature', 'top_p', 'max_tokens', 'max_completion_tokens', 'stop', 'seed', 'frequency_penalty', 'presence_penalty', 'reasoning', 'reasoning_effort', 'response_format', 'tool_choice', 'parallel_tool_calls'].filter(key => options[key] !== undefined).map(key => [key, options[key]]));
+  const options = request.wireRequest?.body || { ...(request.options || {}), ...(request.requestOptions || {}) };
+  const omitted = new Set(['model', 'messages', 'contents', 'input', 'system', 'systemInstruction',
+    'stream', 'signal', 'nativeRequestId', 'requestParamConstraints', 'requestContext']);
+  const params = Object.fromEntries(Object.entries(options).filter(([key, value]) => !omitted.has(key)
+    && value !== undefined && typeof value !== 'function'));
+  if (request.apiFormat === 'responses') params.api_format = 'responses';
   const tools = request.tools || options.tools;
   if (Array.isArray(tools) && tools.length) params.tools = tools;
   if (Object.keys(params).length) items.push(`<details class="hop-request-params"><summary>${escapeHtml(t('请求参数'))}</summary><pre data-i18n-skip="true">${escapeHtml(JSON.stringify(params, null, 2))}</pre></details>`);
+  if (request.wireRequest?.body) items.push(`<details class="hop-request-params"><summary>${escapeHtml(t('请求 JSON'))}</summary><pre data-i18n-skip="true">${escapeHtml(JSON.stringify(request.wireRequest.body, null, 2))}</pre></details>`);
+  if (request.wireRequest?.parameterReport?.length) items.push(`<details class="hop-request-params"><summary>${escapeHtml(t('参数处理结果'))}</summary>${renderRequestParamReport(request.wireRequest.parameterReport)}</details>`);
   return items.join('');
 };
 

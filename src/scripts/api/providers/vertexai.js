@@ -3,6 +3,7 @@
  * Supports both Express mode (API key) and Full mode (Service Account JSON)
  */
 
+import { finalizeTextRequestBody, getRequestParamReport } from '../request-params.js';
 import { handleSSE, parseSSEBuffer } from '../stream.js';
 import { createLinkedAbortController, invokeNativeHttpRequest, splitRequestOptions } from '../abort.js';
 import { createReasoningStreamEvent, extractGeminiStreamParts } from '../native-reasoning.js';
@@ -422,7 +423,7 @@ export class VertexAIProvider {
   /**
    * Build request body in Gemini format
    */
-  buildRequestBody(messages, options = {}) {
+  buildRequestBody(messages, options = {}, { requestParams = true } = {}) {
     const { contents, systemInstruction } = this.convertMessages(messages);
 
     const body = {
@@ -459,7 +460,15 @@ export class VertexAIProvider {
       body.toolConfig = options.toolConfig;
     }
 
-    return body;
+    return requestParams ? finalizeTextRequestBody(body, {
+      config: this.transportConfig, options, protocol: 'gemini',
+    }) : body;
+  }
+
+  prepareChatRequest(messages, options = {}) {
+    const body = this.buildRequestBody(messages, options);
+    return { url: this.buildUrl(options.stream === true), body, payload: body, messages,
+      parameterReport: getRequestParamReport(body), responsePrefix: '' };
   }
 
   /**
@@ -468,7 +477,7 @@ export class VertexAIProvider {
   async chat(messages, options = {}) {
     const { signal, requestId, onProviderToolCallDelta, options: payloadOptions } = splitRequestOptions(options);
     const headers = await this.getHeaders();
-    const body = this.buildRequestBody(messages, payloadOptions);
+    const body = this.buildRequestBody(messages, options);
     const tryOnce = async ({ region, baseHost }) => {
       const url = this.buildUrlFor({ stream: false, region, baseHost, model: this.model });
       return requestJson({
@@ -538,7 +547,7 @@ export class VertexAIProvider {
   async *streamChat(messages, options = {}) {
     const { signal, requestId, onProviderToolCallDelta, options: payloadOptions } = splitRequestOptions(options);
     const headers = await this.getHeaders();
-    const body = this.buildRequestBody(messages, payloadOptions);
+    const body = this.buildRequestBody(messages, options);
     const notifyProviderToolCallDelta = data => {
       try {
         onProviderToolCallDelta?.(data, { provider: 'vertexai', model: this.model });

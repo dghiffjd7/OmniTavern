@@ -1,5 +1,9 @@
+import { finalizeTextRequestBody } from '../api/request-params.js';
 import { createLinkedAbortController, splitRequestOptions } from '../api/abort.js';
 import { prepareTransportRequest } from '../api/transport.js';
+import { bindOpenCodeRequestContext } from '../api/opencode-request-headers.js';
+import { buildOpenAICompatibleEndpoint } from '../api/openai-api-format.js';
+import { assertResponsesSuccess } from '../api/providers/openai-responses-runtime.js';
 import {
   buildOpenAIResponsesRequestBody,
   extractOpenAIResponsesText,
@@ -167,12 +171,17 @@ const requestJson = async ({
   url = '',
   headers = {},
   body = {},
+  requestParamOptions = {},
   signal = null,
   requestId = '',
   timeoutMs = 60000,
   fetchFn = null,
 } = {}) => {
-  const payload = typeof body === 'string' ? body : JSON.stringify(body);
+  const payload = typeof body === 'string' ? body : JSON.stringify(finalizeTextRequestBody(body, {
+    config: providerObject?.transportConfig || {}, options: requestParamOptions,
+    protocol: providerFamily === 'OpenAI Responses' ? 'responses'
+      : providerFamily === 'Anthropic' ? 'anthropic' : 'gemini',
+  }));
   if (providerObject && typeof providerObject.requestJson === 'function') {
     return providerObject.requestJson({
       url,
@@ -305,9 +314,7 @@ const runAnthropicNativeRequest = async ({
   const converted = history.length && typeof providerObject?.convertMessages === 'function'
     ? providerObject.convertMessages(history)
     : { system: undefined, messages: [] };
-  const providerRequestOptions = isPlainObject(continuationContext.providerRequestOptions)
-    ? continuationContext.providerRequestOptions
-    : {};
+  const { options: providerRequestOptions } = splitRequestOptions(continuationContext.providerRequestOptions);
   const maxTokens = payloadOptions.maxTokens ?? payloadOptions.max_tokens ?? 4096;
   const providerModel = request.model || providerObject?.model || '';
   const body = {
@@ -331,6 +338,7 @@ const runAnthropicNativeRequest = async ({
     requestId,
     timeoutMs: providerObject?.timeout,
     fetchFn: options.fetchFn,
+    requestParamOptions: { ...providerRequestOptions, ...options },
   });
   const finalText = extractAnthropicText(data);
   return {
@@ -362,9 +370,7 @@ const runGeminiNativeRequest = async ({
   const converted = history.length && typeof providerObject?.convertMessages === 'function'
     ? providerObject.convertMessages(history)
     : { contents: [], systemInstruction: '' };
-  const providerRequestOptions = isPlainObject(continuationContext.providerRequestOptions)
-    ? continuationContext.providerRequestOptions
-    : {};
+  const { options: providerRequestOptions } = splitRequestOptions(continuationContext.providerRequestOptions);
   const nativeRequest = {
     ...request,
     contents: [...clone(converted.contents || []), ...clone(request.contents || [])],
@@ -386,6 +392,7 @@ const runGeminiNativeRequest = async ({
     requestId,
     timeoutMs: providerObject?.timeout,
     fetchFn: options.fetchFn,
+    requestParamOptions: { ...providerRequestOptions, ...options },
   });
   const finalText = extractGeminiText(data);
   return {
@@ -413,9 +420,7 @@ const runOpenAIResponsesNativeRequest = async ({
   const history = Array.isArray(continuationContext.historyMessages)
     ? continuationContext.historyMessages
     : [];
-  const providerRequestOptions = isPlainObject(continuationContext.providerRequestOptions)
-    ? continuationContext.providerRequestOptions
-    : {};
+  const { options: providerRequestOptions } = splitRequestOptions(continuationContext.providerRequestOptions);
   const providerModel = request.model || providerObject?.model || '';
   const body = buildOpenAIResponsesRequestBody({
     model: providerModel,
@@ -423,24 +428,31 @@ const runOpenAIResponsesNativeRequest = async ({
     input: request.input,
     options: { ...clone(providerRequestOptions), ...payloadOptions },
   });
+  const prepared = typeof providerObject?.prepareResponsesRequest === 'function'
+    ? providerObject.prepareResponsesRequest([...history, ...(request.input || [])], {
+        ...clone(providerRequestOptions), ...payloadOptions,
+      })
+    : null;
   const data = await requestJson({
     providerObject,
     providerFamily: 'OpenAI Responses',
-    transportProvider: 'openai',
-    url: `${providerObject?.baseUrl || 'https://api.openai.com/v1'}/responses`,
+    transportProvider: providerObject?.provider || request.sourceProvider || 'openai',
+    url: prepared?.url || buildOpenAICompatibleEndpoint(providerObject?.baseUrl || 'https://api.openai.com/v1', 'responses'),
     headers: await getProviderHeaders(providerObject),
     body,
     signal,
     requestId,
     timeoutMs: providerObject?.timeout,
     fetchFn: options.fetchFn,
+    requestParamOptions: { ...providerRequestOptions, ...options },
   });
+  assertResponsesSuccess(data);
   const finalText = extractOpenAIResponsesText(data);
   return {
     adapter: PROVIDER_TOOL_NATIVE_RUNNER_CONTRACTS.openaiResponses,
     finalText,
     events: buildProviderStreamEvents({
-      provider: 'openai',
+      provider: providerObject?.provider || request.sourceProvider || 'openai',
       model: providerModel,
       sessionId: trim(request.sessionId),
       finalText,
@@ -456,9 +468,13 @@ export const createProviderToolLlmClientNativeRunner = ({
   now = Date.now,
   fetchFn = null,
 } = {}) => {
-  const providerObject = provider || llmClient?.provider || null;
+  const baseProvider = provider || llmClient?.provider || null;
   return {
     async runProviderToolRequest(request = {}, options = {}) {
+      const continuationContext = readProviderToolContinuationContext(request);
+      const providerObject = bindOpenCodeRequestContext(baseProvider,
+        continuationContext?.providerRequestOptions?.requestContext
+        || options.requestContext || { sessionId: request.sessionId });
       const runnerRequestDraft = {
         ok: true,
         status: 'ready',

@@ -1,6 +1,6 @@
 [package]
 name = "omnitavern"
-version = "0.7.2-diagnose-1"
+version = "0.7.2-diagnose-2"
 description = "A cross-platform chat application"
 authors = ["you"]
 edition = "2021"
@@ -47,7 +47,8 @@ tauri-plugin-shell = "2.0"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 webview2-com = "0.38"
-windows = { version = "0.61", features = ["Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_Foundation"] }
+tauri-plugin-single-instance = "2"
+windows = { version = "0.61", features = ["Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_Foundation", "Win32_Security", "Win32_System_Registry", "Win32_System_WinRT", "Data_Xml_Dom", "UI_Notifications"] }
 
 [features]
 default = ["custom-protocol"]

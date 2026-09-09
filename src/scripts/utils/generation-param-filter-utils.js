@@ -18,11 +18,11 @@ export const COMMON_GENERATION_PARAM_FILTERS = Object.freeze([
   'response_format',
 ]);
 
-const PARAM_NAME_RE = /^[A-Za-z_][A-Za-z0-9_.$:-]{0,79}$/;
+const PARAM_NAME_RE = /^[A-Za-z_][A-Za-z0-9_.$:-]{0,159}$/;
 
 export const normalizeGenerationParamFilterName = (value = '') => {
   const name = String(value || '').trim();
-  if (!name || name.length > 80) return '';
+  if (!name || name.length > 160) return '';
   if (!PARAM_NAME_RE.test(name)) return '';
   return name;
 };

@@ -45,3 +45,14 @@ legacy_chatapp_cleanup_reg:
 legacy_chatapp_done:
   ClearErrors
 !macroend
+
+; The protocol handler is registered when reply notifications are enabled.
+; Remove only a handler owned by this installation; development uses a separate scheme.
+!macro NSIS_HOOK_POSTUNINSTALL
+  ReadRegStr $R0 HKCU "Software\Classes\omnitavern-reply\shell\open\command" ""
+  StrCmp $R0 '$\"$INSTDIR\omnitavern.exe$\" $\"%1$\"' 0 reply_notification_cleanup_done
+  DeleteRegKey HKCU "Software\Classes\omnitavern-reply"
+  DeleteRegKey HKCU "Software\Classes\AppUserModelId\com.chatapp.dev"
+reply_notification_cleanup_done:
+  ClearErrors
+!macroend

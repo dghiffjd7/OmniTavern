@@ -93,9 +93,9 @@ const buildDraft = (overrides = {}) => ({
       },
     }),
   });
-  assert.equal(contract.ok, false);
-  assert.equal(contract.reason.includes('official OpenAI'), true);
-  console.log('ok - provider native runner contract rejects proxy Responses continuations');
+  assert.equal(contract.ok, true);
+  assert.equal(contract.contractKind, PROVIDER_TOOL_NATIVE_RUNNER_CONTRACTS.openaiResponses);
+  console.log('ok - provider native runner contract accepts compatible Responses items; the client validates configured protocol');
 }
 
 {

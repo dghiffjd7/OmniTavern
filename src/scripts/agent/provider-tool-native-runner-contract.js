@@ -161,8 +161,8 @@ export const resolveProviderToolNativeRunnerContract = ({
     if (!functionCallOutputCount) {
       return buildUnsupported(base, 'openai responses native runner input requires a function_call_output item');
     }
-    if (trim(request.sourceProvider || request.provider).toLowerCase() !== 'openai') {
-      return buildUnsupported(base, 'openai responses native runner only supports the official OpenAI provider');
+    if (!['openai', 'custom', 'opencode'].includes(trim(request.sourceProvider || request.provider).toLowerCase())) {
+      return buildUnsupported(base, 'responses native runner requires an OpenAI or explicitly configured compatible provider');
     }
     return buildReady(base, PROVIDER_TOOL_NATIVE_RUNNER_CONTRACTS.openaiResponses, {
       requestKeys: ['input'],

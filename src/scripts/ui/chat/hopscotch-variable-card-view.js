@@ -20,9 +20,9 @@ export const renderHopscotchVariableInfo = (activity = {}, active = {}, { execut
     [t('更新方式'), execution === 'standalone' ? t('独立请求更新') : (activity.updateModes || []).filter(mode => execution !== 'rules' || mode !== 'inline').map(mode => modes[mode]).filter(Boolean).join(' · ') || '—'],
     [t('影响'), (activity.effects || []).map(effect => effects[effect]).filter(Boolean).join(' · ') || '—'],
   ];
-  return `<div class="hop-variable-info">
-    <div class="agent-center-agent-section-title has-help" data-help="${e(active.enabled ? t('按当前角色的变量、更新约定和启用规则判断；条件规则在触发时执行。') : hopscotchInactiveLabel(active.reason || activity.reason))}">${e(t('角色变量'))}</div>
-    <dl>${values.map(([label, value]) => `<div><dt>${e(label)}</dt><dd>${e(value)}</dd></div>`).join('')}</dl>
+  return `<div class="agent-center-agent-section hop-variable-info">
+    <div class="agent-center-agent-section-title has-help" data-help-mode="tap" data-help="${e(active.enabled ? t('按当前角色的变量、更新约定和启用规则判断；条件规则在触发时执行。') : hopscotchInactiveLabel(active.reason || activity.reason))}">${e(t('角色变量'))}</div>
+    <dl class="agent-center-agent-settings">${values.map(([label, value]) => `<div class="agent-center-setting-row is-model"><dt class="agent-center-setting-label">${e(label)}</dt><dd class="agent-center-setting-value">${e(value)}</dd></div>`).join('')}</dl>
     <div class="agent-center-card-actions"><button type="button" class="agent-center-card-action" data-action="variable-settings">${e(t('变量设置'))}</button><button type="button" class="agent-center-card-action" data-action="variable-preview-tools">${e(t('变更预览工具'))}</button></div>
   </div>`;
 };

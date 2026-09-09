@@ -1,5 +1,55 @@
 /* API 配置：迁移 roleplay-app-api-design 的纸张卡片、层级与轻动效。 */
 
+.api-config-format-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--app-border-default);
+  border-radius: 12px;
+  background: var(--app-surface-subtle);
+}
+
+.api-config-format-option {
+  position: relative;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.api-config-format-option input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.api-config-format-option span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--app-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: center;
+  transition: color 150ms ease, background 150ms ease, border-color 150ms ease;
+}
+
+.api-config-format-option input:checked + span {
+  color: var(--app-accent-strong);
+  background: var(--app-accent-soft);
+  border-color: var(--app-accent-primary);
+}
+
+.api-config-format-option input:focus-visible + span {
+  outline: 2px solid var(--app-accent-primary);
+  outline-offset: 2px;
+}
+
 #config-panel.api-config-panel,
 .api-param-filter-dialog,
 .api-fc-compat-modal {

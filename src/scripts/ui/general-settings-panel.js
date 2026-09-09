@@ -4,6 +4,7 @@ import { localizeDomSubtree, t } from '../i18n/index.js';
 import { ConfigManager } from '../storage/config.js';
 import { pickSavePath } from '../utils/save-dialog.js';
 import { safeInvoke } from '../utils/tauri.js';
+import { bindReplyNotificationSettings } from './reply-notification-service.js';
 import { appConfirm } from './app-confirm.js';
 import { resolveImportKindFromZipEntries } from './import-package-kind-utils.js';
 import {
@@ -19,6 +20,7 @@ import {
 import { themeStore } from '../storage/theme-store.js';
 
 const GENERAL_SETTINGS_ICONS = Object.freeze({
+  bell: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"></path><path d="M10 21h4"></path></svg>',
   reply: `
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M9 8L4 12l5 4"></path>
@@ -2088,6 +2090,14 @@ export class GeneralSettingsPanel {
               description: '回复时显示跳动的小点动画。',
               icon: 'reply',
             })}
+            <div data-reply-notification-settings hidden>
+              ${this.renderSettingRow({
+                id: 'general-reply-notification-enabled',
+                title: '回复完成通知',
+                description: '切换到其他应用或最小化后，回复完成时发送 Windows 系统通知。点击返回对应会话，横幅与声音遵循系统设置。',
+                icon: 'bell',
+              })}
+            </div>
             ${this.renderSettingRow({
               id: 'general-creative-wide',
               title: '创意写作气泡加宽',
@@ -2137,8 +2147,8 @@ export class GeneralSettingsPanel {
                 })}
                 ${this.renderSettingRow({
                   id: 'general-toast-enabled',
-                  title: '显示通知提示',
-                  description: '关闭后不再弹出右上角通知。',
+                  title: '应用内提示',
+                  description: '在应用内显示操作结果与状态提示。',
                   icon: 'bell',
                   nested: true,
                 })}
@@ -2562,6 +2572,11 @@ export class GeneralSettingsPanel {
     this.richIframeScriptsToggle = this.element.querySelector('#general-rich-iframe-scripts');
     this.traditionalProtocolToggle = this.element.querySelector('#general-traditional-model-output-protocol');
     this.toastEnabledToggle = this.element.querySelector('#general-toast-enabled');
+    this.replyNotificationSettingsCleanup = bindReplyNotificationSettings({
+      root: this.element,
+      updateRows: () => this.updateSelectableCards(),
+      onError: () => window.toastr?.error?.(t('通知设置保存失败，请重试')),
+    });
     this.chatHistoryMaxInput = this.element.querySelector('#general-chat-history-max');
     this.creativeHistoryInput = this.element.querySelector('#general-creative-history');
     this.creativeWideToggle = this.element.querySelector('#general-creative-wide');

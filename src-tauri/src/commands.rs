@@ -4190,6 +4190,20 @@ pub async fn public_http_request(
     }
 }
 
+// OpenCode accepts each client's own identity. Use our compiled version; the JS
+// transport marks these requests with our product token and a conversation ID.
+fn complete_opencode_user_agent(headers: &mut reqwest::header::HeaderMap) {
+    use reqwest::header::{HeaderValue, USER_AGENT};
+    if headers.contains_key("x-opencode-session")
+        && headers.get(USER_AGENT).and_then(|value| value.to_str().ok()) == Some("OmniTavern")
+    {
+        headers.insert(
+            USER_AGENT,
+            HeaderValue::from_static(concat!("OmniTavern/", env!("CARGO_PKG_VERSION"))),
+        );
+    }
+}
+
 /// Native HTTP request to bypass WebView CORS (used by OpenAI-compatible providers like DeepSeek).
 #[tauri::command]
 pub async fn http_request(
@@ -4219,6 +4233,7 @@ pub async fn http_request(
             header_map.insert(name, value);
         }
 
+        complete_opencode_user_agent(&mut header_map);
         let mut builder = reqwest::Client::builder();
         if let Some(ms) = timeout_ms {
             builder = builder.timeout(std::time::Duration::from_millis(ms));
@@ -4526,6 +4541,7 @@ pub async fn http_stream_request_start(
                 header_map.insert(name, value);
             }
 
+            complete_opencode_user_agent(&mut header_map);
             // 流式请求不使用 reqwest 总超时——它覆盖整个响应体读取，会把健康的
             // 长流在中途杀死并伪装成 "error decoding response body"。改为
             // 连接超时 + 响应头超时 + 块间空闲超时，仅在链路真正无数据时失败。
@@ -4838,6 +4854,22 @@ pub async fn delete_template(
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn opencode_user_agent_uses_app_version_only_for_marked_requests() {
+        use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
+        let mut headers = HeaderMap::new();
+        headers.insert(USER_AGENT, HeaderValue::from_static("OmniTavern"));
+        complete_opencode_user_agent(&mut headers);
+        assert_eq!(headers[USER_AGENT], "OmniTavern");
+        headers.insert("x-opencode-session", HeaderValue::from_static("ot_fixture"));
+        complete_opencode_user_agent(&mut headers);
+        assert_eq!(headers[USER_AGENT], concat!("OmniTavern/", env!("CARGO_PKG_VERSION")));
+        headers.insert(USER_AGENT, HeaderValue::from_static("another-client/1"));
+        complete_opencode_user_agent(&mut headers);
+        assert_eq!(headers[USER_AGENT], "another-client/1");
+        assert_eq!(headers["x-opencode-session"], "ot_fixture");
+    }
 
     #[test]
     fn openai_realtime_call_contract_accepts_only_official_valid_inputs() {

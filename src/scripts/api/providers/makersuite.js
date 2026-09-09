@@ -3,6 +3,7 @@
  * Uses API key in URL parameter
  */
 
+import { finalizeTextRequestBody, getRequestParamReport } from '../request-params.js';
 import { handleSSE } from '../stream.js';
 import { createLinkedAbortController, invokeNativeHttpRequest, splitRequestOptions } from '../abort.js';
 import { createReasoningStreamEvent, extractGeminiStreamParts } from '../native-reasoning.js';
@@ -203,7 +204,7 @@ export class MakersuiteProvider {
   /**
    * Build request body in Gemini format
    */
-  buildRequestBody(messages, options = {}) {
+  buildRequestBody(messages, options = {}, { requestParams = true } = {}) {
     const { contents, systemInstruction } = this.convertMessages(messages);
 
     const body = {
@@ -241,7 +242,15 @@ export class MakersuiteProvider {
       body.toolConfig = options.toolConfig;
     }
 
-    return body;
+    return requestParams ? finalizeTextRequestBody(body, {
+      config: this.transportConfig, options, protocol: 'gemini',
+    }) : body;
+  }
+
+  prepareChatRequest(messages, options = {}) {
+    const body = this.buildRequestBody(messages, options);
+    return { url: this.buildUrl(options.stream === true), body, payload: body, messages,
+      parameterReport: getRequestParamReport(body), responsePrefix: '' };
   }
 
   /**
@@ -253,7 +262,7 @@ export class MakersuiteProvider {
 
     try {
       const url = this.buildUrl(false);
-      const body = this.buildRequestBody(messages, payloadOptions);
+      const body = this.buildRequestBody(messages, options);
 
       const res = await this.request({
         url,
@@ -327,7 +336,7 @@ export class MakersuiteProvider {
 
     try {
       const url = this.buildUrl(true);
-      const body = this.buildRequestBody(messages, payloadOptions);
+      const body = this.buildRequestBody(messages, options);
       const prepared = prepareTransportRequest({
         config: this.transportConfig,
         provider: 'makersuite',
@@ -557,7 +566,7 @@ export class MakersuiteProvider {
       });
       const content = referenceImages.length ? parts : String(prompt ?? '');
       const messages = [{ role: 'user', content }];
-      const body = this.buildRequestBody(messages, payloadOptions);
+      const body = this.buildRequestBody(messages, payloadOptions, { requestParams: false });
       body.generationConfig = { ...(body.generationConfig || {}) };
       const responseModalities = payloadOptions.responseModalities || payloadOptions.response_modalities;
       body.generationConfig.responseModalities = Array.isArray(responseModalities) && responseModalities.length

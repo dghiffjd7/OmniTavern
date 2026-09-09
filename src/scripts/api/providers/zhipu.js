@@ -34,11 +34,10 @@ export class ZhipuProvider extends CustomProvider {
     });
   }
 
-  prepareChatRequest(messages, options = {}) {
-    const prepared = super.prepareChatRequest(messages, options);
-    delete prepared.payload?.maxTokens;
-    delete prepared.normalizedOptions?.maxTokens;
-    return prepared;
+  normalizeOptions(options = {}) {
+    const normalized = super.normalizeOptions(options);
+    delete normalized.maxTokens;
+    return normalized;
   }
 
   async *streamChatUnguarded(messages, options = {}) {

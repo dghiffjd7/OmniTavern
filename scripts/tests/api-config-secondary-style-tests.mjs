@@ -20,16 +20,15 @@ assert.match(configSource, /id="open-generation-param-filter"[\s\S]*?\$\{API_CON
 assert.match(configSource, /id="config-test"[\s\S]*?\$\{API_CONFIG_ICONS\.zap\}/);
 assert.match(configSource, /id="config-save"[\s\S]*?\$\{API_CONFIG_ICONS\.save\}/);
 
-const filterDialogSource = configSource.match(/openGenerationParamFilterDialog\(\)\s*\{[\s\S]*?\n    \}\n\n    \/\*\*/)?.[0] || '';
-assert.match(filterDialogSource, /className = 'api-param-filter-overlay'/);
-assert.match(filterDialogSource, /class="api-param-filter-dialog"/);
-assert.match(filterDialogSource, /class="api-param-filter-header"/);
-assert.match(filterDialogSource, /class="api-param-filter-body"/);
-assert.match(filterDialogSource, /class="api-param-filter-footer"/);
-assert.match(filterDialogSource, /API_CONFIG_ICONS\.close/);
-assert.match(filterDialogSource, /API_CONFIG_ICONS\.plus/);
-assert.match(filterDialogSource, /API_CONFIG_ICONS\.check/);
-assert.doesNotMatch(filterDialogSource, /style="/, '参数过滤弹窗应由语义 class 驱动，不再使用内联视觉样式');
+const filterDialogSource = await readFile(path.join(root, 'src/scripts/ui/request-params-panel.js'), 'utf8');
+assert.match(configSource, /openRequestParamsPanel\(\{/);
+for (const name of ['api-param-filter-overlay', 'api-param-filter-dialog', 'api-param-filter-header', 'api-param-filter-body', 'api-param-filter-footer']) {
+  assert.ok(filterDialogSource.includes(name));
+}
+assert.match(filterDialogSource, /role="tablist"/);
+assert.match(filterDialogSource, /data-rp-role="json"/);
+assert.match(filterDialogSource, /data-rp-field="enabled"/);
+assert.doesNotMatch(filterDialogSource, /style="/, 'request parameters use the shared theme stylesheet');
 
 assert.doesNotMatch(imageParamsSource, /STYLE_ID|ensureStyles/, '图片参数页面样式应迁移到独立样式表');
 assert.match(imageParamsSource, /const ICONS\s*=\s*Object\.freeze/);

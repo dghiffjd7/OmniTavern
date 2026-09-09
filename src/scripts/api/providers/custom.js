@@ -3,6 +3,7 @@
  * 支持兼容 OpenAI 格式的自建 API
  */
 
+import { finalizeTextRequestBody, getRequestParamReport } from '../request-params.js';
 import { handleSSE, parseSSEBuffer } from '../stream.js';
 import { createLinkedAbortController, invokeNativeHttpRequest, splitRequestOptions } from '../abort.js';
 import {
@@ -14,6 +15,8 @@ import { reportProviderUsage } from '../provider-usage.js';
 import { reportProviderWebSources } from '../web-search-runtime.js';
 import { attachSafeProviderErrorMetadata } from '../provider-error-metadata.js';
 import { isStreamOptionsRejectionError, streamUsageCompat } from '../stream-usage-compat.js';
+import { usesConfiguredResponses, buildOpenAICompatibleEndpoint } from '../openai-api-format.js';
+import { chatResponses, prepareResponsesRequest, streamResponsesEvents, streamChatResponses } from './openai-responses-runtime.js';
 
 const DEFAULT_IMAGE_MIME = 'image/png';
 
@@ -332,6 +335,14 @@ const isOfficialGeminiOpenAIEndpoint = (baseUrl) => {
 
 const normalizeOpenAICompatiblePayloadOptions = (options = {}, { officialGeminiOpenAIEndpoint = false } = {}) => {
     const out = { ...(options && typeof options === 'object' ? options : {}) };
+    if (out.maxTokens !== undefined) {
+        if (out.max_tokens === undefined && out.max_completion_tokens === undefined) out.max_tokens = out.maxTokens;
+        delete out.maxTokens;
+    }
+    if (out.toolChoice !== undefined) {
+        if (out.tool_choice === undefined) out.tool_choice = out.toolChoice;
+        delete out.toolChoice;
+    }
     if (officialGeminiOpenAIEndpoint) {
         delete out.deepseekPrefix;
         delete out.thinkingBudget;
@@ -376,7 +387,7 @@ const normalizeOpenAICompatiblePayloadOptions = (options = {}, { officialGeminiO
 
 export class CustomProvider {
     constructor(config) {
-        this.transportConfig = config || {};
+        this.transportConfig = { ...config, provider: config.provider || 'custom' };
         this.provider = config.provider || 'custom';
         this.apiKey = config.apiKey || '';
         this.baseUrl = config.baseUrl;
@@ -468,18 +479,24 @@ export class CustomProvider {
     /**
      * 准备聊天请求，供发送链路和调试面板复用同一份实际 payload。
      */
+    normalizeOptions(options = {}) {
+        return normalizeOpenAICompatiblePayloadOptions(options, {
+            officialGeminiOpenAIEndpoint: isOfficialGeminiOpenAIEndpoint(this.baseUrl),
+        });
+    }
+
     prepareChatRequest(messages, options = {}) {
+        if (usesConfiguredResponses(this.transportConfig)) {
+            return this.prepareResponsesRequest(messages, options, { stream: options.stream === true });
+        }
         const { signal, requestId, onProviderToolCallDelta, onProviderSources, options: rawPayloadOptions } = splitRequestOptions(options);
         const officialGeminiOpenAIEndpoint = isOfficialGeminiOpenAIEndpoint(this.baseUrl);
-        const normalizedOptions = normalizeOpenAICompatiblePayloadOptions(rawPayloadOptions, {
-            officialGeminiOpenAIEndpoint,
-        });
+        const normalizedOptions = this.normalizeOptions(rawPayloadOptions);
         const payloadMessages = Array.isArray(messages) ? messages : [];
-        const payload = {
-            model: this.model,
-            messages: payloadMessages,
-            ...normalizedOptions,
-        };
+        const basePayload = { model: this.model, messages: payloadMessages, ...normalizedOptions, stream: options.stream === true };
+        const payload = finalizeTextRequestBody(options.stream === true
+            ? streamUsageCompat.applyStreamUsageOptions(basePayload, this.baseUrl) : basePayload,
+            { config: this.transportConfig, options, protocol: 'chat_completions' });
         return {
             signal,
             requestId,
@@ -489,6 +506,8 @@ export class CustomProvider {
                 ? buildEndpointUrl(this.baseUrl, 'chat/completions')
                 : `${this.baseUrl}/chat/completions`,
             payload,
+            body: payload,
+            parameterReport: getRequestParamReport(payload),
             messages: payloadMessages,
             normalizedOptions,
             responsePrefix: '',
@@ -499,15 +518,13 @@ export class CustomProvider {
      * 发送聊天消息（非流式）
      */
     async chat(messages, options = {}) {
-        const request = this.prepareChatRequest(messages, options);
+        if (usesConfiguredResponses(this.transportConfig)) return chatResponses(this, messages, options);
+        const request = this.prepareChatRequest(messages, { ...options, stream: false });
         const data = await this.requestJson({
             url: request.url,
             method: 'POST',
             headers: this.getHeaders(),
-            body: JSON.stringify({
-                ...request.payload,
-                stream: false,
-            }),
+            body: JSON.stringify(request.payload),
             signal: request.signal,
             requestId: request.requestId,
         });
@@ -540,6 +557,10 @@ export class CustomProvider {
      */
     // 同 openai.js：流式带 include_usage 拿校准样本；端点点名拒绝时记忆并去掉重试一次。
     async *streamChat(messages, options = {}) {
+        if (usesConfiguredResponses(this.transportConfig)) {
+            yield* streamChatResponses(this, messages, options);
+            return;
+        }
         // 只在尚未产出任何增量时才允许去掉 stream_options 重试一次：
         // 已产出的增量无法收回，整段重跑会把开头内容重复发给用户。
         let yieldedAny = false;
@@ -562,18 +583,23 @@ export class CustomProvider {
         }
     }
 
+    prepareResponsesRequest(messages, options = {}, settings = {}) {
+        return prepareResponsesRequest(this, messages, options, settings);
+    }
+
+    async *streamResponsesEvents(prepared = {}) {
+        yield* streamResponsesEvents(this, prepared);
+    }
+
     async *streamChatUnguarded(messages, options = {}) {
-        const request = this.prepareChatRequest(messages, options);
+        const request = this.prepareChatRequest(messages, { ...options, stream: true });
         const providerName = this.provider || 'custom';
         const notifyProviderToolCallDelta = data => {
             try {
                 request.onProviderToolCallDelta?.(data, { provider: providerName, model: this.model });
             } catch {}
         };
-        const payload = JSON.stringify(streamUsageCompat.applyStreamUsageOptions({
-            ...request.payload,
-            stream: true,
-        }, this.baseUrl));
+        const payload = JSON.stringify(request.payload);
 
         const invoker = getTauriInvoker();
         if (typeof invoker === 'function') {
@@ -879,7 +905,9 @@ export class CustomProvider {
     async listModels() {
         try {
             const res = await this.request({
-                url: `${this.baseUrl}/models`,
+                url: usesConfiguredResponses(this.transportConfig)
+                    ? buildOpenAICompatibleEndpoint(this.baseUrl, 'models')
+                    : `${this.baseUrl}/models`,
                 method: 'GET',
                 headers: this.getHeaders(),
             });
@@ -900,7 +928,7 @@ export class CustomProvider {
     async healthCheck() {
         try {
             const testMessages = [{ role: 'user', content: 'test' }];
-            await this.chat(testMessages, { max_tokens: 5 });
+            await this.chat(testMessages, { max_tokens: usesConfiguredResponses(this.transportConfig) ? 128 : 5 });
             return { ok: true };
         } catch (error) {
             return { ok: false, error: error.message };

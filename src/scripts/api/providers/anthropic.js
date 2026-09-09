@@ -2,6 +2,7 @@
  * Anthropic (Claude) API 适配器
  */
 
+import { finalizeTextRequestBody, getRequestParamReport } from '../request-params.js';
 import { handleSSE } from '../stream.js';
 import { createLinkedAbortController, invokeNativeHttpRequest, splitRequestOptions } from '../abort.js';
 import { createReasoningStreamEvent, extractAnthropicStreamParts } from '../native-reasoning.js';
@@ -298,29 +299,34 @@ export class AnthropicProvider {
         };
     }
 
+    prepareChatRequest(messages, options = {}) {
+        const { options: raw, ...runtime } = splitRequestOptions(options);
+        const { maxTokens, ...payloadOptions } = raw;
+        const converted = this.convertMessages(messages);
+        const body = finalizeTextRequestBody({
+            ...payloadOptions,
+            model: this.model,
+            messages: converted.messages,
+            system: converted.system,
+            max_tokens: maxTokens || payloadOptions.max_tokens || 4096,
+            stream: options.stream === true,
+        }, { config: this.transportConfig, options, protocol: 'anthropic' });
+        return { ...runtime, body, payload: body, messages, url: `${this.baseUrl}/messages`,
+            parameterReport: getRequestParamReport(body), responsePrefix: '' };
+    }
+
     /**
      * 发送聊天消息（非流式）
      */
     async chat(messages, options = {}) {
-        const { signal, requestId, onProviderToolCallDelta, options: payloadOptionsRaw } = splitRequestOptions(options);
-        const maxTokens = payloadOptionsRaw?.maxTokens ?? payloadOptionsRaw?.max_tokens;
-        const payloadOptions = { ...(payloadOptionsRaw || {}) };
-        delete payloadOptions.maxTokens;
-
-        const { system, messages: convertedMessages } = this.convertMessages(messages);
+        const prepared = this.prepareChatRequest(messages, { ...options, stream: false });
+        const { signal, requestId, onProviderToolCallDelta } = prepared;
 
         const data = await this.requestJson({
             url: `${this.baseUrl}/messages`,
             method: 'POST',
             headers: this.getHeaders(),
-            body: JSON.stringify({
-                model: this.model,
-                messages: convertedMessages,
-                system: system,
-                max_tokens: maxTokens || payloadOptions.max_tokens || 4096,
-                stream: false,
-                ...payloadOptions
-            }),
+            body: JSON.stringify(prepared.body),
             signal,
             requestId,
         });
@@ -348,20 +354,9 @@ export class AnthropicProvider {
      * 流式聊天
      */
     async *streamChat(messages, options = {}) {
-        const { signal, requestId, onProviderToolCallDelta, options: payloadOptionsRaw } = splitRequestOptions(options);
-        const maxTokens = payloadOptionsRaw?.maxTokens ?? payloadOptionsRaw?.max_tokens;
-        const payloadOptions = { ...(payloadOptionsRaw || {}) };
-        delete payloadOptions.maxTokens;
-
-        const { system, messages: convertedMessages } = this.convertMessages(messages);
-        const payload = JSON.stringify({
-            model: this.model,
-            messages: convertedMessages,
-            system: system,
-            max_tokens: maxTokens || payloadOptions.max_tokens || 4096,
-            stream: true,
-            ...payloadOptions
-        });
+        const request = this.prepareChatRequest(messages, { ...options, stream: true });
+        const { signal, requestId, onProviderToolCallDelta } = request;
+        const payload = JSON.stringify(request.body);
 
         const prepared = prepareTransportRequest({
             config: this.transportConfig,

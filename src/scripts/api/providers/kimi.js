@@ -42,16 +42,13 @@ export class KimiProvider extends CustomProvider {
     });
   }
 
-  prepareChatRequest(messages, options = {}) {
-    const prepared = super.prepareChatRequest(messages, options);
-    delete prepared.payload?.maxTokens;
-    delete prepared.normalizedOptions?.maxTokens;
-    if (!/^kimi-/iu.test(trim(this.model))) return prepared;
-    FIXED_SAMPLING_FIELDS.forEach((field) => {
-      delete prepared.payload?.[field];
-      delete prepared.normalizedOptions?.[field];
-    });
-    return prepared;
+  normalizeOptions(options = {}) {
+    const normalized = super.normalizeOptions(options);
+    delete normalized.maxTokens;
+    if (/^kimi-/iu.test(trim(this.model))) {
+      FIXED_SAMPLING_FIELDS.forEach(field => { delete normalized[field]; });
+    }
+    return normalized;
   }
 
   async listModels() {

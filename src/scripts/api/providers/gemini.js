@@ -3,6 +3,7 @@
  * Supports both Google AI Studio (Makersuite) and Vertex AI
  */
 
+import { finalizeTextRequestBody, getRequestParamReport } from '../request-params.js';
 import { handleSSE } from '../stream.js';
 import { createLinkedAbortController, splitRequestOptions } from '../abort.js';
 import { createReasoningStreamEvent, extractGeminiStreamParts } from '../native-reasoning.js';
@@ -153,7 +154,7 @@ export class GeminiProvider {
   /**
    * Build request body in Gemini format
    */
-  buildRequestBody(messages, options = {}) {
+  buildRequestBody(messages, options = {}, { requestParams = true } = {}) {
     const { contents, systemInstruction } = this.convertMessages(messages);
 
     const body = {
@@ -191,7 +192,15 @@ export class GeminiProvider {
       body.toolConfig = options.toolConfig;
     }
 
-    return body;
+    return requestParams ? finalizeTextRequestBody(body, {
+      config: this.transportConfig, options, protocol: 'gemini',
+    }) : body;
+  }
+
+  prepareChatRequest(messages, options = {}) {
+    const body = this.buildRequestBody(messages, options);
+    return { url: this.buildUrl(options.stream === true), body, payload: body, messages,
+      parameterReport: getRequestParamReport(body), responsePrefix: '' };
   }
 
   /**
@@ -203,7 +212,7 @@ export class GeminiProvider {
 
     try {
       const url = this.buildUrl(false);
-      const body = this.buildRequestBody(messages, payloadOptions);
+      const body = this.buildRequestBody(messages, options);
       const prepared = prepareTransportRequest({
         config: this.transportConfig,
         provider: 'gemini',
@@ -283,7 +292,7 @@ export class GeminiProvider {
 
     try {
       const url = this.buildUrl(true);
-      const body = this.buildRequestBody(messages, payloadOptions);
+      const body = this.buildRequestBody(messages, options);
       const prepared = prepareTransportRequest({
         config: this.transportConfig,
         provider: 'gemini',

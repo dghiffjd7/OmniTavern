@@ -1,4 +1,5 @@
 import { t } from '../../i18n/index.js';
+import { cloneData } from '../../utils/clone-data.js';
 import { AUTO_IMAGE_PROMPT_TAG, buildAutoImagePromptInstruction, extractAutoImagePrompts } from './auto-image-prompt-utils.js';
 import { extractUpdateVariableBlocks } from './update-variable-block-utils.js';
 import { buildUpdateVariableParser } from './update-variable-parser-utils.js';
@@ -17,9 +18,9 @@ export const createHopscotchSidecarExecutors = ({
   imageEligibility = () => ({ ok: true }),
 } = {}) => {
   const scope = getScope();
-  const rules = structuredClone(ruleEngine?.getRules(sessionId) || []);
+  const rules = cloneData(ruleEngine?.getRules(sessionId) || []);
   const contracts = promptSources.filter(text => UPDATE_CONTRACT.test(String(text || ''))).join('\n\n');
-  const imageInstruction = buildAutoImagePromptInstruction({ uiMode: 'rp', ...structuredClone(imageSettings) });
+  const imageInstruction = buildAutoImagePromptInstruction({ uiMode: 'rp', ...cloneData(imageSettings) });
   const profiles = new Map();
   for (const house of board.rows.flatMap(row => row.houses)) {
     if (!['variable', 'image_prompt'].includes(house.kind)) continue;
@@ -39,7 +40,7 @@ export const createHopscotchSidecarExecutors = ({
       const latest = getMessage(messageId, sessionId);
       return current(signal) && latest?.role === 'assistant' && rawText(latest) === source && (latest.meta?.activeSwipe || 0) === swipe;
     };
-    return { messageId, message: structuredClone(message), source, canCommit };
+    return { messageId, message: cloneData(message), source, canCommit };
   };
   const request = async (house, messages, signal) => {
     if (!current(signal)) abort();

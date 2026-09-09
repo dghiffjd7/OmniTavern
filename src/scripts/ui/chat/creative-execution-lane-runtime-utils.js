@@ -1,4 +1,5 @@
 import { translateUiText } from '../../i18n/index.js';
+import { cloneData } from '../../utils/clone-data.js';
 import { renderHopscotchCourt } from './hopscotch-court-view.js';
 
 const TERMINAL_TASK_STATUSES = new Set(['succeeded', 'failed', 'cancelled', 'skipped']);
@@ -254,7 +255,7 @@ export const createCreativeExecutionInitialState = ({
     fullscreen: false,
     selectedTaskId: '',
     userPanned: false,
-    ...(board ? { board: structuredClone(board) } : {}),
+    ...(board ? { board: cloneData(board) } : {}),
     run: {
       id,
       sessionId: normalizeId(sessionId),

@@ -292,12 +292,13 @@ const secondaryExpression = theme => `(async () => {
   await new Promise(resolve => setTimeout(resolve, 280));
   const filterOverlay = document.querySelector('.api-param-filter-overlay');
   const filterDialog = filterOverlay?.querySelector('.api-param-filter-dialog');
-  const commonChip = filterDialog?.querySelector('.api-param-filter-common-chip');
-  const firstParam = commonChip?.dataset.param || '';
+  filterDialog?.querySelector('[data-rp-tab="exclude"]')?.click();
+  const commonChip = filterDialog?.querySelector('[data-rp-role="exclude-common"] .api-param-filter-common-chip');
+  const firstParam = commonChip?.dataset.rpExclude || '';
   commonChip?.click();
   await new Promise(resolve => setTimeout(resolve, 80));
   const activeChip = firstParam
-    ? filterDialog?.querySelector('.api-param-filter-common-chip[data-param="' + CSS.escape(firstParam) + '"]')
+    ? filterDialog?.querySelector('.api-param-filter-common-chip[data-rp-exclude="' + CSS.escape(firstParam) + '"]')
     : null;
   const selectedChip = filterDialog?.querySelector('.api-param-filter-selected-chip');
   const filterRect = filterDialog?.getBoundingClientRect();
@@ -308,7 +309,7 @@ const secondaryExpression = theme => `(async () => {
   const closeTopElement = closeRect
     ? document.elementFromPoint(closeRect.left + closeRect.width / 2, closeRect.top + closeRect.height / 2)
     : null;
-  const addButton = filterDialog?.querySelector('[data-param-filter-action="add"]');
+  const addButton = filterDialog?.querySelector('[data-rp-action="exclude-add"]');
   const addLabelRect = addButton?.querySelector('span')?.getBoundingClientRect();
   const filter = {
     exists: Boolean(filterDialog),
@@ -330,11 +331,11 @@ const secondaryExpression = theme => `(async () => {
       zIndex: getComputedStyle(closeTopElement).zIndex,
     } : null,
   };
-  filterDialog?.querySelector('[data-param-filter-action="apply"]')?.click();
+  filterDialog?.querySelector('[data-rp-action="apply"]')?.click();
   await new Promise(resolve => setTimeout(resolve, 40));
   filter.closed = !document.querySelector('.api-param-filter-overlay');
   filter.applied = panel.excludedGenerationParams.includes(firstParam)
-    && panel.element.querySelector('#generation-param-filter-summary').textContent.includes(firstParam);
+    && panel.element.querySelector('#generation-param-filter-summary').textContent.includes('1');
   panel.setExcludedGenerationParams([], { emit: false });
 
   await panel.setActiveTab('image');
@@ -413,7 +414,7 @@ const prepareVoiceCaptureExpression = ({ theme, mode }) => `(async () => {
 })()`;
 
 const cleanupSecondaryCaptureExpression = String.raw`(() => {
-  document.querySelector('.api-param-filter-header [data-param-filter-action="cancel"]')?.click();
+  document.querySelector('.api-param-filter-header [data-rp-action="cancel"]')?.click();
   window.__apiConfigCdpProbe?.panel?.hide?.();
   return true;
 })()`;

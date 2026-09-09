@@ -243,6 +243,10 @@ export const resolveProviderFcTransport = (config = {}, { localRuleOverride = nu
     };
   }
   if (localCapability.matched && localCapability.layer === 'local_advanced') {
+    if (config.apiFormat === 'responses' && ['custom', 'opencode'].includes(provider)
+      && localCapability.identity?.transportAdapter !== 'openai_responses') {
+      return unsupported({ provider, reason: 'configured_api_format_mismatch' });
+    }
     const family = familyForTransportAdapter(localCapability.identity?.transportAdapter);
     if (family !== PROVIDER_FC_FAMILIES.unsupported) {
       return supported({
@@ -267,6 +271,7 @@ export const resolveProviderFcTransport = (config = {}, { localRuleOverride = nu
       : unsupported({ provider, reason: 'unverified_provider_endpoint' });
   }
   if (provider === 'opencode') {
+    if (config.apiFormat === 'responses') return unsupported({ provider, reason: 'unverified_responses_capabilities' });
     const direct = trim(config?.connectionMode, 'direct').toLowerCase() !== 'reverse_proxy';
     return direct && isOfficialOpenCodeGoBaseUrl(config?.baseUrl)
       ? supported({

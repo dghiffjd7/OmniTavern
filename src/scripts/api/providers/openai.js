@@ -2,6 +2,7 @@
  * OpenAI API 适配器
  */
 
+import { finalizeTextRequestBody, getRequestParamReport } from '../request-params.js';
 import { handleSSE } from '../stream.js';
 import { createLinkedAbortController, invokeNativeHttpRequest, splitRequestOptions } from '../abort.js';
 import {
@@ -22,9 +23,11 @@ import {
   resolveDeepSeekBetaBaseUrl,
 } from './deepseek-compat.js';
 import {
-  buildOpenAIResponsesRequestBody,
-  extractOpenAIResponsesText,
-} from './openai-responses-utils.js';
+  chatResponses,
+  prepareResponsesRequest,
+  streamResponsesEvents,
+  streamChatResponses,
+} from './openai-responses-runtime.js';
 
 const getTauriInvoker = () => {
   const g = typeof globalThis !== 'undefined' ? globalThis : undefined;
@@ -296,27 +299,6 @@ const isOpenAIResponsesRequested = (options = {}) => (
   String(options?.openaiApi || options?.openai_api || '').trim().toLowerCase() === 'responses'
 );
 
-const resolveOfficialResponsesUrl = ({ provider = '', baseUrl = '' } = {}) => {
-  const normalizedProvider = String(provider || '').trim().toLowerCase();
-  try {
-    const url = new URL(String(baseUrl || (
-      normalizedProvider === 'deepseek'
-        ? 'https://api.deepseek.com/v1'
-        : 'https://api.openai.com/v1'
-    )));
-    const hostname = url.hostname.toLowerCase();
-    if (normalizedProvider === 'openai' && hostname === 'api.openai.com') {
-      const basePath = url.pathname.replace(/\/+$/u, '');
-      return `${url.origin}${basePath && basePath !== '/' ? basePath : '/v1'}/responses`;
-    }
-    if (normalizedProvider === 'deepseek' && hostname === 'api.deepseek.com') {
-      return `${url.origin}/responses`;
-    }
-    return '';
-  } catch {
-    return '';
-  }
-};
 
 const buildMessageRoleWindow = (messages, index, radius = 4) => {
   const arr = Array.isArray(messages) ? messages : [];
@@ -467,6 +449,9 @@ export class OpenAIProvider {
   }
 
   prepareChatRequest(messages, options = {}) {
+    if (isOpenAIResponsesRequested(options)) {
+      return this.prepareResponsesRequest(messages, options, { stream: options.stream === true });
+    }
     const { signal, requestId, onProviderToolCallDelta, onProviderSources, options: rawPayloadOptions } = splitRequestOptions(options);
     const payloadOptions = (rawPayloadOptions && typeof rawPayloadOptions === 'object') ? { ...rawPayloadOptions } : {};
     const deepseekPrefix = normalizeDeepSeekPrefixRequest(payloadOptions.deepseekPrefix);
@@ -497,11 +482,10 @@ export class OpenAIProvider {
       payloadMessages = prefixCompat.messages;
     }
 
-    const payload = {
-      model: this.model,
-      messages: payloadMessages,
-      ...normalizedOptions,
-    };
+    const basePayload = { model: this.model, messages: payloadMessages, ...normalizedOptions, stream: options.stream === true };
+    const payload = finalizeTextRequestBody(options.stream === true
+      ? streamUsageCompat.applyStreamUsageOptions(basePayload, this.baseUrl) : basePayload,
+      { config: this.transportConfig, options, protocol: 'chat_completions' });
 
     return {
       signal,
@@ -510,6 +494,8 @@ export class OpenAIProvider {
       onProviderSources,
       url: `${requestBaseUrl}/chat/completions`,
       payload,
+      body: payload,
+      parameterReport: getRequestParamReport(payload),
       messages: payloadMessages,
       normalizedOptions,
       responsePrefix,
@@ -599,279 +585,26 @@ export class OpenAIProvider {
    * 发送聊天消息（非流式）
    */
   async chatResponses(messages, options = {}) {
-    const prepared = this.prepareResponsesRequest(messages, options, { stream: false });
-    const { signal, requestId, onProviderToolCallDelta, body } = prepared;
-    const data = await this.requestJson({
-      url: prepared.url,
-      method: 'POST',
-      headers: this.getHeaders(),
-      body: JSON.stringify(body),
-      signal,
-      requestId,
-    });
-    try {
-      onProviderToolCallDelta?.(data, { provider: this.provider, model: this.model, api: 'responses' });
-    } catch {}
-    reportProviderWebSources(options, data, { provider: this.provider });
-    reportProviderUsage(options, {
-      body: data,
-      model: this.model,
-      provider: this.provider,
-      finishReason: String(data?.status || data?.incomplete_details?.reason || ''),
-    });
-    return extractOpenAIResponsesText(data);
+    return chatResponses(this, messages, options);
   }
 
-  prepareResponsesRequest(messages, options = {}, { stream = false } = {}) {
-    const responsesUrl = resolveOfficialResponsesUrl(this);
-    if (!responsesUrl) {
-      throw new Error('Responses API requires an official api.openai.com or api.deepseek.com endpoint');
-    }
-    const {
-      signal,
-      requestId,
-      onProviderToolCallDelta,
-      onProviderSources,
-      options: rawPayloadOptions,
-    } = splitRequestOptions(options);
-    const payloadOptions = { ...(rawPayloadOptions || {}) };
-    delete payloadOptions.openaiApi;
-    delete payloadOptions.openai_api;
-    const body = buildOpenAIResponsesRequestBody({
-      model: this.model,
-      messages,
-      options: payloadOptions,
-      stream,
-    });
-    const estimatedChars = JSON.stringify(body).length;
-    if (estimatedChars > 1_800_000) {
-      throw new Error(
-        `请求过大（约 ${Math.round(estimatedChars / 1024)} KB），可能导致 Android WebView OOM；请减少历史/摘要/世界书注入或清理该聊天室。`,
-      );
-    }
-    return {
-      signal,
-      requestId,
-      onProviderToolCallDelta,
-      onProviderSources,
-      url: responsesUrl,
-      body,
-    };
+  prepareResponsesRequest(messages, options = {}, settings = {}) {
+    return prepareResponsesRequest(this, messages, options, settings);
   }
 
   async *streamResponsesEvents(prepared = {}) {
-    const transport = prepareTransportRequest({
-      config: this.transportConfig,
-      provider: this.provider,
-      url: prepared.url,
-      headers: { ...this.getHeaders(), Accept: 'text/event-stream' },
-    });
-    const payload = JSON.stringify(prepared.body || {});
-    const { signal } = prepared;
-
-    if (this.canUseNativeHttp()) {
-      const invoker = getTauriInvoker();
-      const rawRequestId = String(
-        prepared.requestId || `responses_stream_${Date.now().toString(36)}_${Math.random().toString(16).slice(2, 10)}`,
-      ).trim();
-      const nativeRequestId = rawRequestId.replace(/[^a-z0-9._-]+/giu, '_').slice(0, 160)
-        || `responses_stream_${Date.now().toString(36)}`;
-      let started = false;
-      let responseStatus = 0;
-      let responseOk = null;
-      let rawErrorBody = '';
-      let sseBuffer = '';
-      const parseBufferedEvents = (final = false) => {
-        const normalized = String(sseBuffer || '').replace(/\r\n/gu, '\n');
-        const blocks = normalized.split('\n\n');
-        sseBuffer = final ? '' : (blocks.pop() || '');
-        const events = [];
-        for (const block of blocks) {
-          const dataText = block
-            .split('\n')
-            .filter(line => line.startsWith('data:'))
-            .map(line => line.slice(5).trimStart())
-            .join('\n')
-            .trim();
-          if (!dataText || dataText === '[DONE]') continue;
-          try { events.push(JSON.parse(dataText)); } catch {}
-        }
-        return events;
-      };
-      try {
-        if (signal?.aborted) throw makeAbortError();
-        await invoker('http_stream_request_start', {
-          url: transport.url,
-          method: 'POST',
-          headers: transport.headers,
-          body: payload,
-          timeoutMs: this.timeout,
-          requestId: nativeRequestId,
-        });
-        started = true;
-        while (true) {
-          if (signal?.aborted) throw makeAbortError();
-          const batch = await invoker('http_stream_request_read', {
-            requestId: nativeRequestId,
-            maxChunks: 32,
-          });
-          if (Number.isFinite(Number(batch?.status))) responseStatus = Number(batch.status);
-          if (typeof batch?.ok === 'boolean') responseOk = batch.ok;
-          const chunks = Array.isArray(batch?.chunks)
-            ? batch.chunks.map(chunk => String(chunk || ''))
-            : [];
-          if (responseOk === false) {
-            rawErrorBody += chunks.join('');
-          } else {
-            for (const chunk of chunks) {
-              sseBuffer += chunk;
-              for (const event of parseBufferedEvents(false)) yield event;
-            }
-          }
-          const nativeError = String(batch?.error || '').trim();
-          if (nativeError) {
-            if (/aborted/iu.test(nativeError)) throw makeAbortError();
-            const error = new Error(`native http_stream_request failed: ${nativeError}`);
-            error.status = responseStatus;
-            error.response = rawErrorBody;
-            throw error;
-          }
-          if (batch?.done) {
-            if (responseOk === false) {
-              const detail = this.extractErrorDetail(rawErrorBody);
-              const error = new Error(`OpenAI API Error: ${responseStatus}${detail ? ` - ${detail}` : ''}`);
-              error.status = responseStatus;
-              error.response = rawErrorBody;
-              throw attachSafeProviderErrorMetadata(error, rawErrorBody);
-            }
-            sseBuffer += '\n\n';
-            for (const event of parseBufferedEvents(true)) yield event;
-            return;
-          }
-          if (!chunks.length) await delay(20);
-        }
-      } finally {
-        if (started) {
-          invoker('http_stream_request_close', { requestId: nativeRequestId }).catch(() => {});
-        }
-      }
-    }
-
-    const { controller, cleanup, touch } = createLinkedAbortController({ timeoutMs: this.timeout, signal, idle: true });
-    try {
-      const response = await fetch(transport.url, {
-        method: 'POST',
-        headers: transport.headers,
-        signal: controller.signal,
-        body: payload,
-      });
-      if (!response.ok) {
-        const rawErrorBody = await response.text();
-        const detail = this.extractErrorDetail(rawErrorBody);
-        const error = new Error(`OpenAI API Error: ${response.status}${detail ? ` - ${detail}` : ''}`);
-        error.status = response.status;
-        error.response = rawErrorBody;
-        throw attachSafeProviderErrorMetadata(error, rawErrorBody);
-      }
-      for await (const event of handleSSE(response)) {
-        touch();
-        yield event;
-      }
-    } finally {
-      cleanup();
-    }
+    yield* streamResponsesEvents(this, prepared);
   }
 
   async *streamChatResponses(messages, options = {}) {
-    const prepared = this.prepareResponsesRequest(messages, options, { stream: true });
-    let finalResponse = null;
-    let outputChars = 0;
-    let reasoningChars = 0;
-    let deltaCount = 0;
-    try {
-      if (prepared.signal?.aborted) throw makeAbortError();
-      for await (const event of this.streamResponsesEvents(prepared)) {
-        const type = String(event?.type || '').trim();
-        if (type === 'error' || type === 'response.failed') {
-          const detail = event?.error?.message || event?.response?.error?.message || 'Responses stream failed';
-          const error = new Error(String(detail));
-          error.response = event;
-          throw error;
-        }
-        try {
-          prepared.onProviderToolCallDelta?.(event, {
-            provider: this.provider,
-            model: this.model,
-            api: 'responses',
-          });
-        } catch {}
-        reportProviderWebSources(options, event, { provider: this.provider });
-        deltaCount += 1;
-        if (type === 'response.completed') finalResponse = event?.response || null;
-        const reasoningDelta = (
-          type === 'response.reasoning_summary_text.delta'
-          || type === 'response.reasoning_text.delta'
-        ) && typeof event?.delta === 'string'
-          ? event.delta
-          : '';
-        if (reasoningDelta) {
-          reasoningChars += reasoningDelta.length;
-          yield createReasoningStreamEvent(reasoningDelta, { provider: this.provider });
-        }
-        if (type === 'response.output_text.delta' && typeof event?.delta === 'string' && event.delta) {
-          outputChars += event.delta.length;
-          yield event.delta;
-        }
-      }
-      if (finalResponse) {
-        reportProviderWebSources(options, finalResponse, { provider: this.provider });
-        reportProviderUsage(options, {
-          body: finalResponse,
-          model: this.model,
-          provider: this.provider,
-          finishReason: String(finalResponse?.status || finalResponse?.incomplete_details?.reason || ''),
-        });
-      }
-      emitOpenAIResponseDiagnostics({
-        phase: 'responses-stream',
-        provider: this.provider,
-        model: this.model,
-        stream: true,
-        transport: this.canUseNativeHttp() ? 'native-stream' : 'fetch-stream',
-        requestId: prepared.requestId,
-        status: finalResponse ? 200 : 0,
-        payload: { ...prepared.body, __timeoutMs: this.timeout },
-        finishReason: String(finalResponse?.status || ''),
-        outputChars,
-        reasoningChars,
-        deltaCount,
-        usageBody: finalResponse,
-      });
-    } catch (error) {
-      emitOpenAIResponseDiagnostics({
-        phase: 'responses-stream-error',
-        provider: this.provider,
-        model: this.model,
-        stream: true,
-        transport: this.canUseNativeHttp() ? 'native-stream' : 'fetch-stream',
-        requestId: prepared.requestId,
-        status: error?.status || 0,
-        payload: { ...prepared.body, __timeoutMs: this.timeout },
-        outputChars,
-        reasoningChars,
-        deltaCount,
-        usageBody: finalResponse,
-        errorMessage: error?.message || String(error || ''),
-      });
-      throw error;
-    }
+    yield* streamChatResponses(this, messages, options, emitOpenAIResponseDiagnostics);
   }
 
   async chat(messages, options = {}) {
     if (isOpenAIResponsesRequested(options)) {
       return this.chatResponses(messages, options);
     }
-    const prepared = this.prepareChatRequest(messages, options);
+    const prepared = this.prepareChatRequest(messages, { ...options, stream: false });
     const { signal, requestId } = prepared;
     messages = prepared.messages;
     const normalized = prepared.normalizedOptions;
@@ -901,10 +634,7 @@ export class OpenAIProvider {
         url: prepared.url,
         method: 'POST',
         headers: this.getHeaders(),
-        body: JSON.stringify({
-          ...prepared.payload,
-          stream: false,
-        }),
+        body: JSON.stringify(prepared.payload),
         signal,
         requestId,
       });
@@ -1015,7 +745,7 @@ export class OpenAIProvider {
   }
 
   async *streamChatUnguarded(messages, options = {}) {
-    const prepared = this.prepareChatRequest(messages, options);
+    const prepared = this.prepareChatRequest(messages, { ...options, stream: true });
     const { signal, requestId } = prepared;
     const notifyProviderToolCallDelta = data => {
       try {
@@ -1044,10 +774,7 @@ export class OpenAIProvider {
         `请求过大（约 ${Math.round(estimatedChars / 1024)} KB），可能导致 Android WebView OOM；请减少历史/摘要/世界书注入或清理该聊天室。`,
       );
     }
-    const payload = JSON.stringify(streamUsageCompat.applyStreamUsageOptions({
-      ...prepared.payload,
-      stream: true,
-    }, this.baseUrl));
+    const payload = JSON.stringify(prepared.payload);
     const transport = prepareTransportRequest({
       config: this.transportConfig,
       provider: this.provider,

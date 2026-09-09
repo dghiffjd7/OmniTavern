@@ -5,6 +5,7 @@ mod external_links;
 mod memory_db;
 mod microphone_permission;
 mod realtime_transport;
+mod reply_notifications;
 mod screenshot;
 mod storage;
 
@@ -13,13 +14,30 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let builder = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(target_os = "windows")]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+        if args.len() <= 1 {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }
+        reply_notifications::activate(app, &args);
+    }));
+    let builder = builder
         .plugin(tauri_plugin_opener::init())
         .plugin(microphone_permission::init());
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let builder = builder.plugin(tauri_plugin_dialog::init());
     builder
         .invoke_handler(tauri::generate_handler![
+            reply_notifications::reply_notification_settings,
+            reply_notifications::reply_notification_configure,
+            reply_notifications::reply_notification_watch,
+            reply_notifications::reply_notification_take_activation,
+            reply_notifications::reply_notification_complete,
             external_links::open_external_url,
             commands::exit_app,
             commands::restart_app,
@@ -109,6 +127,10 @@ pub fn run() {
         ])
         .setup(|_app| {
             let handle = _app.handle();
+            #[cfg(target_os = "windows")]
+            if let Err(error) = reply_notifications::init(&handle) {
+                eprintln!("Reply notification initialization failed: {error}");
+            }
             let memory_db = memory_db::MemoryDb::new(&handle)
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
             _app.manage(memory_db);

@@ -13,11 +13,13 @@ import {
     normalizeVertexAuthMode,
 } from '../api/vertexai-config-utils.js';
 import { normalizeOpenRouterProviderSlugs } from '../api/openrouter-provider-routing.js';
+import { openRequestParamsPanel } from './request-params-panel.js';
+import { normalizeCustomRequestParams, getRequestParamProtection } from '../api/request-params.js';
+import { partitionPresetRequestParam } from '../api/request-param-ownership.js';
+import { normalizeOpenAIApiFormat, supportsOpenAIApiFormatSelection } from '../api/openai-api-format.js';
 import { logger } from '../utils/logger.js';
 import {
-    COMMON_GENERATION_PARAM_FILTERS,
     normalizeGenerationParamFilterList,
-    splitGenerationParamFilterInput,
 } from '../utils/generation-param-filter-utils.js';
 import { appConfirm } from './app-confirm.js';
 import { appSettings } from '../storage/app-settings.js';
@@ -181,6 +183,8 @@ export class ConfigPanel {
         this.transportExpanded = false;
         this.webSearchCredentialLoadSequence = 0;
         this.excludedGenerationParams = [];
+        this.customRequestParams = [];
+        this.requestParamsDialog = null;
         this.openOptions = {};
         this.onSaved = typeof onSaved === 'function' ? onSaved : null;
         this.currentPage = 'main';
@@ -245,6 +249,7 @@ export class ConfigPanel {
      * 隐藏配置面板
      */
     hide() {
+        this.requestParamsDialog?.close();
         this.realtimeSettingsPanel?.hide();
         if (this.modelFilterDebounceTimer !== null) {
             clearTimeout(this.modelFilterDebounceTimer);
@@ -354,7 +359,10 @@ export class ConfigPanel {
     }
 
     emitDraftChange() {
-        if (this.activeTab === 'chat') this.updateFcCompatibilitySummary();
+        if (this.activeTab === 'chat') {
+            this.updateFcCompatibilitySummary();
+            this.refreshGenerationParamFilterSummary();
+        }
         try {
             window.dispatchEvent(new CustomEvent('config-draft-changed', {
                 detail: { tab: this.activeTab },
@@ -733,6 +741,20 @@ export class ConfigPanel {
                     </div>
                 </div>
 
+                <div id="config-api-format-section" class="api-config-field" style="display:none;">
+                    <span id="config-api-format-label" class="api-config-field-label has-help" data-help="按服务商文档选择接口格式：Chat Completions 使用 /chat/completions，Responses 使用 /responses。模型列表沿用刷新与手动填写，工具等能力以渠道支持为准。">接口格式</span>
+                    <div class="api-config-format-picker" role="radiogroup" aria-labelledby="config-api-format-label">
+                        <label class="api-config-format-option">
+                            <input type="radio" name="config-api-format" value="chat_completions" checked>
+                            <span translate="no">Chat Completions</span>
+                        </label>
+                        <label class="api-config-format-option">
+                            <input type="radio" name="config-api-format" value="responses">
+                            <span translate="no">Responses</span>
+                        </label>
+                    </div>
+                </div>
+
                 <div id="config-custom-fields" data-maid-guide-target="config-custom-fields">
                 <div id="config-baseurl-section" class="api-config-field">
                     <label class="api-config-field-label has-help" data-help="内建服务商自动使用默认地址；仅自定义 API 需填写">API Base URL</label>
@@ -1010,8 +1032,8 @@ export class ConfigPanel {
                         <span class="api-config-row-main">
                             <span class="api-config-row-icon">${API_CONFIG_ICONS.filter}</span>
                             <span class="api-config-row-copy">
-                                <strong>请求参数过滤</strong>
-                                <small id="generation-param-filter-summary">未排除生成参数</small>
+                                <strong>请求参数</strong>
+                                <small id="generation-param-filter-summary">${t('附加 {custom} · 排除 {excluded}', { custom: 0, excluded: 0 })}</small>
                             </span>
                         </span>
                         ${API_CONFIG_ICONS.chevronRight}
@@ -1200,6 +1222,7 @@ export class ConfigPanel {
         // Provider 切换时更新默认值和字段可见性
         this.element.querySelector('#config-provider').onchange = async (e) => {
             const provider = e.target.value;
+            this.setApiFormat('chat_completions');
             if (this.activeTab === 'voice') this.clearVoiceModelOptions();
             this.updateDefaultsForProvider(provider);
             this.setOpenRouterProviderState({
@@ -1208,6 +1231,11 @@ export class ConfigPanel {
             this.updateFieldVisibility(provider);
             this.emitDraftChange();
         };
+        this.element.querySelectorAll('input[name="config-api-format"]').forEach(input => {
+            input.addEventListener('change', () => {
+                this.emitDraftChange();
+            });
+        });
         this.element.querySelector('#config-region').onchange = async () => {
             const provider = this.element.querySelector('#config-provider')?.value || 'openai';
             if (provider === 'vertexai') {
@@ -1613,173 +1641,62 @@ export class ConfigPanel {
         if (emit) this.emitDraftChange();
     }
 
+    setCustomRequestParams(params = [], { emit = false } = {}) {
+        this.customRequestParams = normalizeCustomRequestParams(params);
+        this.refreshGenerationParamFilterSummary();
+        if (emit) this.emitDraftChange();
+    }
+
     refreshGenerationParamFilterSummary() {
         const summary = this.element?.querySelector?.('#generation-param-filter-summary');
         if (!summary) return;
-        const list = normalizeGenerationParamFilterList(this.excludedGenerationParams);
-        if (!list.length) {
-            summary.textContent = '未排除生成参数';
-            summary.title = '';
-            return;
-        }
-        const visible = list.slice(0, 4).join(', ');
-        summary.textContent = list.length > 4
-            ? t('已排除：{items} 等 {count} 项', { items: visible, count: list.length })
-            : t('已排除：{items}', { items: visible });
-        summary.title = list.join(', ');
+        const excluded = normalizeGenerationParamFilterList(this.excludedGenerationParams);
+        const custom = normalizeCustomRequestParams(this.customRequestParams);
+        const config = { ...this.configManager.get(), provider: this.element?.querySelector('#config-provider')?.value, model: this.element?.querySelector('#config-model')?.value, baseUrl: this.element?.querySelector('#config-baseurl')?.value };
+        summary.textContent = t('附加 {custom} · 排除 {excluded}', {
+            custom: custom.filter(row => row.enabled && partitionPresetRequestParam(row, { config }).hasValue && !getRequestParamProtection(row.name, { config })).length, excluded: excluded.length,
+        });
+        summary.title = '';
     }
 
     openGenerationParamFilterDialog() {
-        const initial = normalizeGenerationParamFilterList(this.excludedGenerationParams);
-        let draft = initial.slice();
-        const overlay = document.createElement('div');
-        overlay.className = 'api-param-filter-overlay';
-        overlay.innerHTML = `
-            <div class="api-param-filter-dialog" role="dialog" aria-modal="true" aria-labelledby="api-param-filter-title">
-                <header class="api-param-filter-header">
-                    <div>
-                        <h3 id="api-param-filter-title">请求参数过滤</h3>
-                        <p>保存后仅作用于当前连线设置档</p>
-                    </div>
-                    <button type="button" class="api-param-filter-icon-button" data-param-filter-action="cancel" aria-label="关闭">
-                        ${API_CONFIG_ICONS.close}
-                    </button>
-                </header>
-                <div class="api-param-filter-body">
-                    <div class="api-param-filter-section-heading">
-                        <span>常用参数</span>
-                        <span class="api-param-filter-count">${COMMON_GENERATION_PARAM_FILTERS.length} 项</span>
-                    </div>
-                    <div class="api-param-filter-common" data-role="common"></div>
-                    <div class="api-param-filter-custom">
-                        <input class="api-param-filter-input" data-role="custom-input" type="text"
-                               placeholder="输入参数名，例如 response_format">
-                        <button type="button" class="api-param-filter-button is-primary" data-param-filter-action="add">
-                            ${API_CONFIG_ICONS.plus}<span>加入</span>
-                        </button>
-                    </div>
-                    <div class="api-param-filter-error" data-role="input-error" aria-live="polite"></div>
-                    <div class="api-param-filter-section-heading is-selected-heading">
-                        <span>已排除</span>
-                        <span class="api-param-filter-hint">请求发出前将剥除这些字段</span>
-                    </div>
-                    <div class="api-param-filter-selected" data-role="selected"></div>
-                </div>
-                <footer class="api-param-filter-footer">
-                    <button type="button" class="api-param-filter-button is-clear" data-param-filter-action="clear">清空</button>
-                    <div class="api-param-filter-footer-actions">
-                        <button type="button" class="api-param-filter-button is-secondary" data-param-filter-action="cancel">取消</button>
-                        <button type="button" class="api-param-filter-button is-primary is-apply" data-param-filter-action="apply">
-                            <span>完成</span><span class="api-param-filter-apply-count" data-role="apply-count"></span>
-                        </button>
-                    </div>
-                </footer>
-            </div>
-        `;
-        const commonEl = overlay.querySelector('[data-role="common"]');
-        const selectedEl = overlay.querySelector('[data-role="selected"]');
-        const inputEl = overlay.querySelector('[data-role="custom-input"]');
-        const errorEl = overlay.querySelector('[data-role="input-error"]');
-        const applyCountEl = overlay.querySelector('[data-role="apply-count"]');
-        const clearButton = overlay.querySelector('[data-param-filter-action="clear"]');
-        const hasParam = name => draft.includes(name);
-        const addParams = (items = []) => {
-            draft = normalizeGenerationParamFilterList([...draft, ...items]);
-        };
-        const removeParam = (name = '') => {
-            draft = draft.filter(item => item !== name);
-        };
-        const render = () => {
-            if (applyCountEl) applyCountEl.textContent = draft.length ? `· ${draft.length}` : '';
-            if (clearButton) clearButton.disabled = draft.length === 0;
-            if (commonEl) {
-                commonEl.innerHTML = COMMON_GENERATION_PARAM_FILTERS.map((name) => {
-                    const active = hasParam(name);
-                    return `
-                        <button type="button" data-param-filter-action="toggle" data-param="${escapeHtml(name)}"
-                                class="api-param-filter-common-chip${active ? ' is-active' : ''}"
-                                aria-pressed="${active}">
-                            <span>${escapeHtml(name)}</span>${active ? API_CONFIG_ICONS.check : ''}
-                        </button>
-                    `;
-                }).join('');
-            }
-            if (selectedEl) {
-                selectedEl.innerHTML = draft.length
-                    ? draft.map(name => `
-                        <span class="api-param-filter-selected-chip">
-                            <span>${escapeHtml(name)}</span>
-                            <button type="button" data-param-filter-action="remove" data-param="${escapeHtml(name)}"
-                                    aria-label="移除 ${escapeHtml(name)}" title="移除 ${escapeHtml(name)}">
-                                ${API_CONFIG_ICONS.close}
-                            </button>
-                        </span>
-                    `).join('')
-                    : '<div class="api-param-filter-empty">暂无排除项 · 点击上方参数或手动输入加入</div>';
-            }
-        };
-        const close = (apply = false) => {
-            if (apply) this.setExcludedGenerationParams(draft, { emit: true });
-            unbindBackdropActivation();
-            overlay.remove();
-        };
-        const addFromInput = () => {
-            const items = splitGenerationParamFilterInput(inputEl?.value || '');
-            if (!items.length) {
-                if (errorEl) errorEl.textContent = '请输入有效参数名：以字母或下划线开头，只包含字母、数字、下划线、点、冒号或短横线。';
-                inputEl?.classList?.add('is-invalid');
-                return;
-            }
-            if (errorEl) errorEl.textContent = '';
-            inputEl?.classList?.remove('is-invalid');
-            addParams(items);
-            if (inputEl) inputEl.value = '';
-            render();
-        };
+        this.requestParamsDialog?.close();
+        const config = { ...this.configManager.get(), ...this.getFormData() };
+        this.requestParamsDialog = openRequestParamsPanel({
+            config,
+            icons: API_CONFIG_ICONS,
+            onApply: ({ customRequestParams, excludedGenerationParams }) => {
+                this.setCustomRequestParams(customRequestParams);
+                this.setExcludedGenerationParams(excludedGenerationParams, { emit: true });
+            },
+            onClose: () => { this.requestParamsDialog = null; },
+            onOpenPreset: typeof this.onOpenPresetParams === 'function' ? options => this.openPresetFromRequestParams(options) : undefined,
+            buildPreview: rules => {
+                const previewConfig = { ...config, ...rules };
+                const options = window.appBridge?.getGenerationOptions?.(null, previewConfig) || {};
+                return new LLMClient(previewConfig).prepareChatRequest(
+                    [{ role: 'user', content: 'Hi' }], { ...options, stream: config.stream !== false },
+                );
+            },
+        });
+    }
 
-        const unbindBackdropActivation = bindBackdropActivation(overlay, {
-            onActivate: () => close(false),
-        });
-        overlay.addEventListener('click', (event) => {
-            const btn = event.target?.closest?.('[data-param-filter-action]');
-            if (!btn || !overlay.contains(btn)) return;
-            const action = btn.dataset.paramFilterAction || '';
-            const param = btn.dataset.param || '';
-            if (action === 'toggle') {
-                if (hasParam(param)) removeParam(param);
-                else addParams([param]);
-                if (errorEl) errorEl.textContent = '';
-                inputEl?.classList?.remove('is-invalid');
-                render();
-            } else if (action === 'remove') {
-                removeParam(param);
-                render();
-            } else if (action === 'add') {
-                addFromInput();
-            } else if (action === 'clear') {
-                draft = [];
-                if (errorEl) errorEl.textContent = '';
-                inputEl?.classList?.remove('is-invalid');
-                render();
-            } else if (action === 'apply') {
-                close(true);
-            } else if (action === 'cancel') {
-                close(false);
-            }
-        });
-        inputEl?.addEventListener?.('keydown', (event) => {
-            if (event.key === 'Enter') {
-                event.preventDefault();
-                addFromInput();
-            }
-        });
-        inputEl?.addEventListener?.('input', () => {
-            if (errorEl) errorEl.textContent = '';
-            inputEl.classList.remove('is-invalid');
-        });
-        render();
-        document.body.appendChild(overlay);
-        inputEl?.focus?.();
+    async openPresetFromRequestParams({ field, rules }) {
+        const panelVisibility = this.element.style.visibility;
+        const overlayVisibility = this.overlayElement.style.visibility;
+        this.requestParamsPresetDraft = rules;
+        this.closeCustomSelectMenu();
+        this.element.style.visibility = 'hidden';
+        this.overlayElement.style.visibility = 'hidden';
+        try {
+            await new Promise((resolve, reject) => {
+                Promise.resolve(this.onOpenPresetParams({ section: 'openai', focusParam: field, onHide: resolve })).catch(reject);
+            });
+        } finally {
+            this.requestParamsPresetDraft = null;
+            this.element.style.visibility = panelVisibility;
+            this.overlayElement.style.visibility = overlayVisibility;
+        }
     }
 
     /**
@@ -1910,6 +1827,7 @@ export class ConfigPanel {
 
     resetFormForProvider(provider) {
         const panel = this.element || document;
+        this.setApiFormat('chat_completions');
         const baseEl = panel.querySelector('#config-baseurl');
         const modelEl = panel.querySelector('#config-model');
         const ttsModelEl = panel.querySelector('#config-voice-tts-model');
@@ -2352,6 +2270,7 @@ export class ConfigPanel {
             const apiKeyInput = panel.querySelector('#config-apikey');
 
             if (baseEl) baseEl.value = config.baseUrl || '';
+            this.setApiFormat(config.apiFormat);
             if (modelEl) modelEl.value = config.model || '';
             if (streamEl) streamEl.checked = config.stream !== false;
             if (webSearchEl) webSearchEl.checked = config.webSearchEnabled === true;
@@ -2489,8 +2408,10 @@ export class ConfigPanel {
             ttsVoiceEl.placeholder = providerDefaults.ttsVoice || 'Voice ID';
         }
         streamEl.checked = config.stream !== false;
+        this.setApiFormat(config.apiFormat);
         if (webSearchEl) webSearchEl.checked = config.webSearchEnabled === true;
         this.setExcludedGenerationParams(config.excludedGenerationParams || [], { emit: false });
+        this.setCustomRequestParams(config.customRequestParams || [], { emit: false });
         if (promptPostProcessingEl) promptPostProcessingEl.value = normalizePromptPostProcessingForForm(config.promptPostProcessing);
         if (transportModeEl) {
             transportModeEl.value = (config.connectionMode === 'reverse_proxy' || legacyProxyBaseUrl)
@@ -2818,8 +2739,21 @@ export class ConfigPanel {
     /**
      * 更新字段可见性（根据服务商）
      */
+    setApiFormat(value) {
+        const panel = this.element || document;
+        const format = normalizeOpenAIApiFormat(value);
+        panel.querySelectorAll?.('input[name="config-api-format"]').forEach(input => {
+            input.checked = input.value === format;
+        });
+    }
+
     updateFieldVisibility(provider) {
         const panel = this.element || document;
+        const formatSection = panel.querySelector('#config-api-format-section');
+        if (formatSection) {
+            formatSection.style.display = this.activeTab === 'chat' && supportsOpenAIApiFormatSelection(provider)
+                ? 'block' : 'none';
+        }
         const baseUrlSection = panel.querySelector('#config-baseurl-section');
         const vertexaiFields = panel.querySelector('#vertexai-fields');
         const vertexRegionField = panel.querySelector('#vertexai-region-field');
@@ -2914,6 +2848,9 @@ export class ConfigPanel {
 
         const formData = {
             provider: provider,
+            apiFormat: this.activeTab === 'chat' && supportsOpenAIApiFormatSelection(provider)
+                ? normalizeOpenAIApiFormat(panel.querySelector('input[name="config-api-format"]:checked')?.value)
+                : 'chat_completions',
             baseUrl: this.usesEditableBaseUrl(provider)
                 ? (panel.querySelector('#config-baseurl')?.value || '').trim()
                 : this.getProviderDefaults(provider, { region, kimiRegion }).baseUrl,
@@ -2928,6 +2865,7 @@ export class ConfigPanel {
             webSearchEnabled: Boolean(panel.querySelector('#config-web-search')?.checked),
             stream: Boolean(panel.querySelector('#config-stream')?.checked),
             excludedGenerationParams: normalizeGenerationParamFilterList(this.excludedGenerationParams),
+            customRequestParams: this.activeTab === 'chat' ? normalizeCustomRequestParams(this.customRequestParams) : [],
             timeout: (() => {
                 const secRaw = (panel.querySelector('#config-timeout')?.value || '').trim();
                 const sec = Number(secRaw);
@@ -2941,6 +2879,7 @@ export class ConfigPanel {
             formData.webSearchEnabled = false;
             formData.promptPostProcessing = 'none';
             formData.excludedGenerationParams = [];
+            formData.customRequestParams = [];
             if (this.voiceConnectionMode === 'shared') {
                 formData.ttsModel = (panel.querySelector('#config-voice-tts-model')?.value || '').trim();
                 formData.sttModel = (panel.querySelector('#config-voice-stt-model')?.value || '').trim();
@@ -3007,7 +2946,7 @@ export class ConfigPanel {
     getDraftConfig({ tab = '' } = {}) {
         const targetTab = ['chat', 'image', 'voice'].includes(tab) ? tab : this.activeTab;
         if (!this.isOpen() || targetTab !== this.activeTab) return null;
-        return this.getFormData({ commitActiveInput: false });
+        return { ...this.getFormData({ commitActiveInput: false }), ...(this.requestParamsPresetDraft || {}) };
     }
 
     toggleApiKey() {

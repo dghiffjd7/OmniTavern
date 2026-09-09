@@ -1409,3 +1409,159 @@ body[data-reduced-motion='on'] .igp-panel * {
     transition: none !important;
   }
 }
+
+/* Profile request parameters: rows, JSON and the final request share one draft. */
+.api-param-filter-dialog [hidden] { display: none !important; }
+.api-request-param-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 16px 24px 0;
+  padding: 4px;
+  flex: 0 0 auto;
+  border: 1px solid var(--app-border-default);
+  border-radius: 12px;
+  background: var(--app-surface-subtle);
+}
+.api-request-param-tabs button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--app-text-secondary);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.api-request-param-tabs button[aria-selected='true'] {
+  background: var(--app-surface-card);
+  border-color: var(--app-border-default);
+  color: var(--app-accent-primary);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--app-shadow-color) 12%, transparent);
+}
+.api-request-param-tabs button span { font-size: 11px; font-variant-numeric: tabular-nums; opacity: 0.8; }
+.api-request-param-toolbar, .api-request-param-toolbar > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.api-request-param-toolbar { justify-content: space-between; margin-bottom: 14px; font-size: 13px; font-weight: 650; }
+.api-request-param-toolbar .api-param-filter-button { min-height: 44px; padding: 8px 12px; }
+.api-request-param-toolbar button[aria-pressed='true'] { color: var(--app-accent-primary); background: var(--app-accent-soft); }
+.api-request-param-common { margin-bottom: 16px; }
+.api-request-param-common summary, .api-request-param-preview summary {
+  min-height: 44px;
+  align-content: center;
+  color: var(--app-text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.api-request-param-common .api-param-filter-common { margin-top: 6px; }
+.api-request-param-common .api-param-filter-common-chip { min-height: 36px; overflow-wrap: anywhere; text-align: left; }
+.api-request-param-rows { display: grid; gap: 12px; }
+.api-request-param-row {
+  min-width: 0;
+  padding: 10px 14px 14px;
+  border: 1px solid var(--app-border-default);
+  border-radius: 14px;
+  background: var(--app-surface-card);
+  transition: border-color 140ms ease, background 140ms ease;
+}
+.api-request-param-row:focus-within { border-color: color-mix(in srgb, var(--app-accent-primary) 50%, var(--app-border-default)); }
+.api-request-param-row.is-disabled { background: var(--app-surface-subtle); }
+.api-request-param-row.is-disabled .api-request-param-fields { opacity: 0.65; }
+.api-param-filter-overlay.is-suspended { display: none; }
+.api-request-param-row.is-preset-managed .api-request-param-value,
+.api-request-param-row.is-preset-managed .api-request-param-type,
+.api-request-param-row.is-preset-managed .api-request-param-toggle { opacity: 0.55; }
+.api-request-param-row.is-preset-managed .api-request-param-toggle,
+.api-request-param-row.is-preset-managed .api-request-param-toggle input { cursor: default; }
+.api-request-param-preset-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 36px;
+  padding: 4px 6px;
+  border: 0;
+  background: transparent;
+  color: var(--app-accent-primary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.api-request-param-preset-link svg { width: 14px; height: 14px; }
+.api-request-param-common + .api-request-param-preset-link { margin: -8px 0 8px; }
+.api-request-param-preset-link:hover { background: var(--app-accent-soft); border-radius: 6px; }
+.api-request-param-preset-link:focus-visible { outline: 2px solid var(--app-accent-primary); outline-offset: 1px; }
+.api-request-param-json-ownership > div { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 12px; color: var(--app-text-muted); }
+.api-request-param-json-ownership code { overflow-wrap: anywhere; }
+.api-request-param-row header { display: flex; align-items: center; gap: 8px; margin: -5px -5px 4px; }
+.api-request-param-index { color: var(--app-text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.api-request-param-state { color: var(--app-text-muted); font-size: 11px; overflow-wrap: anywhere; }
+.api-request-param-row header .api-param-filter-icon-button { margin-left: auto; }
+.api-request-param-row .api-param-filter-icon-button,
+.api-param-filter-header .api-param-filter-icon-button { min-width: 44px; min-height: 44px; }
+.api-request-param-toggle { position: relative; display: grid; place-items: center; flex: 0 0 44px; width: 44px; height: 44px; cursor: pointer; }
+.api-request-param-toggle input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.api-request-param-toggle > span { width: 32px; height: 19px; border-radius: 99px; background: var(--app-border-strong); pointer-events: none; transition: background 140ms ease; }
+.api-request-param-toggle > span::after { content: ''; display: block; width: 13px; height: 13px; margin: 3px; border-radius: 50%; background: var(--app-surface-card); transition: transform 140ms ease; }
+.api-request-param-toggle input:checked + span { background: var(--app-accent-primary); }
+.api-request-param-toggle input:checked + span::after { transform: translateX(13px); }
+.api-request-param-toggle input:focus-visible + span { outline: 2px solid var(--app-accent-primary); outline-offset: 3px; }
+.api-request-param-fields { display: grid; grid-template-columns: minmax(0, 1.25fr) 88px minmax(0, 1fr); gap: 10px; }
+.api-request-param-fields label { display: flex; flex-direction: column; min-width: 0; gap: 7px; }
+.api-request-param-fields label > span { color: var(--app-text-muted); font-size: 11px; font-weight: 600; }
+.api-request-param-fields .api-param-filter-input,
+.api-request-param-json .api-param-filter-input { width: 100%; min-width: 0; min-height: 44px; margin: 0; border-radius: 9px; padding: 10px; font-size: 12px; line-height: 1.6; }
+.api-request-param-fields textarea { resize: vertical; }
+.api-request-param-fields input,
+.api-request-param-fields textarea,
+.api-request-param-json textarea { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.api-request-param-json label { display: block; margin-bottom: 10px; font-size: 12px; color: var(--app-text-secondary); }
+.api-request-param-json textarea { display: block; resize: vertical; min-height: 220px; tab-size: 2; }
+.api-request-param-preview { margin-top: 18px; border-top: 1px solid var(--app-border-default); }
+.api-request-param-preview pre {
+  max-height: calc(35 * var(--api-config-vh, 1vh));
+  margin: 8px 0 0;
+  padding: 14px;
+  border: 1px solid var(--app-border-default);
+  border-radius: 10px;
+  overflow: auto;
+  background: var(--app-surface-subtle);
+  color: var(--app-text-secondary);
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.request-param-report { display: grid; gap: 8px; margin: 12px 0; font-size: 12px; line-height: 1.5; }
+.request-param-report > div { display: flex; justify-content: space-between; gap: 14px; min-width: 0; }
+.request-param-report dt { min-width: 0; color: var(--app-text-secondary); overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.request-param-report dd { flex-shrink: 0; margin: 0; color: var(--app-text-muted); }
+.request-param-report dt small { display: block; margin-top: 3px; font-size: 10px; opacity: 0.8; }
+.api-request-param-tabs button:focus-visible,
+.api-param-filter-dialog button:focus-visible,
+.api-param-filter-dialog summary:focus-visible { outline: 2px solid var(--app-accent-primary); outline-offset: 2px; }
+@media (max-width: 600px) {
+  .api-request-param-tabs { margin: 12px 16px 0; }
+  .api-request-param-toolbar { gap: 6px; }
+  .api-request-param-toolbar .api-param-filter-button { padding: 8px 10px; }
+  .api-request-param-fields { grid-template-columns: 80px minmax(0, 1fr); }
+  .api-request-param-name { grid-column: 1 / -1; }
+  .api-request-param-type { grid-column: 1; }
+  .api-request-param-value { grid-column: 2; }
+  .api-request-param-row { padding: 10px 12px 12px; }
+  .api-request-param-preset-link { min-height: 44px; }
+  .api-request-param-state { display: flex; flex-wrap: wrap; align-items: center; column-gap: 4px; }
+  .api-param-filter-dialog .api-param-filter-common-chip { min-height: 44px; }
+  .api-param-filter-dialog .api-param-filter-selected-chip button { min-width: 44px; min-height: 44px; }
+  .api-request-param-fields .api-param-filter-input { font-size: 14px; }
+  .request-param-report > div { flex-wrap: wrap; gap: 2px 10px; }
+}

@@ -13,6 +13,9 @@ export const splitRequestOptions = (options = {}) => {
   const onProviderSearchActivity =
     typeof src.onProviderSearchActivity === 'function' ? src.onProviderSearchActivity : null;
   const {
+    requestContext: _requestContext,
+    requestParamConstraints: _requestParamConstraints,
+    onProviderRequestPrepared: _onProviderRequestPrepared,
     signal: _signal,
     nativeRequestId: _nativeRequestId,
     requestId: _requestId,

@@ -1,12 +1,12 @@
 /**
  * OpenCode Go provider.
  *
- * The Go catalog mixes OpenAI Responses, Anthropic Messages and
- * OpenAI-compatible Chat Completions models. This first adapter deliberately
- * exposes only the documented Chat Completions families.
+ * The Go catalog mixes wire formats. Chat Completions keeps its known-family
+ * filter; explicitly selected Responses profiles expose the returned catalog.
  */
 
 import { CustomProvider } from './custom.js';
+import { usesConfiguredResponses } from '../openai-api-format.js';
 
 export const OPENCODE_GO_BASE_URL = 'https://opencode.ai/zen/go/v1';
 export const OPENCODE_GO_DEFAULT_MODEL = 'glm-5.3';
@@ -61,7 +61,9 @@ export class OpenCodeProvider extends CustomProvider {
         : Array.isArray(data)
           ? data.map(item => item?.id || item?.name || item)
           : [];
-      const compatibleModels = catalogModels.filter(isOpenCodeGoChatCompletionsModel);
+      const compatibleModels = usesConfiguredResponses(this.transportConfig)
+        ? catalogModels
+        : catalogModels.filter(isOpenCodeGoChatCompletionsModel);
       return uniqueStrings([...compatibleModels, this.model || OPENCODE_GO_DEFAULT_MODEL]);
     } catch (error) {
       console.warn('Failed to list OpenCode Go models, preserving the current model:', error);

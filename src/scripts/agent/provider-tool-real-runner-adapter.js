@@ -343,6 +343,8 @@ const runProviderClient = async ({
       : {}),
     ...stripRunnerRequestOptions(requestOptions),
   };
+  options.requestContext = continuationContext?.providerRequestOptions?.requestContext
+    || options.requestContext || { sessionId: request.sessionId };
   if (boundary.clientMethod === 'runProviderToolRequest') {
     const nativeRequest = clone(request);
     copyProviderToolContinuationContext(request, nativeRequest);

@@ -1355,6 +1355,7 @@ export class ChatUI {
 
   setInputText(val) {
     this.inputEl.value = val;
+    this.inputEl.dispatchEvent(new Event('input-suggestion-reset'));
     this.syncComposerTextState();
   }
 

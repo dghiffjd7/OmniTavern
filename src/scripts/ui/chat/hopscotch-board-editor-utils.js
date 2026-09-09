@@ -1,5 +1,6 @@
 import { normalizeHopscotchBoard, validateHopscotchBoard } from './hopscotch-board-utils.js';
 import { applyHopscotchDrop } from './hopscotch-drag-utils.js';
+import { cloneData } from '../../utils/clone-data.js';
 
 let sequence = 0;
 const newId = prefix => `${prefix}_${Date.now().toString(36)}_${++sequence}`;
@@ -34,7 +35,7 @@ export const editHopscotchBoard = (board, action = {}) => {
       break;
     case 'copy':
       if (house?.kind !== 'custom_prompt') return { ok: false, reason: 'custom_only' };
-      sourceRow.houses.push({ ...structuredClone(house), id: newId('house') });
+      sourceRow.houses.push({ ...cloneData(house), id: newId('house') });
       break;
     case 'update':
       if (!house) return { ok: false, reason: 'house_missing' };

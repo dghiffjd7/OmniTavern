@@ -82,15 +82,18 @@ export const AGENT_FEATURE_DEFINITIONS = Object.freeze([
   },
   {
     id: AGENT_FEATURE_IDS.textCompletion,
-    title: '文本补全',
-    summary: '为输入和选中文本提供写作补全建议。',
-    detailTitle: '文本补全',
+    title: '文本建议',
+    summary: '输入停顿时，在光标处提供短句续写。',
+    detailTitle: '文本建议',
     detail: [
-      '第一版会先做选中文本后的改写建议。',
-      '实时半透明补全会在输入框、选区、安卓输入法验证后再接入。',
-      '开启后仍只显示建议，不会自动发送内容。',
+      '适用于聊天与创意写作主输入框，使用独立选择的模型配置。',
+      '输入停顿后将当前输入的光标前后文交给所选模型续写。',
+      'Tab 或点击建议条采纳全部；按住 Tab 用左右方向键逐字选择，松开采纳。',
+      '手机长按建议文本后左右拖选，松手采纳；拖到边缘可查看后续文字。',
+      'Esc 关闭；继续输入可获取新建议。',
+      '中文输入法组字期间暂停；每分钟最多请求 12 次。',
     ],
-    implemented: false,
+    implemented: true,
     supportsModel: true,
     modelDefault: 'none',
     supportsTriggerMode: false,
@@ -154,11 +157,12 @@ export const normalizeAgentFeatureState = (state = {}, definition = {}, { now = 
   const triggerDefault = normalizeAgentFeatureTriggerMode(definition.triggerDefault, AGENT_FEATURE_TRIGGER_MODES.autoModel);
   return {
     enabled: src.enabled === true,
-    modelMode: normalizeAgentFeatureModelMode(src.modelMode, modelDefault),
+    modelMode: definition.id === AGENT_FEATURE_IDS.textCompletion ? (src.modelMode === 'profile' ? 'profile' : 'none') : normalizeAgentFeatureModelMode(src.modelMode, modelDefault),
     modelProfileId: trim(src.modelProfileId),
     // 可选模型覆盖：连接沿用所选设定档，仅替换 model；空 = 用档内保存的模型
     modelOverride: trim(src.modelOverride),
     triggerMode: normalizeAgentFeatureTriggerMode(src.triggerMode, triggerDefault),
+    ...(definition.id === AGENT_FEATURE_IDS.textCompletion ? { inputConsent: src.inputConsent === true } : {}),
     updatedAt: Number.isFinite(Number(src.updatedAt)) ? Number(src.updatedAt) : 0,
   };
 };
@@ -212,6 +216,7 @@ export const setAgentFeatureEnabled = (settings = {}, featureId = '', enabled = 
   normalized.features[id] = {
     ...normalizeAgentFeatureState(normalized.features[id], definition),
     enabled: enabled === true,
+    ...(id === AGENT_FEATURE_IDS.textCompletion ? { inputConsent: enabled === true || normalized.features[id].inputConsent === true } : {}),
     updatedAt: toTimestamp(now),
   };
   return normalized;

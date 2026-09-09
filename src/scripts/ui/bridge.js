@@ -2,7 +2,9 @@
  * UI 桥接层 - 连接原有 UI 代码和新的 API 层
  */
 
+import { sanitizeRequestPreviewUrl } from '../api/request-params.js';
 import { LLMClient } from '../api/client.js';
+import { captureRequestContext } from '../api/request-context.js';
 import { canInitClient } from '../api/client-config-utils.js';
 import {
   applyDeepSeekPrefillToStream,
@@ -16,7 +18,6 @@ import {
   buildWebSearchRequestPlan,
   mergeWebSources,
 } from '../api/web-search-runtime.js';
-import { applyGenerationParamFilter } from '../utils/generation-param-filter-utils.js';
 import { resolveBuiltinPhoneFormatReminderPlan } from '../utils/builtin-phone-format-contract.js';
 import {
   normalizePhoneFormatPromptDepth,
@@ -3694,6 +3695,11 @@ class AppBridge {
    * @returns {Promise<string>|AsyncGenerator<string>} 回复内容或流
    */
   async generate(userMessage, context = {}) {
+    const requestContext = captureRequestContext(context?.meta?.requestContext || {
+      scopeId: this.scopeId,
+      sessionId: context?.session?.id || this.activeSessionId,
+      archiveId: this.chatStore?.getCurrentArchiveId?.(context?.session?.id || this.activeSessionId),
+    });
     const previewOnly = context?.meta?.previewOnly === true;
     const phoneStructuredPreviewCallback = !previewOnly
       && typeof context?.meta?.onPhoneStructuredPreview === 'function'
@@ -4160,15 +4166,14 @@ class AppBridge {
         }
       }
       messages = this.normalizeOutgoingProviderMessages(messages, config);
-      const genOptions = this.getGenerationOptions(presetContext, config);
-      const applyRuntimeParamFilter = options => applyGenerationParamFilter(options, config?.excludedGenerationParams, {
-        protectedParams: [
-          'signal',
-          'nativeRequestId',
-          ...(config?.webSearchEnabled === true
-            ? ['tools', 'tool_choice', 'openaiApi', 'include', 'max_tool_calls']
-            : []),
-        ],
+      const genOptions = { ...this.getGenerationOptions(presetContext, config), requestContext };
+      const withRuntimeParamConstraints = options => ({
+        ...options,
+        ...(config?.webSearchEnabled === true ? { requestParamConstraints: {
+          ...(options.requestParamConstraints || {}),
+          protectedParams: [...(options.requestParamConstraints?.protectedParams || []),
+            'tools', 'tool_choice', 'toolConfig', 'include', 'max_tool_calls'],
+        } } : {}),
       });
       const configuredProviderDirectives = this.buildProviderRequestDirectives(nextContext, presetContext, config);
       const sessionId = String(nextContext?.session?.id || this.activeSessionId || 'default').trim() || 'default';
@@ -4176,6 +4181,7 @@ class AppBridge {
         debugUiRegistry: this.debugUiRegistry,
         provider: config?.provider,
         baseUrl: config?.baseUrl,
+        apiFormat: config?.apiFormat,
         model: config?.model,
         sessionId,
         existingOptions: [genOptions, configuredProviderDirectives],
@@ -4188,7 +4194,7 @@ class AppBridge {
         requestId: nativeRequestId,
         source: 'bridge.generateStream',
         historyMessages: messages,
-        providerRequestOptions: providerToolRequestSchema.requestOptions,
+        providerRequestOptions: { ...providerToolRequestSchema.requestOptions, requestContext },
       });
       const fallbackToolDefinitions = ['web.search', 'web.research', 'web.fetch_url']
         .map(name => this.webSearchToolRuntime?.getTool?.(name))
@@ -4612,7 +4618,7 @@ class AppBridge {
         ...(configuredProviderDirectives || {}),
         ...(phonePrefillPlan.requestOptions || {}),
       };
-      const requestOptions = applyRuntimeParamFilter({
+      const requestOptions = withRuntimeParamConstraints({
         ...(genOptions || {}),
         ...(providerDirectives || {}),
         ...(providerToolRequestSchema.requestOptions || {}),
@@ -4621,33 +4627,35 @@ class AppBridge {
         nativeRequestId,
         ...(providerToolBridgeLoopPlan.requestOptions || {}),
       });
-      const phoneProviderFcRequestOptions = applyRuntimeParamFilter({
+      const phoneProviderFcRequestOptions = withRuntimeParamConstraints({
         ...(genOptions || {}),
+        requestParamConstraints: { protectedParams: ['tools', 'tool_choice', 'parallel_tool_calls', 'response_format', 'text.format'] },
         signal: abortController.signal,
         nativeRequestId,
       });
       const phoneProviderFcPlanDebugOptions = buildProviderFcRequestOptionsForLocalDiagnostics(
         phoneProviderFcRequestPlan,
       );
-      const phoneProviderFcDebugRequestOptions = applyRuntimeParamFilter({
+      const phoneProviderFcDebugRequestOptions = withRuntimeParamConstraints({
         ...sanitizeProviderFcInheritedRequestOptions({
           provider: config?.provider,
           options: genOptions,
         }),
         ...phoneProviderFcPlanDebugOptions,
       });
-      const phoneJsonTerminalRequestOptions = applyRuntimeParamFilter({
+      const phoneJsonTerminalRequestOptions = withRuntimeParamConstraints({
         ...(genOptions || {}),
+        requestParamConstraints: { tools: 'none', protectedParams: ['response_format', 'text.format'] },
         ...(phoneJsonTerminalRoute.requestOptions || {}),
         signal: abortController.signal,
         nativeRequestId,
       });
-      const phoneJsonTerminalDebugRequestOptions = applyRuntimeParamFilter({
+      const phoneJsonTerminalDebugRequestOptions = withRuntimeParamConstraints({
         ...(genOptions || {}),
         ...(phoneJsonTerminalRoute.requestOptions || {}),
       });
       // Phase B 主任务计量：本次生成的真实 provider usage（chat/stream 均经 onProviderUsage 上报）。
-      // 在 param filter 之后注入回调，避免被参数过滤剥掉；主流程 finalize 消息时 consume 一次挂到 meta.usage。
+      // 回调保留在运行时选项中，协议组装时剥离；主流程 finalize 消息时 consume 一次挂到 meta.usage。
       // consume-once：协议路径一次生成可 emit 多条消息，usage 属于整次生成，只挂到首条，避免重复计量。
       this.lastGenerationUsage = null;
       this.lastGenerationSources = null;
@@ -4896,7 +4904,7 @@ class AppBridge {
       });
       const preparedRequest = phoneProviderFcRoute.eligible
         ? null
-        : (generationClient?.prepareChatRequest?.(messages, requestOptions) || null);
+        : (generationClient?.prepareChatRequest?.(messages, { ...requestOptions, stream: Boolean(config?.stream) }) || null);
       const legacyResponsePrefix = String(preparedRequest?.responsePrefix || '');
       const finalRequestMessages = preparedRequest?.messages || messages;
       const requestPayloadMessages = phoneProviderFcRoute.eligible
@@ -4988,7 +4996,13 @@ class AppBridge {
         requestId: nativeRequestId,
         scopeId: String(this.scopeId || '').trim(),
         provider: config?.provider,
-        baseUrl: preparedRequest?.url ? String(preparedRequest.url).replace(/\/chat\/completions$/, '') : config?.baseUrl,
+        baseUrl: sanitizeRequestPreviewUrl(config?.baseUrl),
+        ...(['custom', 'opencode'].includes(config?.provider) ? { apiFormat: config?.apiFormat || 'chat_completions' } : {}),
+        ...(preparedRequest?.body ? { wireRequest: {
+          url: sanitizeRequestPreviewUrl(preparedRequest.url),
+          body: preparedRequest.body,
+          parameterReport: preparedRequest.parameterReport || [],
+        }, ...(preparedRequest.body.input ? { apiFormat: 'responses' } : {}) } : {}),
         model: config?.model,
         stream: phoneProviderFcRoute.eligible
           ? (phoneStructuredRouteMode === CHAT_STRUCTURED_ROUTE_MODES.jsonTerminal
@@ -5025,7 +5039,7 @@ class AppBridge {
             ? (phoneStructuredRouteMode === CHAT_STRUCTURED_ROUTE_MODES.jsonTerminal
                 ? phoneJsonTerminalDebugRequestOptions
                 : phoneProviderFcDebugRequestOptions)
-            : applyRuntimeParamFilter({
+            : withRuntimeParamConstraints({
                 ...(genOptions || {}),
                 ...(providerDirectives || {}),
                 ...(providerToolRequestSchema.requestOptions || {}),
@@ -5175,10 +5189,37 @@ class AppBridge {
           );
 
       if (previewOnly) {
+        if (!preparedRequest && phoneProviderFcRoute.eligible) {
+          const predicted = requestClient?.prepareChatRequest?.(requestPayloadMessages, {
+            ...(phoneStructuredRouteMode === CHAT_STRUCTURED_ROUTE_MODES.jsonTerminal
+              ? phoneJsonTerminalDebugRequestOptions : {
+                  ...phoneProviderFcDebugRequestOptions,
+                  ...phoneProviderFcRequestPlan.generationOptions,
+                  ...phoneProviderFcRequestPlan.requestOptions,
+                }),
+            maxTokens: Number(requestPayloadOptions?.max_tokens ?? requestPayloadOptions?.maxTokens) > 0
+              ? Number(requestPayloadOptions.max_tokens ?? requestPayloadOptions.maxTokens) : (phoneProviderFcUsesBatch ? 3200 : 2400),
+            requestParamConstraints: requestPayloadOptions.requestParamConstraints,
+            stream: this.lastRequest.stream,
+          });
+          if (predicted?.body) this.lastRequest.wireRequest = {
+            url: sanitizeRequestPreviewUrl(predicted.url), body: predicted.body,
+            parameterReport: predicted.parameterReport || [],
+          };
+        }
         this.lastRequest.previewOnly = true;
         this.lastRequest.source = 'prompt_preview';
         return this.lastRequest;
       }
+
+      const recordPreparedRequest = ({ body, parameterReport, protocol } = {}) => {
+        if (!body || this.lastRequest?.requestId !== nativeRequestId) return;
+        this.lastRequest.wireRequest = { ...(this.lastRequest.wireRequest || {}), body, parameterReport: parameterReport || [] };
+        if (protocol === 'responses') this.lastRequest.apiFormat = 'responses';
+      };
+      requestOptions.onProviderRequestPrepared = recordPreparedRequest;
+      phoneProviderFcRequestOptions.onProviderRequestPrepared = recordPreparedRequest;
+      phoneJsonTerminalRequestOptions.onProviderRequestPrepared = recordPreparedRequest;
 
       const emitPhoneStructuredRouteStatus = (state, detail = {}) => {
         if (!phoneProviderFcRoute.eligible) return;
@@ -5463,7 +5504,7 @@ class AppBridge {
           throw new Error(`Structured fallback snapshot unavailable: ${lazyLegacyAssembly.reason}`);
         }
         messages = lazyLegacyAssembly.messages;
-        const fallbackPreparedRequest = generationClient?.prepareChatRequest?.(messages, requestOptions) || null;
+        const fallbackPreparedRequest = generationClient?.prepareChatRequest?.(messages, { ...requestOptions, stream: Boolean(config?.stream) }) || null;
         const fallbackRequestMessages = fallbackPreparedRequest?.messages || messages;
         responsePrefix = String(fallbackPreparedRequest?.responsePrefix || legacyResponsePrefix);
         rawEstimatedPromptTokens = estimatePromptMessagesTokens(fallbackRequestMessages, 'rough');
@@ -5495,8 +5536,12 @@ class AppBridge {
         if (this.lastRequest?.requestId === nativeRequestId) {
           this.lastRequest.stream = Boolean(config?.stream);
           this.lastRequest.options = fallbackPreparedRequest?.normalizedOptions || genOptions;
+          if (fallbackPreparedRequest?.body) this.lastRequest.wireRequest = {
+            url: sanitizeRequestPreviewUrl(fallbackPreparedRequest.url), body: fallbackPreparedRequest.body,
+            parameterReport: fallbackPreparedRequest.parameterReport || [],
+          };
           this.lastRequest.requestOptions = {
-            ...applyRuntimeParamFilter({
+            ...withRuntimeParamConstraints({
               ...(genOptions || {}),
               ...(providerDirectives || {}),
               ...(providerToolRequestSchema.requestOptions || {}),
@@ -5629,6 +5674,11 @@ class AppBridge {
    * Intended for maintenance tasks like summary compaction.
    */
   async backgroundChat(messages, options = {}) {
+    const requestContext = captureRequestContext(options.requestContext || {
+      scopeId: this.scopeId,
+      sessionId: options.presetContext?.sessionId || this.activeSessionId,
+      archiveId: this.chatStore?.getCurrentArchiveId?.(options.presetContext?.sessionId || this.activeSessionId),
+    });
     if (!this.initialized) {
       await this.init();
     }
@@ -5659,12 +5709,11 @@ class AppBridge {
     if (!requestClient) {
       throw new Error('请先配置 API 信息');
     }
-    const genOptions = applyGenerationParamFilter({
+    const genOptions = {
       ...this.getGenerationOptions(resolvedPresetContext, config),
       ...requestOverrides,
-    }, config?.excludedGenerationParams, {
-      protectedParams: ['signal', 'nativeRequestId'],
-    });
+      requestContext,
+    };
     const normalizedMsgs = this.normalizeOutgoingProviderMessages(msgs, config);
     return requestClient.chat(normalizedMsgs, genOptions);
   }
@@ -9076,8 +9125,6 @@ const stringifyMessageContent = (content) => {
       const provider = runtimeConfig?.provider;
       const model = runtimeConfig?.model;
       const baseUrl = runtimeConfig?.baseUrl;
-      const applyRuntimeParamFilter = options =>
-          applyGenerationParamFilter(options, runtimeConfig?.excludedGenerationParams);
       const samplerPolicy = getReasoningSamplerPolicy({
         provider,
         model,
@@ -9103,24 +9150,24 @@ const stringifyMessageContent = (content) => {
 
       // Provider-specific mapping
       if (provider === 'gemini' || provider === 'makersuite' || provider === 'vertexai') {
-        return applyRuntimeParamFilter({
+        return {
           temperature: base.temperature,
           top_p: base.top_p,
           top_k: base.top_k,
           maxTokens,
           ...reasoningOptions,
-        });
+        };
       }
 
       if (provider === 'anthropic') {
         // our AnthropicProvider expects maxTokens (camelCase), but will pass other fields through
-        return applyRuntimeParamFilter({
+        return {
           temperature: base.temperature,
           top_p: base.top_p,
           top_k: base.top_k,
           maxTokens,
           ...reasoningOptions,
-        });
+        };
       }
 
       // openai-like (openai/deepseek/custom)
@@ -9134,7 +9181,7 @@ const stringifyMessageContent = (content) => {
         ...reasoningOptions,
       };
       if (typeof maxTokens === 'number') options.max_tokens = maxTokens;
-      return applyRuntimeParamFilter(options);
+      return options;
     } catch (err) {
       logger.debug('getGenerationOptions failed', err);
       return {};

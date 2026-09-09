@@ -8,6 +8,7 @@ import { getRealtimeSystemVoices } from './realtime-voice-catalog.js';
 import { RealtimeVoicePicker, realtimeVoicePickerFields } from './realtime-voice-picker.js';
 import { RealtimeVoiceDiscovery } from './realtime-voice-discovery.js';
 import { rankModelCandidates } from '../../utils/model-candidates.js';
+import { cloneData } from '../../utils/clone-data.js';
 import { appConfirm } from '../app-confirm.js';
 import { t, translateUiText } from '../../i18n/index.js';
 const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
@@ -137,7 +138,7 @@ export class RealtimeSettingsPanel {
     this.root.querySelector('#rt-model').addEventListener('input', () => this.renderModelOptions());
     this.root.querySelector('#rt-refresh-models').onclick = () => this.run(async signal => {
       this.capture();
-      const profile = structuredClone(this.draft), source = realtimeModelSource(profile);
+      const profile = cloneData(this.draft), source = realtimeModelSource(profile);
       const refreshButton = this.root.querySelector('#rt-refresh-models'); refreshButton.textContent = translateUiText('刷新中...');
       this.status('正在获取模型列表...');
       try {
@@ -150,7 +151,7 @@ export class RealtimeSettingsPanel {
     }, '操作已取消');
     this.voicePicker = new RealtimeVoicePicker({ root: this.root.querySelector('#rt-voice-picker'), profile: this.draft });
     this.root.querySelector('#rt-refresh-voices')?.addEventListener('click', () => this.run(async signal => {
-      this.capture(); const profile = structuredClone(this.draft), source = realtimeModelSource(profile);
+      this.capture(); const profile = cloneData(this.draft), source = realtimeModelSource(profile);
       const credentials = await this.readCredentials() || await this.store.credentials(this.store.get(profile.id));
       this.status('正在获取音色列表...');
       const voices = await this.voiceDiscovery.list(profile, credentials, { signal });

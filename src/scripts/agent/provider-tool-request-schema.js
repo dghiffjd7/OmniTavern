@@ -1,4 +1,5 @@
 import { toProviderToolModelName } from './provider-tool-name-map.js';
+import { usesConfiguredResponses } from '../api/openai-api-format.js';
 
 export const PROVIDER_TOOL_REQUEST_FORMATS = Object.freeze({
   openai: 'openai_chat_completions',
@@ -76,8 +77,9 @@ const isOfficialOpenAIEndpoint = (baseUrl = '') => {
   }
 };
 
-const normalizeProviderFormat = (provider = '', baseUrl = '') => {
+const normalizeProviderFormat = (provider = '', baseUrl = '', apiFormat = '') => {
   const value = trim(provider).toLowerCase();
+  if (usesConfiguredResponses({ provider: value, apiFormat })) return PROVIDER_TOOL_REQUEST_FORMATS.openaiResponses;
   if (value === 'anthropic' || value.includes('claude')) return PROVIDER_TOOL_REQUEST_FORMATS.anthropic;
   if (value === 'gemini' || value === 'makersuite' || value === 'vertexai') {
     return PROVIDER_TOOL_REQUEST_FORMATS.gemini;
@@ -252,6 +254,7 @@ export const buildProviderToolRequestSchema = ({
   debugUiRegistry = null,
   provider = '',
   baseUrl = '',
+  apiFormat = '',
   model = '',
   sessionId = '',
   sessionGate = null,
@@ -261,7 +264,7 @@ export const buildProviderToolRequestSchema = ({
   const normalizedProvider = trim(provider);
   const normalizedModel = trim(model);
   const normalizedSessionId = trim(sessionId);
-  const format = normalizeProviderFormat(normalizedProvider, baseUrl);
+  const format = normalizeProviderFormat(normalizedProvider, baseUrl, apiFormat);
   const baseDiagnostics = {
     provider: normalizedProvider,
     model: normalizedModel,

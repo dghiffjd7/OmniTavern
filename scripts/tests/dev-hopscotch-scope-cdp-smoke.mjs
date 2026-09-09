@@ -11,7 +11,7 @@ const result = await evaluateInApp(`(async () => {
   check(window.appBridge.debugUiRegistry.panels.agentCenterPanel.hide() !== false, '真实 AC 有未保存草稿，停止烟测');
   const { AgentCenterPanel } = await import('/scripts/ui/agent-center-panel.js');
   const { createHopscotchBoardPanel } = await import('/scripts/ui/chat/hopscotch-board-panel.js');
-  const { createHopscotchBoardStore } = await import('/scripts/storage/hopscotch-board-store.js');
+  const { createScopedHopscotchBoardStore } = await import('/scripts/storage/hopscotch-board-store.js');
   const { createHopscotchTurnRuntime } = await import('/scripts/ui/chat/hopscotch-turn-runtime.js');
   const { resolveHopscotchBoardSettings } = await import('/scripts/ui/chat/hopscotch-settings-utils.js');
   const settings = { memoryEnabled: true, memoryStorageMode: 'table', memoryAutoExtract: true, memoryAutoExtractMode: 'inline', memoryTableEnabledWriting: true, memoryTableEnabledChat: true };
@@ -20,7 +20,8 @@ const result = await evaluateInApp(`(async () => {
   let board;
   let enables = 0;
   const local = new Map();
-  const store = createHopscotchBoardStore({ storage: { getItem: k => local.get(k), setItem: (k, v) => local.set(k, v) } });
+  const sessions = new Map();
+  const store = createScopedHopscotchBoardStore({ scopeId: 'scope-smoke-persona', storage: { getItem: k => local.get(k), setItem: (k, v) => local.set(k, v) }, getSessionSettings: sid => sessions.get(sid) || {}, setSessionSettings: (sid, value) => { sessions.set(sid, value); return true; } });
   const runtime = createHopscotchTurnRuntime({ boardStore: store, resolveWritingSettings: (_, scope) => resolveHopscotchBoardSettings({ settings, place: scope, replyCheck: review }) });
   const ac = new AgentCenterPanel({ getActions: () => ({ getAgentFeatureSettings: () => ({ features: { reply_check: review } }) }), getHopscotchPanel: () => board });
   board = createHopscotchBoardPanel({ embedded: true, boardStore: store, runtime, getPlace: () => place, getSessionId: () => place === 'writing' ? 'rp:scope-smoke' : 'chat-scope-smoke', enable: () => { enables++; }, mountAgentCard: (host, options) => ac.mountHopscotchAgentCard(host, options) });
@@ -49,7 +50,9 @@ const result = await evaluateInApp(`(async () => {
 
     place = 'chat'; await ac.refresh();
     check(ids() === 'body,memory,review' && root.dataset.hopPlace === 'chat', 'chat must use its own memory/review settings');
-    check(!root.querySelector('[data-action="save"], [data-hop-add], [data-hop-target]'), 'chat must not offer creative board writes');
+    check(!root.querySelector('[data-action="save"], [data-hop-add]'), 'chat must not offer creative board writes');
+    check([...root.querySelector('[data-hop-target]').options].map(o => o.value).join(',') === 'global,session', 'chat scopes must exclude character/writing options');
+    check(root.querySelector('.hop-scope-source').textContent === '设置推导', 'chat must identify its derived flow');
     await change('memoryAutoExtractMode', 'inline');
     check(ids() === 'body,review' && root.querySelector('.hop-fusion-group'), 'chat inline table + review layout');
     click('[data-hop-house="body"]');
@@ -81,18 +84,34 @@ const result = await evaluateInApp(`(async () => {
     check(ids() === 'body,review', 'chat must not load creative global board');
     place = 'writing'; await ac.refresh();
     check(ids() === 'body,custom', 'saved creative board must remain intact');
+    check([...root.querySelector('[data-hop-target]').options].map(o => o.value).join(',') === 'global,persona,session', 'writing needs global/persona/session scopes');
+    check(enables === 0, 'viewing scopes must not enable orchestration');
+    const selectScope = async value => { const select = root.querySelector('[data-hop-target]'); select.value = value; select.dispatchEvent(new Event('change')); await tick(); };
+    const importAndSave = async name => {
+      click('[data-action="more"]'); click('[data-action="transfer"]');
+      const dialog = document.querySelector('.hop-detail[open]');
+      dialog.querySelector('[name="boardJson"]').value = JSON.stringify({ name, rows: [{ houses: [{ id: 'body', kind: 'body' }] }] });
+      click('[data-action="import"]', dialog); click('[data-action="save"]'); await tick();
+    };
+    await selectScope('session'); await importAndSave('会话探针');
+    check(store.getSessionOverride('rp:scope-smoke')?.name === '会话探针', 'session target saved to wrong scope');
+    check(store.getGlobalBoard().rows.length === 2 && !store.getPersonaBoard(), 'session save polluted defaults');
+    await selectScope('persona'); await importAndSave('角色探针');
+    check(store.getPersonaBoard()?.name === '角色探针' && store.getGlobalBoard().rows.length === 2, 'persona target saved to wrong scope');
+    check(root.querySelector('.hop-scope-source').textContent === '角色卡编排', 'source must identify persona board');
+    await selectScope('global');
     click('[data-hop-add="0"][data-hop-new="1"]');
     const picker = document.querySelector('.hop-detail[open]');
     check(!picker.querySelector('[data-action="add:format_review"]'), 'chat-only review cannot be added to writing');
     check(!picker.querySelector('[data-action="add:summary_compaction"]'), 'internal compaction is not an independent Agent to add');
-    click('[data-action="add:custom_prompt"]', picker);
+    [...picker.querySelectorAll('[data-action^="add:"]')].find(button => button.textContent.includes('自定义提示词')).click();
     const dirtyIds = ids();
     await change('memoryEnabled', true);
     check(ids() === dirtyIds && root.querySelector('.hop-source.is-dirty'), 'settings refresh must not discard a board draft');
-    check(enables === 0, 'viewing settings must not enable board orchestration');
+    check(enables === 2, 'only explicit board saves should enable orchestration');
     return { topDown: true, modes: ['off', 'table-inline', 'table-separate', 'summary'], scopes: ['writing', 'chat'], sharedCard: true, draftPreserved: true, enables };
   } finally { dispose(); }
 })()`);
 assert.equal(result.topDown, true);
-assert.equal(result.enables, 0);
+assert.equal(result.enables, 2);
 console.log('ok - live memory settings, scope isolation, top-down layout, original shared cards and draft preservation', result);

@@ -18,6 +18,7 @@ import { buildReasoningRequestOptions, getReasoningCapability, getReasoningSampl
 import { resolveChatStructuredThinkingPreference } from '../agent/provider-fc-transport.js';
 import { formatChatStructuredThinkingDisclosure } from './chat/chat-structured-profile-status.js';
 import { LLMClient } from '../api/client.js';
+import { getPresetParamExclusions } from '../api/request-params.js';
 import { canInitClient } from '../api/client-config-utils.js';
 import { logger } from '../utils/logger.js';
 import { buildBuiltinPhoneFormatReminder } from '../utils/builtin-phone-format-contract.js';
@@ -1506,6 +1507,11 @@ body[data-reduced-motion='on'] .pp-editor-handle::after { transition: none !impo
 
 /* ── form helpers ── */
 .pp-field-label { font-weight: 700; color: var(--app-text-primary); margin-bottom: 6px; font-size: 13px; }
+.pp-api-param-excluded {
+    display: inline-block; margin: 3px 0 0 6px; padding: 2px 6px; border-radius: 5px;
+    font-size: 10px; font-weight: 500; line-height: 1.6; color: var(--app-text-muted);
+    background: var(--app-surface-subtle); vertical-align: middle; cursor: help;
+}
 .pp-textarea {
     width: 100%; min-height: 140px; resize: vertical;
     border: 1px solid var(--app-border-default); border-radius: 11px; padding: 10px;
@@ -2672,6 +2678,13 @@ export class PresetPanel {
         this.element.style.display = 'flex';
         this.overlayElement.style.display = 'block';
         this.syncPreviewDiscoveryGuide();
+        if (opts.focusParam) {
+            const ids = { temperature: 'gen-temperature', top_p: 'gen-top-p', top_k: 'gen-top-k', max_output_tokens: 'gen-max-tokens',
+                max_context: 'gen-max-context-num', presence_penalty: 'gen-presence', frequency_penalty: 'gen-frequency', reasoning: 'gen-request-reasoning' };
+            const target = this.element.querySelector('#' + (ids[opts.focusParam] || 'gen-temperature'));
+            target?.scrollIntoView?.({ block: 'center' });
+            target?.focus?.({ preventScroll: true });
+        }
     }
 
     /* 取消 = 确认后回滚未保存编辑；×/遮罩关闭 = 缓存编辑（发送始终用已保存内容，保存才更新） */
@@ -2721,6 +2734,9 @@ export class PresetPanel {
         this.previewDiscoveryGuide?.hide?.();
         if (this.element) this.element.style.display = 'none';
         if (this.overlayElement) this.overlayElement.style.display = 'none';
+        const onHide = this.pendingOpenOptions?.onHide;
+        if (this.pendingOpenOptions) delete this.pendingOpenOptions.onHide;
+        onHide?.();
     }
 
     setPreviewDiscoveryGuide(guide = null) {
@@ -4229,6 +4245,18 @@ export class PresetPanel {
     /* ── OpenAI Params ── */
     renderOpenAIParamsEditor(p) {
         const wrap = document.createElement('div');
+        const apiProfile = this.getBoundProfileForPreset(p) || {};
+        const markExclusion = (label, field) => {
+            const paths = getPresetParamExclusions(field, apiProfile);
+            if (!label || !paths.length) return;
+            const badge = document.createElement('span');
+            badge.className = 'pp-api-param-excluded has-help';
+            badge.tabIndex = 0;
+            badge.dataset.paramField = field;
+            badge.dataset.help = t('当前 API：{name}；排除字段：{paths}。可在 API 配置的请求参数中调整。', { name: apiProfile.name || apiProfile.provider || 'API', paths: paths.join(', ') });
+            badge.textContent = t('当前 API 已排除');
+            label.appendChild(badge);
+        };
 
         const maxContext = document.createElement('input');
         maxContext.id = 'gen-max-context'; maxContext.type = 'range';
@@ -4305,6 +4333,7 @@ export class PresetPanel {
             const title = document.createElement('div');
             title.className = 'pp-field-label';
             title.textContent = '推理请求';
+            markExclusion(title, 'reasoning');
             reasoningCard.appendChild(title);
 
             const meta = document.createElement('div');
@@ -4486,6 +4515,11 @@ export class PresetPanel {
         wrap.appendChild(targetRow);
         this.bindCustomSelect('gen-response-target-chat', targetRow);
         this.bindCustomSelect('gen-response-target-rp', targetRow);
+
+        for (const [id, field] of [['gen-temperature', 'temperature'], ['gen-top-p', 'top_p'], ['gen-top-k', 'top_k'],
+            ['gen-max-tokens', 'max_output_tokens'], ['gen-presence', 'presence_penalty'], ['gen-frequency', 'frequency_penalty']]) {
+            markExclusion(wrap.querySelector('#' + id)?.parentElement?.querySelector('.pp-field-label'), field);
+        }
 
         return wrap;
     }

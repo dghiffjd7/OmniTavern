@@ -748,3 +748,96 @@ body[data-reduced-motion='on'] .chat-realtime-call-btn {
     animation: none !important;
   }
 }
+
+.input-suggestion-mirror {
+  position: absolute;
+  box-sizing: border-box;
+  border-style: solid;
+  border-color: transparent;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 1;
+}
+.input-suggestion-prefix { color: transparent; }
+.input-suggestion-text { color: var(--app-text-secondary); }
+.input-suggestion-text .input-suggestion-remaining { opacity: .65; }
+.input-suggestion-selected {
+  color: var(--app-accent-primary);
+  background: var(--app-accent-soft);
+  border-radius: 3px;
+}
+.input-suggestion-selected:empty { display: none; }
+.input-suggestion-accept {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  max-width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--app-border-default);
+  border-radius: 12px;
+  background: var(--app-surface-card);
+  color: var(--app-text-secondary);
+  box-shadow: var(--app-shadow-sm);
+  display: flex;
+  align-items: center;
+  text-align: start;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  z-index: 3;
+}
+.input-suggestion-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.input-suggestion-accept.is-selecting { border-color: var(--app-accent-primary); }
+.input-suggestion-accept.is-selecting .input-suggestion-label {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  max-height: min(32vh, 12em);
+  overflow-y: auto;
+}
+.input-suggestion-accept.is-touch-selecting .input-suggestion-label {
+  white-space: nowrap;
+  max-height: none;
+  overflow: hidden;
+  text-overflow: clip;
+  scroll-behavior: auto;
+}
+.input-suggestion-touch-preview {
+  position: fixed;
+  z-index: 2147483647;
+  display: flex;
+  align-items: center;
+  max-width: calc(100vw - 16px);
+  overflow: hidden;
+  padding: 9px 12px;
+  border: 1px solid var(--app-border-default);
+  border-radius: 12px;
+  background: var(--app-surface-card);
+  color: var(--app-text-primary);
+  box-shadow: var(--app-shadow-sm);
+  font-size: 17px;
+  line-height: 1.5;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+}
+.input-suggestion-touch-caret { align-self: stretch; flex: 0 0 1px; margin: 0 2px; background: var(--app-accent-primary); }
+.input-suggestion-touch-after { color: var(--app-text-secondary); }
+@media (hover: hover) {
+  .input-suggestion-accept:hover { color: var(--app-accent-primary); }
+}
+@media (any-pointer: coarse) {
+  .input-suggestion-accept { min-height: 44px; padding-block: 10px; font-size: 14px; }
+}
+.input-suggestion-mirror[hidden], .input-suggestion-accept[hidden], .input-suggestion-touch-preview[hidden] { display: none; }

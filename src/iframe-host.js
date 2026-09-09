@@ -1637,7 +1637,7 @@
       target.appendChild(link);
       return link;
     }
-    if (inHead && !/^(meta|base|title|style)$/i.test(tag)) {
+    if (inHead && !/^(meta|base|title|style|template)$/i.test(tag)) {
       return null;
     }
 
@@ -1675,6 +1675,12 @@
     });
     if (inHead) el.setAttribute('data-chatapp-head-node', '1');
     target.appendChild(el);
+    if (tag === 'template' && node.content && el.content) {
+      // 模板数据保存在 content 中，普通 childNodes 为空。整段复制惰性内容，
+      // 保留嵌套模板，避免将其中的脚本交给宿主提前执行。
+      el.content.appendChild(node.content.cloneNode(true));
+      return el;
+    }
     Array.from(node.childNodes || []).forEach((child) => {
       // 单个子节点重建失败不能殃及后续兄弟（否则同父级一整段 UI 连锁丢失）。
       try {

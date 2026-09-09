@@ -8,6 +8,7 @@ import {
   setLastMemoryPlan,
 } from './memory-update-runtime-utils.js';
 import { loadBridgeConfig } from '../config-runtime-utils.js';
+import { captureRequestContext } from '../../api/request-context.js';
 
 const emitMemoryRuntimeTrace = (recordTraceEvent, event) => {
   if (typeof recordTraceEvent !== 'function') return null;
@@ -148,6 +149,7 @@ export const createMemoryUpdateRuntime = ({
   };
 
   const runMemoryUpdateTask = async (sessionId, isGroup, baseContext, checkpointMessageId, signal) => {
+    const requestContext = captureRequestContext(baseContext?.meta?.requestContext || { sessionId });
     const runId = `${sessionId}:${checkpointMessageId || Date.now()}`;
     memoryUpdateRunning.add(runId);
     const agentRun = await startAgentMemoryRun({ sessionId, isGroup, checkpointMessageId });
@@ -199,7 +201,7 @@ export const createMemoryUpdateRuntime = ({
         historyText,
       });
       const client = createClient(config);
-      const response = await client.chat(request.messages, { signal });
+      const response = await client.chat(request.messages, { signal, requestContext });
       if (signal?.aborted) {
         return finishTrace({ status: 'cancelled', reason: 'aborted' });
       }

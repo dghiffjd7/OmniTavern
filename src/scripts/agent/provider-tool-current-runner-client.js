@@ -1,4 +1,5 @@
 import { canInitClient } from '../api/client-config-utils.js';
+import { captureRequestContext } from '../api/request-context.js';
 import { createProviderToolLlmClientNativeRunner } from './provider-tool-llmclient-native-runner.js';
 
 const isPlainObject = value => Boolean(value && typeof value === 'object' && !Array.isArray(value));
@@ -14,7 +15,7 @@ const normalizeProviderFamily = (provider = '') => {
   const value = trim(provider).toLowerCase();
   if (value.includes('anthropic') || value.includes('claude')) return 'anthropic';
   if (value.includes('gemini') || value.includes('maker') || value.includes('vertex')) return 'gemini';
-  if (value.includes('openai') || value.includes('custom') || value.includes('deepseek')) return 'openai';
+  if (value.includes('openai') || value.includes('custom') || value.includes('deepseek') || value === 'opencode') return 'openai';
   return value || 'generic';
 };
 
@@ -164,6 +165,7 @@ export const resolveProviderToolCurrentRunnerClient = async ({
   now = Date.now,
 } = {}) => {
   const gate = isPlainObject(sessionGate) ? sessionGate : {};
+  const requestContext = captureRequestContext({ sessionId });
   if (enabled !== true) {
     return buildResult({
       status: 'disabled',
@@ -261,6 +263,7 @@ export const resolveProviderToolCurrentRunnerClient = async ({
     config,
     sessionGate: gate,
     runnerRequestOptions: {
+      requestContext,
       requestId: trim(requestId, `provider-tool-current-runner:${readTimestamp(now)}`),
       source: 'provider-tool-current-runner',
       configProfileId: trim(runtime?.profileId),

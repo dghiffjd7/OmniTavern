@@ -4,6 +4,7 @@
 // 未编辑的推导默认板继续走既有固定流程（creative-turn-tracker），保证默认行为等价。
 
 import { t, translateUiText } from '../../i18n/index.js';
+import { cloneData } from '../../utils/clone-data.js';
 import { getActiveHopscotchFused, resolveHopscotchActivation } from './hopscotch-activation-utils.js';
 import { buildDefaultHopscotchBoard, projectHopscotchVariableRules, compileBoardToLaneTasks, findBodyRowIndex, getHopscotchHouseDisplayStatus } from './hopscotch-board-utils.js';
 import { createCreativeTurnOrchestrator } from './creative-turn-orchestrator.js';
@@ -104,7 +105,7 @@ export const createHopscotchExecutors = ({
     if (house.kind !== 'custom_prompt' || house.config?.includeContext === 'none') return max;
     return Math.max(max, house.config?.includeContext === 'full' ? HOPSCOTCH_FULL_CONTEXT_MESSAGE_CAP : (Number(house.config?.recentMessageCount) || 8));
   }, 0);
-  const historySnapshot = historyLimit > 0 ? structuredClone(custom?.getRecentMessages?.(sessionId, historyLimit) || []) : [];
+  const historySnapshot = historyLimit > 0 ? cloneData(custom?.getRecentMessages?.(sessionId, historyLimit) || []) : [];
   const profileConfigs = new Map();
   for (const house of board?.rows?.flatMap(row => row.houses) || []) {
     if (house.kind !== 'custom_prompt') continue;
@@ -349,13 +350,13 @@ export const createHopscotchTurnRuntime = ({
   const resolveLane = () => (typeof getLaneRuntime === 'function' ? getLaneRuntime() : laneRuntime);
 
   const isEnabled = () => getSettings()?.creativeHopscotchEnabled === true;
-  const resolveBoard = (sessionId, { place = 'writing', contextSessionId = sessionId } = {}) => {
+  const resolveBoard = (sessionId, { place = 'writing', contextSessionId = sessionId, scope = 'effective' } = {}) => {
     if (!boardStore) return { board: null, source: 'derived' };
     const settings = resolveWritingSettings(contextSessionId, place);
     const derived = buildDefaultHopscotchBoard({ ...settings, place });
     // 聊天不能读到创意写作的自定义板，也不能借此接管聊天发送。
     if (place === 'chat') return { board: derived, source: 'derived' };
-    const resolved = boardStore.resolveEffectiveBoard({ sessionId, derivedBoard: derived });
+    const resolved = boardStore.resolveEffectiveBoard({ sessionId, derivedBoard: derived, scope });
     return { ...resolved, board: projectHopscotchVariableRules(resolved.board, settings?.variables?.activity) };
   };
 
@@ -371,7 +372,7 @@ export const createHopscotchTurnRuntime = ({
     const resolved = resolveBoard(sessionId, { place });
     const settings = resolveWritingSettings(sessionId, place);
     const activation = resolveHopscotchActivation(resolved.board, settings);
-    return { ...resolved, activation, memory: structuredClone(settings?.memory || {}), fused: getActiveHopscotchFused(resolved.board, activation), custom: place === 'writing' && isEnabled() && resolved.source !== 'derived' };
+    return { ...resolved, activation, memory: cloneData(settings?.memory || {}), fused: getActiveHopscotchFused(resolved.board, activation), custom: place === 'writing' && isEnabled() && resolved.source !== 'derived' };
   };
 
   const isSessionBusy = sessionId => activeTurns.has(trim(sessionId));
@@ -398,11 +399,11 @@ export const createHopscotchTurnRuntime = ({
     const resolved = executionPlan || resolveExecutionPlan(sid);
     if (!resolved.board || resolved.source === 'derived') return null;
     if (activeTurns.has(sid)) return null;
-    const board = structuredClone(resolved.board);
-    const activation = structuredClone(resolved.activation || resolveActivation(board, sid));
+    const board = cloneData(resolved.board);
+    const activation = cloneData(resolved.activation || resolveActivation(board, sid));
     const fused = getActiveHopscotchFused(board, activation);
     // 执行器只拿有效成员；运行页仍保留完整原板与逐项启停原因。
-    const executionBoard = structuredClone(board);
+    const executionBoard = cloneData(board);
     for (const row of executionBoard.rows) for (const house of row.houses) {
       house.enabled = activation.houses[house.id]?.enabled !== false;
       if (house.kind === 'body') house.fused = fused.slice();

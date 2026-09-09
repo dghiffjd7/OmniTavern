@@ -91,6 +91,15 @@ const compactSearchResultForModel = (output = {}) => {
 };
 
 const buildToolContinuationMessages = (toolCalls = [], toolResults = [], assistantCapture = {}) => {
+  const nativeOutput = assistantCapture.responsesOutput || toolCalls.find(call => call?.providerContinuation?.api === 'openai_responses')
+    ?.providerContinuation?.assistantOutput;
+  if (Array.isArray(nativeOutput) && nativeOutput.length) {
+    return [...nativeOutput, ...toolResults.map(item => ({
+      type: 'function_call_output',
+      call_id: trim(item.call.toolCallId || item.call.id),
+      output: JSON.stringify(compactSearchResultForModel(item.output)),
+    }))];
+  }
   const assistantMessage = {
     role: 'assistant',
     content: assistantCapture.hasContent ? assistantCapture.content : '',
@@ -118,6 +127,8 @@ const buildToolContinuationMessages = (toolCalls = [], toolResults = [], assista
 
 const captureAssistantTurnPayload = (capture, data) => {
   if (!capture || !data || typeof data !== 'object') return;
+  const output = data.response?.output || data.output;
+  if (Array.isArray(output)) capture.responsesOutput = output;
   const choice = Array.isArray(data.choices) ? data.choices[0] : null;
   const message = isPlainObject(choice?.message) ? choice.message : null;
   const delta = isPlainObject(choice?.delta) ? choice.delta : null;

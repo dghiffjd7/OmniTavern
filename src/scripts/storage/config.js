@@ -3,10 +3,12 @@
  */
 
 import { logger } from '../utils/logger.js';
+import { normalizeCustomRequestParams, validateCustomRequestParams } from '../api/request-params.js';
 import { normalizeGenerationParamFilterList } from '../utils/generation-param-filter-utils.js';
 import { safeInvoke } from '../utils/tauri.js';
 import { normalizeVertexAuthMode } from '../api/vertexai-config-utils.js';
 import { normalizeOpenRouterProviderSlugs } from '../api/openrouter-provider-routing.js';
+import { normalizeOpenAIApiFormat } from '../api/openai-api-format.js';
 
 const SUPPORTED_PROVIDERS = [
     'openai',
@@ -148,6 +150,7 @@ const normalizeProfile = (p = {}, { touchUpdatedAt = false } = {}) => {
         name: p.name || '未命名',
         provider,
         baseUrl: p.baseUrl || 'https://api.openai.com/v1',
+        apiFormat: normalizeOpenAIApiFormat(p.apiFormat),
         connectionMode: p.connectionMode === 'reverse_proxy' ? 'reverse_proxy' : 'direct',
         proxyBaseUrl: typeof p.proxyBaseUrl === 'string' ? p.proxyBaseUrl : '',
         proxyAuthHeaderName: typeof p.proxyAuthHeaderName === 'string' ? p.proxyAuthHeaderName : '',
@@ -162,6 +165,7 @@ const normalizeProfile = (p = {}, { touchUpdatedAt = false } = {}) => {
         webSearchEnabled: p.webSearchEnabled === true,
         stream: p.stream !== false,
         excludedGenerationParams: normalizeGenerationParamFilterList(p.excludedGenerationParams),
+        customRequestParams: normalizeCustomRequestParams(p.customRequestParams),
         timeout: typeof p.timeout === 'number' ? p.timeout : 60000,
         maxRetries: typeof p.maxRetries === 'number' ? p.maxRetries : 3,
         ...(provider === 'vertexai'
@@ -396,6 +400,7 @@ export class ConfigManager {
             provider: 'openai',
             apiKey: '',
             baseUrl: 'https://api.openai.com/v1',
+            apiFormat: 'chat_completions',
             connectionMode: 'direct',
             proxyBaseUrl: '',
             proxyAuthHeaderName: '',
@@ -412,6 +417,7 @@ export class ConfigManager {
             webSearchEnabled: false,
             stream: true,
             excludedGenerationParams: [],
+            customRequestParams: [],
             timeout: 60000,
             maxRetries: 3
         };
@@ -999,6 +1005,7 @@ export class ConfigManager {
         const runtime = {
             provider: p.provider,
             baseUrl: p.baseUrl,
+            apiFormat: p.apiFormat,
             connectionMode: p.connectionMode === 'reverse_proxy' ? 'reverse_proxy' : 'direct',
             proxyBaseUrl: String(p.proxyBaseUrl || '').trim(),
             proxyAuthHeaderName: String(p.proxyAuthHeaderName || '').trim(),
@@ -1013,6 +1020,7 @@ export class ConfigManager {
             webSearchEnabled: p.webSearchEnabled === true,
             stream: p.stream,
             excludedGenerationParams: normalizeGenerationParamFilterList(p.excludedGenerationParams),
+            customRequestParams: normalizeCustomRequestParams(p.customRequestParams),
             timeout: p.timeout,
             maxRetries: p.maxRetries,
             ...(p.provider === 'vertexai'
@@ -1087,6 +1095,9 @@ export class ConfigManager {
         }
         config.provider = provider;
         config.excludedGenerationParams = normalizeGenerationParamFilterList(config.excludedGenerationParams);
+        config.customRequestParams = normalizeCustomRequestParams(config.customRequestParams);
+        const requestParamErrors = validateCustomRequestParams(config.customRequestParams);
+        if (requestParamErrors.length) throw new Error('请求参数：' + requestParamErrors[0].message);
 
         // 验证 URL
         try {

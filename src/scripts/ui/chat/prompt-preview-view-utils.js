@@ -1,3 +1,4 @@
+import { renderRequestParamReport, requestParamStatusLabel } from '../request-param-report-view.js';
 import {
   formatDateTime as formatLocalizedDateTime,
   formatNumber,
@@ -68,9 +69,11 @@ const formatDuration = (value) => {
 };
 
 const normalizeParamEntries = (request) => {
-  const merged = { ...(request?.options || {}), ...(request?.requestOptions || {}) };
+  const merged = request?.wireRequest?.body || { ...(request?.options || {}), ...(request?.requestOptions || {}) };
   const skipped = new Set([
+    'input', 'model', 'stream', 'messages', 'contents', 'system', 'systemInstruction', 'requestParamConstraints',
     'signal',
+    'requestContext',
     'nativeRequestId',
     'tools',
     'tool_choice',
@@ -364,6 +367,8 @@ export const buildPromptOverviewView = (request = null, {
     ['provider', req.provider || '—'],
     ['model', req.model || '—'],
     ['base_url', req.baseUrl || '—'],
+    ...(req.apiFormat ? [['api_format', req.apiFormat]] : []),
+    ...(req.wireRequest?.url ? [['endpoint', req.wireRequest.url]] : []),
     ['stream', req.stream ? 'true' : 'false'],
     ['session', req.session?.name || req.session?.id || '—'],
     ['profile', req.configProfile?.id || req.configProfile?.source || 'global'],
@@ -496,6 +501,13 @@ export const buildPromptOverviewView = (request = null, {
             ${requestJsonRows}${paramRows}
             <div class="prompt-overview-code-line is-brace"><span class="prompt-overview-line-number">${requestRows.length + params.length + 1}</span><code>}</code></div>
           </div>
+          ${req.wireRequest?.body ? `
+            <details class="prompt-overview-schema">
+              <summary><strong>请求 JSON</strong></summary>
+              <pre><code data-i18n-skip="true">${escapeHtml(truncateBase64(JSON.stringify(req.wireRequest.body, null, 2)))}</code></pre>
+            </details>` : ''}
+          ${req.wireRequest?.parameterReport?.length ? `
+            <details class="prompt-overview-schema"><summary><strong>参数处理结果</strong></summary>${renderRequestParamReport(req.wireRequest.parameterReport)}</details>` : ''}
           ${terminalToolSchemaJson ? `
             <details class="prompt-overview-schema">
               <summary>
@@ -595,6 +607,7 @@ export const buildPromptOverviewView = (request = null, {
     ...globalPromptSkipped.map(item => `global prompt skipped: ${item.name || item.id || '-'} · ${item.message || item.reason || '-'}`),
     ...contractSummaryRows.map(([label, value]) => `${label}: ${value}`),
     roles.length ? `roles: ${roles.map(([role, count]) => `${role} ×${count}`).join(', ')}` : '',
+    req.wireRequest?.parameterReport?.length ? `parameter rules: ${req.wireRequest.parameterReport.map(item => `${item.name}: ${requestParamStatusLabel(item.status)}`).join(', ')}` : '',
     params.length ? `generation params: ${params.map(item => `${item.key}=${item.value}`).join(', ')}` : '',
     injectionAuditText,
     `total latency: ${formatDuration(diagnostics.latencyMs)}`,

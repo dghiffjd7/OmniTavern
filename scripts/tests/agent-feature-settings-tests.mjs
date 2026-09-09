@@ -210,11 +210,11 @@ const createStorage = () => {
   assert.match(replyCheck.summary, /格式问题/);
   assert.equal(replyCheck.state.triggerMode, AGENT_FEATURE_TRIGGER_MODES.auto);
   assert.equal(replyCheck.state.modelMode, 'none');
-  assert.equal(textCompletion.title, '文本补全');
+  assert.equal(textCompletion.title, '文本建议');
   assert.equal(textCompletion.enabled, true);
   assert.equal(textCompletion.state.modelMode, 'profile');
   assert.equal(textCompletion.state.modelProfileId, 'profile-a');
-  assert.equal(textCompletion.implemented, false);
+  assert.equal(textCompletion.implemented, true);
   assert.equal(promptManager.title, '提示词管家');
   assert.equal(promptManager.implemented, false);
   assert.match(promptManager.summary, /只读检查提示词/);

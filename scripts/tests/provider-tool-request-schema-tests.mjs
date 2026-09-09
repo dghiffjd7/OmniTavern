@@ -408,9 +408,11 @@ const createRegistry = ({
     { role: 'user', content: 'hello' },
   ], schema.requestOptions);
 
-  assert.equal(prepared.payload.tools[0].function.name, 'contact_profile_list');
+  assert.equal(prepared.url, 'https://api.openai.com/v1/responses');
+  assert.equal(prepared.payload.tools[0].name, 'contact_profile_list');
+  assert.equal(prepared.payload.store, false);
   assert.equal(prepared.payload.tool_choice, 'auto');
-  console.log('ok - OpenAI provider preserves provider tool request options in payloads');
+  console.log('ok - OpenAI request preview uses the actual Responses tool payload');
 }
 
 {

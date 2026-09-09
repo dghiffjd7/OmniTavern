@@ -3,6 +3,7 @@ import {
   mergeWebSources,
 } from '../../api/web-search-runtime.js';
 import { createWebSearchGenerationClient } from './web-search-generation-client.js';
+import { captureRequestContext } from '../../api/request-context.js';
 
 export const AD_HOC_WEB_SEARCH_NOTICE_KEY = 'chatapp.ad_hoc_web_search_notice_v1';
 
@@ -120,6 +121,9 @@ export const buildAdHocWebSearchRuntime = ({
   onSources = null,
 } = {}) => {
   const baseOptions = requestOptions && typeof requestOptions === 'object' ? { ...requestOptions } : {};
+  if (baseOptions.requestContext || sessionId) {
+    baseOptions.requestContext = captureRequestContext(baseOptions.requestContext || { sessionId });
+  }
   const runtime = toolRuntime === undefined ? getDefaultToolRuntime() : toolRuntime;
   const fallbackToolDefinitions = ['web.search', 'web.research', 'web.fetch_url']
     .map(name => runtime?.getTool?.(name))

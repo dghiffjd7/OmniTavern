@@ -1669,6 +1669,12 @@
     ]
   },
   {
+    "source": "「{name}」的回复已完成",
+    "references": [
+      "src/scripts/ui/app.js#ui-call"
+    ]
+  },
+  {
     "source": "「{value}」必须位于正文之后的行",
     "references": [
       "src/scripts/ui/chat/hopscotch-board-utils.js#ui-call"
@@ -2413,6 +2419,12 @@
     ]
   },
   {
+    "source": "按服务商文档选择接口格式：Chat Completions 使用 /chat/completions，Responses 使用 /responses。模型列表沿用刷新与手动填写，工具等能力以渠道支持为准。",
+    "references": [
+      "src/scripts/ui/config-panel.js#html-attribute"
+    ]
+  },
+  {
     "source": "按规则替换输入/输出文本；全局始终生效，角色/预设按绑定对象生效",
     "references": [
       "src/scripts/ui/regex-panel.js#html-attribute"
@@ -2434,6 +2446,24 @@
     "source": "按能力标签委派模型任务",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "按任务上限",
+    "references": [
+      "src/scripts/ui/request-param-report-view.js#ui-call"
+    ]
+  },
+  {
+    "source": "按任务设置",
+    "references": [
+      "src/scripts/ui/request-param-report-view.js#ui-call"
+    ]
+  },
+  {
+    "source": "按所选聊天范围展示当前设置推导的流程；点击房子可查看对应 Agent 配置。",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
   },
   {
@@ -2952,12 +2982,6 @@
     ]
   },
   {
-    "source": "保存范围",
-    "references": [
-      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
-    ]
-  },
-  {
     "source": "保存更改",
     "references": [
       "src/scripts/ui/world-editor/world-variable-picker.js#html-text"
@@ -2989,12 +3013,6 @@
   },
   {
     "source": "保存后将自動设为当前 Key",
-    "references": [
-      "src/scripts/ui/config-panel.js#html-text"
-    ]
-  },
-  {
-    "source": "保存后仅作用于当前连线设置档",
     "references": [
       "src/scripts/ui/config-panel.js#html-text"
     ]
@@ -3168,6 +3186,12 @@
     "source": "保存原图（不压缩，文件较大）",
     "references": [
       "src/index.html#html-text"
+    ]
+  },
+  {
+    "source": "保存在当前连线设置档；生成参数在预设中编辑，附加参数补充接口字段，排除规则最后执行。",
+    "references": [
+      "src/scripts/ui/request-params-panel.js#ui-call"
     ]
   },
   {
@@ -3595,13 +3619,7 @@
     ]
   },
   {
-    "source": "本会话",
-    "references": [
-      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
-    ]
-  },
-  {
-    "source": "本会话覆盖",
+    "source": "本会话编排",
     "references": [
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
@@ -3894,6 +3912,12 @@
     ]
   },
   {
+    "source": "编辑启用项的附加字段；停用项保留在列表。生成参数仍由预设管理，原值保留供整理。",
+    "references": [
+      "src/scripts/ui/request-params-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "编辑思维链",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -3935,6 +3959,12 @@
     "source": "编辑摘要",
     "references": [
       "src/scripts/ui/moment-summary-panel.js#html-text"
+    ]
+  },
+  {
+    "source": "编排优先采用当前会话，其次是角色卡，再其次是创意写作全局。此处选择编辑与保存的位置；Agent 卡片内的共享配置沿用各自范围。",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
   },
   {
@@ -4579,6 +4609,12 @@
     ]
   },
   {
+    "source": "补充预设尚未提供的接口字段；点号表示嵌套路径。对象按字段合并，数组整体替换。归预设管理的旧项保留原值。",
+    "references": [
+      "src/scripts/ui/request-params-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "补丁没有改变原文",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -4908,6 +4944,7 @@
   {
     "source": "布尔",
     "references": [
+      "src/scripts/ui/request-params-panel.js#ui-call",
       "src/scripts/ui/variable-schema-editor.js#html-text",
       "src/scripts/ui/world-editor.js#ui-property"
     ]
@@ -4945,10 +4982,22 @@
     ]
   },
   {
+    "source": "部分排除",
+    "references": [
+      "src/scripts/ui/request-param-report-view.js#ui-call"
+    ]
+  },
+  {
     "source": "部分失败",
     "references": [
       "src/scripts/ui/chat/hopscotch-court-view.js#ui-call",
       "src/scripts/ui/chat/hopscotch-turn-runtime.js#ui-call"
+    ]
+  },
+  {
+    "source": "部分由预设管理",
+    "references": [
+      "src/scripts/ui/request-param-report-view.js#ui-call"
     ]
   },
   {
@@ -4973,6 +5022,12 @@
     "source": "裁剪={value}",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "采纳输入建议",
+    "references": [
+      "src/scripts/ui/chat/input-suggestion-composer.js#ui-call"
     ]
   },
   {
@@ -5050,10 +5105,53 @@
     ]
   },
   {
+    "source": "参数处理结果",
+    "references": [
+      "src/scripts/ui/chat/agent-request-preview.js#ui-call",
+      "src/scripts/ui/chat/prompt-preview-view-utils.js#html-text"
+    ]
+  },
+  {
+    "source": "参数路径重复或与上级、下级字段冲突：{value}",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "参数名",
+    "references": [
+      "src/scripts/ui/request-params-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "参数名无效",
+    "references": [
+      "src/scripts/ui/request-param-report-view.js#ui-call"
+    ]
+  },
+  {
+    "source": "参数名需由字母或下划线开头，使用点号连接嵌套字段",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "参数预设",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/scripts/ui/image-generation-params-panel.js#html-text"
+    ]
+  },
+  {
+    "source": "参数值",
+    "references": [
+      "src/scripts/ui/request-params-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "参数值与所选类型不符",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -5446,7 +5544,7 @@
   {
     "source": "常用参数",
     "references": [
-      "src/scripts/ui/config-panel.js#html-text"
+      "src/scripts/ui/request-params-panel.js#ui-call"
     ]
   },
   {
@@ -6113,6 +6211,7 @@
     "source": "创意写作",
     "references": [
       "src/scripts/ui/agent-center-panel.js#ui-property",
+      "src/scripts/ui/app.js#ui-call",
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call",
       "src/scripts/ui/custom-bundle-exporter.js#html-text",
       "src/scripts/ui/custom-bundle-import-room-utils.js#ui-property",
@@ -6216,7 +6315,6 @@
     "source": "创意写作默认",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
-      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call",
       "src/scripts/ui/preset-panel.js#ui-call",
       "src/scripts/ui/preset-panel.js#ui-property"
     ]
@@ -7164,6 +7262,18 @@
     ]
   },
   {
+    "source": "当前 API 已排除",
+    "references": [
+      "src/scripts/ui/preset-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "当前 API：{name}；排除字段：{paths}。可在 API 配置的请求参数中调整。",
+    "references": [
+      "src/scripts/ui/preset-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "当前 block 内还没有比较节点引用这个变量。",
     "references": [
       "src/scripts/ui/world-editor/world-node-editor-core.js#html-text"
@@ -8027,7 +8137,8 @@
   {
     "source": "当前角色卡",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
   },
   {
@@ -8196,7 +8307,8 @@
   {
     "source": "当前聊天",
     "references": [
-      "src/index.html#html-text"
+      "src/index.html#html-text",
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
   },
   {
@@ -8734,6 +8846,12 @@
     "source": "当前无法读取条目激活解释。",
     "references": [
       "src/scripts/ui/world-editor/world-block-overview.js#html-text"
+    ]
+  },
+  {
+    "source": "当前写作会话",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
   },
   {
@@ -9720,6 +9838,12 @@
     ]
   },
   {
+    "source": "第 {count} 项：{message}",
+    "references": [
+      "src/scripts/ui/request-params-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "第 {page} 页",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -9787,12 +9911,6 @@
     ]
   },
   {
-    "source": "第一版会先做选中文本后的改写建议。",
-    "references": [
-      "src/scripts/agent/agent-feature-settings.js#ui-definition"
-    ]
-  },
-  {
     "source": "第一次",
     "references": [
       "src/scripts/ui/maid-intent-presets.js#ui-definition"
@@ -9847,6 +9965,12 @@
     "source": "点击标题展开条目",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "点击采纳全部，长按拖选部分；按住 Tab 用左右方向键选择，松开采纳。",
+    "references": [
+      "src/scripts/ui/chat/input-suggestion-composer.js#ui-call"
     ]
   },
   {
@@ -11062,6 +11186,7 @@
   {
     "source": "对象",
     "references": [
+      "src/scripts/ui/request-params-panel.js#ui-call",
       "src/scripts/ui/variable-schema-editor.js#html-text"
     ]
   },
@@ -11814,6 +11939,24 @@
     "source": "负责摘要任务时的格式要求和注入位置。",
     "references": [
       "src/scripts/ui/agent-center-card-catalog.js#ui-definition"
+    ]
+  },
+  {
+    "source": "附加",
+    "references": [
+      "src/scripts/ui/request-params-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "附加 {custom} · 排除 {excluded}",
+    "references": [
+      "src/scripts/ui/config-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "附加参数",
+    "references": [
+      "src/scripts/ui/request-params-panel.js#ui-call"
     ]
   },
   {
@@ -13407,6 +13550,7 @@
       "src/scripts/ui/moments-modal-shell-utils.js#html-text",
       "src/scripts/ui/persona-panel.js#html-attribute",
       "src/scripts/ui/regex-panel.js#html-attribute",
+      "src/scripts/ui/request-params-panel.js#ui-call",
       "src/scripts/ui/session-panel.js#html-attribute",
       "src/scripts/ui/session-shared-view-utils.js#html-attribute",
       "src/scripts/ui/session-summary-modal-utils.js#ui-property",
@@ -13549,12 +13693,6 @@
   },
   {
     "source": "关闭后不会发送摘要提示词，也不会读写记忆表格。",
-    "references": [
-      "src/scripts/ui/general-settings-panel.js#ui-property"
-    ]
-  },
-  {
-    "source": "关闭后不再弹出右上角通知。",
     "references": [
       "src/scripts/ui/general-settings-panel.js#ui-property"
     ]
@@ -14881,6 +15019,12 @@
     ]
   },
   {
+    "source": "回复完成通知",
+    "references": [
+      "src/scripts/ui/general-settings-panel.js#ui-property"
+    ]
+  },
+  {
     "source": "回滚插件版本",
     "references": [
       "src/scripts/ui/plugin-panel.js#ui-property"
@@ -15913,7 +16057,7 @@
   {
     "source": "加入",
     "references": [
-      "src/scripts/ui/config-panel.js#html-text"
+      "src/scripts/ui/request-params-panel.js#ui-call"
     ]
   },
   {
@@ -16705,6 +16849,12 @@
     ]
   },
   {
+    "source": "角色卡编排",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "角色卡存档",
     "references": [
       "src/scripts/ui/persona-panel.js#dom-assignment",
@@ -17202,6 +17352,18 @@
     "source": "接好api",
     "references": [
       "src/scripts/ui/maid-intent-presets.js#ui-definition"
+    ]
+  },
+  {
+    "source": "接口必填",
+    "references": [
+      "src/scripts/ui/request-param-report-view.js#ui-call"
+    ]
+  },
+  {
+    "source": "接口格式",
+    "references": [
+      "src/scripts/ui/config-panel.js#html-text"
     ]
   },
   {
@@ -18129,12 +18291,6 @@
     ]
   },
   {
-    "source": "开启后仍只显示建议，不会自动发送内容。",
-    "references": [
-      "src/scripts/agent/agent-feature-settings.js#ui-definition"
-    ]
-  },
-  {
     "source": "开启后由 NovelAI 追加模型对应质量标签；如提示词已手写大量质量词，可关闭。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
@@ -18784,6 +18940,7 @@
     "references": [
       "src/scripts/memory/default-template.js#ui-definition",
       "src/scripts/ui/chat/hopscotch-variable-card-view.js#ui-call",
+      "src/scripts/ui/request-params-panel.js#ui-call",
       "src/scripts/ui/variable-panel-runtime.js#html-text",
       "src/scripts/ui/variable-schema-editor.js#html-text"
     ]
@@ -19695,6 +19852,12 @@
     "source": "聊天前文注入条数",
     "references": [
       "src/scripts/ui/general-settings-panel.js#ui-property"
+    ]
+  },
+  {
+    "source": "聊天全局设置",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
   },
   {
@@ -22358,6 +22521,30 @@
     ]
   },
   {
+    "source": "排除",
+    "references": [
+      "src/scripts/ui/request-params-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "排除参数",
+    "references": [
+      "src/scripts/ui/request-params-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "排除参数名",
+    "references": [
+      "src/scripts/ui/request-params-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "排除参数最多 100 项",
+    "references": [
+      "src/scripts/ui/request-params-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "排队",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
@@ -22737,6 +22924,7 @@
   {
     "source": "启用",
     "references": [
+      "src/scripts/ui/agent-center-panel.js#ui-call",
       "src/scripts/ui/memory-table-editor.js#dom-assignment",
       "src/scripts/ui/memory-table-editor.js#html-attribute",
       "src/scripts/ui/preset-panel.js#html-text",
@@ -22767,6 +22955,12 @@
     "source": "启用边",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "启用参数",
+    "references": [
+      "src/scripts/ui/request-params-panel.js#ui-call"
     ]
   },
   {
@@ -22925,6 +23119,12 @@
     ]
   },
   {
+    "source": "启用文本建议",
+    "references": [
+      "src/scripts/ui/agent-center-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "启用状态保存失败",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -23039,6 +23239,12 @@
     ]
   },
   {
+    "source": "前往设置",
+    "references": [
+      "src/scripts/ui/request-params-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "前序房子失败",
     "references": [
       "src/scripts/ui/chat/creative-turn-orchestrator.js#ui-call"
@@ -23052,6 +23258,12 @@
   },
   {
     "source": "浅色",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "嵌套参数的上级字段需为对象：{value}",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -23147,6 +23359,12 @@
     "source": "切换到配置",
     "references": [
       "src/scripts/ui/agent-center-panel.js#html-attribute"
+    ]
+  },
+  {
+    "source": "切换到其他应用或最小化后，回复完成时发送 Windows 系统通知。点击返回对应会话，横幅与声音遵循系统设置。",
+    "references": [
+      "src/scripts/ui/general-settings-panel.js#ui-property"
     ]
   },
   {
@@ -23401,12 +23619,12 @@
   {
     "source": "清空",
     "references": [
-      "src/scripts/ui/config-panel.js#html-text",
       "src/scripts/ui/contact-settings-panel.js#html-text",
       "src/scripts/ui/group-chat-panels.js#html-text",
       "src/scripts/ui/memory-table-editor.js#dom-assignment",
       "src/scripts/ui/moment-summary-panel.js#html-attribute",
       "src/scripts/ui/regex-panel.js#html-text",
+      "src/scripts/ui/request-params-panel.js#ui-call",
       "src/scripts/ui/world-editor.js#html-text"
     ]
   },
@@ -23666,6 +23884,13 @@
     ]
   },
   {
+    "source": "请求 JSON",
+    "references": [
+      "src/scripts/ui/chat/agent-request-preview.js#ui-call",
+      "src/scripts/ui/chat/prompt-preview-view-utils.js#html-text"
+    ]
+  },
+  {
     "source": "请求：{value}",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -23674,13 +23899,21 @@
   {
     "source": "请求参数",
     "references": [
-      "src/scripts/ui/chat/agent-request-preview.js#ui-call"
+      "src/scripts/ui/chat/agent-request-preview.js#ui-call",
+      "src/scripts/ui/config-panel.js#html-text",
+      "src/scripts/ui/request-params-panel.js#ui-call"
     ]
   },
   {
-    "source": "请求参数过滤",
+    "source": "请求参数：{value}",
     "references": [
-      "src/scripts/ui/config-panel.js#html-text"
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "请求参数：max_tokens 需为正数",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -23691,12 +23924,6 @@
   },
   {
     "source": "请求超时（秒）",
-    "references": [
-      "src/scripts/ui/config-panel.js#html-text"
-    ]
-  },
-  {
-    "source": "请求发出前将剥除这些字段",
     "references": [
       "src/scripts/ui/config-panel.js#html-text"
     ]
@@ -23767,7 +23994,14 @@
     "source": "请求预览",
     "references": [
       "src/scripts/ui/chat/agent-request-preview.js#ui-call",
-      "src/scripts/ui/preset-panel.js#html-text"
+      "src/scripts/ui/preset-panel.js#html-text",
+      "src/scripts/ui/request-params-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "请求中无此字段",
+    "references": [
+      "src/scripts/ui/request-param-report-view.js#ui-call"
     ]
   },
   {
@@ -23824,6 +24058,12 @@
     "source": "请输入本次角色卡存档名称（留空将自动命名）：",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "请输入参数名",
+    "references": [
+      "src/scripts/ui/request-params-panel.js#ui-call"
     ]
   },
   {
@@ -23912,9 +24152,15 @@
     ]
   },
   {
-    "source": "请输入有效参数名：以字母或下划线开头，只包含字母、数字、下划线、点、冒号或短横线。",
+    "source": "请输入有效的 JSON 对象",
     "references": [
-      "src/scripts/ui/config-panel.js#dom-assignment"
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "请输入有效的 JSON 值",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -24237,6 +24483,12 @@
     "source": "请先为女仆选择或保存一个 API 配置。",
     "references": [
       "src/scripts/ui/app.js#ui-call"
+    ]
+  },
+  {
+    "source": "请先为文本建议选择模型配置",
+    "references": [
+      "src/scripts/ui/agent-center-panel.js#ui-call"
     ]
   },
   {
@@ -24670,6 +24922,7 @@
       "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition",
       "src/scripts/ui/realtime/realtime-settings-panel.js#ui-property",
       "src/scripts/ui/regex-panel.js#html-text",
+      "src/scripts/ui/request-params-panel.js#ui-call",
       "src/scripts/ui/script-panel.js#html-text",
       "src/scripts/ui/session-shared-view-utils.js#dom-assignment",
       "src/scripts/ui/session-summary-modal-utils.js#ui-property",
@@ -24857,6 +25110,12 @@
     ]
   },
   {
+    "source": "全部创意写作",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "全部导入（保留相似内容）",
     "references": [
       "src/scripts/ui/memory-template-panel.js#ui-property"
@@ -24962,6 +25221,12 @@
     "source": "全局:{value}",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "全局编排",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
   },
   {
@@ -26327,6 +26592,7 @@
   {
     "source": "融合",
     "references": [
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call",
       "src/scripts/ui/chat/hopscotch-court-view.js#ui-call"
     ]
   },
@@ -26621,6 +26887,12 @@
     "source": "删除表格",
     "references": [
       "src/scripts/ui/memory-template-panel.js#ui-property"
+    ]
+  },
+  {
+    "source": "删除参数",
+    "references": [
+      "src/scripts/ui/request-params-panel.js#ui-call"
     ]
   },
   {
@@ -27567,6 +27839,12 @@
     ]
   },
   {
+    "source": "设置推导",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "设置完成后记得保存，系统会把当前节点规则写回世界书条目。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -27727,7 +28005,8 @@
   {
     "source": "生成参数",
     "references": [
-      "src/scripts/ui/preset-panel.js#ui-property"
+      "src/scripts/ui/preset-panel.js#ui-property",
+      "src/scripts/ui/request-params-panel.js#ui-call"
     ]
   },
   {
@@ -28336,12 +28615,6 @@
     ]
   },
   {
-    "source": "实时半透明补全会在输入框、选区、安卓输入法验证后再接入。",
-    "references": [
-      "src/scripts/agent/agent-feature-settings.js#ui-definition"
-    ]
-  },
-  {
     "source": "实时服务返回错误",
     "references": [
       "src/scripts/ui/realtime/native-realtime-session-client.js#ui-call"
@@ -28529,6 +28802,12 @@
     "source": "使用传统模型输出协议（兼容模式）",
     "references": [
       "src/scripts/ui/general-settings-panel.js#ui-property"
+    ]
+  },
+  {
+    "source": "使用当前配置与预设组装示例请求；实际正文和 Agent 使用各自上下文与任务限制。",
+    "references": [
+      "src/scripts/ui/request-params-panel.js#ui-call"
     ]
   },
   {
@@ -29094,6 +29373,12 @@
     ]
   },
   {
+    "source": "适用于聊天与创意写作主输入框，使用独立选择的模型配置。",
+    "references": [
+      "src/scripts/agent/agent-feature-settings.js#ui-definition"
+    ]
+  },
+  {
     "source": "适中",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -29304,6 +29589,12 @@
     "source": "手机外壳格式",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "手机长按建议文本后左右拖选，松手采纳；拖到边缘可查看后续文字。",
+    "references": [
+      "src/scripts/agent/agent-feature-settings.js#ui-definition"
     ]
   },
   {
@@ -29524,10 +29815,9 @@
     ]
   },
   {
-    "source": "输入参数名，例如 response_format",
+    "source": "输入参数名",
     "references": [
-      "src/scripts/ui/config-panel.js#dom-assignment",
-      "src/scripts/ui/config-panel.js#html-attribute"
+      "src/scripts/ui/request-params-panel.js#ui-call"
     ]
   },
   {
@@ -29624,6 +29914,12 @@
     ]
   },
   {
+    "source": "输入时",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-court-view.js#ui-call"
+    ]
+  },
+  {
     "source": "输入识别语言",
     "references": [
       "src/scripts/ui/config-panel.js#html-text"
@@ -29640,6 +29936,24 @@
     "references": [
       "src/scripts/ui/app.js#dom-assignment",
       "src/scripts/ui/app.js#html-attribute"
+    ]
+  },
+  {
+    "source": "输入停顿后将当前输入的光标前后文交给所选模型续写。",
+    "references": [
+      "src/scripts/agent/agent-feature-settings.js#ui-definition"
+    ]
+  },
+  {
+    "source": "输入停顿时，会将当前输入的光标前后文发送给所选模型，生成可采纳的短句建议。",
+    "references": [
+      "src/scripts/ui/agent-center-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "输入停顿时，在光标处提供短句续写。",
+    "references": [
+      "src/scripts/agent/agent-feature-settings.js#ui-definition"
     ]
   },
   {
@@ -29776,6 +30090,7 @@
   {
     "source": "数字",
     "references": [
+      "src/scripts/ui/request-params-panel.js#ui-call",
       "src/scripts/ui/world-editor.js#ui-property",
       "src/scripts/ui/world-editor/world-variable-modal.js#html-text"
     ]
@@ -29783,6 +30098,7 @@
   {
     "source": "数组",
     "references": [
+      "src/scripts/ui/request-params-panel.js#ui-call",
       "src/scripts/ui/variable-schema-editor.js#html-text"
     ]
   },
@@ -30736,6 +31052,12 @@
     ]
   },
   {
+    "source": "添加参数",
+    "references": [
+      "src/scripts/ui/request-params-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "添加成员",
     "references": [
       "src/scripts/ui/group-member-management-runtime-utils.js#ui-property"
@@ -31571,6 +31893,12 @@
     ]
   },
   {
+    "source": "通知设置保存失败，请重试",
+    "references": [
+      "src/scripts/ui/general-settings-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "通知提示",
     "references": [
       "src/scripts/ui/variable-panel-runtime.js#html-text"
@@ -32326,10 +32654,10 @@
       "src/scripts/ui/chat/execution-flow-runtime-utils.js#ui-property",
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call",
       "src/scripts/ui/chat/hopscotch-court-view.js#ui-call",
-      "src/scripts/ui/config-panel.js#html-text",
       "src/scripts/ui/general-settings-panel.js#html-text",
       "src/scripts/ui/maid-onboarding-entry-ui.js#ui-definition",
       "src/scripts/ui/maid-selection-mode.js#html-text",
+      "src/scripts/ui/request-params-panel.js#ui-call",
       "src/scripts/ui/world-editor.js#html-text"
     ]
   },
@@ -32590,12 +32918,6 @@
     "source": "为空 (is_empty)",
     "references": [
       "src/scripts/ui/world-editor.js#ui-property"
-    ]
-  },
-  {
-    "source": "为输入和选中文本提供写作补全建议。",
-    "references": [
-      "src/scripts/agent/agent-feature-settings.js#ui-definition"
     ]
   },
   {
@@ -32944,13 +33266,6 @@
     "source": "未能加载该角色卡存档",
     "references": [
       "src/scripts/ui/persona-panel.js#ui-call"
-    ]
-  },
-  {
-    "source": "未排除生成参数",
-    "references": [
-      "src/scripts/ui/config-panel.js#dom-assignment",
-      "src/scripts/ui/config-panel.js#html-text"
     ]
   },
   {
@@ -33714,16 +34029,18 @@
   {
     "source": "文本",
     "references": [
+      "src/scripts/ui/request-params-panel.js#ui-call",
       "src/scripts/ui/variable-panel-runtime.js#html-text",
       "src/scripts/ui/variable-schema-editor.js#html-text",
       "src/scripts/ui/world-editor.js#ui-property"
     ]
   },
   {
-    "source": "文本补全",
+    "source": "文本建议",
     "references": [
       "src/scripts/agent/agent-feature-settings.js#ui-definition",
-      "src/scripts/agent/agent-feature-settings.js#ui-property"
+      "src/scripts/agent/agent-feature-settings.js#ui-property",
+      "src/scripts/ui/chat/hopscotch-court-view.js#ui-call"
     ]
   },
   {
@@ -34734,12 +35051,6 @@
     ]
   },
   {
-    "source": "显示通知提示",
-    "references": [
-      "src/scripts/ui/general-settings-panel.js#ui-property"
-    ]
-  },
-  {
     "source": "显示隐藏推理",
     "references": [
       "src/scripts/ui/preset-panel.js#html-text"
@@ -35656,12 +35967,6 @@
     ]
   },
   {
-    "source": "修改仅对下一轮生效，未保存不改变设置。",
-    "references": [
-      "src/scripts/ui/agent-center-panel.js#ui-call"
-    ]
-  },
-  {
     "source": "修改聊天内容",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -36440,6 +36745,12 @@
     "source": "移除 {value} 行连续重复",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "移除参数",
+    "references": [
+      "src/scripts/ui/request-params-panel.js#ui-call"
     ]
   },
   {
@@ -37547,19 +37858,7 @@
   {
     "source": "已排除",
     "references": [
-      "src/scripts/ui/config-panel.js#html-text"
-    ]
-  },
-  {
-    "source": "已排除：{items}",
-    "references": [
-      "src/scripts/ui/config-panel.js#ui-call"
-    ]
-  },
-  {
-    "source": "已排除：{items} 等 {count} 项",
-    "references": [
-      "src/scripts/ui/config-panel.js#ui-call"
+      "src/scripts/ui/request-param-report-view.js#ui-call"
     ]
   },
   {
@@ -37950,9 +38249,11 @@
     "references": [
       "src/scripts/ui/agent-center-panel.js#ui-call",
       "src/scripts/ui/chat/hopscotch-activation-utils.js#ui-call",
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call",
       "src/scripts/ui/chat/hopscotch-court-view.js#ui-call",
       "src/scripts/ui/chat/hopscotch-variable-card-view.js#ui-call",
-      "src/scripts/ui/plugin-panel.js#dom-assignment"
+      "src/scripts/ui/plugin-panel.js#dom-assignment",
+      "src/scripts/ui/request-param-report-view.js#ui-call"
     ]
   },
   {
@@ -38250,6 +38551,12 @@
     "source": "已隐藏楼层 {value}，后续创意写作提示词将忽略它",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "已应用",
+    "references": [
+      "src/scripts/ui/request-param-report-view.js#ui-call"
     ]
   },
   {
@@ -38760,6 +39067,12 @@
     "source": "应用模型给出的最小格式修复。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "应用内提示",
+    "references": [
+      "src/scripts/ui/general-settings-panel.js#ui-property"
     ]
   },
   {
@@ -39406,6 +39719,18 @@
     "source": "优雅女声",
     "references": [
       "src/scripts/ui/realtime/realtime-voice-catalog.js#ui-definition"
+    ]
+  },
+  {
+    "source": "由对应功能管理",
+    "references": [
+      "src/scripts/ui/request-param-report-view.js#ui-call"
+    ]
+  },
+  {
+    "source": "由预设管理",
+    "references": [
+      "src/scripts/ui/request-param-report-view.js#ui-call"
     ]
   },
   {
@@ -40416,6 +40741,12 @@
     ]
   },
   {
+    "source": "在实际请求 JSON 中删除所选字段，支持嵌套路径。旧参数别名按当前接口转换；必填字段和任务所需字段按对应约束处理。",
+    "references": [
+      "src/scripts/ui/request-params-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "在输入框写一句想说的话。",
     "references": [
       "src/scripts/ui/maid-onboarding-flows.js#ui-definition"
@@ -40431,6 +40762,12 @@
     "source": "在信任角色卡来源时开启富文本 iframe 脚本",
     "references": [
       "src/scripts/ui/maid-onboarding-flows.js#ui-definition"
+    ]
+  },
+  {
+    "source": "在应用内显示操作结果与状态提示。",
+    "references": [
+      "src/scripts/ui/general-settings-panel.js#ui-property"
     ]
   },
   {
@@ -40721,6 +41058,12 @@
     ]
   },
   {
+    "source": "暂无附加参数",
+    "references": [
+      "src/scripts/ui/request-params-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "暂无规则",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
@@ -40954,9 +41297,9 @@
     ]
   },
   {
-    "source": "暂无排除项 · 点击上方参数或手动输入加入",
+    "source": "暂无排除项",
     "references": [
-      "src/scripts/ui/config-panel.js#html-text"
+      "src/scripts/ui/request-params-panel.js#ui-call"
     ]
   },
   {
@@ -43401,6 +43744,12 @@
     ]
   },
   {
+    "source": "中文输入法组字期间暂停；每分钟最多请求 12 次。",
+    "references": [
+      "src/scripts/agent/agent-feature-settings.js#ui-definition"
+    ]
+  },
+  {
     "source": "中性声音",
     "references": [
       "src/scripts/ui/realtime/realtime-voice-picker.js#ui-definition"
@@ -44381,6 +44730,12 @@
     ]
   },
   {
+    "source": "自定义参数最多 100 项",
+    "references": [
+      "src/scripts/ui/request-params-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "自定义导出",
     "references": [
       "src/scripts/ui/general-settings-panel.js#html-text"
@@ -45180,6 +45535,12 @@
     "source": "作品与链接",
     "references": [
       "src/index.html#html-text"
+    ]
+  },
+  {
+    "source": "作用范围",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
   },
   {
@@ -46116,6 +46477,12 @@
     ]
   },
   {
+    "source": "Esc 关闭；继续输入可获取新建议。",
+    "references": [
+      "src/scripts/agent/agent-feature-settings.js#ui-definition"
+    ]
+  },
+  {
     "source": "Express 模式（API Key）",
     "references": [
       "src/scripts/ui/config-panel.js#html-text",
@@ -46365,6 +46732,18 @@
     ]
   },
   {
+    "source": "JSON 包含保留字段名",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "JSON 编辑",
+    "references": [
+      "src/scripts/ui/request-params-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "JSON 格式错误",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -46392,6 +46771,12 @@
     "source": "JSON 解析失败：{value}",
     "references": [
       "src/scripts/ui/variable-panel-runtime.js#ui-call"
+    ]
+  },
+  {
+    "source": "JSON 嵌套层级过多",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -47265,6 +47650,12 @@
     "source": "SYSTEM 系统区末",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "Tab 或点击建议条采纳全部；按住 Tab 用左右方向键逐字选择，松开采纳。",
+    "references": [
+      "src/scripts/agent/agent-feature-settings.js#ui-definition"
     ]
   },
   {

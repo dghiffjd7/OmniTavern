@@ -38,12 +38,13 @@ export const createHopscotchBoardStore = ({
   loadKv = null,
   saveKv = null,
   scopeId = '',
+  baseKey = HOPSCOTCH_BOARD_STORE_BASE_KEY,
   getSessionSettings = null,
   setSessionSettings = null,
   now = Date.now,
   logger = console,
 } = {}) => {
-  let key = makeScopedKey(HOPSCOTCH_BOARD_STORE_BASE_KEY, normalizeScopeId(scopeId));
+  let key = makeScopedKey(baseKey, normalizeScopeId(scopeId));
   let state = null;
   let hydrated = false;
 
@@ -158,7 +159,7 @@ export const createHopscotchBoardStore = ({
   return {
     get key() { return key; },
     setScope: async (nextScope) => {
-      key = makeScopedKey(HOPSCOTCH_BOARD_STORE_BASE_KEY, normalizeScopeId(nextScope));
+      key = makeScopedKey(baseKey, normalizeScopeId(nextScope));
       state = null;
       hydrated = false;
       return hydrate();
@@ -177,6 +178,41 @@ export const createHopscotchBoardStore = ({
       if (!incoming.board) return { ok: false, reason: incoming.invalidBoard ? 'invalid_board' : 'empty' };
       load();
       return setGlobalBoard(incoming.board);
+    },
+  };
+};
+
+// 旧默认板本来就按角色卡分区，继续原键读取；真正的写作全局板使用独立键。
+// 既有数据保持原作用范围：本会话 > 当前角色卡 > 写作全局 > 设置推导。
+export const createScopedHopscotchBoardStore = (options = {}) => {
+  const persona = createHopscotchBoardStore(options);
+  const global = createHopscotchBoardStore({
+    ...options, scopeId: '', baseKey: 'hopscotch_board_writing_global_v1',
+    getSessionSettings: null, setSessionSettings: null,
+  });
+  return {
+    get key() { return persona.key; },
+    get globalKey() { return global.key; },
+    setScope: scope => persona.setScope(scope),
+    hydrate: async () => { await Promise.all([persona.hydrate(), global.hydrate()]); },
+    isHydrated: () => persona.isHydrated() && global.isHydrated(),
+    getGlobalBoard: global.getGlobalBoard,
+    setGlobalBoard: global.setGlobalBoard,
+    getPersonaBoard: persona.getGlobalBoard,
+    setPersonaBoard: persona.setGlobalBoard,
+    getSessionOverride: persona.getSessionOverride,
+    setSessionOverride: persona.setSessionOverride,
+    getInvalidBoard: () => persona.getInvalidBoard() || global.getInvalidBoard(),
+    exportState: persona.exportState,
+    importState: persona.importState,
+    resolveEffectiveBoard: ({ sessionId = '', derivedBoard = null, scope = 'effective' } = {}) => {
+      const session = scope === 'effective' || scope === 'session' ? persona.getSessionOverride(sessionId) : null;
+      if (session) return { board: session, source: 'session' };
+      const local = scope !== 'global' ? persona.getGlobalBoard() : null;
+      if (local) return { board: local, source: 'persona' };
+      const shared = global.getGlobalBoard();
+      if (shared) return { board: shared, source: 'global' };
+      return { board: derivedBoard ? normalizeHopscotchBoard(derivedBoard) : null, source: 'derived' };
     },
   };
 };

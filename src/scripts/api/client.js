@@ -10,6 +10,7 @@ import { DeepseekProvider } from './providers/deepseek.js';
 import { OllamaProvider } from './providers/ollama.js';
 import { OpenRouterProvider } from './providers/openrouter.js';
 import { OpenCodeProvider } from './providers/opencode.js';
+import { bindOpenCodeRequestContext } from './opencode-request-headers.js';
 import { KimiProvider } from './providers/kimi.js';
 import { ZhipuProvider } from './providers/zhipu.js';
 import { MakersuiteProvider } from './providers/makersuite.js';
@@ -71,7 +72,7 @@ export class LLMClient {
      * @returns {Promise<string>} AI 回复的文本
      */
     async chat(messages, options = {}) {
-        return this.provider.chat(messages, options);
+        return bindOpenCodeRequestContext(this.provider, options.requestContext).chat(messages, options);
     }
 
     /**
@@ -81,12 +82,12 @@ export class LLMClient {
      * @returns {AsyncGenerator<string>} 逐字符/逐词的文本流
      */
     async *streamChat(messages, options = {}) {
-        yield* this.provider.streamChat(messages, options);
+        yield* bindOpenCodeRequestContext(this.provider, options.requestContext).streamChat(messages, options);
     }
 
     prepareChatRequest(messages, options = {}) {
         if (typeof this.provider?.prepareChatRequest === 'function') {
-            return this.provider.prepareChatRequest(messages, options);
+            return bindOpenCodeRequestContext(this.provider, options.requestContext).prepareChatRequest(messages, options);
         }
         return null;
     }
@@ -116,6 +117,16 @@ export class LLMClient {
      * @returns {Promise<{ok: boolean, error?: string}>}
      */
     async healthCheck() {
+        const hasRequestRules = this.config?.customRequestParams?.some(row => row.enabled !== false)
+            || this.config?.excludedGenerationParams?.length;
+        if (hasRequestRules && typeof this.provider.chat === 'function') {
+            try {
+                await this.chat([{ role: 'user', content: 'Hi' }], {
+                    maxTokens: 128, requestParamConstraints: { maxOutputTokens: 128, tools: 'none' },
+                });
+                return { ok: true };
+            } catch (error) { return { ok: false, error: error.message }; }
+        }
         return this.provider.healthCheck();
     }
 

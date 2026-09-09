@@ -91,7 +91,7 @@ import {
   assert.equal(view.pending[0].profileSummary, 'Bob · 特征 1 · 互动重点 1');
   assert.deepEqual(view.pending.map(item => item.id), ['profile-pending-1', 'permission-1']);
   assert.deepEqual(view.tools.map(tool => tool.name), ['contact_profile.list', 'memory.update_after_chat']);
-  assert.equal(view.meta.agents, 5);
+  assert.equal(view.meta.agents, 6);
   assert.equal(view.meta.promptModules, 3);
   assert.equal(view.meta.diagnosticViews, 2);
   assert.equal(view.meta.featureAgents, 5);
@@ -102,7 +102,7 @@ import {
   assert.equal(view.agents.find(agent => agent.id === 'reply_check').enabled, true);
   assert.equal(view.agents.find(agent => agent.id === 'reply_check').modelLabel, '不调用模型');
   assert.equal(view.agents.find(agent => agent.id === 'reply_check').triggerLabel, '自动触发');
-  assert.equal(view.agents.find(agent => agent.id === 'text_completion'), undefined);
+  assert.equal(view.agents.find(agent => agent.id === 'text_completion').enabled, false);
   assert.equal(view.agents.find(agent => agent.id === 'prompt_manager'), undefined);
   assert.equal(view.agents.find(agent => agent.id === 'memory_manager'), undefined);
   assert.equal(view.agents.find(agent => agent.id === 'image_director').title, '生图 Agent');
@@ -122,7 +122,7 @@ import {
   });
   assert.equal(view.tabs.find(tab => tab.id === 'pending').count, 2);
   assert.equal(view.tabs.find(tab => tab.id === 'activity').count, 1);
-  assert.equal(view.tabs.find(tab => tab.id === 'agents').count, 5);
+  assert.equal(view.tabs.find(tab => tab.id === 'agents').count, 6);
   assert.equal(view.tabs.find(tab => tab.id === 'prompts').count, 3);
   assert.equal(view.tabs.find(tab => tab.id === 'diagnostics').count, 2);
   assert.equal(view.tabs.find(tab => tab.id === 'resources').count, 1);
@@ -140,7 +140,7 @@ import {
   });
   assert.equal(view.agents.find(agent => agent.id === 'memory_table_agent').title, '记忆表格 Agent');
   assert.equal(view.agents.find(agent => agent.id === 'summary_agent').title, '摘要 Agent');
-  assert.equal(view.tabs.find(tab => tab.id === 'agents').count, 6);
+  assert.equal(view.tabs.find(tab => tab.id === 'agents').count, 7);
   assert.equal(view.meta.memoryMode, 'summary');
   console.log('ok - agent center keeps the memory mode hub reachable while showing summary agent in summary mode');
 }
@@ -149,7 +149,7 @@ import {
   const view = buildAgentCenterView({ memoryMode: 'off' });
   assert.equal(view.agents.find(agent => agent.id === 'memory_table_agent').title, '记忆表格 Agent');
   assert.equal(view.agents.find(agent => agent.id === 'summary_agent'), undefined);
-  assert.equal(view.tabs.find(tab => tab.id === 'agents').count, 5);
+  assert.equal(view.tabs.find(tab => tab.id === 'agents').count, 6);
   console.log('ok - agent center keeps the memory mode hub reachable while memory is off');
 }
 

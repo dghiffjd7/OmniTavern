@@ -1,3 +1,5 @@
+import { buildOpenCodeRequestHeaders } from './opencode-request-headers.js';
+
 const normalizeConnectionMode = (value) => {
   const raw = String(value || '').trim().toLowerCase();
   return raw === 'reverse_proxy' ? 'reverse_proxy' : 'direct';
@@ -57,7 +59,7 @@ export const prepareTransportRequest = ({
   allowProxy = true,
 } = {}) => {
   const originalUrl = String(url || '').trim();
-  const originalHeaders = { ...(headers || {}) };
+  const originalHeaders = { ...buildOpenCodeRequestHeaders({ config, provider, url: originalUrl, headers }) };
   if (!originalUrl) {
     return {
       url: originalUrl,

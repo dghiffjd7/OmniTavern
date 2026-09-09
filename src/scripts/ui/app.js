@@ -1,4 +1,5 @@
 import { LLMClient } from '../api/client.js';
+import { captureRequestContext, setRequestContextResolver } from '../api/request-context.js';
 import { canInitClient } from '../api/client-config-utils.js';
 import { getVisionInputCapability } from '../api/vision-capabilities.js';
 import { normalizeAssistantStreamChunk } from '../api/native-reasoning.js';
@@ -495,8 +496,10 @@ import { createHopscotchExecutors, createHopscotchTurnRuntime } from './chat/hop
 import { createHopscotchSidecarExecutors } from './chat/hopscotch-sidecar-executors.js';
 import { createHopscotchImageExecutor } from './chat/hopscotch-image-executor.js';
 import { resolveHopscotchBoardSettings } from './chat/hopscotch-settings-utils.js';
-import { createHopscotchBoardStore } from '../storage/hopscotch-board-store.js';
+import { createScopedHopscotchBoardStore } from '../storage/hopscotch-board-store.js';
 import { createHopscotchBoardPanel } from './chat/hopscotch-board-panel.js';
+import { bindInputSuggestionComposer } from './chat/input-suggestion-composer.js';
+import { createInputSuggestionRequest } from './chat/input-suggestion-runtime.js';
 import { createExecutionFlowRuntime } from './chat/execution-flow-runtime-utils.js';
 import { createPromptPreviewRuntime } from './chat/prompt-preview-runtime-utils.js';
 import {
@@ -716,6 +719,9 @@ import {
   runSendFinallyFlow,
 } from './chat/send-flow-utils.js';
 import { createSessionAsyncWorkRuntime } from './chat/session-async-work-runtime-utils.js';
+import { replyNotificationService } from './reply-notification-service.js';
+import { createReplyCompletionRuntime, openReplyNotificationRoute } from './chat/reply-completion-runtime.js';
+import { runArchiveSwitchFlow } from './session-archive-switch-utils.js';
 import {
   createPendingUserMessage,
   getMessageSendText,
@@ -1175,6 +1181,7 @@ const initApp = async () => {
     logger.warn('script runtime disabled (Worker unsupported or store missing)');
   }
   const presetPanel = new PresetPanel({ store: presetStore });
+  configPanel.onOpenPresetParams = options => presetPanel.show(options);
   registerRegexStoreBridgeContract(window.appBridge, {
     getRegexStore: window.appBridge.getRegexStore?.bind(window.appBridge),
     waitForRegexStoreReady: window.appBridge.waitForRegexStoreReady?.bind(window.appBridge),
@@ -1192,6 +1199,11 @@ const initApp = async () => {
   const pluginPanel = new PluginPanel({ store: pluginStore, runtime: pluginRuntime });
   const chatStore = new ChatStore();
   window.appBridge.setChatStore(chatStore);
+  setRequestContextResolver(context => ({
+    ...context,
+    scopeId: context.scopeId ?? chatStore.scopeId,
+    archiveId: context.archiveId ?? chatStore.getCurrentArchiveId(context.sessionId),
+  }));
   const isVariableRuntimeEnabled = sessionId => isVariableRuntimeEnabledForSession(
     chatStore,
     String(sessionId || chatStore.getCurrent() || '').trim(),
@@ -1759,6 +1771,7 @@ const initApp = async () => {
   let hopscotchBoardStore = null;
   let hopscotchTurnRuntime = null;
   let hopscotchBoardPanel = null;
+  let inputSuggestionComposer = null;
   markBootPhase('scope-stores');
   await Promise.all([
     chatStore.setScope?.(initialScopeKey),
@@ -2513,6 +2526,7 @@ const initApp = async () => {
     } catch {}
     logger.debug(`[Persona_test] applyPersonaScope start persona=${pid} scope=${nextKey || 'default'}`);
     hopscotchTurnRuntime?.clearScope();
+    inputSuggestionComposer?.cancel();
     hopscotchBoardPanel?.close();
     await hopscotchBoardStore?.setScope(nextKey);
     const scopeSettlement = await settlePersonaScopeStores({
@@ -4678,6 +4692,7 @@ const initApp = async () => {
             debugUiRegistry: window.appBridge?.debugUiRegistry || null,
             provider: opts.provider || 'openai',
             baseUrl: opts.baseUrl || '',
+            apiFormat: opts.apiFormat || '',
             model: opts.model || '',
             sessionId: opts.sessionId || chatStore.getCurrent(),
             sessionGate: opts.sessionGate || null,
@@ -26568,7 +26583,8 @@ const initApp = async () => {
       }
       return updated;
     };
-	    const commitBranch = (source, {
+    const swipeReplyNotice = replyCompletionRuntime.begin(sid, { existingMessageId: msgId });
+    const commitBranch = (source, {
 	      partial = false,
 	      cancelled = false,
 	      memoryTableSnapshot = null,
@@ -26665,6 +26681,8 @@ const initApp = async () => {
       }
       branchFinalized = true;
       clearActiveSwipeGenerationMarker();
+
+      if (!partial && !cancelled) void swipeReplyNotice.finish({ messageId: msgId, allowExisting: true });
 	      syncTurnCheckpointForMessage(sid, updated).catch(err => {
 	        logger.warn('sync turn checkpoint after swipe commit failed', err);
 	      });
@@ -27407,6 +27425,7 @@ const initApp = async () => {
     const sid = String(targetSessionId || '').trim();
     const targetUiMode = resolveUiModeForSession(sid);
     const promptContext = buildChatFormatGuardianModelContext(sid);
+    const requestContext = captureRequestContext({ sessionId: sid });
     const useProfile = modelMode === 'profile' && String(featureState.modelProfileId || '').trim();
     const backgroundChat = useProfile
       ? async (messages, options = {}) => {
@@ -27419,7 +27438,7 @@ const initApp = async () => {
         };
         const { presetContext: _presetContext, ...requestOptions } = options || {};
         const client = new LLMClient(effectiveConfig);
-        return client.chat(messages, requestOptions);
+        return client.chat(messages, { ...requestOptions, requestContext });
       }
       : (...args) => window.appBridge.backgroundChat(...args);
     if (!useProfile) {
@@ -27507,7 +27526,20 @@ const initApp = async () => {
   }
 
   // ===== 跳房子编排（创意写作）：板存储 + 单轮运行时；默认关闭，无用户板时沿用固定流程 =====
-  hopscotchBoardStore = createHopscotchBoardStore({
+  inputSuggestionComposer = bindInputSuggestionComposer({
+    input: ui.inputEl,
+    getSettings: () => agentFeatureSettingsStore.getSettings().features[AGENT_FEATURE_IDS.textCompletion],
+    getContext: () => ({
+      key: `${activePersonaScopeKey}:${uiMode}:${chatStore.getCurrent?.() || ''}:${chatStore.getCurrentArchiveId?.() || ''}`,
+      requestContext: captureRequestContext({ sessionId: chatStore.getCurrent?.() }),
+      active: ['chat', 'rp'].includes(uiMode) && Boolean(chatStore.getCurrent?.()),
+    }),
+    request: createInputSuggestionRequest({
+      getProfileConfig: id => chatConfigManager.getRuntimeConfigByProfileId(id),
+      createClient: config => new LLMClient(config),
+    }),
+  });
+  hopscotchBoardStore = createScopedHopscotchBoardStore({
     loadKv: name => safeInvoke('load_kv', { name }),
     saveKv: (name, data) => safeInvoke('save_kv', { name, data }),
     scopeId: initialScopeKey,
@@ -27716,6 +27748,8 @@ const initApp = async () => {
     getSessionId: () => chatStore.getCurrent?.(),
     getPlace: () => uiMode === 'rp' ? 'writing' : 'chat',
     getProfiles: () => chatConfigManager.getProfiles?.() || [],
+    getInputSuggestion: () => agentFeatureSettingsStore.getSettings().features[AGENT_FEATURE_IDS.textCompletion],
+    openInputSuggestion: () => agentCenterPanel.openFloatingAgentCard(AGENT_FEATURE_IDS.textCompletion),
     getEnabled: () => appSettings.get().creativeHopscotchEnabled === true,
     enable: value => appSettings.update({ creativeHopscotchEnabled: value === true }),
   });
@@ -29187,6 +29221,17 @@ const initApp = async () => {
   };
 
   // Send handler (发送 pending 消息)
+  const replyCompletionRuntime = createReplyCompletionRuntime({
+    service: replyNotificationService,
+    chatStore,
+    getPersonaId: () => personaStore.getActive?.()?.id || 'default',
+    getScopeId: () => chatStore.scopeId || '',
+    getSessionName: sid => isRpSessionId(sid)
+      ? (personaStore.get(sid.slice(RP_SESSION_PREFIX.length))?.name || t('创意写作'))
+      : formatSessionName(sid, contactsStore.getContact(sid)),
+    formatBody: name => t('「{name}」的回复已完成', { name }),
+    onError: error => logger.warn('Reply notification failed', error),
+  });
   /**
    * @param {string} targetMessageId - 可选，点击的 pending 消息 ID（发送到这里）
    */
@@ -29262,6 +29307,10 @@ const initApp = async () => {
       return false;
     }
     const messagesBeforeSend = chatStore.getMessages(sessionId) || [];
+    const replyNotice = replyCompletionRuntime.begin(sessionId, {
+      eligible: !previewOnly && !returnMaidCompletionOutcome && !swipeTarget,
+      existingMessageId: continueTarget?.messageId || '',
+    });
     const protocolHistoryFacts = inspectProtocolHistory(messagesBeforeSend, {
       lastRawResponse: chatStore.getLastRawResponse(sessionId),
     });
@@ -31787,6 +31836,12 @@ const initApp = async () => {
       // 生成成功完成后兜底挂 usage / 联网来源（覆盖尾部到达的流式协议路径）
       patchTrailingAssistantGenerationMeta(sessionId);
       if (sendSucceeded) notifyAssistantDelivered();
+      if (sendSucceeded) void replyNotice.finish({
+        cancelled: generationRecord?.cancelled === true || abortSignal?.aborted === true,
+        refs: formatRepairTurnSourceMessages,
+        messageId: continueTarget?.messageId,
+        allowExisting: Boolean(continueTarget),
+      });
       if (hopscotchTurn) {
         const bodyMessageId = hopscotchBodyMessageId || checkpointTargetMessageId;
         if (sendSucceeded && swipeTarget && variableUpdatesEnabled()) {
@@ -34834,6 +34889,51 @@ const initApp = async () => {
     logger,
   });
   androidBackRuntime.start();
+  void replyNotificationService.start({
+    open: route => openReplyNotificationRoute(route, {
+      chatStore,
+      getPersona: id => personaStore.get(id),
+      getPersonaId: () => personaStore.getActive?.()?.id || 'default',
+      switchPersona,
+      getScopeId: () => chatStore.scopeId || '',
+      saveDraft: () => chatStore.setDraft(String(composerInput?.value || ''), chatStore.getCurrent()),
+      hasSession: sid => canEnterPersonaScopedSession({ sessionId: sid, scopeId: activePersonaScopeKey, chatStore, contactsStore }).allowed,
+      setMode: mode => { uiMode = mode; persistUiMode(); applyUiModeUI(); switchPage('chat'); },
+      loadArchive: async (archiveId, sid) => {
+        const barrier = await sessionAsyncWorkRuntime.cancelAndWait(sid, { reason: 'notification_archive_switch', holdClosing: true });
+        if (!barrier.ok) return false;
+        try {
+          const result = await runArchiveSwitchFlow({
+            sessionId: sid,
+            archive: chatStore.getArchives(sid).find(item => item.id === archiveId),
+            isGroup: sid.startsWith('group:') || contactsStore.getContact(sid)?.isGroup === true,
+            getMemoryStorageMode,
+            buildMemoryTableSnapshot: ({ sessionId, isGroup }) => buildSwipeMemoryTableSnapshot(sessionId, { isGroup }),
+            captureArchivePointer: buildArchivePointerFromCurrentThread,
+            loadArchivedMessages: (id, sessionId, options) => chatStore.loadArchivedMessages(id, sessionId, options),
+            getLastArchiveTransition: sessionId => chatStore.getLastArchiveTransition(sessionId),
+            persistArchivePointer: setArchivePointerForArchive,
+            applyMemoryTableSnapshot: ({ sessionId, isGroup, snapshot }) => applySwipeMemoryTableSnapshot(sessionId, snapshot, { isGroup }),
+            restoreArchivePointerForLoadedThread,
+            logger,
+            sourcePrefix: 'notification',
+          });
+          return result.loaded;
+        } finally { barrier.release?.(); }
+      },
+      enterRoom: (sid, messageId) => enterChatRoom(sid, isRpSessionId(sid) ? getRpTitle() : formatSessionName(sid, contactsStore.getContact(sid)), 'chat', {
+        suppressInitialAutoScroll: true, jumpTargetMessageId: messageId, jumpKind: 'anchor',
+      }),
+      locateMessage: ensureMessageVisibleInCurrentChat,
+      selectSwipe: (sid, messageId, index) => {
+        const message = chatStore.findMessage(messageId, sid);
+        if (!message?.meta?.swipes?.[index] || Number(message.meta.activeSwipe || 0) === index) return;
+        const wrapper = ui.scrollEl?.querySelector(`[data-msg-id="${CSS.escape(messageId)}"]`);
+        if (wrapper) ui._applySwipe(wrapper, message, index);
+      },
+    }),
+    onError: error => logger.warn('Reply notification navigation failed', error),
+  }).catch(error => logger.warn('Reply notification listener failed', error));
   patchDebugUiRegistry((registry) => {
     registry.actions.handleAndroidBack = () => androidBackRuntime.handleBack('debug');
     registry.actions.getAndroidBackDiagnostics = () => androidBackRuntime.getDiagnostics();

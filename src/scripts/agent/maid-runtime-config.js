@@ -1,3 +1,5 @@
+import { captureRequestContext } from '../api/request-context.js';
+
 const trim = (value, fallback = '') => {
   const text = String(value ?? '').trim();
   return text || fallback;
@@ -14,7 +16,8 @@ export const createMaidRuntimeConfigResolver = ({
   // 缺省回退到直接读 settingsStore，保持既有行为与单测不变。
   getSubAgents = null,
   logger = console,
-} = {}) => async () => {
+} = {}) => async (context = {}) => {
+  const requestContext = captureRequestContext(context.requestContext || { sessionId: context.sessionId || 'maid' });
   const profileId = trim(settingsStore?.getBoundProfileId?.());
   const modelOverride = trim(settingsStore?.getBoundModelOverride?.());
   const fallbackProfileId = trim(settingsStore?.getFallbackProfileId?.());
@@ -55,6 +58,7 @@ export const createMaidRuntimeConfigResolver = ({
     // 上限 240s 走 Rust 请求层，不受窗口后台 timer 冻结影响。
     const cappedConfig = {
       ...config,
+      requestContext,
       timeout: Math.min(Number(config.timeout) > 0 ? Number(config.timeout) : 240000, 240000),
     };
     const client = ready && typeof createClient === 'function' ? createClient(cappedConfig) : null;
@@ -67,6 +71,7 @@ export const createMaidRuntimeConfigResolver = ({
         if (isPlainObject(rawFallbackConfig) && isConfigReady(rawFallbackConfig) && typeof createClient === 'function') {
           fallbackConfig = {
             ...rawFallbackConfig,
+            requestContext,
             timeout: Math.min(Number(rawFallbackConfig.timeout) > 0 ? Number(rawFallbackConfig.timeout) : 240000, 240000),
           };
           fallbackClient = createClient(fallbackConfig);
@@ -110,6 +115,7 @@ export const createMaidMemoryExtractionRuntimeResolver = ({
   isConfigReady = () => false,
   logger = console,
 } = {}) => async (context = {}) => {
+  const requestContext = captureRequestContext(context.requestContext || { sessionId: context.sessionId || 'maid' });
   const selection = settingsStore?.getMemoryExtractionSettings?.() || {};
   const mode = trim(selection?.mode).toLowerCase() === 'custom' ? 'custom' : 'follow_main';
   const fallbackToMain = selection?.fallbackToMain === true;
@@ -117,6 +123,7 @@ export const createMaidMemoryExtractionRuntimeResolver = ({
     if (typeof resolveMainRuntime !== 'function') return null;
     return resolveMainRuntime({
       ...context,
+      requestContext,
       taskType: 'maid_memory_extract',
       uiMode: 'maid',
     });
@@ -162,6 +169,7 @@ export const createMaidMemoryExtractionRuntimeResolver = ({
     if (isPlainObject(rawConfig)) {
       config = {
         ...rawConfig,
+        requestContext,
         ...(modelOverride ? { model: modelOverride } : {}),
         timeout: Math.min(Number(rawConfig.timeout) > 0 ? Number(rawConfig.timeout) : 240000, 240000),
       };

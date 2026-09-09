@@ -95,33 +95,13 @@ test('generation resolves request config before building provider messages', asy
   assert.match(source, /buildMessages\(userMessage, context = \{\}, options = \{\}\)/);
 });
 
-test('generation applies connection parameter filter to final request options', async () => {
-  const bridgePath = fileURLToPath(new URL('../../src/scripts/ui/bridge.js', import.meta.url));
-  const source = await readFile(bridgePath, 'utf8');
-  const generateStart = source.indexOf('async generate(userMessage, context = {})');
-  const backgroundStart = source.indexOf('async backgroundChat(messages, options = {})');
-  const streamStart = source.indexOf('async *generateStream(messages, genOptions = {}, originalUserMessage = \'\', streamMeta = {})');
-  assert.ok(generateStart >= 0 && backgroundStart > generateStart, 'bridge generate body should be discoverable');
-  assert.ok(streamStart > backgroundStart, 'backgroundChat body should be discoverable');
-
-  const generateBody = source.slice(generateStart, backgroundStart);
-  assert.match(
-    generateBody,
-    /const applyRuntimeParamFilter = options => applyGenerationParamFilter\(options, config\?\.excludedGenerationParams,\s*\{\s*protectedParams:\s*\[\s*'signal',\s*'nativeRequestId',\s*\.\.\.\(config\?\.webSearchEnabled === true\s*\? \['tools', 'tool_choice', 'openaiApi', 'include', 'max_tool_calls'\]/,
-  );
-  assert.match(generateBody, /const requestOptions = applyRuntimeParamFilter\(\{\s*...\(genOptions \|\| \{\}\),\s*...\(providerDirectives \|\| \{\}\),\s*...\(providerToolRequestSchema\.requestOptions \|\| \{\}\),\s*...\(webSearchPlan\.requestOptions \|\| \{\}\),\s*signal: abortController\.signal,\s*nativeRequestId,/);
-  assert.match(
-    generateBody,
-    /requestOptions:\s*\{\s*\.\.\.\(phoneProviderFcRoute\.eligible\s*\?\s*\(phoneStructuredRouteMode === CHAT_STRUCTURED_ROUTE_MODES\.jsonTerminal\s*\?\s*phoneJsonTerminalDebugRequestOptions\s*:\s*phoneProviderFcDebugRequestOptions\)\s*:\s*applyRuntimeParamFilter\(\{\s*\.\.\.\(genOptions \|\| \{\}\),/,
-  );
-
-  const backgroundBody = source.slice(backgroundStart, streamStart);
-  assert.match(backgroundBody, /const \{ presetContext = null, runtimeConfigOverride = null, \.\.\.requestOverrides \} = options \|\| \{\};/);
-  assert.match(backgroundBody, /const hasRuntimeConfigOverride = runtimeConfigOverride && typeof runtimeConfigOverride === 'object';/);
-  assert.match(backgroundBody, /const config = hasRuntimeConfigOverride\s*\? \{ \.\.\.baseConfig, \.\.\.runtimeConfigOverride \}\s*: baseConfig;/);
-  assert.match(backgroundBody, /canUseAnonymousCustomApi/);
-  assert.doesNotMatch(backgroundBody, /if \(!this\.isConfigured\(\)\)/);
-  assert.match(backgroundBody, /const genOptions = applyGenerationParamFilter\(\{\s*...this\.getGenerationOptions\(resolvedPresetContext, config\),\s*...requestOverrides,\s*\}, config\?\.excludedGenerationParams,\s*\{\s*protectedParams: \['signal', 'nativeRequestId'\],\s*\}\);/);
+test('bridge preserves options until the provider applies profile rules to its final body', async () => {
+  const source = await readFile(fileURLToPath(new URL('../../src/scripts/ui/bridge.js', import.meta.url)), 'utf8');
+  assert.doesNotMatch(source, /applyGenerationParamFilter/);
+  assert.match(source, /const withRuntimeParamConstraints = options =>/);
+  assert.match(source, /protectedParams:[\s\S]*?'tools', 'tool_choice', 'toolConfig', 'include', 'max_tool_calls'/);
+  assert.match(source, /const genOptions = \{\s*...this\.getGenerationOptions\(resolvedPresetContext, config\),\s*...requestOverrides,\s*requestContext,\s*\};/);
+  assert.match(source, /wireRequest: \{\s*url: sanitizeRequestPreviewUrl\(preparedRequest.url\),\s*body: preparedRequest.body,\s*parameterReport: preparedRequest.parameterReport/);
 });
 
 for (const { name, fn } of tests) {

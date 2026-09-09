@@ -504,6 +504,7 @@ const normalizeAgentFeature = (feature = {}, { modelProfiles = [] } = {}) => {
     detail: list(src.detail),
     enabled: src.enabled === true || state.enabled === true,
     implemented: src.implemented === true,
+    ...(src.id === 'text_completion' ? { inputConsent: state.inputConsent === true } : {}),
     supportsModel: src.supportsModel === true,
     supportsTriggerMode: src.supportsTriggerMode === true,
     modelMode,
