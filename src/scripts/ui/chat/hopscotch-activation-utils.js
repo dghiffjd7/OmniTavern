@@ -1,5 +1,6 @@
 import { t } from '../../i18n/index.js';
 import { extractHouseReferences } from './hopscotch-board-utils.js';
+import { resolveFormatReviewAvailability } from './format-review-settings-utils.js';
 
 export const hopscotchInactiveLabel = reason => ({
   disabled: t('已停用'),
@@ -11,6 +12,9 @@ export const hopscotchInactiveLabel = reason => ({
   image_prompt_disabled: t('图片提示已停用'),
   no_variable_rules: t('当前角色暂无此阶段的变量规则'),
   dependency_disabled: t('依赖的房子已停用'),
+  format_guide_missing: t('请先设置格式要求'),
+  manual_only: t('仅手动检查'),
+  model_unavailable: t('请先选择检查模型'),
 })[reason] || t('已停用');
 
 // 布局/配置保持完整；该投影在开始一轮时冻结，用户的开关与功能可用性分别保存。
@@ -32,6 +36,7 @@ export const resolveHopscotchActivation = (board, settings = {}) => {
   for (const house of all) {
     let reason = '';
     if (house.kind === 'memory_table' && memoryOff) reason = 'memory_disabled';
+    if (house.kind === 'format_review' && settings.replyCheck) reason = resolveFormatReviewAvailability(settings.replyCheck, { place: settings.place, hasFormatGuide: settings.replyCheck.hasFormatGuide }).reason;
     if (house.kind === 'variable' && variable && (!variable.enabled || !variable.updateModes?.includes('inline'))) reason = variable.reason || 'no_variable_updates';
     if (house.kind === 'variable_rules' && variable && (!variable.enabled || !variable.rulePhases?.includes(house.config.phase))) reason = variable.reason || 'no_variable_rules';
     if (house.kind === 'image_generation' && (prompt ? prompt.enabled === false : fused.image_prompt?.enabled === false)) reason = 'image_prompt_disabled';

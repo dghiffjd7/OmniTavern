@@ -3355,6 +3355,7 @@ export class AgentCenterPanel {
             agentProfileView,
             memoryMode,
             memoryAgentPromptConfig,
+            agentFormatGuide,
         ] = await Promise.all([
             this.callAction('listProviderToolPendingPermissions', { limit: 100 }, []),
             this.callAction('listContactProfilePendingUpdates', undefined, []),
@@ -3369,6 +3370,7 @@ export class AgentCenterPanel {
             this.callAction('getAgentCenterProfileView', undefined, null),
             this.callAction('getMemoryStorageMode', undefined, 'table'),
             this.callAction('getMemoryAgentPromptConfig', undefined, null),
+            this.callAction('getAgentFormatGuide', undefined, null),
         ]);
         const agentFeatureSettings = await this.callAction('getAgentFeatureSettings', undefined, null);
         const view = buildAgentCenterView({
@@ -3388,6 +3390,7 @@ export class AgentCenterPanel {
             memoryMode,
         });
         view.memoryAgentPromptConfig = memoryAgentPromptConfig;
+        view.agentFormatGuide = agentFormatGuide;
         return view;
     }
 
@@ -3923,6 +3926,25 @@ export class AgentCenterPanel {
         `;
     }
 
+    renderFormatGuideEditor(agent = {}) {
+        const config = this.view.agentFormatGuide;
+        if (agent.id !== 'reply_check' || config?.place !== 'writing') return '';
+        return `<div class="agent-center-agent-section agent-center-agent-editor" data-agent-format-guide-editor
+                data-format-session-id="${escapeHtml(config.sessionId)}" data-format-scope-id="${escapeHtml(config.scopeId)}" data-format-revision="${Number(config.revision || 0)}">
+            <div class="agent-center-setting-row">
+                <label class="agent-center-agent-section-title has-help" data-help-mode="tap" data-help="${escapeHtml(t('用文字说明必须保留的标签、顺序和字段，也可附上正常回复示例。修复结果通过差异预览确认。'))}">${escapeHtml(t('格式要求'))}</label>
+                <span class="agent-center-setting-value">${escapeHtml(t('当前写作会话'))}</span>
+            </div>
+            <div class="agent-center-agent-field">
+                <textarea class="agent-center-agent-textarea" data-agent-format-guide data-i18n-skip="true" maxlength="6000" spellcheck="false" aria-label="${escapeHtml(t('格式要求'))}" placeholder="${escapeHtml(t('例如：在回复末尾用 {tag} 包裹记忆表格更新指令，并确保标签成对闭合。', { tag: '<tableEdit>' }))}" ${config.sessionId ? '' : 'disabled'}>${escapeHtml(config.guide || '')}</textarea>
+            </div>
+            <div class="agent-center-card-actions">
+                <span class="agent-center-setting-value" data-format-guide-status role="status">${escapeHtml(config.usable ? t('已设置') : config.stale ? t('请确认格式要求后保存') : t('待设置'))}</span>
+                <button type="button" class="agent-center-card-action is-primary" data-agent-format-guide-save ${config.sessionId ? '' : 'disabled'}>${escapeHtml(t('保存'))}</button>
+            </div>
+        </div>`;
+    }
+
     renderAgentSettingRefs(agent = {}) {
         const refs = list(agent.settingRefs);
         if (!refs.length) return '';
@@ -3992,7 +4014,7 @@ export class AgentCenterPanel {
         const title = agent.title || displayAgentFeature(agent.id);
         return `
             <div class="agent-center-setting-row is-status">
-                <span class="agent-center-setting-label">状态</span>
+                <span class="agent-center-setting-label${agent.id === 'reply_check' ? ' has-help' : ''}" ${agent.id === 'reply_check' ? `data-help-mode="tap" data-help="${escapeHtml(t('启用与模型设置为全局共享；创意写作按各会话的格式要求检查。'))}"` : ''}>状态</span>
                 <span class="agent-center-setting-value">${agent.enabled ? '已开启' : '已关闭'}</span>
                 <button
                     type="button"
@@ -4081,6 +4103,7 @@ export class AgentCenterPanel {
                 </div>
             ` : ''}
             ${this.renderAgentFeatureSettings(agent)}
+            ${this.renderFormatGuideEditor(agent)}
             ${this.renderAgentSettingRefs(agent)}
             ${this.renderMemoryAgentEditor(agent)}
             ${this.renderAgentPromptRefs(agent)}
@@ -4149,6 +4172,7 @@ export class AgentCenterPanel {
         return `
             ${this.renderAgentEnabledSetting(agent)}
             ${this.renderAgentFeatureSettings(agent)}
+            ${this.renderFormatGuideEditor(agent)}
             ${preview ? this.renderAgentPromptPreviewAction(agent) : ''}
             ${this.renderReplyCheckPromptInfo(agent)}
             ${this.renderMemoryAgentEditor(agent)}
@@ -4878,6 +4902,20 @@ export class AgentCenterPanel {
         const originalEnabled = agent.enabled === true;
         this.setAgentQuickTogglePending(button, true);
         try {
+            if (enabling && id === 'reply_check' && this.view.agentFormatGuide?.place === 'writing') {
+                if (!this.view.agentFormatGuide.usable) {
+                    this.notifyError?.(t('请先设置格式要求'));
+                    if (this.sharedAgentConfig?.agentId === id) { this.sharedAgentConfig.flipped = true; this.refreshSharedAgentConfig(); }
+                    else { this.floatingAgentId = id; this.floatingAgentFlipped = true; this.render(); }
+                    (this.sharedAgentConfig?.host || this.contentElement)?.querySelector('[data-agent-format-guide]')?.focus();
+                    return false;
+                }
+                if (trim(agent.modelMode, 'none') === 'none' || (agent.modelMode === 'profile' && !trim(agent.modelProfileId))) {
+                    this.notifyError?.(t('请先选择检查模型'));
+                    this.openAgentModelSelect(id);
+                    return false;
+                }
+            }
             if (enabling && id === 'text_completion') {
                 if (agent.modelMode !== 'profile' || !trim(agent.modelProfileId)) {
                     this.notifyError?.(t('请先为文本建议选择模型配置'));
@@ -4934,6 +4972,31 @@ export class AgentCenterPanel {
         } finally {
             this.setAgentQuickTogglePending(button, false);
         }
+    }
+
+    async handleFormatGuideSave(button) {
+        const editor = button?.closest('[data-agent-format-guide-editor]');
+        const field = editor?.querySelector('[data-agent-format-guide]');
+        if (!field || button.disabled) return;
+        const status = editor.querySelector('[data-format-guide-status]');
+        button.disabled = true;
+        const result = await this.callAgentFeatureMutation('setAgentFormatGuide', {
+            sessionId: editor.dataset.formatSessionId, scopeId: editor.dataset.formatScopeId,
+            revision: Number(editor.dataset.formatRevision || 0), guide: field.value,
+        });
+        if (!result?.ok) {
+            const message = result?.message || this.lastError || t('格式要求保存失败，请重试');
+            if (status) status.textContent = message;
+            this.notifyError?.(message);
+            button.disabled = false;
+            return;
+        }
+        field.value = result.guide;
+        field.defaultValue = result.guide;
+        editor.dataset.formatRevision = String(result.revision || 0);
+        this.notifySuccess?.(t('格式要求已保存'));
+        await this.refresh();
+        button.disabled = false;
     }
 
     async handleAgentFeatureDetail(featureId = '') {
@@ -6664,6 +6727,9 @@ export class AgentCenterPanel {
         });
         root.querySelectorAll('[data-memory-agent-save]').forEach((button) => {
             button.addEventListener('click', () => this.handleMemoryAgentSave(button));
+        });
+        root.querySelectorAll('[data-agent-format-guide-save]').forEach(button => {
+            button.addEventListener('click', () => this.handleFormatGuideSave(button));
         });
         root.querySelectorAll('[data-memory-storage-mode]').forEach((button) => {
             button.addEventListener('click', () => this.handleMemoryStorageMode(button.dataset.memoryStorageMode || 'table'));

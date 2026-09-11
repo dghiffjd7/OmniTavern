@@ -32,7 +32,7 @@ const userBoard = () => ({ rows: [
   { id: 'r3', houses: [{ id: 'image', kind: 'image_generation' }, { id: 'review', kind: 'format_review' }, { id: 'memory', kind: 'memory_table' }] },
   { id: 'r4', houses: [{ id: 'compaction', kind: 'summary_compaction' }, { id: 'h_edit', kind: 'custom_prompt', label: '编修', config: { prompt: '建议：{{body}} / {{house:h_analysis}}', includeContext: 'none', output: { mode: 'note' } } }] },
 ] });
-const writingSettings = () => ({ memory: { storageMode: 'table', autoExtract: true, autoExtractMode: 'inline' }, replyCheck: { enabled: false }, autoImage: { enabled: false }, variables: { enabled: false } });
+const writingSettings = () => ({ place: 'writing', memory: { storageMode: 'table', autoExtract: true, autoExtractMode: 'inline' }, replyCheck: { enabled: true, hasFormatGuide: true, modelMode: 'follow_current' }, autoImage: { enabled: false }, variables: { enabled: false } });
 
 const makeDeps = (overrides = {}) => {
   const log = [];

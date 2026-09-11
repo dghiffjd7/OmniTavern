@@ -2905,6 +2905,7 @@
     "references": [
       "src/index.html#html-text",
       "src/scripts/ui/agent-center-panel.js#html-text",
+      "src/scripts/ui/agent-center-panel.js#ui-call",
       "src/scripts/ui/app.js#html-text",
       "src/scripts/ui/chat/code-viewer-ui-utils.js#dom-assignment",
       "src/scripts/ui/chat/inline-edit-ui-utils.js#html-attribute",
@@ -4014,12 +4015,6 @@
     "source": "编辑摘要",
     "references": [
       "src/scripts/ui/moment-summary-panel.js#html-text"
-    ]
-  },
-  {
-    "source": "编排优先采用当前会话，其次是角色卡，再其次是创意写作全局。此处选择编辑与保存的位置；Agent 卡片内的共享配置沿用各自范围。",
-    "references": [
-      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
   },
   {
@@ -6388,6 +6383,12 @@
     ]
   },
   {
+    "source": "创意写作启用自动触发后，每次回复完成时使用所选模型检查；修复候选通过差异预览确认。",
+    "references": [
+      "src/scripts/agent/agent-feature-settings.js#ui-definition"
+    ]
+  },
+  {
     "source": "创意写作气泡加宽",
     "references": [
       "src/scripts/ui/general-settings-panel.js#ui-property"
@@ -7191,6 +7192,12 @@
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/scripts/ui/agent-center-panel.js#ui-property"
+    ]
+  },
+  {
+    "source": "待设置",
+    "references": [
+      "src/scripts/ui/agent-center-panel.js#ui-call"
     ]
   },
   {
@@ -8945,7 +8952,7 @@
   {
     "source": "当前写作会话",
     "references": [
-      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
+      "src/scripts/ui/agent-center-panel.js#ui-call"
     ]
   },
   {
@@ -12836,7 +12843,7 @@
   {
     "source": "格式复核失败",
     "references": [
-      "src/scripts/ui/app.js#ui-call"
+      "src/scripts/ui/chat/format-review-runtime.js#ui-call"
     ]
   },
   {
@@ -12950,7 +12957,8 @@
   {
     "source": "格式修复",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/chat/hopscotch-court-view.js#ui-call"
     ]
   },
   {
@@ -13071,6 +13079,43 @@
     "source": "格式修复只能作用于最新一轮已完成的 AI 回复。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "格式要求",
+    "references": [
+      "src/scripts/ui/agent-center-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "格式要求保存失败，请重试",
+    "references": [
+      "src/scripts/ui/agent-center-panel.js#ui-call",
+      "src/scripts/ui/chat/format-review-settings-utils.js#ui-call"
+    ]
+  },
+  {
+    "source": "格式要求已保存",
+    "references": [
+      "src/scripts/ui/agent-center-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "格式要求已更新，请重新打开后编辑",
+    "references": [
+      "src/scripts/ui/chat/format-review-settings-utils.js#ui-call"
+    ]
+  },
+  {
+    "source": "格式要求暂时无法保存",
+    "references": [
+      "src/scripts/ui/chat/format-review-settings-utils.js#ui-call"
+    ]
+  },
+  {
+    "source": "格式要求最多 6000 字",
+    "references": [
+      "src/scripts/ui/chat/format-review-settings-utils.js#ui-call"
     ]
   },
   {
@@ -13207,6 +13252,12 @@
     "source": "跟随全局实时配置",
     "references": [
       "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
+    ]
+  },
+  {
+    "source": "跟随所有角色卡",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
   },
   {
@@ -15154,6 +15205,12 @@
     ]
   },
   {
+    "source": "回复后",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-court-view.js#ui-call"
+    ]
+  },
+  {
     "source": "回复后变量规则",
     "references": [
       "src/scripts/ui/chat/hopscotch-court-view.js#ui-call"
@@ -15347,6 +15404,12 @@
     "source": "会话血缘图",
     "references": [
       "src/scripts/ui/agent-center-card-catalog.js#ui-definition"
+    ]
+  },
+  {
+    "source": "会话已切换，请重新打开格式要求",
+    "references": [
+      "src/scripts/ui/chat/format-review-settings-utils.js#ui-call"
     ]
   },
   {
@@ -16513,6 +16576,12 @@
     ]
   },
   {
+    "source": "检查聊天格式问题，或按创意写作会话的格式要求生成修复候选。",
+    "references": [
+      "src/scripts/agent/agent-feature-settings.js#ui-definition"
+    ]
+  },
+  {
     "source": "检查模型",
     "references": [
       "src/scripts/ui/agent-center-card-catalog.js#ui-definition"
@@ -16528,12 +16597,6 @@
     "source": "检查是否触发画像任务",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
-    ]
-  },
-  {
-    "source": "检查私聊、群聊、动态等输出格式。",
-    "references": [
-      "src/scripts/agent/agent-feature-settings.js#ui-definition"
     ]
   },
   {
@@ -17930,12 +17993,6 @@
     ]
   },
   {
-    "source": "仅聊天",
-    "references": [
-      "src/scripts/ui/chat/hopscotch-court-view.js#ui-call"
-    ]
-  },
-  {
     "source": "仅聊天请求生效；越靠后兼容性越强，但对原始提示词改动越大。",
     "references": [
       "src/scripts/ui/config-panel.js#html-attribute"
@@ -17963,6 +18020,12 @@
     "source": "仅设定资源",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "仅手动检查",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-activation-utils.js#ui-call"
     ]
   },
   {
@@ -19487,6 +19550,12 @@
     ]
   },
   {
+    "source": "例如：在回复末尾用 {tag} 包裹记忆表格更新指令，并确保标签成对闭合。",
+    "references": [
+      "src/scripts/ui/agent-center-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "例如：周五奶茶拼单群",
     "references": [
       "src/scripts/ui/group-chat-panels.js#dom-assignment",
@@ -20132,6 +20201,12 @@
     ]
   },
   {
+    "source": "聊天使用内建格式；创意写作先定义本会话的格式要求。",
+    "references": [
+      "src/scripts/agent/agent-feature-settings.js#ui-definition"
+    ]
+  },
+  {
     "source": "聊天事件候选",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -20420,6 +20495,12 @@
     "source": "流程已结束",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "流程作用范围",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
   },
   {
@@ -23401,6 +23482,12 @@
     ]
   },
   {
+    "source": "启用与模型设置为全局共享；创意写作按各会话的格式要求检查。",
+    "references": [
+      "src/scripts/ui/agent-center-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "启用状态保存失败",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -24301,6 +24388,12 @@
     ]
   },
   {
+    "source": "请确认格式要求后保存",
+    "references": [
+      "src/scripts/ui/agent-center-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "请使用 /hide、/hide 3 或 /hide 2-5",
     "references": [
       "src/scripts/ui/command-runner.js#ui-call"
@@ -24697,6 +24790,14 @@
     ]
   },
   {
+    "source": "请先设置格式要求",
+    "references": [
+      "src/scripts/ui/agent-center-panel.js#ui-call",
+      "src/scripts/ui/app.js#ui-call",
+      "src/scripts/ui/chat/hopscotch-activation-utils.js#ui-call"
+    ]
+  },
+  {
     "source": "请先生成或填写完整提示词",
     "references": [
       "src/scripts/ui/app.js#ui-call"
@@ -24772,6 +24873,14 @@
     "source": "请先为文本建议选择模型配置",
     "references": [
       "src/scripts/ui/agent-center-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "请先选择检查模型",
+    "references": [
+      "src/scripts/ui/agent-center-panel.js#ui-call",
+      "src/scripts/ui/app.js#ui-call",
+      "src/scripts/ui/chat/hopscotch-activation-utils.js#ui-call"
     ]
   },
   {
@@ -25411,12 +25520,6 @@
     "source": "全部不命中",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
-    ]
-  },
-  {
-    "source": "全部创意写作",
-    "references": [
-      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
   },
   {
@@ -31062,6 +31165,12 @@
     "source": "所有 FC/JSON 本机成功计数、冷却与熔断状态都会清除；官方内建能力目录与手动本地规则不会被删除。",
     "references": [
       "src/scripts/ui/chat-fc-compatibility-panel.js#ui-property"
+    ]
+  },
+  {
+    "source": "所有角色卡",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
   },
   {
@@ -38571,6 +38680,12 @@
     ]
   },
   {
+    "source": "已设置",
+    "references": [
+      "src/scripts/ui/agent-center-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "已设置壁纸",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -40046,6 +40161,12 @@
     ]
   },
   {
+    "source": "用文字说明必须保留的标签、顺序和字段，也可附上正常回复示例。修复结果通过差异预览确认。",
+    "references": [
+      "src/scripts/ui/agent-center-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "用于排查回复受到哪些记忆、变量、世界书和任务影响。",
     "references": [
       "src/scripts/ui/agent-center-card-catalog.js#ui-definition"
@@ -40115,6 +40236,12 @@
     "source": "优化结果与原文一致，无需修改。",
     "references": [
       "src/scripts/ui/app.js#ui-property"
+    ]
+  },
+  {
+    "source": "优先采用当前角色卡的编排，其次是所有角色卡的默认编排。此处管理流程；Agent 卡片内的共享配置沿用各自范围。",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
   },
   {
@@ -46075,12 +46202,6 @@
     ]
   },
   {
-    "source": "作用范围",
-    "references": [
-      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
-    ]
-  },
-  {
     "source": "作用于当前聊天、动态或创意写作中启用的记忆表格；默认排在最新输入前。",
     "references": [
       "src/scripts/ui/general-settings-panel.js#html-attribute"
@@ -46333,12 +46454,6 @@
     "source": "AI 对话、角色扮演、创意写作与个人 Agent 的跨平台工作空间。",
     "references": [
       "src/index.html#html-text"
-    ]
-  },
-  {
-    "source": "AI 回复后检查私聊、群聊、动态等格式问题，结果显示在消息旁。",
-    "references": [
-      "src/scripts/agent/agent-feature-settings.js#ui-definition"
     ]
   },
   {

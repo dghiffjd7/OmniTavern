@@ -58,10 +58,10 @@ console.log('ok - board default follows persona scope switching');
   assert.deepEqual(scoped.resolveBoard('rp:test').board, original, '设置变化不重写已保存编排');
   assert.deepEqual(store.getGlobalBoard(), original);
   let reviews = 0;
-  const scopedExecutors = createHopscotchExecutors({ getTurnContext: () => ({ body: { messageId: 'm' } }), formatReview: { place: 'writing', run: () => { reviews++; } } });
-  assert.equal((await scopedExecutors.format_review.run({ signal: new AbortController().signal })).reason, 'chat_only');
-  assert.equal(reviews, 0, '旧创意写作自定义板也不能借房子触发聊天专属自动复核');
-  console.log('ok - chat projection is isolated, saved boards remain intact and writing review is skipped');
+  const scopedExecutors = createHopscotchExecutors({ getTurnContext: () => ({ body: { messageId: 'm' } }), formatReview: { place: 'writing', run: () => { reviews++; return { status: 'succeeded' }; } } });
+  assert.equal((await scopedExecutors.format_review.run({ signal: new AbortController().signal })).status, 'succeeded');
+  assert.equal(reviews, 1, '创意写作格式修复委托专用运行时检查格式要求和模型可用性');
+  console.log('ok - chat projection is isolated, saved boards remain intact and writing review is delegated');
 }
 
 const history = [{ role: 'user', content: 'before' }];

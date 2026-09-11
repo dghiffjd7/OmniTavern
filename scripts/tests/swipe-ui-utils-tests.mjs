@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { buildGeneratedImageMessagePatch } from '../../src/scripts/ui/media-generation-adapter-utils.js';
+import { normalizeCheckpointSwipeState } from '../../src/scripts/ui/chat/turn-checkpoint-message-runtime-utils.js';
 
 import {
   createSwipeIndicatorElement,
@@ -18,6 +20,45 @@ const createClassList = () => {
     contains: token => set.has(token),
   };
 };
+
+{
+  // 四个独立任务中，两条失败记录已被记忆检查点补入旧正文快照。
+  const images = Array.from({ length: 4 }, (_, i) => ({
+    id: `generated-${i}`, role: 'assistant', type: 'text', content: `插图生成失败：故障 ${i}`,
+    meta: { generatedMedia: { kind: 'image', status: 'failed', prompt: `prompt ${i}` } },
+  }));
+  for (const index of [1, 3]) {
+    const state = normalizeCheckpointSwipeState(images[index]);
+    images[index].meta = { ...images[index].meta, swipes: state.swipes, activeSwipe: state.activeSwipeIndex };
+  }
+  const original = JSON.stringify(images);
+  const pending = images.map(message => ({ ...message,
+    content: `正在生成插图：${message.meta.generatedMedia.prompt}`,
+    meta: { ...message.meta, generatedMedia: { ...message.meta.generatedMedia, status: 'running' } },
+  }));
+  for (const message of pending) {
+    assert.equal(resolveActiveSwipeMessageCore(message).content, message.content, '旧失败快照不能覆盖本次提示词');
+  }
+  for (const index of [3, 0, 2, 1]) {
+    const asset = { id: `asset-${index}`, prompt: `prompt ${index}`, output: { path: `D:\\images\\retry-${index}.png` } };
+    const patch = buildGeneratedImageMessagePatch(asset, { surface: 'writing', targetId: 'rp:test' });
+    const current = { ...pending[index], ...patch, meta: { ...pending[index].meta, ...patch.meta } };
+    const rendered = resolveActiveSwipeMessageCore(current);
+    assert.equal(rendered.content, '[binary omitted]', '成功图片须保留图片内容占位，不能变成错误文字地址');
+    assert.equal(rendered.meta.localPath, asset.output.path);
+    assert.equal(rendered.meta.generatedMedia.prompt, asset.prompt);
+    const reloaded = JSON.parse(JSON.stringify(current));
+    assert.equal(resolveActiveSwipeMessageCore(reloaded).content, '[binary omitted]', '已有旧快照的成功记录重开仍正常显示');
+  }
+  const failedAgain = { ...pending[1], content: '插图生成失败：新的错误', meta: { ...pending[1].meta,
+    generatedMedia: { ...pending[1].meta.generatedMedia, status: 'failed' } } };
+  assert.equal(resolveActiveSwipeMessageCore(failedAgain).content, '插图生成失败：新的错误');
+  const cancelled = { ...failedAgain, content: '插图生成已取消', meta: { ...failedAgain.meta,
+    generatedMedia: { ...failedAgain.meta.generatedMedia, status: 'cancelled' } } };
+  assert.equal(resolveActiveSwipeMessageCore(cancelled).content, '插图生成已取消');
+  assert.equal(JSON.stringify(images), original, '显示兼容保留已有快照和原始数据');
+  console.log('ok - independent generated-image retry/status/URL survive legacy checkpoint swipes and out-of-order completion');
+}
 
 const createFakeDocument = () => {
   class FakeElement {

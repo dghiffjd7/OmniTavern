@@ -378,7 +378,8 @@ export const buildDefaultHopscotchBoard = (resolved = {}) => {
   const extractMode = trim(memory.autoExtractMode) === 'separate' ? 'separate' : 'inline';
   // 表格的内部摘要维护不是第二种记忆模式，不在默认板重复展开成摘要房。
   const compactionEnabled = storageMode === 'summary';
-  const reviewEnabled = src.place === 'chat' && replyCheck.enabled === true
+  const reviewEnabled = replyCheck.enabled === true
+    && (src.place === 'chat' || replyCheck.hasFormatGuide === true)
     && (trim(replyCheck.triggerMode) || 'auto') === 'auto'
     && (trim(replyCheck.modelMode) || 'none') !== 'none';
   const imageEnabled = autoImage.enabled === true;

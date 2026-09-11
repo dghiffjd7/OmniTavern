@@ -160,12 +160,13 @@ body[data-theme-mode='dark'] .chat-room-topbar .agent-status-chip {
     place-items: center;
     overflow: hidden;
     border-radius: 50%;
-    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    background: linear-gradient(145deg, #ffffff 3%, #e4e8ed 26%, #fafbfc 43%, #b8c0ca 72%, #edf0f4);
     background-clip: border-box;
     -webkit-background-clip: border-box;
-    color: #fff;
-    -webkit-text-fill-color: #fff;
-    box-shadow: 0 6px 16px -6px rgba(99, 102, 241, 0.64);
+    color: #56616e;
+    -webkit-text-fill-color: #56616e;
+    text-shadow: 0 1px 0 #fff, 0 -0.5px 0 rgba(57, 68, 82, 0.22);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.88), inset 0 0 0 2px rgba(107, 120, 137, 0.35), inset 0 -2px 3px rgba(70, 84, 102, 0.18), 0 2px 3px rgba(40, 50, 65, 0.2), 0 6px 12px -7px rgba(40, 50, 65, 0.36);
     transform: translateY(-0.5px);
     transition: transform 180ms ease, box-shadow 180ms ease;
 }
@@ -185,7 +186,7 @@ body[data-theme-mode='dark'] .chat-room-topbar .agent-status-chip {
     pointer-events: none;
 }
 .chat-room-topbar .agent-status-chip:hover .agent-status-chip-mark {
-    box-shadow: 0 7px 18px -5px rgba(99, 102, 241, 0.72);
+    box-shadow: inset 0 0 0 1px #fff, inset 0 0 0 2px rgba(107, 120, 137, 0.4), inset 0 -2px 3px rgba(70, 84, 102, 0.18), 0 3px 5px rgba(40, 50, 65, 0.24), 0 7px 14px -6px rgba(40, 50, 65, 0.35);
     transform: translateY(-1px) scale(1.045);
 }
 .chat-room-topbar .agent-status-chip:hover .agent-status-chip-mark::after {

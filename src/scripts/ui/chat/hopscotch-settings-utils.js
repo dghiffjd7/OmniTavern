@@ -1,6 +1,6 @@
 import { deriveMemoryStorageMode } from '../memory-storage-mode-utils.js';
 
-// 只解析当前作用域的设置，不保存配置或将聊天功能扩展到创意写作。
+// 只解析当前作用域的设置；创意写作的格式要求由当前会话提供。
 export const resolveHopscotchBoardSettings = ({
   settings = {}, place = 'writing', replyCheck = {}, autoImageEnabled = false, variablesEnabled = false, variableActivity = null,
 } = {}) => {
@@ -18,7 +18,7 @@ export const resolveHopscotchBoardSettings = ({
       independentModel: settings.memoryUpdateApiMode === 'profile',
       placeEnabled,
     },
-    replyCheck: { ...replyCheck, enabled: scope === 'chat' && replyCheck.enabled === true },
+    replyCheck: { ...replyCheck, enabled: replyCheck.enabled === true },
     autoImage: { enabled: scope === 'writing' && autoImageEnabled === true },
     variables: { enabled: variableActivity ? variableActivity.enabled : variablesEnabled === true, ...(variableActivity ? { activity: variableActivity } : {}) },
   };

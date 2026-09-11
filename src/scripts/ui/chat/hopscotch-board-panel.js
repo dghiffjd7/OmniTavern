@@ -37,6 +37,7 @@ export const createHopscotchBoardPanel = ({
   closeRelatedLayer = () => false, buildPromptPreview = null,
   openVariableSettings = null, openVariablePreviewTools = null,
   getInputSuggestion = () => null, openInputSuggestion = null,
+  getFormatReview = () => null, openFormatReview = null,
 } = {}) => {
   const doc = documentRef;
   const panel = doc.createElement(embedded ? 'section' : 'dialog');
@@ -132,10 +133,10 @@ export const createHopscotchBoardPanel = ({
   const isScopeMenuOpen = () => panel.contains(doc.activeElement)
     && doc.activeElement.matches('.hop-scope .world-app-select-btn')
     && doc.querySelector('.world-app-select-menu')?.style.display === 'block';
-  const sourceLabel = source => ({ session: t('本会话编排'), persona: t('角色卡编排'), global: t('全局编排'), derived: t('跟随现有设置') })[source];
-  const resolveBoard = () => runtime.resolveBoard(target === 'session' ? sid : '', { place, scope: target, contextSessionId: place === 'chat' && target === 'global' ? '' : sid });
+  const sourceLabel = source => ({ session: place === 'writing' ? t('角色卡编排') : t('本会话编排'), persona: t('角色卡编排'), global: place === 'writing' ? (target === 'global' ? t('所有角色卡') : t('跟随所有角色卡')) : t('全局编排'), derived: t('跟随现有设置') })[source];
+  const resolveBoard = () => runtime.resolveBoard(target === 'global' ? '' : sid, { place, scope: target, contextSessionId: place === 'chat' && target === 'global' ? '' : sid });
   const scopeOptions = () => place === 'writing'
-    ? option('global', t('全部创意写作'), target) + (boardStore.getPersonaBoard ? option('persona', t('当前角色卡'), target) : '') + (sid ? option('session', t('当前写作会话'), target) : '')
+    ? (sid ? option(boardStore.getPersonaBoard ? 'persona' : 'session', t('当前角色卡'), target) : '') + option('global', t('所有角色卡'), target)
     : option('global', t('聊天全局设置'), target) + (sid ? option('session', t('当前聊天'), target) : '');
   const resolveActivation = board => runtime.resolveActivation?.(board, sid, { place }) || resolveHopscotchActivation(board);
   const loadDraft = () => {
@@ -245,7 +246,7 @@ export const createHopscotchBoardPanel = ({
     const saveDisabled = !editable || (!dirty && resolved.source !== 'derived');
     panel.innerHTML = `<div class="hop-board-toolbar"><div class="hop-header">
         <span class="hop-source${dirty ? ' is-dirty' : ''}${resolved.source !== 'derived' ? ' is-custom' : ''}" title="${e(dirty ? t('未保存') : sourceLabel(resolved.source))}"><i aria-hidden="true"></i>${e(place === 'writing' ? t('创意写作') : t('聊天模式'))}<span class="hop-sr">${e(dirty ? t('未保存') : sourceLabel(resolved.source))}</span></span>
-        <div class="hop-scope"><span class="hop-scope-label has-help" data-help-mode="tap" data-help="${e(place === 'writing' ? t('编排优先采用当前会话，其次是角色卡，再其次是创意写作全局。此处选择编辑与保存的位置；Agent 卡片内的共享配置沿用各自范围。') : t('按所选聊天范围展示当前设置推导的流程；点击房子可查看对应 Agent 配置。'))}">${e(t('作用范围'))}</span><select data-hop-target aria-label="${e(t('作用范围'))}" ${saving || busy() || live ? 'disabled' : ''}>${scopeOptions()}</select></div>
+        <div class="hop-scope"><span class="hop-scope-label has-help" data-help-mode="tap" data-help="${e(place === 'writing' ? t('优先采用当前角色卡的编排，其次是所有角色卡的默认编排。此处管理流程；Agent 卡片内的共享配置沿用各自范围。') : t('按所选聊天范围展示当前设置推导的流程；点击房子可查看对应 Agent 配置。'))}">${e(t('流程作用范围'))}</span><select data-hop-target aria-label="${e(t('流程作用范围'))}" ${saving || busy() || live ? 'disabled' : ''}>${scopeOptions()}</select></div>
         <span class="hop-scope-source">${e(dirty ? t('未保存') : place === 'chat' ? t('设置推导') : sourceLabel(resolved.source))}</span>
         <span class="hop-spacer"></span>
         ${busy() ? button('stop', t('停止'), 'class="hop-danger"') : ''}
@@ -256,7 +257,7 @@ export const createHopscotchBoardPanel = ({
         ${embedded ? '' : iconBtn('close', t('关闭'))}
         ${place === 'writing' ? `<div class="hop-menu hop-secondary-actions" role="menu" hidden>${button('settings', t('执行规则'), 'role="menuitem"' + (editable ? '' : ' disabled'))}${button('transfer', t('导入 / 导出'), 'role="menuitem"' + (editable ? '' : ' disabled'))}${button('reset', target !== 'global' ? t('跟随默认') : t('恢复推导'), 'role="menuitem"' + (editable ? '' : ' disabled'))}</div>` : ''}
       </div></div>
-      ${renderHopscotchCourt(live ? latest.board : draft, { editable, states, place, activation, inputSuggestion: live ? null : getInputSuggestion(), status: live ? latest.result?.status || 'running' : '' })}
+      ${renderHopscotchCourt(live ? latest.board : draft, { editable, states, place, activation, inputSuggestion: live ? null : getInputSuggestion(), formatReview: live ? null : getFormatReview(), status: live ? latest.result?.status || 'running' : '' })}
       <p class="hop-error" role="alert">${e(error)}</p>
       ${place === 'writing' ? `<div class="hop-footer hop-board-footer">${undoStack.length ? iconBtn('undo', t('撤销上一步'), editable ? '' : 'disabled') : ''}${button('save', saveLabel, `class="hop-primary" ${saveDisabled ? 'disabled' : ''}`)}</div>` : ''}`;
     fitCourt();
@@ -411,7 +412,7 @@ export const createHopscotchBoardPanel = ({
   };
   const openPicker = (rowIndex, newRow) => {
     // 压缩是记忆内部维护，不是可新增的 Agent；旧板节点仍可读取和删除。
-    const choices = HOPSCOTCH_HOUSE_CATALOG.filter(item => item.kind !== 'body' && item.kind !== 'summary_compaction' && (place !== 'writing' || item.kind !== 'format_review')).flatMap(item => item.kind === 'variable_rules' ? ['before', 'after'].map(phase => ({ ...item, config: { phase } })) : [item]);
+    const choices = HOPSCOTCH_HOUSE_CATALOG.filter(item => item.kind !== 'body' && item.kind !== 'summary_compaction').flatMap(item => item.kind === 'variable_rules' ? ['before', 'after'].map(phase => ({ ...item, config: { phase } })) : [item]);
     frameDetail(t('新增房子'), `<div class="hop-picker">${choices.map((item, index) => button(`add:${index}`, hopscotchHouseLabel(item), editHopscotchBoard(draft, { type: 'add', kind: item.kind, house: { config: item.config }, rowIndex, newRow }).ok ? '' : 'disabled')).join('')}</div>`);
     detail.onclick = event => {
       const action = event.target.closest('[data-action]')?.dataset.action;
@@ -427,7 +428,7 @@ export const createHopscotchBoardPanel = ({
     render();
     try {
       const result = target === 'session' ? await boardStore.setSessionOverride(sid, reset ? null : draft)
-        : target === 'persona' ? await boardStore.setPersonaBoard(reset ? null : draft) : await boardStore.setGlobalBoard(reset ? null : draft);
+        : target === 'persona' ? await boardStore.setPersonaBoard(reset ? null : draft, { sessionId: sid }) : await boardStore.setGlobalBoard(reset ? null : draft);
       if (epoch !== viewEpoch) return;
       if (!result?.ok) throw new Error(result?.reason || t('保存失败'));
       if (!reset) await enable(true);
@@ -464,6 +465,7 @@ export const createHopscotchBoardPanel = ({
   };
   panel.onclick = event => {
     if (event.target.closest('[data-hop-input-suggestion]')) { openInputSuggestion?.(); return; }
+    if (event.target.closest('[data-hop-format-review]')) { openFormatReview?.(); return; }
     const cell = event.target.closest('[data-hop-house]');
     if (cell) { openHouse(cell.dataset.hopHouse, false, event.target.closest('[data-hop-part]')?.dataset.hopPart); return; }
     const add = event.target.closest('[data-hop-add]');
@@ -532,9 +534,10 @@ export const createHopscotchBoardPanel = ({
   const initialize = () => {
     place = getPlace() === 'chat' ? 'chat' : 'writing';
     sid = String(getSessionId() || '');
-    // 从当前实际来源进入，旧角色卡默认板继续留在角色卡范围。
-    target = place === 'chat' ? (sid ? 'session' : 'global') : sid && boardStore.getSessionOverride?.(sid) ? 'session'
-      : boardStore.getPersonaBoard?.() ? 'persona' : boardStore.getGlobalBoard?.() ? 'global' : boardStore.getPersonaBoard ? 'persona' : 'global';
+    // 创作默认编辑当前角色卡，来源角标说明是否继承所有角色卡的编排。
+    target = place === 'writing'
+      ? (sid && boardStore.getPersonaBoard ? 'persona' : sid && boardStore.getSessionOverride?.(sid) ? 'session' : 'global')
+      : (sid ? 'session' : 'global');
     mode = busy() ? 'run' : 'edit'; loadDraft(); render();
   };
   const refreshSettings = () => {
@@ -556,7 +559,11 @@ export const createHopscotchBoardPanel = ({
     if (/^(memoryEnabled|memoryStorageMode|memoryAutoExtract|memoryAutoExtractMode|memoryTableEnabledChat|memoryTableEnabledWriting)$/.test(event?.detail?.key || '')) refreshSettings();
   };
   doc.defaultView?.addEventListener('app-settings-changed', onSettingsChanged);
-  const onInputSuggestionChanged = event => { if (event?.detail?.id === 'text_completion' && (mounted || panel.open)) render(); };
+  const onInputSuggestionChanged = event => {
+    if (!['text_completion', 'reply_check'].includes(event?.detail?.id) || !(mounted || panel.open)) return;
+    if (event.detail.id === 'reply_check') refreshSettings();
+    if (!dragController.isActive() && !saving) render();
+  };
   doc.defaultView?.addEventListener('agent-feature-settings-changed', onInputSuggestionChanged);
   const variableEvents = ['chatapp-variable-changed', 'chatapp-variable-schema-changed', 'chatapp-variable-rules-changed', 'chatapp-stage-schema-changed', 'chatapp-variable-runtime-changed'];
   const onVariablesChanged = event => { if (!event?.detail?.sessionId || event.detail.sessionId === sid) refreshSettings(); };

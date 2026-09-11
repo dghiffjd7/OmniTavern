@@ -5,7 +5,7 @@ import { hopscotchInactiveLabel, resolveHopscotchActivation } from './hopscotch-
 export const escapeHopscotchHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const e = escapeHopscotchHtml;
 export const hopscotchStatusLabel = status => ({ queued: t('等待'), running: t('执行中'), succeeded: t('完成'), failed: t('失败'), cancelled: t('已取消'), skipped: t('跳过'), partial: t('部分失败') })[status] || t('待出发');
-export const hopscotchHouseLabel = house => house.kind === 'custom_prompt' ? house.label : house.kind === 'variable_rules' ? (house.config?.phase === 'before' ? t('发送前变量规则') : t('回复后变量规则')) : translateUiText(house.label);
+export const hopscotchHouseLabel = house => house.kind === 'format_review' ? t('格式修复') : house.kind === 'custom_prompt' ? house.label : house.kind === 'variable_rules' ? (house.config?.phase === 'before' ? t('发送前变量规则') : t('回复后变量规则')) : translateUiText(house.label);
 export const hopscotchFusedLabel = kind => translateUiText(({ memory_table: '记忆表格', image_prompt: '图片提示', variable: '变量' })[kind] || kind);
 
 // 图标随节点类型着色；SVG 不参与名称与点击目标的识别。
@@ -39,7 +39,7 @@ const resolveStoneRow = (board, states) => {
 };
 
 // 编辑器、运行面板共享一张板；DOM 与视觉均按执行顺序从上向下。
-export const renderHopscotchCourt = (board, { editable = false, states = {}, status = '', place = '', taskAttribute = 'data-hop-house', inputSuggestion = null, activation = resolveHopscotchActivation(board) } = {}) => {
+export const renderHopscotchCourt = (board, { editable = false, states = {}, status = '', place = '', taskAttribute = 'data-hop-house', inputSuggestion = null, formatReview = null, activation = resolveHopscotchActivation(board) } = {}) => {
   let number = 0;
   const live = Boolean(status) || Object.keys(states).length > 0;
   const stoneRow = live ? resolveStoneRow(board, states) : -1;
@@ -65,7 +65,7 @@ export const renderHopscotchCourt = (board, { editable = false, states = {}, sta
         const active = activation.houses?.[house.id];
         const displayStatus = state ? getHopscotchHouseDisplayStatus(state) : '';
         const mark = `<span class="hop-number">${String(++number).padStart(2, '0')}</span>`;
-        const statusHtml = cellStatus(displayStatus, place === 'writing' && house.kind === 'format_review' ? t('仅聊天') : '');
+        const statusHtml = cellStatus(displayStatus);
         if (house.kind === 'body' && house.fused?.length) {
           const members = [{ kind: 'body', label: hopscotchHouseLabel(house) }, ...house.fused.map(kind => ({ kind, label: hopscotchFusedLabel(kind) }))];
           return `<div class="hop-cell hop-body hop-fusion-group is-${e(displayStatus || 'idle')}" role="group" data-hop-kind="body" ${taskAttribute}="${e(house.id)}" aria-label="${e(members.map(member => member.label).join(' · '))}" aria-description="${e(t('融合项与正文共享一次请求。'))}">
@@ -87,6 +87,7 @@ export const renderHopscotchCourt = (board, { editable = false, states = {}, sta
         </button>`;
       }).join('')}</div>${editable ? plus(ri, false) : ''}</div>`).join('')}
     ${editable ? plus(board.rows.length, true) : tick(true)}
+    ${formatReview && !board.rows.some(row => row.houses.some(house => house.kind === 'format_review')) ? `<div class="hop-input-stage hop-review-stage"><button type="button" class="hop-cell${formatReview.enabled ? '' : ' is-disabled'}" data-hop-kind="format_review" data-hop-format-review data-hop-enabled="${formatReview.enabled === true}" aria-label="${e(t('格式修复'))}" aria-description="${e(formatReview.enabled ? t('回复后') : hopscotchInactiveLabel(formatReview.reason))}">${courtIcon('format_review')}<span class="hop-title">${e(t('格式修复'))}</span><span class="hop-input-stage-label">${e(formatReview.enabled ? t('回复后') : t('已停用'))}</span></button></div>${tick(true)}` : ''}
     <div class="hop-roof is-${e(status || 'idle')}" aria-label="${e(hopscotchStatusLabel(status))}"><span aria-hidden="true">${roofGlyph}</span></div>
   </div></div>`;
 };

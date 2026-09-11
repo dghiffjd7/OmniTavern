@@ -185,6 +185,9 @@ export const resolveActiveSwipeMessageCore = (message, {
   activeSwipeGenerationMsgId = '',
 } = {}) => {
   if (!message || typeof message !== 'object') return message;
+  // 独立图片任务在同条消息上更新状态和地址。记忆检查点可能补入旧文本 swipes，
+  // 这些快照不代表图片版本；读取它们会把失败提示覆盖回重试状态，甚至当成 img src。
+  if (message.meta?.generatedMedia?.kind === 'image') return message;
   let meta = message.meta && typeof message.meta === 'object' ? message.meta : null;
   let swipes = Array.isArray(meta?.swipes) && meta.swipes.length ? meta.swipes : null;
   if (!swipes) return message;

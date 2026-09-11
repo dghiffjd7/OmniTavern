@@ -1,10 +1,11 @@
 // 只保留“显式保存”编辑器的未提交字段；模型/开关等即时设置不作为草稿恢复。
 // 身份包含预设和模板，避免把旧资源的输入恢复到新资源。
-const editorSelector = '[data-agent-prompt-editor], [data-memory-agent-editor]';
+const editorSelector = '[data-agent-prompt-editor], [data-memory-agent-editor], [data-agent-format-guide-editor]';
 const editorKey = node => JSON.stringify([
   node.dataset.agentPromptEditor, node.dataset.agentId, node.dataset.agentPromptProfileType,
   node.dataset.agentPromptPresetId, node.dataset.memoryAgentEditor,
   node.dataset.memoryAgentPresetId, node.dataset.memoryAgentTemplateId,
+  node.dataset.agentFormatGuideEditor, node.dataset.formatSessionId, node.dataset.formatScopeId,
 ]);
 const fieldKey = node => `${node.tagName}:${Object.keys(node.dataset).sort().join(',')}:${node.name || ''}`;
 const valueOf = node => node.type === 'checkbox' ? node.checked : node.value;

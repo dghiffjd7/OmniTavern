@@ -200,10 +200,9 @@ export const createHopscotchExecutors = ({
   if (formatReview) {
     executors.format_review = {
       run: async ({ signal }) => {
-        if (formatReview.place === 'writing') return { status: 'skipped', reason: 'chat_only' };
         const ctx = getTurnContext()?.body;
         if (!ctx?.messageId) return { status: 'skipped', reason: 'body_message_missing' };
-        return formatReview.run({ sessionId, messageId: ctx.messageId, signal });
+        return formatReview.run({ sessionId, messageId: ctx.messageId, signal, automatic: true });
       },
     };
   }

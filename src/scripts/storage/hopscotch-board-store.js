@@ -8,6 +8,7 @@ import { makeScopedKey, normalizeScopeId } from './store-scope.js';
 export const HOPSCOTCH_BOARD_STORE_BASE_KEY = 'hopscotch_board_default_v1';
 export const HOPSCOTCH_BOARD_STORE_VERSION = 1;
 export const HOPSCOTCH_SESSION_SETTING_KEY = 'hopscotchBoard';
+export const HOPSCOTCH_FOLLOW_GLOBAL_SETTING_KEY = 'hopscotchBoardFollowGlobal';
 
 const isPlainObject = value => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 const safeNow = (now = Date.now) => {
@@ -129,7 +130,7 @@ export const createHopscotchBoardStore = ({
     const normalized = normalizeHopscotchBoard(raw);
     return validateHopscotchBoard(normalized).ok ? { ...normalized, source: 'user' } : null;
   };
-  const setSessionOverride = (sessionId = '', board = null) => {
+  const setSessionOverride = (sessionId = '', board = null, { followGlobal } = {}) => {
     const sid = String(sessionId || '').trim();
     if (!sid || typeof getSessionSettings !== 'function' || typeof setSessionSettings !== 'function') {
       return { ok: false, reason: 'session_settings_unavailable' };
@@ -143,6 +144,7 @@ export const createHopscotchBoardStore = ({
       if (!validation.ok) return { ok: false, reason: 'invalid_board', errors: validation.errors };
       next[HOPSCOTCH_SESSION_SETTING_KEY] = { ...validation.board, source: 'user', updatedAt: safeNow(now) };
     }
+    if (typeof followGlobal === 'boolean') next[HOPSCOTCH_FOLLOW_GLOBAL_SETTING_KEY] = followGlobal;
     const ok = setSessionSettings(sid, next) !== false;
     return { ok, reason: ok ? '' : 'session_settings_write_failed' };
   };
@@ -183,13 +185,26 @@ export const createHopscotchBoardStore = ({
 };
 
 // 旧默认板本来就按角色卡分区，继续原键读取；真正的写作全局板使用独立键。
-// 既有数据保持原作用范围：本会话 > 当前角色卡 > 写作全局 > 设置推导。
+// 创作会话由角色卡 ID 固定生成：旧会话覆盖合入「当前角色卡」，保留现有生效顺序。
+// 新角色卡选择仍保存在该 rp 会话设置；显式跟随全局时忽略旧角色键，保留原数据。
 export const createScopedHopscotchBoardStore = (options = {}) => {
   const persona = createHopscotchBoardStore(options);
   const global = createHopscotchBoardStore({
     ...options, scopeId: '', baseKey: 'hopscotch_board_writing_global_v1',
     getSessionSettings: null, setSessionSettings: null,
   });
+  const isWritingSession = sessionId => String(sessionId || '').startsWith('rp:');
+  const getPersonaBoard = (sessionId = '') => {
+    if (isWritingSession(sessionId)) {
+      const override = persona.getSessionOverride(sessionId);
+      if (override) return override;
+      if (options.getSessionSettings?.(sessionId)?.[HOPSCOTCH_FOLLOW_GLOBAL_SETTING_KEY] === true) return null;
+    }
+    return persona.getGlobalBoard();
+  };
+  const setPersonaBoard = (board = null, { sessionId = '' } = {}) => isWritingSession(sessionId)
+    ? persona.setSessionOverride(sessionId, board, { followGlobal: board == null })
+    : persona.setGlobalBoard(board);
   return {
     get key() { return persona.key; },
     get globalKey() { return global.key; },
@@ -198,17 +213,17 @@ export const createScopedHopscotchBoardStore = (options = {}) => {
     isHydrated: () => persona.isHydrated() && global.isHydrated(),
     getGlobalBoard: global.getGlobalBoard,
     setGlobalBoard: global.setGlobalBoard,
-    getPersonaBoard: persona.getGlobalBoard,
-    setPersonaBoard: persona.setGlobalBoard,
+    getPersonaBoard,
+    setPersonaBoard,
     getSessionOverride: persona.getSessionOverride,
     setSessionOverride: persona.setSessionOverride,
     getInvalidBoard: () => persona.getInvalidBoard() || global.getInvalidBoard(),
     exportState: persona.exportState,
     importState: persona.importState,
     resolveEffectiveBoard: ({ sessionId = '', derivedBoard = null, scope = 'effective' } = {}) => {
-      const session = scope === 'effective' || scope === 'session' ? persona.getSessionOverride(sessionId) : null;
+      const session = !isWritingSession(sessionId) && (scope === 'effective' || scope === 'session') ? persona.getSessionOverride(sessionId) : null;
       if (session) return { board: session, source: 'session' };
-      const local = scope !== 'global' ? persona.getGlobalBoard() : null;
+      const local = scope !== 'global' ? getPersonaBoard(sessionId) : null;
       if (local) return { board: local, source: 'persona' };
       const shared = global.getGlobalBoard();
       if (shared) return { board: shared, source: 'global' };

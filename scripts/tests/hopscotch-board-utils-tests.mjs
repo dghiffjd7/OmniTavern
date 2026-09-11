@@ -33,7 +33,7 @@ const bodyRow = (fused = []) => ({ id: 'rb', houses: [{ id: 'body', kind: 'body'
   const writing = resolveHopscotchBoardSettings(args);
   const chat = resolveHopscotchBoardSettings({ ...args, place: 'chat' });
   assert.equal(writing.memory.storageMode, 'off');
-  assert.equal(writing.replyCheck.enabled, false);
+  assert.equal(writing.replyCheck.enabled, true, '共享启用设置保留；创意格式可用性单独判断');
   assert.equal(writing.autoImage.enabled, true);
   assert.equal(chat.memory.storageMode, 'table');
   assert.equal(chat.replyCheck.enabled, true);
@@ -41,7 +41,7 @@ const bodyRow = (fused = []) => ({ id: 'rb', houses: [{ id: 'body', kind: 'body'
   assert.equal(resolveHopscotchBoardSettings({ settings: { ...settings, memoryEnabled: false } }).memory.storageMode, 'off');
   assert.equal(resolveHopscotchBoardSettings({ settings: { ...settings, memoryStorageMode: 'summary' } }).memory.storageMode, 'summary', '表格位置开关不禁用另一种摘要存储');
   assert.equal(settings.memoryEnabled, true, '解析不写回设置');
-  console.log('ok - memory mode/place switches and chat-only review resolve without changing settings');
+  console.log('ok - memory mode/place switches and shared review settings resolve without changing settings');
 }
 
 {

@@ -503,6 +503,8 @@ import { createHopscotchImageExecutor } from './chat/hopscotch-image-executor.js
 import { resolveHopscotchBoardSettings } from './chat/hopscotch-settings-utils.js';
 import { createScopedHopscotchBoardStore } from '../storage/hopscotch-board-store.js';
 import { createHopscotchBoardPanel } from './chat/hopscotch-board-panel.js';
+import { createFormatGuideSettingsRuntime, resolveFormatReviewAvailability } from './chat/format-review-settings-utils.js';
+import { createFormatReviewExecutor, createCreativeFormatReviewRuntime } from './chat/format-review-runtime.js';
 import { bindInputSuggestionComposer } from './chat/input-suggestion-composer.js';
 import { createInputSuggestionRequest } from './chat/input-suggestion-runtime.js';
 import { createExecutionFlowRuntime } from './chat/execution-flow-runtime-utils.js';
@@ -4509,9 +4511,16 @@ const initApp = async () => {
         hasAgentFormatRepairCandidate: options => hasRejectedFormatRepairAgentRunCandidate(options || {}),
         getAgentFeatureSettings: () => agentFeatureSettingsStore.getSettings(),
         listAgentFeatures: () => agentFeatureSettingsStore.listFeatures(),
+        getAgentFormatGuide: () => formatGuideSettingsRuntime.read(),
+        setAgentFormatGuide: options => formatGuideSettingsRuntime.save(options),
         setAgentFeatureEnabled: async (options = {}) => {
           const id = String(options?.id || '').trim();
           const enabling = options?.enabled === true;
+          if (id === AGENT_FEATURE_IDS.replyCheck && enabling && uiMode === 'rp') {
+            if (!getSessionFormatGuide(chatStore.getCurrent())) return { ok: false, message: t('请先设置格式要求') };
+            const state = agentFeatureSettingsStore.getSettings().features[id];
+            if (!state.modelMode || state.modelMode === 'none' || (state.modelMode === 'profile' && !state.modelProfileId)) return { ok: false, message: t('请先选择检查模型') };
+          }
           const result = await agentFeatureSettingsStore.setEnabled(id, enabling);
           if (id === AGENT_FEATURE_IDS.writePreview) {
             const gatePatch = resolveWritePreviewGatePatch({
@@ -17310,6 +17319,12 @@ const initApp = async () => {
     const profile = getSessionFormatProfile(sessionId);
     return profile?.usable === false ? '' : String(profile?.guide || '').trim();
   };
+  const formatGuideSettingsRuntime = createFormatGuideSettingsRuntime({
+    getSessionId: () => chatStore.getCurrent(), getScopeId: () => activePersonaScopeKey,
+    getPlace: () => uiMode === 'rp' ? 'writing' : 'chat',
+    getProfile: getSessionFormatProfile, getStore: () => maidFormatProfileStore,
+    notifyChanged: sessionId => window.dispatchEvent(new CustomEvent('agent-feature-settings-changed', { detail: { id: AGENT_FEATURE_IDS.replyCheck, sessionId } })),
+  });
   const resolveFormatTargetForSession = (sessionId = '') => {
     const sid = String(sessionId || '').trim();
     if (resolveUiModeForSession(sid) === 'rp') {
@@ -27176,67 +27191,29 @@ const initApp = async () => {
         enabled: agentFeatureSettingsStore.isEnabled(AGENT_FEATURE_IDS.replyCheck),
         triggerMode: featureState.triggerMode,
         modelMode: featureState.modelMode,
+        modelProfileId: featureState.modelProfileId,
+        hasFormatGuide: Boolean(getSessionFormatGuide(sid)),
       },
       autoImageEnabled: isWritingAutoImagePromptEnabled(),
       variableActivity: getVariableWorkflowActivity(sid, { place }),
     });
   };
-  // 格式复核房子：复用手动检查的选项（强制模型复核）+ 完成回调；signal 贯通 backgroundChat
-  const runHopscotchFormatReview = async ({ sessionId = '', messageId = '', signal = null } = {}) => {
-    const sid = String(sessionId || '').trim();
-    const message = chatStore.findMessage(String(messageId || '').trim(), sid);
-    if (!message || message.role !== 'assistant') return { status: 'skipped', reason: 'message_missing' };
-    const repairTarget = await resolveChatFormatRepairTarget(message, sid);
-    if (signal?.aborted) return { status: 'cancelled', reason: 'user_cancelled' };
-    const sourceContent = String(message.content || '');
-    const targetScope = activePersonaScopeKey;
-    const canCommit = () => !signal?.aborted && activePersonaScopeKey === targetScope && String(chatStore.findMessage(messageId, sid)?.content ?? '') === sourceContent;
-    if (!repairTarget?.ok) return { status: 'skipped', reason: repairTarget?.reason || 'target_unavailable' };
-    const options = {
-      ...buildManualChatFormatGuardianOptions(sid),
-      baseRevision: createFormatPatchRevisionToken(),
-      sourceSnapshot: repairTarget.sourceText,
-      repairTarget: { ...repairTarget, sessionId: repairTarget.targetSessionId || sid },
-      sourceMessageId: String(message.id || '').trim(),
-    };
-    if (options?.modelReview?.enabled !== true || typeof options?.modelReview?.backgroundChat !== 'function') {
-      return { status: 'skipped', reason: 'model_unavailable' };
-    }
-    options.modelReview = {
-      ...options.modelReview,
-      requestOptions: { ...(options.modelReview.requestOptions || {}), ...(signal ? { signal } : {}) },
-    };
-    let settle = null;
-    const completion = new Promise((resolve) => { settle = resolve; });
-    const preview = runChatFormatGuardianPreview({
-      message: { ...message, rawOriginal: repairTarget.sourceText },
-      sessionId: sid,
-      chatFormatGuardian: options,
-      onChatFormatGuardianPreview: payload => { if (canCommit()) handleChatFormatGuardianPreview(payload); },
-      onChatFormatGuardianRun: handleChatFormatGuardianAgentRun,
-      onChatFormatGuardianModelReviewQueued: payload => { if (canCommit()) handleChatFormatGuardianModelReviewQueued(payload); },
-      onChatFormatGuardianModelReviewCompleted: payload => settle?.(payload || {}),
-      logger,
-    });
-    if (!preview) return { status: 'skipped', reason: 'no_source' };
-    if (!preview.modelReviewQueued) {
-      return { status: 'succeeded', reason: 'local_only', artifact: { kind: 'format_review', payload: { status: preview?.result?.status || '' } } };
-    }
-    const payload = await completion;
-    if (signal?.aborted) return { status: 'cancelled', reason: 'user_cancelled' };
-    const failed = payload?.failed === true || payload?.agentRun?.status === 'failed';
-    if (failed) return { status: 'failed', reason: 'review_failed', error: String(payload?.agentRun?.errorMessage || payload?.error || t('格式复核失败')) };
-    return {
-      status: 'succeeded',
-      artifact: {
-        kind: 'format_review',
-        payload: {
-          status: payload?.result?.modelReview?.status || payload?.result?.status || 'completed',
-          hasCandidate: Boolean(payload?.result?.modelReview?.canRepair || payload?.result?.repairCandidate),
-        },
-      },
-    };
-  };
+  const runHopscotchFormatReview = createFormatReviewExecutor({
+    findMessage: (mid, sid) => chatStore.findMessage(mid, sid), resolveTarget: resolveChatFormatRepairTarget,
+    getScope: sid => `${activePersonaScopeKey}:${chatStore.getCurrentArchiveId(sid) || ''}`,
+    getPlace: sid => resolveUiModeForSession(sid) === 'rp' ? 'writing' : 'chat', getGuide: getSessionFormatGuide,
+    buildOptions: sid => buildManualChatFormatGuardianOptions(sid), createRevision: createFormatPatchRevisionToken,
+    runPreview: runChatFormatGuardianPreview,
+    onPreview: payload => handleChatFormatGuardianPreview(payload), onRun: payload => handleChatFormatGuardianAgentRun(payload),
+    onQueued: payload => handleChatFormatGuardianModelReviewQueued(payload),
+    onCompleted: sid => chatFormatRepairActiveSessions.delete(sid), logger,
+  });
+  const creativeFormatReviewRuntime = createCreativeFormatReviewRuntime({
+    getSettings: () => agentFeatureSettingsStore.getSettings().features[AGENT_FEATURE_IDS.replyCheck],
+    getGuide: getSessionFormatGuide, getPlace: sid => resolveUiModeForSession(sid) === 'rp' ? 'writing' : 'chat',
+    getScope: sid => `${activePersonaScopeKey}:${chatStore.getCurrentArchiveId(sid) || ''}`,
+    run: runHopscotchFormatReview, sessionAsyncWorkRuntime, logger,
+  });
   // 生图房子：等待整组图片任务与回填结束；无提示 → skipped；部分失败 → failed(partial)
   const runHopscotchAutoImage = createHopscotchImageExecutor({
     findMessage: (mid, sid) => chatStore.findMessage(mid, sid),
@@ -27350,6 +27327,10 @@ const initApp = async () => {
     getProfiles: () => chatConfigManager.getProfiles?.() || [],
     getInputSuggestion: () => agentFeatureSettingsStore.getSettings().features[AGENT_FEATURE_IDS.textCompletion],
     openInputSuggestion: () => agentCenterPanel.openFloatingAgentCard(AGENT_FEATURE_IDS.textCompletion),
+    getFormatReview: () => resolveFormatReviewAvailability(agentFeatureSettingsStore.getSettings().features[AGENT_FEATURE_IDS.replyCheck], {
+      place: uiMode === 'rp' ? 'writing' : 'chat', hasFormatGuide: Boolean(getSessionFormatGuide(chatStore.getCurrent())),
+    }),
+    openFormatReview: () => agentCenterPanel.openFloatingAgentCard(AGENT_FEATURE_IDS.replyCheck),
     getEnabled: () => appSettings.get().creativeHopscotchEnabled === true,
     enable: value => appSettings.update({ creativeHopscotchEnabled: value === true }),
   });
@@ -28294,7 +28275,7 @@ const initApp = async () => {
     ui.updateMessage(patchedMessage.id, decorated);
   };
 
-  const handleChatFormatGuardianModelReviewQueued = ({ message, sessionId: previewSessionId } = {}) => {
+  const handleChatFormatGuardianModelReviewQueued = ({ message, sessionId: previewSessionId, quiet = false } = {}) => {
     const sid = String(previewSessionId || '').trim();
     protocolGenerationDiagnostics.markGuardianQueued(
       String(message?.meta?.formatRepairTurnId || '').trim(),
@@ -28303,7 +28284,7 @@ const initApp = async () => {
     if (message?.meta?.protocolParseFailure === true) {
       rejectedFormatRepairBannerRuntime?.markChecking?.({ sessionId: sid });
     }
-    if (!isSessionActive(sid)) return;
+    if (!isSessionActive(sid) || quiet) return;
     window.toastr?.info?.('正在修复格式中');
   };
 
@@ -28771,12 +28752,14 @@ const initApp = async () => {
       applyUpdateVariable = null,
       // 跳房子板接管本轮时，格式复核模型请求与自动生图由板的房子执行器单一触发（计划 §6.2）
       suppressFormatGuardianModelReview = false,
+      formatReviewSignal = null,
       suppressAutoImagePrompt = false,
       suppressVariableRules = false,
     } = {},
   ) => {
     const suppressReplayedFunctionalEffects = Boolean(activeFormatRepairFunctionPlan);
     const buildGuardianOptionsForDispatch = () => {
+      if (resolveUiModeForSession(targetSessionId) === 'rp') return null;
       const base = buildChatFormatGuardianOptions(targetSessionId);
       if (!suppressFormatGuardianModelReview) return base;
       return { ...base, modelReview: { enabled: false } };
@@ -28812,6 +28795,11 @@ const initApp = async () => {
         : buildChatBodyQualityOptions(targetSessionId),
       onChatBodyQualityPreview: handleChatFormatGuardianPreview,
       onChatBodyQualityRun: handleChatBodyQualityAgentRun,
+    });
+    creativeFormatReviewRuntime.afterReceive({
+      message, sessionId: targetSessionId,
+      suppressed: suppressReplayedFunctionalEffects || suppressFormatGuardianModelReview,
+      signal: formatReviewSignal,
     });
     if (!suppressReplayedFunctionalEffects && !suppressAutoImagePrompt) {
       scheduleAutoImagePromptGenerationForMessage(message, targetSessionId, {
@@ -30041,7 +30029,8 @@ const initApp = async () => {
         skipScripts: skipThisScripts,
         defaultSkipScripts: skipScripts,
         applyUpdateVariable: applyUpdateVariableForCreativeExecution,
-        suppressFormatGuardianModelReview: Boolean(hopscotchTurn),
+        suppressFormatGuardianModelReview: Boolean(hopscotchTurn?.board?.rows.some(row => row.houses.some(house => house.kind === 'format_review'))),
+        formatReviewSignal: abortSignal,
         suppressAutoImagePrompt: Boolean(hopscotchTurn),
         suppressVariableRules: boardOwnsVariableRules || !variableUpdatesEnabled(),
       });

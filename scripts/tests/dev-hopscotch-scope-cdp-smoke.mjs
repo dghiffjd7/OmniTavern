@@ -5,6 +5,7 @@ import { evaluateInApp } from '../dev/cdp-client.mjs';
 const result = await evaluateInApp(`(async () => {
   const check = (value, message) => { if (!value) throw new Error(message); };
   const tick = () => new Promise(resolve => setTimeout(resolve, 50));
+  for (let i = 0; i < 200 && !window.appBridge?.debugUiRegistry?.panels?.agentCenterPanel; i++) await tick();
   window.__hopscotchSmokePanel?.dispose();
   window.__agentCenterHopscotchSmoke?.dispose();
   window.__agentCenterMigrationSmoke?.dispose();
@@ -84,7 +85,11 @@ const result = await evaluateInApp(`(async () => {
     check(ids() === 'body,review', 'chat must not load creative global board');
     place = 'writing'; await ac.refresh();
     check(ids() === 'body,custom', 'saved creative board must remain intact');
-    check([...root.querySelector('[data-hop-target]').options].map(o => o.value).join(',') === 'global,persona,session', 'writing needs global/persona/session scopes');
+    check([...root.querySelector('[data-hop-target]').options].map(o => o.value).join(',') === 'persona,global', 'writing needs only current/all character scopes');
+    check([...root.querySelector('[data-hop-target]').options].map(o => o.textContent.trim()).join(',') === '当前角色卡,所有角色卡', 'writing scope labels');
+    check(root.querySelector('.hop-scope-label').textContent === '流程作用范围', 'workflow scope title');
+    check(root.querySelector('[data-hop-target]').value === 'persona' && root.querySelector('.hop-scope-source').textContent === '跟随所有角色卡', 'current character should initially inherit all-character defaults');
+    check(sessions.size === 0, 'viewing scopes must not write settings');
     check(enables === 0, 'viewing scopes must not enable orchestration');
     const selectScope = async value => { const select = root.querySelector('[data-hop-target]'); select.value = value; select.dispatchEvent(new Event('change')); await tick(); };
     const importAndSave = async name => {
@@ -93,17 +98,27 @@ const result = await evaluateInApp(`(async () => {
       dialog.querySelector('[name="boardJson"]').value = JSON.stringify({ name, rows: [{ houses: [{ id: 'body', kind: 'body' }] }] });
       click('[data-action="import"]', dialog); click('[data-action="save"]'); await tick();
     };
-    await selectScope('session'); await importAndSave('会话探针');
-    check(store.getSessionOverride('rp:scope-smoke')?.name === '会话探针', 'session target saved to wrong scope');
-    check(store.getGlobalBoard().rows.length === 2 && !store.getPersonaBoard(), 'session save polluted defaults');
-    await selectScope('persona'); await importAndSave('角色探针');
-    check(store.getPersonaBoard()?.name === '角色探针' && store.getGlobalBoard().rows.length === 2, 'persona target saved to wrong scope');
+    // 旧的两层覆盖均保留，最高优先级的一层显示为当前角色卡流程。
+    await store.setPersonaBoard({ name: '旧角色编排', rows: [{ houses: [{ id: 'body', kind: 'body' }] }] });
+    store.setSessionOverride('rp:scope-smoke', { name: '旧会话编排', rows: [{ houses: [{ id: 'body', kind: 'body' }] }] });
+    await ac.refresh();
+    check(root.querySelector('[data-hop-target]').value === 'persona' && ids() === 'body', 'legacy session workflow must be visible under current character');
+    await importAndSave('角色探针');
+    check(store.getPersonaBoard('rp:scope-smoke')?.name === '角色探针' && store.getGlobalBoard().rows.length === 2, 'persona target saved to wrong scope');
+    check(runtime.resolveBoard('rp:scope-smoke').board.name === '角色探针', 'runtime must execute the workflow shown in the character scope');
     check(root.querySelector('.hop-scope-source').textContent === '角色卡编排', 'source must identify persona board');
+    click('[data-action="more"]'); click('[data-action="reset"]');
+    click('[data-action="confirm-reset"]', document.querySelector('.hop-detail[open]')); await tick();
+    check(ids() === 'body,custom' && root.querySelector('.hop-scope-source').textContent === '跟随所有角色卡', 'reset must follow all characters and suppress both old overrides');
+    check(store.getPersonaBoard()?.name === '旧角色编排', 'reset must retain legacy shared data for other characters');
+    await selectScope('global'); await importAndSave('全角色探针');
+    check(store.getGlobalBoard().name === '全角色探针' && root.querySelector('.hop-scope-source').textContent === '所有角色卡', 'all-character save and source');
+    await selectScope('persona');
+    check(runtime.resolveBoard('rp:scope-smoke').board.name === '全角色探针' && root.querySelector('.hop-scope-source').textContent === '跟随所有角色卡', 'character must follow subsequent default changes');
     await selectScope('global');
     click('[data-hop-add="0"][data-hop-new="1"]');
     const picker = document.querySelector('.hop-detail[open]');
-    check(!picker.querySelector('[data-action="add:format_review"]'), 'chat-only review cannot be added to writing');
-    check(!picker.querySelector('[data-action="add:summary_compaction"]'), 'internal compaction is not an independent Agent to add');
+    check([...picker.querySelectorAll('[data-action^="add:"]')].some(button => button.textContent.includes('格式修复')), 'format repair is available in creative writing');
     [...picker.querySelectorAll('[data-action^="add:"]')].find(button => button.textContent.includes('自定义提示词')).click();
     const dirtyIds = ids();
     await change('memoryEnabled', true);
