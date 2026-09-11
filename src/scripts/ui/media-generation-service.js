@@ -192,6 +192,7 @@ export const createMediaGenerationService = ({
   fetchFn = (...args) => fetch(...args),
   now = () => Date.now(),
   logger = console,
+  preparePromptRequest = null,
 } = {}) => {
   const fetchImageAsDataUrl = async (url, signal) => {
     const raw = String(url || '').trim();
@@ -348,7 +349,13 @@ export const createMediaGenerationService = ({
     agentTask = true,
     retainDataUrl = false,
   } = {}) => {
-    const text = String(prompt || '').trim();
+    throwIfAborted(signal);
+    let text = String(prompt || '').trim();
+    if (typeof preparePromptRequest === 'function') {
+      const prepared = await preparePromptRequest({ prompt: text, config, options });
+      text = prepared.prompt;
+      options = prepared.options;
+    }
     if (!text) throw new Error('图片提示词为空');
     if (!config || typeof config !== 'object') throw new Error('图片生成配置为空');
     if (typeof createClient !== 'function') throw new Error('图片生成客户端未配置');

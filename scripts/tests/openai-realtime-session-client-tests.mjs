@@ -66,6 +66,8 @@ const audioElement = {
 const events = [];
 const connectionStates = [];
 const calls = [];
+const meterCalls = [], audioLevels = [];
+let meterCallback;
 const client = new OpenAiRealtimeSessionClient({
   invoke: async (command, args) => {
     calls.push({ command, args });
@@ -76,6 +78,11 @@ const client = new OpenAiRealtimeSessionClient({
   createAudioElement: () => audioElement,
   onEvent: event => events.push(event),
   onConnectionState: state => connectionStates.push(state),
+  onAudioLevel: value => audioLevels.push(value),
+  createMeter: ({ onLevel }) => {
+    meterCallback = onLevel;
+    return { attach: (channel, source) => meterCalls.push(['attach', channel, source]), setMuted: (channel, muted) => meterCalls.push(['mute', channel, muted]), close: async () => meterCalls.push(['close']) };
+  },
 });
 
 await client.connect({
@@ -92,6 +99,8 @@ assert.equal(audioElement.autoplay, true);
 FakePeerConnection.instance.ontrack({ streams: [{ id: 'remote-stream' }] });
 assert.equal(audioElement.srcObject.id, 'remote-stream');
 assert.equal(audioElement.played, true);
+assert.deepEqual(meterCalls.filter(call => call[0] === 'attach').map(call => call[1]), ['input', 'output']);
+meterCallback({ input: { level: .4 } }); assert.equal(audioLevels.length, 1);
 
 FakePeerConnection.instance.channel.emit('message', {
   data: JSON.stringify({ type: 'session.created', session: { id: 'sess_1' } }),
@@ -110,11 +119,14 @@ assert.equal(client.setMicrophoneMuted(true), true);
 assert.equal(track.enabled, false);
 assert.equal(client.setOutputMuted(true), true);
 assert.equal(audioElement.muted, true);
+assert.deepEqual(meterCalls.slice(-2), [['mute', 'input', true], ['mute', 'output', true]]);
 
 await client.close();
 assert.equal(track.stopped, true);
 assert.equal(FakePeerConnection.instance.connectionState, 'closed');
 assert.equal(audioElement.srcObject, null);
+assert.deepEqual(meterCalls.at(-1), ['close']);
+meterCallback({ input: { level: 1 } }); assert.equal(audioLevels.length, 1);
 
 {
   let brokerStarted;

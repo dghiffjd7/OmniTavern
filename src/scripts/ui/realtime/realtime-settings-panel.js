@@ -7,6 +7,7 @@ import { RealtimeModelDiscovery, realtimeModelSource } from './realtime-model-di
 import { getRealtimeSystemVoices } from './realtime-voice-catalog.js';
 import { RealtimeVoicePicker, realtimeVoicePickerFields } from './realtime-voice-picker.js';
 import { RealtimeVoiceDiscovery } from './realtime-voice-discovery.js';
+import { realtimeReplyLanguageField, bindRealtimeReplyLanguagePicker } from './realtime-reply-language-picker.js';
 import { rankModelCandidates } from '../../utils/model-candidates.js';
 import { cloneData } from '../../utils/clone-data.js';
 import { appConfirm } from '../app-confirm.js';
@@ -38,7 +39,7 @@ export class RealtimeSettingsPanel {
     }
   }
   async run(action, cancelMessage = '操作已取消；已提交的云端训练可通过 Voice ID 查询', { feedbackId = 'rt-status', busyButtonId = '', busyLabel = '' } = {}) {
-    if (this.busy) return; this.busy = true; this.controller = new AbortController();
+    if (this.busy) return; this.languagePicker?.close(); this.busy = true; this.controller = new AbortController();
     this.feedbackId = feedbackId;
     const busyButton = this.root.querySelector(`#${busyButtonId || 'rt-unused'}`), originalLabel = busyButton?.textContent;
     if (busyButton && busyLabel) busyButton.textContent = translateUiText(busyLabel);
@@ -57,11 +58,11 @@ export class RealtimeSettingsPanel {
     if (!this.dirty && this.draft?.id) this.draft = this.store.get(this.draft.id);
     this.render();
   }
-  hide() { this.controller?.abort(); this.voicePicker?.hideTooltip(); this.enrollmentView.detach(); this.capture(); }
+  hide() { this.controller?.abort(); this.languagePicker?.close(); this.voicePicker?.hideTooltip(); this.enrollmentView.detach(); this.capture(); }
   capture() {
     if (!this.draft) return;
     this.root.querySelectorAll('[data-secret]').forEach(node => { this.secretDraft[node.dataset.secret] = node.value; });
-    for (const [field, id] of Object.entries({ name: 'rt-name', model: 'rt-model', region: 'rt-region', workspaceId: 'rt-workspace', idleTimeoutMinutes: 'rt-idle', voiceKind: 'rt-voice-kind', voice: 'rt-voice', geminiBackend: 'rt-gemini-backend', vertexaiAuthMode: 'rt-vertex-auth-mode', vertexaiProjectId: 'rt-vertex-project' })) {
+    for (const [field, id] of Object.entries({ name: 'rt-name', model: 'rt-model', region: 'rt-region', workspaceId: 'rt-workspace', idleTimeoutMinutes: 'rt-idle', voiceKind: 'rt-voice-kind', voice: 'rt-voice', geminiBackend: 'rt-gemini-backend', vertexaiAuthMode: 'rt-vertex-auth-mode', vertexaiProjectId: 'rt-vertex-project', replyLanguage: 'rt-reply-language', transcriptionLanguage: 'rt-transcription-language' })) {
       const element = this.root.querySelector(`#${id}`); if (element) this.draft[field] = element.value;
     }
   }
@@ -70,6 +71,7 @@ export class RealtimeSettingsPanel {
     const enrollmentOpen = this.root.querySelector('.api-config-realtime-enrollment')?.open;
     this.enrollmentView.detach();
     this.voicePicker?.destroy();
+    this.languagePicker?.destroy();
     const profile = this.draft, preset = profile && REALTIME_PROVIDERS[profile.provider];
     if (!profile || this.modelSource !== realtimeModelSource(profile)) { this.modelOptions = []; this.modelSource = ''; }
     this.legacyElements.forEach(element => { element.hidden = Boolean(profile); });
@@ -110,9 +112,11 @@ export class RealtimeSettingsPanel {
       this.card.closest('#config-panel')?.querySelector('#config-close')?.click(); void startRealtimeSettingsCall();
     });
     if (!profile) return;
+    this.languagePicker = bindRealtimeReplyLanguagePicker(this.root.querySelector('#rt-reply-language'), { provider: profile.provider });
     const set = (id, value) => { const el = this.root.querySelector(`#${id}`); if (el) el.value = String(value ?? ''); };
     set('rt-provider', profile.provider); set('rt-region', profile.region); set('rt-voice-kind', profile.voiceKind); set('rt-voice', profile.voice);
     set('rt-gemini-backend', profile.geminiBackend); set('rt-vertex-auth-mode', profile.vertexaiAuthMode);
+    set('rt-transcription-language', profile.transcriptionLanguage);
     this.root.querySelector('#rt-provider').disabled = Boolean(profile.id);
     this.root.querySelector('#rt-provider').onchange = event => { this.secretDraft = {}; this.draft = makeRealtimeProfile(event.target.value); this.dirty = true; this.render(); };
     this.root.querySelector('#rt-gemini-backend')?.addEventListener('change', () => {
@@ -235,6 +239,8 @@ export class RealtimeSettingsPanel {
       ${secrets.map(([key, label]) => input(`rt-secret-${key}`, label, this.secretDraft[key] || '', 'password', `data-secret="${key}" placeholder="${tr(profile.credentialId ? '已保存；留空保持原值' : '尚未填写')}"`)).join('')}
       <label class="api-config-realtime-field">${helpTitle('声音类型', profile.provider === 'doubao_realtime' ? ['SC2.0 使用 saturn_ 系统声音或 S_ 克隆声音；预设角色音色可能影响角色表现。'] : [])}<select id="rt-voice-kind">${option('system', translateUiText('系统声音'))}${preset.clone ? option('custom', translateUiText('自定义声音')) : ''}</select></label>
       ${input('rt-idle', '静音挂断（分钟）', profile.idleTimeoutMinutes, 'number', 'min="1" max="30"')}
+      ${realtimeReplyLanguageField('rt-reply-language', profile.replyLanguage)}
+      ${profile.provider === 'openai' ? `<label class="api-config-realtime-field">${helpTitle('输入识别语言', ['用于输入转写，独立于角色的回复语言。'])}<select id="rt-transcription-language">${option('', translateUiText('自动识别'))}${[['zh', '普通话／中文'], ['en', '英文'], ['ja', '日文'], ['ko', '韩文'], ['fr', '法语'], ['de', '德语'], ['es', '西班牙语']].map(([id, label]) => option(id, translateUiText(label))).join('')}</select></label>` : ''}
       ${realtimeVoicePickerFields(profile)}
     </div>
     <div class="api-config-realtime-actions">${button('rt-save', '保存并使用')}</div>

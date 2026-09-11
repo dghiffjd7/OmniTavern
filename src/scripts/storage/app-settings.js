@@ -139,6 +139,7 @@ const defaults = {
     realtimeModel: 'gpt-realtime-2.1',
     transcriptionModel: 'gpt-4o-mini-transcribe',
     transcriptionLanguage: '',
+    replyLanguage: '',
     voice: 'marin',
     vad: {
       mode: 'server_vad',
@@ -353,6 +354,7 @@ const migrateSettings = (settings = {}) => {
     realtimeModel: String(realtimeInput.realtimeModel || 'gpt-realtime-2.1').trim() || 'gpt-realtime-2.1',
     transcriptionModel: String(realtimeInput.transcriptionModel || 'gpt-4o-mini-transcribe').trim() || 'gpt-4o-mini-transcribe',
     transcriptionLanguage: realtimeTranscriptionLanguage,
+    replyLanguage: String(realtimeInput.replyLanguage || '').replace(/\s+/g, ' ').trim().slice(0, 80),
     voice: String(realtimeInput.voice || 'marin').trim().toLowerCase() || 'marin',
     vad: {
       mode: String(realtimeVad.mode || '').trim().toLowerCase() === 'semantic_vad'

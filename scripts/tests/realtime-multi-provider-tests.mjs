@@ -25,9 +25,12 @@ await test('profiles keep typed credentials outside metadata and roll back faile
   let profile = await store.save(makeRealtimeProfile('qwen_audio_realtime'), { apiKey: 'SECRET' });
   assert.equal((await store.resolve()).config.credentials.apiKey, 'SECRET');
   assert(!JSON.stringify(persisted).includes('SECRET'));
+  profile.replyLanguage = '台湾普通话';
   profile.customVoices.push({ voiceId: 'Voice_CaseSensitive', label: 'mine', targetModel: profile.model, region: profile.region, workspaceId: profile.workspaceId, credentialId: profile.credentialId, status: 'ready' });
   profile.voiceKind = 'custom'; profile.voice = 'Voice_CaseSensitive'; profile = await store.save(profile);
   assert.equal((await store.resolve()).settings.voice, 'Voice_CaseSensitive');
+  assert.equal((await store.resolve()).settings.replyLanguage, '台湾普通话');
+  assert.equal(store.get(profile.id).replyLanguage, '台湾普通话');
   assert.throws(() => validateRealtimeProfile({ ...profile, model: 'qwen-audio-3.0-realtime-flash' }), /目标模型/);
   await assert.rejects(store.save(profile, { apiKey: 'OTHER_ACCOUNT' }), /其他账号/);
   assert.equal(keys.size, 1); assert.equal((await store.resolve()).config.credentials.apiKey, 'SECRET');
@@ -119,14 +122,15 @@ await test('natural sessions avoid extra response.create and preserve late Step 
   await runtime.end(); emit({ type: 'response.created', response: { id: 'late' } }); assert.equal(runtime.getState().status, 'idle');
 });
 await test('native client drains setup, stops audio, closes transport and ignores late events', async () => {
-  let callback; const commands = [], events = []; let audioClosed = 0;
+  let callback, audioCallback; const commands = [], events = [], audioLevels = []; let audioClosed = 0;
   const profile = { ...makeRealtimeProfile('qwen_audio_realtime'), credentials: { apiKey: 'secret' } };
-  const client = new NativeRealtimeSessionClient({ onEvent: e => events.push(e), createChannel: fn => { callback = fn; return { id: 123 }; },
-    createAudio: () => ({ open: async () => {}, close: async () => { audioClosed++; }, clear: () => {}, play: () => {} }),
+  const client = new NativeRealtimeSessionClient({ onEvent: e => events.push(e), onAudioLevel: value => audioLevels.push(value), createChannel: fn => { callback = fn; return { id: 123 }; },
+    createAudio: options => { audioCallback = options.onAudioLevel; return { open: async () => {}, close: async () => { audioClosed++; }, clear: () => {}, play: () => {} }; },
     invoke: async (command, args) => { commands.push([command,args]); if (command === 'realtime_transport_open') callback({ kind: 'open' }); if (command === 'realtime_transport_send' && args.messages.some(e => e.data.includes('session.update'))) callback({ kind: 'text', data: JSON.stringify({ type: 'session.updated' }) }); },
   });
   await client.connect({ config: profile, sessionConfig: { instructions: 'role' } });
-  await client.close(); const length = events.length; callback({ kind: 'text', data: JSON.stringify({ type: 'response.created', response: { id: 'late' } }) }); await tick();
+  audioCallback({ input: { level: .4 } }); assert.equal(audioLevels.length, 1);
+  await client.close(); audioCallback({ input: { level: 1 } }); assert.equal(audioLevels.length, 1); const length = events.length; callback({ kind: 'text', data: JSON.stringify({ type: 'response.created', response: { id: 'late' } }) }); await tick();
   assert.equal(events.length, length); assert.equal(audioClosed, 1); assert(commands.some(([cmd]) => cmd === 'realtime_transport_close')); assert.equal(client.id, '');
 });
 await test('cancelling a pending native open also closes a connection that opens late', async () => {

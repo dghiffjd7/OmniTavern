@@ -1,8 +1,0 @@
-sharkpan.xyz: 18
-api.vkeys.cn: 4
-files.catbox.moe: 3
-catbox.moe: 2
-cdn.discordapp.com: 1
-sharkpan: 1
-static.zeoseven.com: 1
-y.qq.com: 1

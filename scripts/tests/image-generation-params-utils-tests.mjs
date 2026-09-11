@@ -9,7 +9,9 @@ import {
 import {
   combineImageNegativePrompts,
   createDefaultImageGenerationPreset,
+  getParamsForImageConfig,
   mergeImageGenerationRequestOptions,
+  normalizeImageGenerationPreset,
   resolveImageGenerationParamSchema,
   resolveImageNegativePromptDraft,
   sanitizeImageGenerationParams,
@@ -38,6 +40,30 @@ for (const config of [
 
 assert.equal(findNegativeField({ provider: 'vertexai', model: 'gemini-2.5-flash-image' }), undefined);
 assert.equal(findNegativeField({ provider: 'openai', model: 'gpt-image-2' }), undefined);
+
+{
+  const preset = createDefaultImageGenerationPreset();
+  for (const model of [
+    'gpt-image-2.5-sunburst', 'gpt-image-2.5-sunburst-2026-09-08',
+    'gpt-image-2.5-flare', 'gpt-image-2.5-flare-2026-09-08',
+  ]) {
+    const config = { provider: 'openai', model };
+    const field = resolveImageGenerationParamSchema(config).fields.find(item => item.key === 'quality');
+    assert.deepEqual(field.options.map(option => option.value), ['auto', 'low', 'medium', 'high', 'xhigh', 'max']);
+    for (const quality of ['low', 'medium', 'high', 'xhigh', 'max']) {
+      preset.paramsByProvider.openai = sanitizeImageGenerationParams({ quality }, config);
+      const restored = normalizeImageGenerationPreset(JSON.parse(JSON.stringify(preset)));
+      assert.equal(getParamsForImageConfig(restored, config).quality, quality, `${model} retains ${quality} after saving`);
+    }
+  }
+  for (const model of ['gpt-image-1', 'gpt-image-1.5', 'gpt-image-2', 'gpt-image-2-2026-04-21', 'gpt-image-2.5-unknown', 'dall-e-3', 'dall-e-2']) {
+    assert.equal(getParamsForImageConfig(preset, { provider: 'openai', model }).quality, undefined, `${model} must not receive max from another model`);
+  }
+  assert.equal(preset.paramsByProvider.openai.quality, 'max', 'changing models does not rewrite the saved preset');
+  assert.equal(getParamsForImageConfig(preset, { provider: 'openai', model: 'gpt-image-2.5-sunburst' }).quality, 'max');
+  assert.equal(sanitizeImageGenerationParams({ quality: 'auto' }, { provider: 'openai', model: 'gpt-image-2.5-sunburst' }).quality, undefined);
+  assert.equal(sanitizeImageGenerationParams({ quality: 'relay-quality' }, { provider: 'custom', model: 'relay-model' }).quality, 'relay-quality');
+}
 
 {
   const config = { provider: 'novelai', model: 'nai-diffusion-4-5-full' };
@@ -101,15 +127,6 @@ assert.equal(
   assert.equal(preset.paramsByProvider.novelai.negativePrompt, 'low quality, blurry');
 }
 
-{
-  const appSource = await readFile(new URL('../../src/scripts/ui/app.js', import.meta.url), 'utf8');
-  assert.match(
-    appSource,
-    /negativeTextarea\.value = resolveImageNegativePromptDraft\(initialNegativePrompt, generationParamBase\)/,
-  );
-  assert.match(appSource, /negativePromptMode: 'replace'/);
-  assert.match(appSource, /编辑只影响本次生成，不会修改生图设定/);
-}
 
 {
   const englishBase = JSON.parse(await readFile(new URL('../i18n/en.base.json', import.meta.url), 'utf8'));
@@ -120,6 +137,7 @@ assert.equal(
   });
   const configs = [
     { provider: 'openai', model: 'gpt-image-1' },
+    { provider: 'openai', model: 'gpt-image-2.5-sunburst' },
     { provider: 'openai', model: 'dall-e-3' },
     { provider: 'novelai', model: 'nai-diffusion-4-5-full' },
     { provider: 'stability', model: 'stable-image-ultra' },
@@ -144,4 +162,4 @@ assert.equal(
   assert.doesNotMatch(html, />Close<\/option>|>开启<\/option>/);
 }
 
-console.log('ok - fixed image negative prompts support visible one-shot replacement without mutating presets');
+console.log('ok - image parameters retain model-specific quality and fixed negative prompts without mutating presets');

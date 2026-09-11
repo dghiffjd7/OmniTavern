@@ -1,5 +1,7 @@
+import { IMAGE_PROMPT_TEXT_KEYS } from './image-prompt/image-prompt-utils.js';
 import { getImageGenerationParamsStore } from '../storage/image-generation-params-store.js';
 import { t, translateUiText } from '../i18n/index.js';
+import { imageGenerationSizeControlMarkup, bindImageGenerationSizeControl, validateImageGenerationSizeControls } from './image-generation-size-control.js';
 import {
   createDefaultImageGenerationPreset,
   normalizeImageGenerationPreset,
@@ -263,7 +265,8 @@ export class ImageGenerationParamsPanel {
 
   renderField(field, value) {
     const safeValue = value ?? field.defaultValue ?? '';
-    const help = field.help ? `<div class="igp-field-help">${escapeHtml(field.help)}</div>` : '';
+    const headingHelp = field.help && (field.type === 'image-size' || IMAGE_PROMPT_TEXT_KEYS.includes(field.key));
+    const help = field.help && !headingHelp ? `<div class="igp-field-help">${escapeHtml(field.help)}</div>` : '';
     const common = `data-param-key="${escapeHtml(field.key)}"`;
     const placeholder = field.placeholder ? ` placeholder="${escapeHtml(field.placeholder)}"` : '';
     const fieldClasses = [
@@ -271,14 +274,17 @@ export class ImageGenerationParamsPanel {
       field.fullWidth ? 'is-full-width' : '',
       field.variant ? `is-${field.variant}` : '',
     ].filter(Boolean).join(' ');
+    const title = headingHelp ? `<span class="has-help" data-help="${escapeHtml(translateUiText(field.help))}" data-help-mode="tap">${escapeHtml(field.label)}</span>` : escapeHtml(field.label);
     const label = field.badge
       ? `<div class="igp-field-heading">
-          <div class="igp-label">${escapeHtml(field.label)}</div>
+          <div class="igp-label">${title}</div>
           <span class="igp-field-badge">${escapeHtml(field.badge)}</span>
         </div>`
-      : `<div class="igp-label">${escapeHtml(field.label)}</div>`;
+      : `<div class="igp-label">${title}</div>`;
     let control = '';
-    if (field.type === 'select') {
+    if (field.type === 'image-size') {
+      control = imageGenerationSizeControlMarkup(field, safeValue, { selectClass: 'igp-select', inputClass: `${FIELD_CLASS} igp-input` });
+    } else if (field.type === 'select') {
       control = `<select ${common} class="${FIELD_CLASS} igp-select">
         ${(field.options || []).map(opt => `<option value="${escapeHtml(opt.value)}" ${String(opt.value) === String(safeValue) ? 'selected' : ''}>${escapeHtml(resolveImageGenerationOptionLabel(opt))}</option>`).join('')}
       </select>`;
@@ -299,6 +305,7 @@ export class ImageGenerationParamsPanel {
   }
 
   bindFieldInteractions() {
+    this.body?.querySelectorAll('.image-size-control').forEach(bindImageGenerationSizeControl);
     const samplerEl = this.body?.querySelector('[data-param-key="sampler"]');
     const smEl = this.body?.querySelector('[data-param-key="sm"]');
     const smDynEl = this.body?.querySelector('[data-param-key="sm_dyn"]');
@@ -319,7 +326,7 @@ export class ImageGenerationParamsPanel {
   }
 
   collectParams() {
-    const params = {};
+    const params = Object.fromEntries(IMAGE_PROMPT_TEXT_KEYS.filter(key => Object.hasOwn(this.getProviderParams(this.store.getActive(), this.currentConfig), key)).map(key => [key, this.getProviderParams(this.store.getActive(), this.currentConfig)[key]]));
     this.currentSchema.fields.forEach((field) => {
       const el = this.body?.querySelector(`[data-param-key="${CSS.escape(field.key)}"]`);
       if (!el) return;
@@ -330,6 +337,7 @@ export class ImageGenerationParamsPanel {
   }
 
   async saveCurrent() {
+    if (!validateImageGenerationSizeControls(this.body)) return;
     await this.store.ready;
     const active = this.store.getActive();
     const provider = normalizeImageProviderKey(this.currentConfig?.provider);
@@ -391,7 +399,10 @@ export class ImageGenerationParamsPanel {
       ...active,
       paramsByProvider: {
         ...(active.paramsByProvider || {}),
-        [provider]: fallback.paramsByProvider?.[provider] || {},
+        [provider]: {
+          ...(fallback.paramsByProvider?.[provider] || {}),
+          ...Object.fromEntries(IMAGE_PROMPT_TEXT_KEYS.filter(key => Object.hasOwn(active.paramsByProvider?.[provider] || {}, key)).map(key => [key, active.paramsByProvider[provider][key]])),
+        },
       },
       updatedAt: Date.now(),
     });

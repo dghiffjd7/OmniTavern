@@ -472,7 +472,10 @@ export class NovelAIImageProvider extends ImageProviderBase {
     const steps = toInt(options.steps, 23, { min: 1, max: 50 });
     const promptPrefix = String(options.promptPrefix || options.prompt_prefix || '').trim();
     const promptSuffix = String(options.promptSuffix || options.prompt_suffix || '').trim();
-    const input = [promptPrefix, String(prompt || '').trim(), promptSuffix].filter(Boolean).join(', ');
+    const resolved = options.imagePromptResolved;
+    const input = resolved ? String(resolved.prompt || '') : [promptPrefix, String(prompt || '').trim(), promptSuffix].filter(Boolean).join(', ');
+    const characters = Array.isArray(resolved?.characters) ? resolved.characters : [];
+    const useCoords = resolved?.useCoords === true && characters.length > 0;
     const sm = sampler === 'ddim' ? false : isEnabled(options.sm);
     const smDyn = sm ? isEnabled(options.sm_dyn) : false;
     return {
@@ -503,23 +506,23 @@ export class NovelAIImageProvider extends ImageProviderBase {
         sm_dyn: smDyn,
         uncond_scale: 1,
         cfg_rescale: cfgRescale,
-        use_coords: false,
-        characterPrompts: [],
+        use_coords: useCoords,
+        characterPrompts: characters.map(character => ({ prompt: character.prompt, uc: character.negative, center: character.center })),
         reference_image_multiple: [],
         reference_information_extracted_multiple: [],
         reference_strength_multiple: [],
         v4_negative_prompt: {
           caption: {
             base_caption: negative,
-            char_captions: [],
+            char_captions: characters.map(character => ({ char_caption: character.negative, centers: [character.center] })),
           },
         },
         v4_prompt: {
           caption: {
             base_caption: input,
-            char_captions: [],
+            char_captions: characters.map(character => ({ char_caption: character.prompt, centers: [character.center] })),
           },
-          use_coords: false,
+          use_coords: useCoords,
           use_order: true,
         },
       },

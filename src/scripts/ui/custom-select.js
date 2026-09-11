@@ -60,7 +60,7 @@ export const refreshCustomSelectButton = (buttonEl, selectEl, fallback = '请选
   buttonEl.classList.toggle('is-disabled', disabled);
 };
 
-export const openCustomSelectMenu = ({ anchorEl, options = [], currentValue = '', onSelect = null } = {}) => {
+export const openCustomSelectMenu = ({ anchorEl, options = [], currentValue = '', onSelect = null, onClose = null, menuClass = '' } = {}) => {
   if (!(anchorEl instanceof HTMLElement)) return;
   const isSameAnchorOpen =
     customSelectMenuAnchor === anchorEl &&
@@ -71,7 +71,9 @@ export const openCustomSelectMenu = ({ anchorEl, options = [], currentValue = ''
     return;
   }
 
+  closeCustomSelectMenu();
   const menu = ensureCustomSelectMenu();
+  if (menuClass) menu.classList.add(menuClass);
   const current = String(currentValue ?? '').trim();
   const opts = Array.isArray(options) ? options : [];
   menu.innerHTML = opts.map((opt) => {
@@ -147,8 +149,11 @@ export const openCustomSelectMenu = ({ anchorEl, options = [], currentValue = ''
     document.removeEventListener('touchstart', onDocClick, true);
     window.removeEventListener('resize', onResize);
     window.removeEventListener('scroll', onScroll, true);
+    if (menuClass) menu.classList.remove(menuClass);
+    onClose?.();
   };
   customSelectMenuAnchor = anchorEl;
+  return menu;
 };
 
 export const bindCustomSelectButton = ({ buttonEl, selectEl, fallback = '请选择' } = {}) => {

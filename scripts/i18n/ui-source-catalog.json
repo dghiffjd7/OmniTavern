@@ -2274,6 +2274,41 @@
     ]
   },
   {
+    "source": "2K 方图 · 2048 × 2048",
+    "references": [
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition",
+      "src/scripts/ui/image-generation-params-utils.js#ui-property"
+    ]
+  },
+  {
+    "source": "2K 横图 · 2048 × 1152",
+    "references": [
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition",
+      "src/scripts/ui/image-generation-params-utils.js#ui-property"
+    ]
+  },
+  {
+    "source": "2K 竖图 · 1152 × 2048",
+    "references": [
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition",
+      "src/scripts/ui/image-generation-params-utils.js#ui-property"
+    ]
+  },
+  {
+    "source": "4K 横图 · 3840 × 2160",
+    "references": [
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition",
+      "src/scripts/ui/image-generation-params-utils.js#ui-property"
+    ]
+  },
+  {
+    "source": "4K 竖图 · 2160 × 3840",
+    "references": [
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition",
+      "src/scripts/ui/image-generation-params-utils.js#ui-property"
+    ]
+  },
+  {
     "source": "520元",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -2428,6 +2463,12 @@
     "source": "按规则替换输入/输出文本；全局始终生效，角色/预设按绑定对象生效",
     "references": [
       "src/scripts/ui/regex-panel.js#html-attribute"
+    ]
+  },
+  {
+    "source": "按角色整理提示词，发送时合并为画面描述",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
     ]
   },
   {
@@ -3284,7 +3325,8 @@
     "source": "背景",
     "references": [
       "src/scripts/ui/app.js#html-text",
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -3364,6 +3406,12 @@
     "source": "本次联网不可用",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "本次留空",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
     ]
   },
   {
@@ -3475,7 +3523,13 @@
     ]
   },
   {
-    "source": "本次用量会分别记录语音模型与输入转写",
+    "source": "本次未使用",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "本次用量",
     "references": [
       "src/scripts/ui/realtime/realtime-call-panel.js#html-text"
     ]
@@ -3773,7 +3827,8 @@
   {
     "source": "比例",
     "references": [
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -4702,6 +4757,7 @@
   {
     "source": "不传",
     "references": [
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition",
       "src/scripts/ui/image-generation-params-utils.js#ui-property"
     ]
   },
@@ -4817,6 +4873,7 @@
   {
     "source": "不透明",
     "references": [
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition",
       "src/scripts/ui/image-generation-params-utils.js#ui-property"
     ]
   },
@@ -4824,13 +4881,6 @@
     "source": "不限制上游，由 OpenRouter 自动路由",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
-    ]
-  },
-  {
-    "source": "不想出现的内容，例如低清、畸形手、文字水印",
-    "references": [
-      "src/scripts/ui/app.js#dom-assignment",
-      "src/scripts/ui/app.js#html-attribute"
     ]
   },
   {
@@ -4953,7 +5003,8 @@
     "source": "步数",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -5034,7 +5085,8 @@
     "source": "采样器",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -5076,8 +5128,8 @@
   {
     "source": "参考图最多 {value} 张",
     "references": [
-      "src/scripts/ui/app.js#dom-assignment",
-      "src/scripts/ui/app.js#ui-call"
+      "src/scripts/ui/app.js#ui-call",
+      "src/scripts/ui/chat-image-prompt-modal.js#dom-assignment"
     ]
   },
   {
@@ -5378,7 +5430,8 @@
     "source": "插图素材",
     "references": [
       "src/scripts/ui/app.js#html-text",
-      "src/scripts/ui/app.js#ui-property"
+      "src/scripts/ui/app.js#ui-property",
+      "src/scripts/ui/chat-image-prompt-modal.js#html-text"
     ]
   },
   {
@@ -5621,6 +5674,13 @@
     ]
   },
   {
+    "source": "超高（xhigh）",
+    "references": [
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition",
+      "src/scripts/ui/image-generation-params-utils.js#ui-property"
+    ]
+  },
+  {
     "source": "超过单次自动生图上限（{value} 张）。点击重试可单独生成这张图。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -5732,6 +5792,12 @@
     "source": "撤销写入变更",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "撤销移除",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
     ]
   },
   {
@@ -5890,7 +5956,9 @@
   {
     "source": "尺寸",
     "references": [
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition",
+      "src/scripts/ui/image-generation-size-control.js#ui-definition"
     ]
   },
   {
@@ -7282,7 +7350,8 @@
   {
     "source": "当前 Gemini 图片链路未接入独立负面提示词参数。",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -8516,9 +8585,27 @@
     ]
   },
   {
+    "source": "当前模型使用画面级负向描述",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-utils.js#ui-definition"
+    ]
+  },
+  {
     "source": "当前模型使用兼容结构",
     "references": [
       "src/scripts/ui/chat/chat-structured-profile-status.js#ui-call"
+    ]
+  },
+  {
+    "source": "当前模型使用正向画面描述",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-utils.js#ui-definition"
+    ]
+  },
+  {
+    "source": "当前模型未使用",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
     ]
   },
   {
@@ -8541,6 +8628,12 @@
   },
   {
     "source": "当前模型最多 {value} 张，可用于角色、构图或风格参考",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "当前模型最多支持 {value} 个启用角色",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -8760,7 +8853,8 @@
   {
     "source": "当前图片模型不支持负面提示词。",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -9662,6 +9756,8 @@
   {
     "source": "德语",
     "references": [
+      "src/scripts/ui/realtime/realtime-reply-language-picker.js#ui-definition",
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition",
       "src/scripts/ui/realtime/realtime-voice-catalog.js#ui-definition"
     ]
   },
@@ -9760,6 +9856,7 @@
     "source": "低",
     "references": [
       "src/scripts/memory/default-template.js#ui-definition",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition",
       "src/scripts/ui/image-generation-params-utils.js#ui-property"
     ]
   },
@@ -10227,7 +10324,8 @@
   {
     "source": "调度器",
     "references": [
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -11205,7 +11303,8 @@
   {
     "source": "多数入口只会使用第一张图；保留多张用于后续扩展。",
     "references": [
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -11353,6 +11452,12 @@
     ]
   },
   {
+    "source": "发送预览",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "发送中…",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -11422,6 +11527,8 @@
   {
     "source": "法语",
     "references": [
+      "src/scripts/ui/realtime/realtime-reply-language-picker.js#ui-definition",
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition",
       "src/scripts/ui/realtime/realtime-voice-catalog.js#ui-definition"
     ]
   },
@@ -11454,6 +11561,7 @@
     "references": [
       "src/scripts/ui/agent-center-panel.js#html-text",
       "src/scripts/ui/app.js#html-text",
+      "src/scripts/ui/chat-image-prompt-modal.js#html-text",
       "src/scripts/ui/image-generation-params-panel.js#html-text",
       "src/scripts/ui/maid-settings-panel.js#html-text",
       "src/scripts/ui/persona-panel.js#html-attribute",
@@ -11468,6 +11576,7 @@
       "src/scripts/ui/agent-center-panel.js#html-attribute",
       "src/scripts/ui/agent-center-panel.js#html-text",
       "src/scripts/ui/chat/agent-request-preview.js#ui-call",
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition",
       "src/scripts/ui/preset-panel.js#html-attribute"
     ]
   },
@@ -11480,7 +11589,8 @@
   {
     "source": "返回格式",
     "references": [
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -11504,7 +11614,7 @@
   {
     "source": "返回生成",
     "references": [
-      "src/scripts/ui/app.js#html-text"
+      "src/scripts/ui/chat-image-prompt-modal.js#html-text"
     ]
   },
   {
@@ -11651,6 +11761,12 @@
     "source": "扉页尚是空白",
     "references": [
       "src/scripts/ui/app.js#html-text"
+    ]
+  },
+  {
+    "source": "分别发送每个角色的描述，可独立设置负向与位置",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
     ]
   },
   {
@@ -11802,7 +11918,8 @@
   {
     "source": "风格",
     "references": [
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -11815,7 +11932,8 @@
   {
     "source": "风格预设",
     "references": [
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -11902,7 +12020,20 @@
     "source": "负面提示词",
     "references": [
       "src/scripts/ui/app.js#html-text",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition",
       "src/scripts/ui/image-generation-params-utils.js#ui-property"
+    ]
+  },
+  {
+    "source": "负向",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "负向提示词",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
     ]
   },
   {
@@ -12075,6 +12206,7 @@
       "src/scripts/ui/chat/context-menu-ui-utils.js#ui-property",
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call",
       "src/scripts/ui/debug-panel-viewer-utils.js#dom-assignment",
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition",
       "src/scripts/ui/memory-table-editor.js#html-text",
       "src/scripts/ui/session-summary-modal-utils.js#ui-property",
       "src/scripts/ui/variable-panel-runtime.js#html-text"
@@ -12117,6 +12249,12 @@
     ]
   },
   {
+    "source": "复制区块",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "复制全文",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
@@ -12137,6 +12275,12 @@
       "src/scripts/ui/memory-table-editor.js#ui-call",
       "src/scripts/ui/variable-panel-runtime.js#ui-call",
       "src/scripts/ui/variable-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "复制失败，请选择文本复制",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
     ]
   },
   {
@@ -12168,6 +12312,12 @@
     "source": "复制引用",
     "references": [
       "src/scripts/ui/variable-schema-editor.js#html-text"
+    ]
+  },
+  {
+    "source": "副本",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
     ]
   },
   {
@@ -12583,6 +12733,7 @@
     "source": "高",
     "references": [
       "src/scripts/memory/default-template.js#ui-definition",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition",
       "src/scripts/ui/image-generation-params-utils.js#ui-property"
     ]
   },
@@ -12590,7 +12741,8 @@
     "source": "高 Prompt Guidance 时可缓解过饱和和伪影；0 表示关闭。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -12609,7 +12761,8 @@
     "source": "高度",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -12621,7 +12774,8 @@
   {
     "source": "高级参数",
     "references": [
-      "src/scripts/ui/app.js#html-text"
+      "src/scripts/ui/app.js#html-text",
+      "src/scripts/ui/chat-image-prompt-modal.js#html-text"
     ]
   },
   {
@@ -13491,13 +13645,21 @@
   {
     "source": "固定负面提示词",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition",
+      "src/scripts/ui/image-prompt/image-prompt-utils.js#ui-definition"
     ]
   },
   {
-    "source": "固定内容已自动带入；编辑只影响本次生成，不会修改生图设定",
+    "source": "固定负向",
     "references": [
-      "src/scripts/ui/app.js#html-text"
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "固定后缀",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
     ]
   },
   {
@@ -13507,17 +13669,27 @@
     ]
   },
   {
+    "source": "固定正向",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "固定正向后缀",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition",
+      "src/scripts/ui/image-prompt/image-prompt-utils.js#ui-definition"
     ]
   },
   {
     "source": "固定正向前缀",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition",
+      "src/scripts/ui/image-prompt/image-prompt-utils.js#ui-definition"
     ]
   },
   {
@@ -13536,6 +13708,7 @@
       "src/scripts/ui/app.js#html-text",
       "src/scripts/ui/chat-fc-compatibility-panel.js#html-attribute",
       "src/scripts/ui/chat-fc-compatibility-panel.js#html-text",
+      "src/scripts/ui/chat-image-prompt-modal.js#html-attribute",
       "src/scripts/ui/chat/execution-flow-runtime-utils.js#html-attribute",
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call",
       "src/scripts/ui/config-panel.js#html-attribute",
@@ -13544,6 +13717,7 @@
       "src/scripts/ui/general-settings-panel.js#html-text",
       "src/scripts/ui/group-chat-panels.js#html-attribute",
       "src/scripts/ui/group-panel.js#html-attribute",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition",
       "src/scripts/ui/image-generation-params-utils.js#ui-property",
       "src/scripts/ui/memory-table-editor.js#html-attribute",
       "src/scripts/ui/moment-summary-panel.js#html-text",
@@ -13603,7 +13777,8 @@
   {
     "source": "关闭安全检查",
     "references": [
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -14475,7 +14650,9 @@
   {
     "source": "韩文",
     "references": [
-      "src/scripts/ui/config-panel.js#html-text"
+      "src/scripts/ui/config-panel.js#html-text",
+      "src/scripts/ui/realtime/realtime-reply-language-picker.js#ui-definition",
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
     ]
   },
   {
@@ -15022,6 +15199,12 @@
     "source": "回复完成通知",
     "references": [
       "src/scripts/ui/general-settings-panel.js#ui-property"
+    ]
+  },
+  {
+    "source": "回复语言",
+    "references": [
+      "src/scripts/ui/realtime/realtime-reply-language-picker.js#ui-definition"
     ]
   },
   {
@@ -16678,6 +16861,7 @@
     "source": "角色",
     "references": [
       "src/scripts/ui/agent-center-panel.js#html-text",
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition",
       "src/scripts/ui/realtime/realtime-call-panel.js#html-text",
       "src/scripts/ui/realtime/realtime-call-panel.js#ui-definition",
       "src/scripts/ui/regex-panel.js#html-text",
@@ -16798,6 +16982,24 @@
     "source": "角色动画",
     "references": [
       "src/scripts/ui/app.js#html-text"
+    ]
+  },
+  {
+    "source": "角色负向",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "角色负向用于排除该角色的特征；位置按当前模型的网格处理",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "角色负向与位置",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
     ]
   },
   {
@@ -17020,6 +17222,12 @@
     ]
   },
   {
+    "source": "角色区块与 | 分隔语法请择一使用",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-utils.js#ui-definition"
+    ]
+  },
+  {
     "source": "角色设定",
     "references": [
       "src/scripts/ui/character-card-importer.js#ui-property"
@@ -17074,6 +17282,12 @@
     "source": "角色体验包导入完成",
     "references": [
       "src/scripts/ui/experience-pack-transfer.js#ui-call"
+    ]
+  },
+  {
+    "source": "角色位置",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
     ]
   },
   {
@@ -17521,13 +17735,6 @@
     ]
   },
   {
-    "source": "结束并关闭",
-    "references": [
-      "src/scripts/ui/realtime/realtime-call-panel.js#html-attribute",
-      "src/scripts/ui/realtime/realtime-call-panel.js#ui-definition"
-    ]
-  },
-  {
     "source": "结束原因 {value}",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -17621,7 +17828,8 @@
   {
     "source": "仅 JPEG/WebP 适用。",
     "references": [
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -17803,6 +18011,12 @@
     ]
   },
   {
+    "source": "仅用于本次生成",
+    "references": [
+      "src/scripts/ui/chat-image-prompt-modal.js#html-attribute"
+    ]
+  },
+  {
     "source": "仅预览已选",
     "references": [
       "src/scripts/ui/app.js#html-text"
@@ -17823,13 +18037,15 @@
   {
     "source": "仅在你的 WebUI 版本支持时传递。",
     "references": [
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
     "source": "仅在你的兼容端点支持时填写。",
     "references": [
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -17842,6 +18058,12 @@
     "source": "仅在需要排查问题时开启，保留更多运行日志。",
     "references": [
       "src/scripts/ui/general-settings-panel.js#ui-property"
+    ]
+  },
+  {
+    "source": "仅在已确认支持负向的模型中使用",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-utils.js#ui-definition"
     ]
   },
   {
@@ -18009,7 +18231,8 @@
   {
     "source": "静音",
     "references": [
-      "src/scripts/ui/realtime/realtime-call-panel.js#html-text"
+      "src/scripts/ui/realtime/realtime-call-panel.js#html-text",
+      "src/scripts/ui/realtime/realtime-call-panel.js#ui-definition"
     ]
   },
   {
@@ -18238,6 +18461,7 @@
     "source": "开启",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition",
       "src/scripts/ui/image-generation-params-utils.js#ui-property"
     ]
   },
@@ -18294,7 +18518,8 @@
     "source": "开启后由 NovelAI 追加模型对应质量标签；如提示词已手写大量质量词，可关闭。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -18320,6 +18545,12 @@
     "references": [
       "src/scripts/ui/contact-settings-panel.js#html-text",
       "src/scripts/ui/group-chat-panels.js#html-text"
+    ]
+  },
+  {
+    "source": "开启扬声器",
+    "references": [
+      "src/scripts/ui/realtime/realtime-call-panel.js#ui-definition"
     ]
   },
   {
@@ -18576,6 +18807,12 @@
     ]
   },
   {
+    "source": "可选择常用尺寸或自定义宽 × 高；边长须为 16 的倍数，最多 3840 像素，长宽比介于 1:3 到 3:1，总像素为 655,360 到 8,294,400。超过 2560 × 1440 总像素的输出属于实验性功能。",
+    "references": [
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
+    ]
+  },
+  {
     "source": "可用 Realtime 模型列表",
     "references": [
       "src/scripts/ui/config-panel.js#html-attribute",
@@ -18641,6 +18878,12 @@
     "source": "可在消息旁处理：{value}",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "可直接粘贴完整提示词；固定内容可在分隔区修改，作为本次覆盖",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
     ]
   },
   {
@@ -18751,7 +18994,14 @@
     "source": "宽度",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
+    ]
+  },
+  {
+    "source": "宽和高须为 16 的正整数倍。",
+    "references": [
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -18777,6 +19027,12 @@
     "source": "扩展面板 · 更改会在保存后即时生效",
     "references": [
       "src/scripts/ui/extensions-panel.js#html-text"
+    ]
+  },
+  {
+    "source": "拉出发送预览",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
     ]
   },
   {
@@ -18906,6 +19162,12 @@
     "source": "来源世界书暂时不可用",
     "references": [
       "src/scripts/ui/world-editor.js#ui-call"
+    ]
+  },
+  {
+    "source": "来自生成参数或图片记录；此处修改随本次图片保存",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
     ]
   },
   {
@@ -19131,13 +19393,15 @@
   {
     "source": "例如 1024x1024；留空则不传。",
     "references": [
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
     "source": "例如 Euler a、DPM++ 2M Karras；留空则使用服务端默认。",
     "references": [
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -19232,6 +19496,7 @@
   {
     "source": "例如：low quality, blurry, bad hands…",
     "references": [
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition",
       "src/scripts/ui/image-generation-params-utils.js#ui-property"
     ]
   },
@@ -20178,26 +20443,30 @@
   {
     "source": "留空或 -1 则不传 seed；固定 seed 请填 0 或正整数。",
     "references": [
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
     "source": "留空或 -1 则随机；固定 seed 请填 0 或正整数。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
     "source": "留空或 -1 则随机；A1111 会保留 -1。固定 seed 请填 0 或正整数。",
     "references": [
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
     "source": "留空或 -1 则由服务商随机；固定 seed 请填 0 或正整数。",
     "references": [
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -20218,13 +20487,6 @@
     "references": [
       "src/scripts/ui/voice-registry-panel.js#dom-assignment",
       "src/scripts/ui/voice-registry-panel.js#html-attribute"
-    ]
-  },
-  {
-    "source": "留空则使用动态正文作为提示词",
-    "references": [
-      "src/scripts/ui/app.js#dom-assignment",
-      "src/scripts/ui/app.js#html-attribute"
     ]
   },
   {
@@ -20340,6 +20602,12 @@
     "source": "麦克风权限未开启。再次点击语音可重新请求，或前往系统设置开启。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "麦克风已静音",
+    "references": [
+      "src/scripts/ui/realtime/realtime-call-panel.js#ui-definition"
     ]
   },
   {
@@ -20712,15 +20980,13 @@
   {
     "source": "每次调用 NovelAI 前自动加到正向提示词开头，适合放画师串、固定画风标签。",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual",
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
     "source": "每次调用 NovelAI 前自动加到正向提示词末尾。",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual",
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -20823,6 +21089,12 @@
     ]
   },
   {
+    "source": "每条边最多 3840 像素。",
+    "references": [
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
+    ]
+  },
+  {
     "source": "每行一条摘要（顺序对应所选摘要）。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -20856,7 +21128,8 @@
   {
     "source": "面部修复",
     "references": [
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -20876,13 +21149,6 @@
     "source": "描述: {value}{value2}",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
-    ]
-  },
-  {
-    "source": "描述你想生成的图片，例如角色、场景、风格、构图、光线",
-    "references": [
-      "src/scripts/ui/app.js#dom-assignment",
-      "src/scripts/ui/app.js#html-attribute"
     ]
   },
   {
@@ -21594,6 +21860,7 @@
     "source": "默认",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition",
       "src/scripts/ui/image-generation-params-utils.js#ui-property",
       "src/scripts/ui/theme-manager.js#ui-property",
       "src/scripts/ui/world-panel.js#dom-assignment",
@@ -21733,7 +22000,8 @@
   {
     "source": "默认图片参数",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -22849,7 +23117,9 @@
   {
     "source": "普通话／中文",
     "references": [
-      "src/scripts/ui/config-panel.js#html-text"
+      "src/scripts/ui/config-panel.js#html-text",
+      "src/scripts/ui/realtime/realtime-reply-language-picker.js#ui-definition",
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
     ]
   },
   {
@@ -23080,6 +23350,12 @@
     "source": "启用且 API 已配置时，会把当前已开启功能对应的格式要求一并提供给模型。",
     "references": [
       "src/scripts/agent/agent-feature-settings.js#ui-definition"
+    ]
+  },
+  {
+    "source": "启用区块",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
     ]
   },
   {
@@ -23542,7 +23818,8 @@
   {
     "source": "清除本次覆盖",
     "references": [
-      "src/scripts/ui/app.js#html-text"
+      "src/scripts/ui/app.js#html-text",
+      "src/scripts/ui/chat-image-prompt-modal.js#html-text"
     ]
   },
   {
@@ -24267,6 +24544,12 @@
     ]
   },
   {
+    "source": "请填写宽 × 高，例如 3840 × 2160。",
+    "references": [
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
+    ]
+  },
+  {
     "source": "请填写模型",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -24288,6 +24571,12 @@
     "source": "请填写有效的 Google Cloud Project ID",
     "references": [
       "src/scripts/ui/realtime/realtime-provider-catalog.js#ui-definition"
+    ]
+  },
+  {
+    "source": "请填写正向或角色提示词",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-utils.js#ui-definition"
     ]
   },
   {
@@ -24465,12 +24754,6 @@
     "source": "请先填写提示词模板",
     "references": [
       "src/scripts/ui/app.js#ui-call"
-    ]
-  },
-  {
-    "source": "请先填写图片提示词",
-    "references": [
-      "src/scripts/ui/app.js#dom-assignment"
     ]
   },
   {
@@ -24857,6 +25140,12 @@
     ]
   },
   {
+    "source": "区块操作",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "区块列表",
     "references": [
       "src/scripts/ui/agent-center-panel.js#html-text"
@@ -24866,9 +25155,16 @@
     "source": "区块名称",
     "references": [
       "src/scripts/ui/agent-center-panel.js#ui-property",
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition",
       "src/scripts/ui/preset-panel.js#dom-assignment",
       "src/scripts/ui/preset-panel.js#html-attribute",
       "src/scripts/ui/preset-panel.js#ui-property"
+    ]
+  },
+  {
+    "source": "区块内已有提示词，确定移除吗？",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
     ]
   },
   {
@@ -24898,6 +25194,7 @@
       "src/scripts/ui/app.js#ui-property",
       "src/scripts/ui/character-card-importer.js#html-text",
       "src/scripts/ui/character-card-transfer.js#ui-property",
+      "src/scripts/ui/chat-image-prompt-modal.js#html-text",
       "src/scripts/ui/chat/code-viewer-ui-utils.js#dom-assignment",
       "src/scripts/ui/chat/inline-edit-ui-utils.js#html-attribute",
       "src/scripts/ui/chat/selection-mode-ui-utils.js#dom-assignment",
@@ -24910,6 +25207,7 @@
       "src/scripts/ui/group-chat-panels.js#html-text",
       "src/scripts/ui/group-panel.js#html-attribute",
       "src/scripts/ui/image-generation-params-panel.js#html-text",
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition",
       "src/scripts/ui/memory-table-editor.js#html-text",
       "src/scripts/ui/memory-template-panel.js#html-text",
       "src/scripts/ui/memory-template-panel.js#ui-property",
@@ -24971,6 +25269,12 @@
     "source": "取消回复",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "取消静音",
+    "references": [
+      "src/scripts/ui/realtime/realtime-call-panel.js#ui-definition"
     ]
   },
   {
@@ -26574,7 +26878,9 @@
   {
     "source": "日文",
     "references": [
-      "src/scripts/ui/config-panel.js#html-text"
+      "src/scripts/ui/config-panel.js#html-text",
+      "src/scripts/ui/realtime/realtime-reply-language-picker.js#ui-definition",
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
     ]
   },
   {
@@ -27974,7 +28280,8 @@
   {
     "source": "审核强度",
     "references": [
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -28123,7 +28430,8 @@
   {
     "source": "生成时可填写本次负面提示词。",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -28150,7 +28458,9 @@
       "src/index.html#html-attribute",
       "src/scripts/ui/app.js#html-attribute",
       "src/scripts/ui/app.js#html-text",
-      "src/scripts/ui/app.js#ui-property"
+      "src/scripts/ui/app.js#ui-property",
+      "src/scripts/ui/chat-image-prompt-modal.js#html-attribute",
+      "src/scripts/ui/chat-image-prompt-modal.js#html-text"
     ]
   },
   {
@@ -28252,7 +28562,8 @@
   {
     "source": "生成张数",
     "references": [
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -28623,7 +28934,9 @@
   {
     "source": "实时通话",
     "references": [
-      "src/scripts/ui/config-panel.js#html-text"
+      "src/scripts/ui/config-panel.js#html-text",
+      "src/scripts/ui/realtime/realtime-call-panel.js#html-attribute",
+      "src/scripts/ui/realtime/realtime-call-panel.js#ui-definition"
     ]
   },
   {
@@ -28825,9 +29138,9 @@
   {
     "source": "使用当前图片模型生成并写入这个聊天室",
     "references": [
-      "src/scripts/ui/app.js#html-attribute",
-      "src/scripts/ui/app.js#html-text",
-      "src/scripts/ui/app.js#ui-property"
+      "src/scripts/ui/app.js#ui-property",
+      "src/scripts/ui/chat-image-prompt-modal.js#html-attribute",
+      "src/scripts/ui/chat-image-prompt-modal.js#html-text"
     ]
   },
   {
@@ -29379,6 +29692,13 @@
     ]
   },
   {
+    "source": "适用于其他渠道",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition",
+      "src/scripts/ui/image-prompt/image-prompt-utils.js#ui-definition"
+    ]
+  },
+  {
     "source": "适中",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -29768,7 +30088,8 @@
   {
     "source": "输出格式",
     "references": [
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -29922,7 +30243,8 @@
   {
     "source": "输入识别语言",
     "references": [
-      "src/scripts/ui/config-panel.js#html-text"
+      "src/scripts/ui/config-panel.js#html-text",
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
     ]
   },
   {
@@ -30646,9 +30968,24 @@
     ]
   },
   {
+    "source": "随当前参数预设保存，放在正向开头；生图输入框中可修改为本次覆盖。",
+    "references": [
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
+    ]
+  },
+  {
+    "source": "随当前参数预设保存，放在正向末尾；生图输入框中可修改为本次覆盖。",
+    "references": [
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
+    ]
+  },
+  {
     "source": "随当前参数预设保存；打开生图弹窗时会自动带入，弹窗中的编辑只覆盖本次生成。",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -30672,7 +31009,9 @@
   {
     "source": "随预设保存",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -30748,6 +31087,12 @@
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/scripts/ui/chat/prompt-preview-view-utils.js#html-text"
+    ]
+  },
+  {
+    "source": "台湾普通话",
+    "references": [
+      "src/scripts/ui/realtime/realtime-reply-language-picker.js#ui-definition"
     ]
   },
   {
@@ -31036,7 +31381,7 @@
   {
     "source": "添加参考图",
     "references": [
-      "src/scripts/ui/app.js#html-text"
+      "src/scripts/ui/chat-image-prompt-modal.js#html-text"
     ]
   },
   {
@@ -31101,6 +31446,12 @@
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/scripts/ui/session-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "添加角色",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
     ]
   },
   {
@@ -31813,6 +32164,12 @@
     ]
   },
   {
+    "source": "通过通话指令引导角色的回复语言；可填写语言或口音，效果取决于模型与音色。留空时跟随对话。",
+    "references": [
+      "src/scripts/ui/realtime/realtime-reply-language-picker.js#ui-definition"
+    ]
+  },
+  {
     "source": "通话发生错误",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
@@ -31829,6 +32186,20 @@
     "source": "通话开始时加载角色上下文；通话中修改角色设定，下次通话生效。",
     "references": [
       "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
+    ]
+  },
+  {
+    "source": "通话时长",
+    "references": [
+      "src/scripts/ui/realtime/realtime-call-panel.js#html-attribute",
+      "src/scripts/ui/realtime/realtime-call-panel.js#ui-definition"
+    ]
+  },
+  {
+    "source": "通话提醒",
+    "references": [
+      "src/scripts/ui/realtime/realtime-call-panel.js#html-attribute",
+      "src/scripts/ui/realtime/realtime-call-panel.js#ui-definition"
     ]
   },
   {
@@ -32194,6 +32565,7 @@
     "references": [
       "src/scripts/ui/config-panel.js#html-text",
       "src/scripts/ui/image-generation-params-panel.js#html-text",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition",
       "src/scripts/ui/image-generation-params-utils.js#ui-property"
     ]
   },
@@ -32297,9 +32669,9 @@
     ]
   },
   {
-    "source": "图片提示词",
+    "source": "图片提示词版本较新，请更新 App",
     "references": [
-      "src/scripts/ui/app.js#html-text"
+      "src/scripts/ui/image-prompt/image-prompt-utils.js#ui-definition"
     ]
   },
   {
@@ -32588,6 +32960,19 @@
     ]
   },
   {
+    "source": "拖动排序",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "拖动收起并吸附到顶部或两侧；Alt + 方向键移动，Alt + Home 回到顶部",
+    "references": [
+      "src/scripts/ui/realtime/realtime-call-panel.js#html-attribute",
+      "src/scripts/ui/realtime/realtime-call-panel.js#ui-definition"
+    ]
+  },
+  {
     "source": "拖拽",
     "references": [
       "src/scripts/ui/app.js#html-text"
@@ -32621,6 +33006,12 @@
     "source": "外边距",
     "references": [
       "src/scripts/ui/app.js#html-text"
+    ]
+  },
+  {
+    "source": "外观、服装、动作与特征…",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
     ]
   },
   {
@@ -33496,7 +33887,8 @@
   {
     "source": "未选择图片模型",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
     ]
   },
   {
@@ -34657,6 +35049,8 @@
   {
     "source": "西班牙语",
     "references": [
+      "src/scripts/ui/realtime/realtime-reply-language-picker.js#ui-definition",
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition",
       "src/scripts/ui/realtime/realtime-voice-catalog.js#ui-definition"
     ]
   },
@@ -36057,6 +36451,12 @@
     ]
   },
   {
+    "source": "需要排除的角色特征…",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "需要用户再次确认后才会提交。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -36151,6 +36551,24 @@
     ]
   },
   {
+    "source": "选填",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "选填需要排除的内容",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "选填需要排除的内容；固定内容可在分隔区修改，作为本次覆盖",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "选择",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
@@ -36240,6 +36658,12 @@
     "source": "选择更多表情反应",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "选择回复语言",
+    "references": [
+      "src/scripts/ui/realtime/realtime-reply-language-picker.js#ui-definition"
     ]
   },
   {
@@ -36555,7 +36979,8 @@
   {
     "source": "压缩质量",
     "references": [
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -36634,7 +37059,8 @@
   {
     "source": "扬声器",
     "references": [
-      "src/scripts/ui/realtime/realtime-call-panel.js#html-text"
+      "src/scripts/ui/realtime/realtime-call-panel.js#html-text",
+      "src/scripts/ui/realtime/realtime-call-panel.js#ui-definition"
     ]
   },
   {
@@ -36732,6 +37158,7 @@
   {
     "source": "移除",
     "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition",
       "src/scripts/ui/maid-selection-mode.js#html-attribute"
     ]
   },
@@ -36763,6 +37190,12 @@
     "source": "移除配图",
     "references": [
       "src/scripts/ui/app.js#html-attribute"
+    ]
+  },
+  {
+    "source": "移除区块",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
     ]
   },
   {
@@ -37475,6 +37908,7 @@
     "source": "已复制",
     "references": [
       "src/scripts/ui/app.js#ui-call",
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition",
       "src/scripts/ui/memory-table-editor.js#ui-call",
       "src/scripts/ui/variable-panel-runtime.js#ui-call"
     ]
@@ -38252,6 +38686,8 @@
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call",
       "src/scripts/ui/chat/hopscotch-court-view.js#ui-call",
       "src/scripts/ui/chat/hopscotch-variable-card-view.js#ui-call",
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition",
+      "src/scripts/ui/image-prompt/image-prompt-utils.js#ui-definition",
       "src/scripts/ui/plugin-panel.js#dom-assignment",
       "src/scripts/ui/request-param-report-view.js#ui-call"
     ]
@@ -39137,7 +39573,9 @@
   {
     "source": "英文",
     "references": [
-      "src/scripts/ui/config-panel.js#html-text"
+      "src/scripts/ui/config-panel.js#html-text",
+      "src/scripts/ui/realtime/realtime-reply-language-picker.js#ui-definition",
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
     ]
   },
   {
@@ -39623,6 +40061,18 @@
     "source": "用于实时通话的输入转写。",
     "references": [
       "src/scripts/ui/config-panel.js#html-attribute"
+    ]
+  },
+  {
+    "source": "用于输入转写，独立于角色的回复语言。",
+    "references": [
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
+    ]
+  },
+  {
+    "source": "用于所有模型",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
     ]
   },
   {
@@ -40462,6 +40912,12 @@
     ]
   },
   {
+    "source": "粤语",
+    "references": [
+      "src/scripts/ui/realtime/realtime-reply-language-picker.js#ui-definition"
+    ]
+  },
+  {
     "source": "云端",
     "references": [
       "src/scripts/ui/config-panel.js#html-text"
@@ -40726,6 +41182,12 @@
     "source": "在「界面与调试」卡片右上角展开「调试选项」。",
     "references": [
       "src/scripts/ui/maid-onboarding-flows.js#ui-definition"
+    ]
+  },
+  {
+    "source": "在工作流中连接负向提示词占位符后使用",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-utils.js#ui-definition"
     ]
   },
   {
@@ -41501,7 +41963,8 @@
     "source": "噪声调度",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -41543,7 +42006,8 @@
   {
     "source": "增强提示词",
     "references": [
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -41646,7 +42110,8 @@
   {
     "source": "粘贴 ComfyUI 的 Save (API Format) JSON；可使用 \"%prompt%\"、\"%negative_prompt%\"、\"%model%\"、\"%seed%\"、\"%width%\"、\"%height%\"、\"%steps%\"、\"%scale%\" 等占位符。",
     "references": [
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -41661,6 +42126,12 @@
     "references": [
       "src/scripts/ui/config-panel.js#html-attribute",
       "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
+    ]
+  },
+  {
+    "source": "粘贴完整提示词，或描述想生成的图片",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
     ]
   },
   {
@@ -41745,9 +42216,22 @@
     ]
   },
   {
+    "source": "展开通话控制",
+    "references": [
+      "src/scripts/ui/realtime/realtime-call-panel.js#html-attribute",
+      "src/scripts/ui/realtime/realtime-call-panel.js#ui-definition"
+    ]
+  },
+  {
     "source": "展开推理强度选项",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "展开完整预览",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
     ]
   },
   {
@@ -41767,6 +42251,12 @@
     "source": "展示",
     "references": [
       "src/scripts/ui/variable-panel-runtime.js#html-text"
+    ]
+  },
+  {
+    "source": "展示本次发送给图片模型的提示词；点击来源可返回编辑",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
     ]
   },
   {
@@ -41809,6 +42299,12 @@
     "source": "长按这颗悬浮球打开女仆指令条。电脑上按住片刻，手机上也是长按。",
     "references": [
       "src/scripts/ui/maid-onboarding-flows.js#ui-definition"
+    ]
+  },
+  {
+    "source": "长边与短边的比例最多为 3:1。",
+    "references": [
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -42452,12 +42948,6 @@
     ]
   },
   {
-    "source": "正文和配图都会以资源引用保存，不写入大型 base64",
-    "references": [
-      "src/scripts/ui/app.js#html-text"
-    ]
-  },
-  {
     "source": "正文检查",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -42573,9 +43063,16 @@
     ]
   },
   {
+    "source": "正向",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "正向提示词",
     "references": [
-      "src/scripts/ui/app.js#html-text"
+      "src/scripts/ui/app.js#html-text",
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
     ]
   },
   {
@@ -43031,6 +43528,12 @@
     ]
   },
   {
+    "source": "正在载入提示词…",
+    "references": [
+      "src/scripts/ui/chat-image-prompt-modal.js#dom-assignment"
+    ]
+  },
+  {
     "source": "正在整理导入资料...",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -43453,18 +43956,6 @@
     ]
   },
   {
-    "source": "只覆盖本次动态配图，不会写入全局默认",
-    "references": [
-      "src/scripts/ui/app.js#html-text"
-    ]
-  },
-  {
-    "source": "只覆盖本次生成，不会写入全局默认",
-    "references": [
-      "src/scripts/ui/app.js#html-text"
-    ]
-  },
-  {
     "source": "只能检查最新一轮已完成的 AI 回复",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -43625,7 +44116,8 @@
   {
     "source": "质量",
     "references": [
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -43644,7 +44136,8 @@
   {
     "source": "质量越高，延迟和成本通常越高。",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -43686,6 +44179,7 @@
     "references": [
       "src/scripts/memory/default-template.js#ui-definition",
       "src/scripts/ui/app.js#html-text",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition",
       "src/scripts/ui/image-generation-params-utils.js#ui-property"
     ]
   },
@@ -44675,7 +45169,8 @@
   {
     "source": "自定义",
     "references": [
-      "src/scripts/ui/custom-bundle-exporter.js#html-text"
+      "src/scripts/ui/custom-bundle-exporter.js#html-text",
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
     ]
   },
   {
@@ -44726,6 +45221,7 @@
   {
     "source": "自定义 OpenAI 兼容图片参数",
     "references": [
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition",
       "src/scripts/ui/image-generation-params-utils.js#ui-property"
     ]
   },
@@ -44733,6 +45229,12 @@
     "source": "自定义参数最多 100 项",
     "references": [
       "src/scripts/ui/request-params-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "自定义尺寸",
+    "references": [
+      "src/scripts/ui/image-generation-size-control.js#ui-definition"
     ]
   },
   {
@@ -44873,7 +45375,15 @@
   {
     "source": "自动",
     "references": [
-      "src/scripts/ui/image-generation-params-utils.js#ui-property"
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition",
+      "src/scripts/ui/image-generation-params-utils.js#ui-property",
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "自动（跟随对话）",
+    "references": [
+      "src/scripts/ui/realtime/realtime-reply-language-picker.js#ui-definition"
     ]
   },
   {
@@ -44930,6 +45440,12 @@
     "source": "自动存档 ({date})",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "自动根据角色顺序安排；自定义时在角色中选择位置",
+    "references": [
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
     ]
   },
   {
@@ -45033,7 +45549,8 @@
   {
     "source": "自动识别",
     "references": [
-      "src/scripts/ui/config-panel.js#html-text"
+      "src/scripts/ui/config-panel.js#html-text",
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
     ]
   },
   {
@@ -45166,6 +45683,12 @@
     ]
   },
   {
+    "source": "总像素须在 655,360 到 8,294,400 之间。",
+    "references": [
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
+    ]
+  },
+  {
     "source": "阻止",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -45285,6 +45808,13 @@
     ]
   },
   {
+    "source": "最高（max）",
+    "references": [
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition",
+      "src/scripts/ui/image-generation-params-utils.js#ui-property"
+    ]
+  },
+  {
     "source": "最后按下保存。只有配置真的保存成功，我才会把这堂课记为完成。",
     "references": [
       "src/scripts/ui/maid-onboarding-flows.js#ui-definition"
@@ -45374,6 +45904,13 @@
     "source": "最小",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "最小化通话",
+    "references": [
+      "src/scripts/ui/realtime/realtime-call-panel.js#html-attribute",
+      "src/scripts/ui/realtime/realtime-call-panel.js#ui-definition"
     ]
   },
   {
@@ -46214,6 +46751,7 @@
   {
     "source": "AUTOMATIC1111 参数",
     "references": [
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition",
       "src/scripts/ui/image-generation-params-utils.js#ui-property"
     ]
   },
@@ -46358,6 +46896,7 @@
   {
     "source": "ComfyUI 参数",
     "references": [
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition",
       "src/scripts/ui/image-generation-params-utils.js#ui-property"
     ]
   },
@@ -46572,7 +47111,8 @@
   {
     "source": "Gemini 图片参数",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -46620,13 +47160,15 @@
   {
     "source": "Google Imagen 参数",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
     "source": "Google Imagen 链路会传递 negativePrompt。",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -46638,7 +47180,8 @@
   {
     "source": "gpt-image-2 当前不支持 transparent。",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -46702,7 +47245,8 @@
   {
     "source": "Imagen 预测链路使用；其他模型可能忽略。",
     "references": [
-      "src/scripts/ui/image-generation-params-utils.js#ui-builder"
+      "src/scripts/ui/image-generation-params-utils.js#ui-builder",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -47032,6 +47576,7 @@
     "source": "NovelAI Diffusion 参数",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition",
       "src/scripts/ui/image-generation-params-utils.js#ui-property"
     ]
   },
@@ -47075,7 +47620,8 @@
   {
     "source": "OpenAI 图片参数",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
@@ -47099,18 +47645,21 @@
   {
     "source": "OpenAI DALL·E 2 参数",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
   },
   {
     "source": "OpenAI DALL·E 3 参数",
     "references": [
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition",
       "src/scripts/ui/image-generation-params-utils.js#ui-property"
     ]
   },
   {
     "source": "OpenAI GPT Image 参数",
     "references": [
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition",
       "src/scripts/ui/image-generation-params-utils.js#ui-property"
     ]
   },
@@ -47256,6 +47805,7 @@
   {
     "source": "Pollinations 参数",
     "references": [
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition",
       "src/scripts/ui/image-generation-params-utils.js#ui-property"
     ]
   },
@@ -47541,6 +48091,7 @@
   {
     "source": "Stability AI 参数",
     "references": [
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition",
       "src/scripts/ui/image-generation-params-utils.js#ui-property"
     ]
   },
@@ -47679,6 +48230,7 @@
   {
     "source": "Together AI 图片参数",
     "references": [
+      "src/scripts/ui/image-generation-params-utils.js#ui-definition",
       "src/scripts/ui/image-generation-params-utils.js#ui-property"
     ]
   },

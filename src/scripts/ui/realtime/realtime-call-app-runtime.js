@@ -85,6 +85,7 @@ export const createRealtimeCallAppRuntime = ({
 
   panel = createPanel({
     documentRef,
+    windowLike,
     onToggleMute: () => {
       const muted = runtime?.getState?.().muted === true;
       runtime?.setMicrophoneMuted?.(!muted);
@@ -110,10 +111,12 @@ export const createRealtimeCallAppRuntime = ({
     commitAssistantMessage,
     onStateChange: state => {
       panel?.renderState?.(state);
+      if (state.status === 'idle') panel?.hide?.();
       button?.classList?.toggle?.('is-active', state.status !== 'idle');
       button?.setAttribute?.('aria-pressed', String(state.status !== 'idle'));
     },
     onCaption: caption => panel?.setCaption?.(caption),
+    onAudioLevel: value => panel?.setAudioLevel?.(value),
     onUsage: event => {
       usageTotals = accumulateRealtimeUsage(usageTotals, event);
       panel?.setUsage?.(usageTotals);
@@ -145,14 +148,14 @@ export const createRealtimeCallAppRuntime = ({
       return false;
     }
     if (runtime.getState().status !== 'idle') {
-      panel.show(target);
+      panel.show(target, { expanded: true });
       return true;
     }
     usageTotals = createRealtimeUsageTotals();
     panel.setUsage(usageTotals);
     panel.setWarning('');
     panel.setCaption({ role: '', text: '连接后即可自然说话' });
-    panel.show(target);
+    panel.show(target, { expanded: true });
     const started = await runtime.start();
     if (!started) panel.hide();
     return started;
@@ -162,7 +165,7 @@ export const createRealtimeCallAppRuntime = ({
 
   const handlePageHide = () => {
     onLifecycleInvalidated?.('page_hidden');
-    void runtime.end('page_hidden');
+    void endAndHide('page_hidden');
   };
   const handleVisibilityChange = () => {
     if (documentRef?.visibilityState !== 'hidden') return;
@@ -186,6 +189,7 @@ export const createRealtimeCallAppRuntime = ({
       windowLike?.removeEventListener?.('pagehide', handlePageHide);
       documentRef?.removeEventListener?.('visibilitychange', handleVisibilityChange);
       await endAndHide('destroy');
+      panel?.destroy?.();
     },
   };
 };

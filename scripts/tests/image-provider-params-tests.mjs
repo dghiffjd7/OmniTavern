@@ -7,6 +7,7 @@ import {
 } from '../../src/scripts/api/model-capabilities.js';
 import { OpenAIProvider } from '../../src/scripts/api/providers/openai.js';
 import { CustomProvider } from '../../src/scripts/api/providers/custom.js';
+import { createDefaultImageGenerationPreset, mergeImageGenerationRequestOptions } from '../../src/scripts/ui/image-generation-params-utils.js';
 import {
   Automatic1111ImageProvider,
   ComfyUIImageProvider,
@@ -20,6 +21,34 @@ import {
   normalizeNovelAIImageModelCatalog,
   resolveNovelAIImageModelCatalog,
 } from '../../src/scripts/api/providers/novelai-image-model-catalog.js';
+
+{
+  // Exercise the preset-to-request path; a UI-only change could still drop new qualities.
+  const preset = createDefaultImageGenerationPreset();
+  for (const [model, quality, edit] of [
+    ['gpt-image-2.5-sunburst', 'max', false],
+    ['gpt-image-2.5-sunburst-2026-09-08', 'xhigh', true],
+    ['gpt-image-2.5-flare', 'xhigh', false],
+    ['gpt-image-2.5-flare-2026-09-08', 'max', true],
+    ['gpt-image-2', 'max', false],
+  ]) {
+    const config = { provider: 'openai', apiKey: 'test', model };
+    preset.paramsByProvider.openai.quality = quality;
+    const provider = new OpenAIProvider(config);
+    let sent;
+    provider.requestJson = async request => {
+      sent = { url: request.url, body: JSON.parse(request.body) };
+      return { data: [{ b64_json: 'abc123' }] };
+    };
+    await provider.generateImage('cat', mergeImageGenerationRequestOptions({
+      config, preset, extra: edit ? { referenceImages: ['data:image/png;base64,cmVmMQ=='] } : {},
+    }));
+    assert.equal(sent.body.model, model);
+    assert.equal(sent.body.quality, model === 'gpt-image-2' ? undefined : quality);
+    assert(sent.url.endsWith(edit ? '/images/edits' : '/images/generations'));
+  }
+  console.log('ok - model-specific quality survives presets through generation and image editing requests');
+}
 
 {
   const provider = new OpenAIProvider({

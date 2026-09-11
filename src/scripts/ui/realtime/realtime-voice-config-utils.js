@@ -21,6 +21,7 @@ export const DEFAULT_REALTIME_VOICE_SETTINGS = Object.freeze({
   realtimeModel: 'gpt-realtime-2.1',
   transcriptionModel: 'gpt-4o-mini-transcribe',
   transcriptionLanguage: '',
+  replyLanguage: '',
   voice: 'marin',
   vad: Object.freeze({
     mode: 'server_vad',
@@ -42,11 +43,20 @@ const clampNumber = (value, fallback, min, max) => {
 };
 
 const normalizeModelId = (value, fallback) => String(value || fallback).trim() || fallback;
+const normalizeReplyLanguage = value => String(value || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+
+// A spoken-language preference is separate from input transcription. Native audio
+// providers (including Gemini) use system instructions rather than languageCode.
+export const applyRealtimeReplyLanguage = (instructions, settings = {}) => {
+  const language = normalizeReplyLanguage(settings.replyLanguage);
+  if (!language) return instructions;
+  return `${instructions}\n\n[Realtime reply language]\nUse ${JSON.stringify(language)} for spoken replies throughout this call, unless the user explicitly asks to change language. Keep the character's personality and voice. Names, quotations and brief borrowed words can remain in their original language.`;
+};
 
 export const normalizeRealtimeVoiceSettings = (value = {}) => {
   const input = value && typeof value === 'object' ? value : {};
   if (input.provider && input.provider !== 'openai' && getRealtimeProvider(input.provider)) {
-    return { ...normalizeRealtimeVoiceSettings({}), ...input, voice: String(input.voice || '').trim(), contextMode: 'session_snapshot' };
+    return { ...normalizeRealtimeVoiceSettings({}), ...input, replyLanguage: normalizeReplyLanguage(input.replyLanguage), voice: String(input.voice || '').trim(), contextMode: 'session_snapshot' };
   }
   const configRefInput = input.configRef && typeof input.configRef === 'object' ? input.configRef : {};
   const rawScope = String(configRefInput.scope || '').trim().toLowerCase();
@@ -69,6 +79,7 @@ export const normalizeRealtimeVoiceSettings = (value = {}) => {
       DEFAULT_REALTIME_VOICE_SETTINGS.transcriptionModel,
     ),
     transcriptionLanguage: normalizeVoiceTranscriptionLanguages(input.transcriptionLanguage).join(','),
+    replyLanguage: normalizeReplyLanguage(input.replyLanguage),
     voice: OPENAI_REALTIME_VOICES.includes(voiceInput)
       ? voiceInput
       : DEFAULT_REALTIME_VOICE_SETTINGS.voice,

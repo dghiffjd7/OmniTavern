@@ -38,16 +38,18 @@ node scripts/dev/run-opencode-fc-matrix.mjs --models deepseek-v4-flash,deepseek-
 推荐按阶段执行，并复用同一个报告文件：
 
 ```powershell
-node scripts/dev/run-opencode-fc-matrix.mjs --execute --models deepseek-v4-flash,deepseek-v4-pro --through transport --max-paid-calls 4 --report D:\my\phone\opencode-fc-matrix-state.json
+node scripts/dev/run-opencode-fc-matrix.mjs --execute --models deepseek-v4-flash,deepseek-v4-pro --through transport --max-paid-calls 4 --report scripts/dev/tmp/opencode-fc-matrix-state.json
 
-node scripts/dev/run-opencode-fc-matrix.mjs --execute --models deepseek-v4-flash,deepseek-v4-pro --through surface6 --max-paid-calls 12 --report D:\my\phone\opencode-fc-matrix-state.json
+node scripts/dev/run-opencode-fc-matrix.mjs --execute --models deepseek-v4-flash,deepseek-v4-pro --through surface6 --max-paid-calls 12 --report scripts/dev/tmp/opencode-fc-matrix-state.json
 
-node scripts/dev/run-opencode-fc-matrix.mjs --execute --models deepseek-v4-flash,deepseek-v4-pro --through release30 --max-paid-calls 48 --report D:\my\phone\opencode-fc-matrix-state.json
+node scripts/dev/run-opencode-fc-matrix.mjs --execute --models deepseek-v4-flash,deepseek-v4-pro --through release30 --max-paid-calls 48 --report scripts/dev/tmp/opencode-fc-matrix-state.json
 
-node scripts/dev/run-opencode-fc-matrix.mjs --execute --models deepseek-v4-flash,deepseek-v4-pro --through release --max-paid-calls 6 --report D:\my\phone\opencode-fc-matrix-state.json
+node scripts/dev/run-opencode-fc-matrix.mjs --execute --models deepseek-v4-flash,deepseek-v4-pro --through release --max-paid-calls 6 --report scripts/dev/tmp/opencode-fc-matrix-state.json
 ```
 
 如果前一阶段有模型失败，后续命令会跳过它，因此真实请求数通常低于上限。恢复失败或未决步骤必须分别显式增加 `--retry-failed` 或 `--retry-uncertain`。
+
+`scripts/dev/tmp/` 是保留在仓库中的空输出目录，生成的报告与截图由 Git 忽略。完成批次后可将报告归档到仓库之外；续跑原批次时，应将 `--report` 指向原有检查点文件。
 
 ## 当前目录与验收状态（2026-08-15）
 

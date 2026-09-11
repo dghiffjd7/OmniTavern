@@ -31,7 +31,7 @@ export const parseRealtimeServiceAccount = value => {
 export const makeRealtimeProfile = (provider = 'gemini_live') => {
   const preset = getRealtimeProvider(provider);
   if (!preset) throw new Error('未知实时语音服务商');
-  return { id: '', name: preset.label, provider, model: preset.models[0], voice: preset.voices[0], voiceKind: 'system', region: preset.regions?.[0] || '', workspaceId: '', credentialId: '', customVoices: [], idleTimeoutMinutes: 10,
+  return { id: '', name: preset.label, provider, model: preset.models[0], voice: preset.voices[0], voiceKind: 'system', region: preset.regions?.[0] || '', workspaceId: '', credentialId: '', customVoices: [], idleTimeoutMinutes: 10, replyLanguage: '', transcriptionLanguage: '',
     ...(provider === 'gemini_live' ? { geminiBackend: 'developer', vertexaiAuthMode: 'service_account', vertexaiProjectId: '' } : {}) };
 };
 export const validateRealtimeProfile = profile => {

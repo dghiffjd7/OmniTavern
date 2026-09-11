@@ -2,6 +2,7 @@ import { t } from '../../i18n/index.js';
 import {
   buildOpenAiRealtimeSessionConfig,
   normalizeRealtimeVoiceSettings,
+  applyRealtimeReplyLanguage,
 } from './realtime-voice-config-utils.js';
 
 const TERMINAL_RESPONSE_STATUSES = new Set(['completed', 'cancelled', 'failed', 'incomplete']);
@@ -39,6 +40,7 @@ export const createRealtimeCallRuntime = ({
   commitAssistantMessage,
   onStateChange = null,
   onCaption = null,
+  onAudioLevel = null,
   onUsage = null,
   onError = null,
   onWarning = null,
@@ -214,7 +216,7 @@ export const createRealtimeCallRuntime = ({
       type: 'session.update',
       session: {
         type: 'realtime',
-        instructions,
+        instructions: applyRealtimeReplyLanguage(instructions, connection.settings),
       },
     });
     sessionClient?.sendEvent?.({
@@ -420,12 +422,14 @@ export const createRealtimeCallRuntime = ({
         excludeMessageIds: [],
       });
       assertStartCurrent();
-      const instructions = String(snapshot?.instructions || '').trim();
-      if (!instructions) throw new Error('无法构建当前角色的语音上下文');
+      const snapshotInstructions = String(snapshot?.instructions || '').trim();
+      if (!snapshotInstructions) throw new Error('无法构建当前角色的语音上下文');
+      const instructions = applyRealtimeReplyLanguage(snapshotInstructions, connection.settings);
       sessionClient = createSessionClient?.({
         provider: connection.config.provider || 'openai',
         onEvent: event => { if (generation === startGeneration) handleServerEvent(event); },
         onConnectionState: value => { if (generation === startGeneration) handleConnectionState(value); },
+        onAudioLevel: value => { if (generation === startGeneration) onAudioLevel?.(value); },
       });
       if (!sessionClient) throw new Error('实时语音客户端初始化失败');
       emitState('connecting', { startedAt, elapsedMs: 0, provider: connection.config.provider || 'openai' });

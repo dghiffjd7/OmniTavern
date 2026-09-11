@@ -3,6 +3,7 @@
  */
 
 import { RealtimeSettingsPanel } from './realtime/realtime-settings-panel.js';
+import { realtimeReplyLanguageField, bindRealtimeReplyLanguagePicker } from './realtime/realtime-reply-language-picker.js';
 import { getRealtimeProfileStore } from '../storage/realtime-profile-store.js';
 import { ConfigManager } from '../storage/config.js';
 import { LLMClient } from '../api/client.js';
@@ -251,6 +252,7 @@ export class ConfigPanel {
     hide() {
         this.requestParamsDialog?.close();
         this.realtimeSettingsPanel?.hide();
+        this.realtimeReplyLanguagePicker?.close();
         if (this.modelFilterDebounceTimer !== null) {
             clearTimeout(this.modelFilterDebounceTimer);
             this.modelFilterDebounceTimer = null;
@@ -929,6 +931,7 @@ export class ConfigPanel {
                                 <span class="world-app-select-btn-chevron">${API_CONFIG_ICONS.chevronDown}</span>
                             </button>
                         </div>
+                        ${realtimeReplyLanguageField('config-realtime-reply-language')}
                         <label class="api-config-realtime-field">
                             <span>声音</span>
                             <select id="config-realtime-voice">
@@ -1382,6 +1385,8 @@ export class ConfigPanel {
         this.element.querySelector('#config-baseurl')?.addEventListener('input', () => this.emitDraftChange());
 
         this.initCustomSelects();
+        this.realtimeReplyLanguagePicker?.destroy();
+        this.realtimeReplyLanguagePicker = bindRealtimeReplyLanguagePicker(this.element.querySelector('#config-realtime-reply-language'));
 
         document.body.appendChild(this.overlayElement);
         document.body.appendChild(this.element);
@@ -3429,6 +3434,7 @@ export class ConfigPanel {
             realtimeModel: panel?.querySelector?.('#config-realtime-model')?.value,
             transcriptionModel: panel?.querySelector?.('#config-realtime-transcription-model')?.value,
             transcriptionLanguage: panel?.querySelector?.('#config-realtime-transcription-language')?.value,
+            replyLanguage: panel?.querySelector?.('#config-realtime-reply-language')?.value,
             voice: panel?.querySelector?.('#config-realtime-voice')?.value,
             vad: {
                 ...(appSettings.get().realtimeVoiceSettings?.vad || {}),
@@ -3491,6 +3497,7 @@ export class ConfigPanel {
         setValue('#config-realtime-model', settings.realtimeModel);
         setValue('#config-realtime-transcription-model', settings.transcriptionModel);
         setValue('#config-realtime-transcription-language', settings.transcriptionLanguage);
+        setValue('#config-realtime-reply-language', settings.replyLanguage);
         setValue('#config-realtime-voice', settings.voice);
         setValue('#config-realtime-vad-mode', settings.vad.mode);
         setValue('#config-realtime-idle-timeout', settings.idleTimeoutMinutes);

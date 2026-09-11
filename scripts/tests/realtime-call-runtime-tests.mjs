@@ -394,4 +394,29 @@ const waitForAsyncEnd = () => new Promise(resolve => setImmediate(resolve));
   assert.equal(guardRuntime.getState().status, 'idle');
 }
 
+// Language instructions survive the initial setup and OpenAI's per-turn refresh.
+for (const provider of ['openai', 'gemini_live']) {
+  let languageClient;
+  const levels = [];
+  const languageRuntime = createRealtimeCallRuntime({
+    createSessionClient: callbacks => (languageClient = new FakeSessionClient(callbacks)),
+    resolveConnection: async () => ({ config: { provider }, settings: { provider, voice: provider === 'openai' ? 'marin' : 'Kore', replyLanguage: '台湾普通话' } }),
+    buildSemanticSnapshot: async () => ({ instructions: 'character context' }),
+    getCallTarget: () => ({ supported: true, sessionId: 'language-test' }), isTargetCurrent: () => true,
+    commitUserMessage: async () => ({ messageId: 'u' }), commitAssistantMessage: async () => ({}),
+    onAudioLevel: value => levels.push(value), setIntervalFn: () => 1, clearIntervalFn: () => {},
+  });
+  assert(await languageRuntime.start());
+  assert.match(languageClient.connectPayload.sessionConfig.instructions, /character context[\s\S]*台湾普通话/);
+  languageClient.callbacks.onAudioLevel({ input: { level: .5 } }); assert.equal(levels.length, 1);
+  if (provider === 'openai') {
+    languageClient.emit({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'lang-input', transcript: '你好' });
+    await languageRuntime.whenIdle();
+    assert.match(languageClient.sent[0].session.instructions, /台湾普通话/);
+    assert.equal(languageClient.sent[0].session.instructions.match(/Realtime reply language/g).length, 1);
+  }
+  await languageRuntime.end('user');
+  languageClient.callbacks.onAudioLevel({ input: { level: 1 } }); assert.equal(levels.length, 1, 'late meter samples cannot reach a closed call');
+}
+
 console.log('realtime call runtime tests passed');

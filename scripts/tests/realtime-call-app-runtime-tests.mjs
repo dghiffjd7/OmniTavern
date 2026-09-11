@@ -85,9 +85,11 @@ documentRef.visibilityState = 'visible';
 const windowLike = new FakeEventTarget();
 const panelCalls = [];
 const panel = {
-  show: target => panelCalls.push(['show', target.sessionId]),
+  show: (target, options) => panelCalls.push(['show', target.sessionId, options?.expanded === true]),
   hide: () => panelCalls.push(['hide']),
+  destroy: () => panelCalls.push(['destroy']),
   renderState: state => panelCalls.push(['state', state.status]),
+  setAudioLevel: value => panelCalls.push(['audioLevel', value]),
   setCaption: value => panelCalls.push(['caption', value.text]),
   setWarning: value => panelCalls.push(['warning', value]),
   setUsage: value => panelCalls.push([
@@ -128,7 +130,10 @@ const appRuntime = createRealtimeCallAppRuntime({
   commitAssistantMessage: async () => ({}),
   openVoiceSettings: () => { settingsOpened += 1; },
   onLifecycleInvalidated: reason => { invalidated = reason; },
-  createPanel: () => panel,
+  createPanel: options => {
+    assert.equal(options.windowLike, windowLike);
+    return panel;
+  },
   createRuntime: options => {
     runtimeOptions = options;
     return runtime;
@@ -142,8 +147,15 @@ assert.deepEqual(panelCalls.slice(0, 4), [
   ['usage', 0, 0, null, null],
   ['warning', ''],
   ['caption', '连接后即可自然说话'],
-  ['show', 'contact-1'],
+  ['show', 'contact-1', true],
 ]);
+
+await button.fire('click');
+assert.deepEqual(panelCalls.at(-1), ['show', 'contact-1', true], 'active call opens its controls');
+
+const meterFrame = { input: { level: .3, bands: [.1] }, output: { level: 0, bands: [] } };
+runtimeOptions.onAudioLevel(meterFrame);
+assert.deepEqual(panelCalls.at(-1), ['audioLevel', meterFrame]);
 
 runtimeOptions.onUsage({
   type: 'response',
@@ -154,6 +166,9 @@ assert.deepEqual(panelCalls.at(-1), ['usage', 1, 1, 7, 11]);
 runtimeOptions.onError(Object.assign(new Error('请设置连接'), { code: 'realtime_config_profile_missing' }));
 assert.equal(settingsOpened, 1);
 
+runtimeOptions.onStateChange({ status: 'idle' });
+assert.deepEqual(panelCalls.at(-1), ['hide'], 'remote/automatic call completion removes the pill');
+
 documentRef.visibilityState = 'hidden';
 await documentRef.fire('visibilitychange');
 assert.equal(invalidated, 'app_background');
@@ -161,5 +176,8 @@ assert.ok(panelCalls.some(call => call[0] === 'end' && call[1] === 'app_backgrou
 
 await appRuntime.destroy();
 assert.equal(button.listeners.has('click'), false);
+assert.deepEqual(panelCalls.at(-1), ['destroy']);
+assert.equal(windowLike.listeners.size, 0);
+assert.equal(documentRef.listeners.size, 0);
 
 console.log('realtime call app runtime tests passed');

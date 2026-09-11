@@ -14,8 +14,8 @@ const createVertexAuth = async config => {
   return new VertexAIProvider({ vertexaiAuthMode: 'service_account', vertexaiServiceAccount: config.credentials.vertexaiServiceAccount, vertexaiProjectId: config.vertexaiProjectId, vertexaiRegion: config.region, timeout: 20000 });
 };
 export class NativeRealtimeSessionClient {
-  constructor({ onEvent, onConnectionState, invoke = safeInvoke, createChannel = callback => createTauriPluginChannel({ callback }), createAudio = options => new RealtimePcmAudio(options), createVertexAuth: vertexAuthFactory = createVertexAuth } = {}) {
-    Object.assign(this, { onEvent, onConnectionState, invoke, createChannel, createAudio, createVertexAuth: vertexAuthFactory }); this.closed = true; this.generation = 0; this.pendingFinals = new Map(); this.transcripts = new Map();
+  constructor({ onEvent, onConnectionState, onAudioLevel, invoke = safeInvoke, createChannel = callback => createTauriPluginChannel({ callback }), createAudio = options => new RealtimePcmAudio(options), createVertexAuth: vertexAuthFactory = createVertexAuth } = {}) {
+    Object.assign(this, { onEvent, onConnectionState, onAudioLevel, invoke, createChannel, createAudio, createVertexAuth: vertexAuthFactory }); this.closed = true; this.generation = 0; this.pendingFinals = new Map(); this.transcripts = new Map();
   }
   async connect({ config, sessionConfig, signal } = {}) {
     await this.close(); this.closed = false; this.config = config; this.instructions = sessionConfig.instructions; this.history = []; this.resumeHandle = ''; this.activeResponse = '';
@@ -26,7 +26,7 @@ export class NativeRealtimeSessionClient {
     const preset = getRealtimeProvider(config.provider);
     if (!preset?.inputRate) throw new Error(t('不支持的实时语音服务商'));
     if (this.instructions.length > (config.provider === 'doubao_realtime' ? 24000 : 180000)) throw new Error(t('当前角色上下文超出此实时服务的容量，请缩短上下文后重试'));
-    this.audio = this.createAudio({ onFrame: bytes => { if (this.streaming && !this.closed) { try { this.protocol.audio(bytesToBase64(bytes)); } catch (error) { this.fail(error); } } }, onError: error => this.fail(error) });
+    this.audio = this.createAudio({ onFrame: bytes => { if (this.streaming && !this.closed) { try { this.protocol.audio(bytesToBase64(bytes)); } catch (error) { this.fail(error); } } }, onError: error => this.fail(error), onAudioLevel: value => { if (!this.closed) this.onAudioLevel?.(value); } });
     try {
       await this.audio.open({ ...preset, frameMs: config.provider === 'nova_sonic' ? 32 : 20, signal });
       if (this.closed || signal?.aborted) throw abortError();

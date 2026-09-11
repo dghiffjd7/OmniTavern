@@ -16,8 +16,13 @@ const EXTRA_UI_FILES = [
   path.join(PROJECT_ROOT, 'src/scripts/variables/variable-rule-engine.js'),
 ];
 const FULL_UI_DEFINITION_FILES = new Set([
+  path.join(UI_ROOT, 'image-prompt/image-prompt-utils.js'),
+  path.join(UI_ROOT, 'image-prompt/image-prompt-editor.js'),
+  path.join(UI_ROOT, 'image-generation-params-utils.js'),
+  path.join(UI_ROOT, 'image-generation-size-control.js'),
   path.join(PROJECT_ROOT, 'src/scripts/ui/realtime/realtime-call-panel.js'),
   path.join(PROJECT_ROOT, 'src/scripts/ui/realtime/realtime-settings-panel.js'),
+  path.join(PROJECT_ROOT, 'src/scripts/ui/realtime/realtime-reply-language-picker.js'),
   path.join(PROJECT_ROOT, 'src/scripts/ui/realtime/realtime-enrollment-view.js'),
   path.join(PROJECT_ROOT, 'src/scripts/ui/realtime/realtime-provider-catalog.js'),
   path.join(PROJECT_ROOT, 'src/scripts/ui/realtime/realtime-voice-catalog.js'),

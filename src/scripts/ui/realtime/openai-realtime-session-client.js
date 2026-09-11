@@ -1,4 +1,5 @@
 import { microphonePermissionRecovery } from '../microphone-permission-recovery.js';
+import { createRealtimeAudioMeter } from './realtime-audio-meter.js';
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 30000;
 let realtimeRequestSequence = 0;
@@ -85,6 +86,8 @@ export class OpenAiRealtimeSessionClient {
     createAudioElement = () => globalThis.document?.createElement?.('audio') || null,
     onEvent = null,
     onConnectionState = null,
+    onAudioLevel = null,
+    createMeter = createRealtimeAudioMeter,
   } = {}) {
     this.invoke = invoke === undefined ? getDefaultInvoker() : invoke;
     this.PeerConnection = peerConnectionClass;
@@ -93,6 +96,8 @@ export class OpenAiRealtimeSessionClient {
     this.createAudioElement = createAudioElement;
     this.onEvent = typeof onEvent === 'function' ? onEvent : null;
     this.onConnectionState = typeof onConnectionState === 'function' ? onConnectionState : null;
+    this.onAudioLevel = onAudioLevel;
+    this.createMeter = createMeter;
     this.peerConnection = null;
     this.dataChannel = null;
     this.localStream = null;
@@ -108,6 +113,7 @@ export class OpenAiRealtimeSessionClient {
     await this.close();
     if (signal?.aborted) throw makeAbortError();
     this.closed = false;
+    this.meter = this.createMeter({ onLevel: value => { if (!this.closed) this.onAudioLevel?.(value); } });
 
     try {
       const peerConnection = new this.PeerConnection();
@@ -128,6 +134,8 @@ export class OpenAiRealtimeSessionClient {
         const stream = event?.streams?.[0];
         if (!stream) return;
         this.remoteAudio.srcObject = stream;
+        this.meter?.attach('output', stream);
+        this.meter?.setMuted('output', this.remoteAudio.muted === true);
         try { this.remoteAudio.play?.()?.catch?.(() => {}); } catch {}
       };
 
@@ -143,6 +151,7 @@ export class OpenAiRealtimeSessionClient {
       });
       if (signal?.aborted) throw makeAbortError();
       this.localStream = localStream;
+      this.meter?.attach('input', localStream);
       const tracks = typeof localStream?.getAudioTracks === 'function'
         ? localStream.getAudioTracks()
         : localStream?.getTracks?.() || [];
@@ -197,18 +206,22 @@ export class OpenAiRealtimeSessionClient {
   setMicrophoneMuted(muted) {
     const tracks = this.localStream?.getAudioTracks?.() || [];
     tracks.forEach(track => { track.enabled = muted !== true; });
+    this.meter?.setMuted('input', muted);
     return tracks.length > 0;
   }
 
   setOutputMuted(muted) {
     if (!this.remoteAudio) return false;
     this.remoteAudio.muted = muted === true;
+    this.meter?.setMuted('output', muted);
     return true;
   }
 
   async close() {
     if (this.closed && !this.peerConnection && !this.localStream && !this.remoteAudio) return;
     this.closed = true;
+    const meter = this.meter; this.meter = null;
+    const meterClosed = meter?.close();
     try { this.dataChannel?.removeEventListener?.('message', this.handleDataMessage); } catch {}
     try { this.dataChannel?.close?.(); } catch {}
     const tracks = this.localStream?.getTracks?.() || this.localStream?.getAudioTracks?.() || [];
@@ -228,5 +241,6 @@ export class OpenAiRealtimeSessionClient {
     this.localStream = null;
     this.peerConnection = null;
     this.remoteAudio = null;
+    await meterClosed;
   }
 }

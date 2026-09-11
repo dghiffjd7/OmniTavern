@@ -47,3 +47,9 @@ src-tauri/gen/android/local.properties
 *.jks
 *.p12
 *.pfx
+
+# Local development captures and scratch files
+/scripts/dev/tmp/*
+!/scripts/dev/tmp/.gitkeep
+/.codex_tmp/
+/.codex-*.png

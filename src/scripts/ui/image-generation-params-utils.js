@@ -17,6 +17,22 @@ const clampNumber = (value, min, max, fallback) => {
 const optionValues = (field) => new Set((field?.options || []).map(item => String(item.value)));
 const AUTO_OPTION_OMIT_KEYS = new Set(['quality', 'size', 'background', 'moderation']);
 
+export const normalizeImageGenerationSize = (value) => String(value ?? '').trim().toLowerCase()
+  .replace(/[×✖*]/g, 'x').replace(/\s+/g, '') || 'auto';
+
+export const getImageGenerationSizeError = (value) => {
+  const size = normalizeImageGenerationSize(value);
+  if (size === 'auto') return '';
+  const match = /^(\d+)x(\d+)$/.exec(size);
+  if (!match) return '请填写宽 × 高，例如 3840 × 2160。';
+  const width = Number(match[1]), height = Number(match[2]);
+  if (width <= 0 || height <= 0 || width % 16 || height % 16) return '宽和高须为 16 的正整数倍。';
+  if (width > 3840 || height > 3840) return '每条边最多 3840 像素。';
+  if (Math.max(width, height) > Math.min(width, height) * 3) return '长边与短边的比例最多为 3:1。';
+  if (width * height < 655360 || width * height > 8294400) return '总像素须在 655,360 到 8,294,400 之间。';
+  return '';
+};
+
 const makeSelect = (key, label, options, fallback, help = '') => ({
   key,
   label,
@@ -243,12 +259,16 @@ export const resolveImageNegativePromptCapability = (config = {}) => {
   return unsupported();
 };
 
-export const resolveImageGenerationParamSchema = (config = {}) => {
+const resolveImageProviderParamSchema = (config = {}) => {
   const provider = normalizeImageProviderKey(config?.provider);
   const model = toKey(config?.model);
 
   if (provider === 'openai') {
     const isGptImage = model.startsWith('gpt-image');
+    // OpenAI Docs: Image 2.5 Sunburst/Flare add xhigh and max, including dated snapshots.
+    // /models does not expose parameter capabilities; keep this rule model-specific.
+    const hasExtendedQuality = /^gpt-image-2\.5-(?:sunburst|flare)(?:-\d{4}-\d{2}-\d{2})?$/.test(model);
+    const hasCustomSize = hasExtendedQuality || /^gpt-image-2(?:-\d{4}-\d{2}-\d{2})?$/.test(model);
     const isDalle3 = model.includes('dall-e-3');
     const isDalle2 = model.includes('dall-e-2');
     if (isGptImage) {
@@ -263,13 +283,25 @@ export const resolveImageGenerationParamSchema = (config = {}) => {
             { value: 'low', label: '低' },
             { value: 'medium', label: '中' },
             { value: 'high', label: '高' },
+            ...(hasExtendedQuality ? [
+              { value: 'xhigh', label: '超高（xhigh）' },
+              { value: 'max', label: '最高（max）' },
+            ] : []),
           ], 'auto', '质量越高，延迟和成本通常越高。'),
-          makeSelect('size', '尺寸', [
+          { ...makeSelect('size', '尺寸', [
             { value: 'auto', label: '自动' },
             { value: '1024x1024', label: '1024 x 1024' },
             { value: '1536x1024', label: '1536 x 1024' },
             { value: '1024x1536', label: '1024 x 1536' },
-          ], 'auto'),
+            ...(hasCustomSize ? [
+              { value: '2048x2048', label: '2K 方图 · 2048 × 2048' },
+              { value: '2048x1152', label: '2K 横图 · 2048 × 1152' },
+              { value: '1152x2048', label: '2K 竖图 · 1152 × 2048' },
+              { value: '3840x2160', label: '4K 横图 · 3840 × 2160' },
+              { value: '2160x3840', label: '4K 竖图 · 2160 × 3840' },
+            ] : []),
+          ], 'auto', hasCustomSize ? '可选择常用尺寸或自定义宽 × 高；边长须为 16 的倍数，最多 3840 像素，长宽比介于 1:3 到 3:1，总像素为 655,360 到 8,294,400。超过 2560 × 1440 总像素的输出属于实验性功能。' : ''),
+          type: hasCustomSize ? 'image-size' : 'select' },
           makeSelect('output_format', '输出格式', [
             { value: 'png', label: 'PNG' },
             { value: 'jpeg', label: 'JPEG' },
@@ -371,8 +403,6 @@ export const resolveImageGenerationParamSchema = (config = {}) => {
       model,
       title: 'NovelAI Diffusion 参数',
       fields: [
-        makeText('promptPrefix', '固定正向前缀', '', '每次调用 NovelAI 前自动加到正向提示词开头，适合放画师串、固定画风标签。'),
-        makeText('promptSuffix', '固定正向后缀', '', '每次调用 NovelAI 前自动加到正向提示词末尾。'),
         makeFixedNegativePromptField(),
         makeNumber('width', '宽度', { min: 64, max: 2048, step: 64, fallback: 1024 }),
         makeNumber('height', '高度', { min: 64, max: 2048, step: 64, fallback: 1024 }),
@@ -563,6 +593,15 @@ export const resolveImageGenerationParamSchema = (config = {}) => {
   };
 };
 
+export const resolveImageGenerationParamSchema = (config = {}) => {
+  const schema = resolveImageProviderParamSchema(config);
+  const fixedPositive = [
+    { ...makeTextarea('promptPrefix', '固定正向前缀', '', '随当前参数预设保存，放在正向开头；生图输入框中可修改为本次覆盖。'), fullWidth: true, badge: '随预设保存' },
+    { ...makeTextarea('promptSuffix', '固定正向后缀', '', '随当前参数预设保存，放在正向末尾；生图输入框中可修改为本次覆盖。'), fullWidth: true, badge: '随预设保存' },
+  ];
+  return { ...schema, fields: [...fixedPositive, ...schema.fields] };
+};
+
 export const normalizeImageGenerationPreset = (preset = {}) => {
   const fallback = createDefaultImageGenerationPreset();
   const source = isObject(preset) ? preset : {};
@@ -601,6 +640,13 @@ export const sanitizeImageGenerationParams = (params = {}, config = {}) => {
   const out = {};
   schema.fields.forEach((field) => {
     const value = raw[field.key];
+    if (field.type === 'image-size') {
+      const size = normalizeImageGenerationSize(value);
+      const error = getImageGenerationSizeError(size);
+      if (error) throw new Error(error);
+      if (size !== 'auto') out[field.key] = size;
+      return;
+    }
     if (field.type === 'number') {
       const safe = field.integer === false
         ? clampNumber(value, field.min ?? -Number.MAX_SAFE_INTEGER, field.max ?? Number.MAX_SAFE_INTEGER, field.defaultValue ?? 0)
@@ -693,6 +739,9 @@ export const mergeImageGenerationRequestOptions = ({
     ...merged,
     ...extraOptions,
   };
+  if (preset?.id) options.imagePromptParamsPresetId = preset.id;
+  if (hasExtraNegativePrompt) options.imagePromptNegativeOverride = { value: String(extraNegativePrompt || ''), mode: negativePromptMode };
+  if (overrides?.imagePromptDocument) options.imagePromptDocument = overrides.imagePromptDocument;
   if (negativePrompt) options.negativePrompt = negativePrompt;
   return options;
 };

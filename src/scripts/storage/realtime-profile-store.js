@@ -10,6 +10,7 @@ const cleanProfile = input => {
   const base = makeRealtimeProfile(input.provider);
   const result = Object.fromEntries(Object.keys(base).map(key => [key, input[key] ?? base[key]]));
   for (const key of ['id', 'name', 'model', 'voice', 'region', 'workspaceId', 'credentialId']) result[key] = text(result[key]);
+  for (const key of ['replyLanguage', 'transcriptionLanguage']) result[key] = text(result[key]).replace(/\s+/g, ' ').slice(0, 80);
   if (result.provider === 'step_realtime' && !result.region) result.region = 'cn';
   if (result.provider === 'gemini_live') for (const key of ['geminiBackend', 'vertexaiAuthMode', 'vertexaiProjectId']) result[key] = text(result[key]);
   result.idleTimeoutMinutes = Math.min(30, Math.max(1, Number(result.idleTimeoutMinutes) || 10));

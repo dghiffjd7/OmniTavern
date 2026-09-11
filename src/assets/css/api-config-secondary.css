@@ -452,6 +452,13 @@
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
 }
 
+.image-size-control { display: grid; gap: 8px; min-width: 0; }
+.image-size-control > select { width: 100%; min-width: 0; }
+.image-size-control > input { width: 100%; min-width: 0; }
+.image-size-control [hidden] { display: none !important; }
+.image-size-control input[aria-invalid="true"] { border-color: var(--app-danger-text); }
+.image-size-error { color: var(--app-danger-text); font-size: 12px; line-height: 1.5; }
+
 .igp-panel *,
 .igp-panel *::before,
 .igp-panel *::after {

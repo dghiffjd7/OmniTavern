@@ -503,6 +503,30 @@ body #config-panel.api-config-panel :is(.api-config-voice-mode, .api-config-voic
   padding: 8px 10px;
 }
 
+.realtime-reply-language-picker { position: relative; min-width: 0; }
+#config-panel.api-config-panel .realtime-reply-language-picker input { padding-right: 46px; }
+.realtime-reply-language-toggle {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  bottom: 1px;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid var(--app-border-subtle);
+  border-radius: 0 9px 9px 0;
+  background: transparent;
+  color: var(--app-text-secondary);
+  cursor: pointer;
+}
+.realtime-reply-language-toggle svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.realtime-reply-language-toggle[aria-expanded="true"] { background: var(--app-accent-soft); color: var(--app-accent-strong); }
+.realtime-reply-language-toggle:focus-visible { outline: 2px solid var(--app-accent-primary); outline-offset: -3px; }
+.realtime-reply-language-toggle:disabled { opacity: .45; cursor: default; }
+.realtime-reply-language-menu .world-app-select-item { min-height: 44px; }
+
 .api-config-realtime-actions {
   display: flex;
   justify-content: flex-end;
