@@ -13,13 +13,24 @@ export const editHopscotchBoard = (board, action = {}) => {
   const sourceRow = rows.find(row => row.houses.some(h => h.id === action.id));
   const house = sourceRow?.houses.find(h => h.id === action.id);
   const body = rows.flatMap(row => row.houses).find(h => h.kind === 'body');
+  let insertRowIndex = action.rowIndex;
   const insert = (item) => {
-    const index = Math.max(0, Math.min(rows.length, Number(action.rowIndex) || 0));
+    const index = Math.max(0, Math.min(rows.length, Number(insertRowIndex) || 0));
     if (action.newRow || index === rows.length) rows.splice(index, 0, { id: newId('row'), houses: [item] });
     else rows[index].houses.splice(action.houseIndex ?? rows[index].houses.length, 0, item);
   };
   switch (action.type) {
     case 'add':
+      // 停用的格式修复仍有展示行；首次在其同行或后面新增时，将锚点一起纳入草稿。
+      // 两者共同校验、保存和撤销，避免右侧新增实际落在下一行。
+      if (action.anchorKind === 'format_review') {
+        let anchorIndex = rows.findIndex(row => row.houses.some(h => h.kind === action.anchorKind));
+        if (anchorIndex < 0) {
+          anchorIndex = rows.length;
+          rows.push({ id: newId('row'), houses: [{ id: newId('house'), kind: action.anchorKind }] });
+        }
+        insertRowIndex = anchorIndex + (action.newRow ? 1 : 0);
+      }
       insert({ id: newId('house'), kind: action.kind, ...action.house });
       if (action.kind === 'variable_rules') next.policy.variableRuleExclusions = (next.policy.variableRuleExclusions || []).filter(phase => phase !== (action.house?.config?.phase || 'after'));
       break;

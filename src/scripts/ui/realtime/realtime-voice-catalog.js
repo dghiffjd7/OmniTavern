@@ -1,4 +1,5 @@
-// Official system voices, checked 2026-09-06. IDs are API values; labels are UI text.
+import { isOpenAiLive } from './openai-live-config.js';
+// Official system voices. IDs are API values; labels are UI text.
 // Sources and model boundaries: docs/realtime-voice-providers.md.
 const voices = rows => rows.map(([id, label, gender = '', description = '', language = '']) => ({ id, label: label || id, gender, description, language }));
 export const REALTIME_SYSTEM_VOICES = {
@@ -107,7 +108,28 @@ export const STEP_INTERNATIONAL_VOICES = voices([
   ['zixinnansheng', '自信男声', 'male', '坚定自信'],
 ]);
 
+// Additional Live voices, checked 2026-09-11. Regional influence is descriptive;
+// reply language remains an independent instruction.
+export const OPENAI_LIVE_VOICES = [
+  ...REALTIME_SYSTEM_VOICES.openai,
+  ...voices([
+    ['quartz', 'Quartz', 'female', '澳大利亚风格 · 生成音色', '英语'],
+    ['ripple', 'Ripple', 'male', '澳大利亚风格 · 自然音色', '英语'],
+    ['vesper', 'Vesper', 'male', '英国风格 · 自然音色', '英语'],
+    ['willow', 'Willow', 'female', '爱尔兰风格 · 自然音色', '英语'],
+    ['stone', 'Stone', 'male', '爱尔兰风格 · 自然音色', '英语'],
+    ['gleam', 'Gleam', 'female', '北美风格 · 自然音色', '英语'],
+    ['meridian', 'Meridian', 'male', '北美风格 · 自然音色', '英语'],
+    ['bossa', 'Bossa', 'female', '巴西风格 · 自然音色', '葡萄牙语'],
+    ['tempo', 'Tempo', 'male', '巴西风格 · 自然音色', '葡萄牙语'],
+    ['beacon', 'Beacon', 'male', '菲律宾风格 · 生成音色', '英语'],
+    ['delta', 'Delta', 'female', '美国南部风格 · 生成音色', '英语'],
+    ['cinder', 'Cinder', 'male', '美国南部风格 · 生成音色', '英语'],
+  ]),
+];
+
 export const getRealtimeSystemVoices = profile => {
+  if (isOpenAiLive(profile)) return OPENAI_LIVE_VOICES;
   const list = REALTIME_SYSTEM_VOICES[profile.provider] || [];
   if (profile.provider === 'doubao_realtime') {
     if (String(profile.model).startsWith('2.')) return DOUBAO_SC2_VOICES;

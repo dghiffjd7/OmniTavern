@@ -1,3 +1,5 @@
+import { t } from '../../i18n/index.js';
+
 const emptyResponseUsage = () => ({
   totalTokens: null,
   inputTokens: null,
@@ -59,8 +61,12 @@ const accumulateBucket = (bucket, usage, { includeOutputDetails = false } = {}) 
   };
 };
 
-export const accumulateRealtimeUsage = (current, { type = '', usage = null } = {}) => {
+export const accumulateRealtimeUsage = (current, { type = '', usage = null, finalized = false } = {}) => {
   const totals = current && typeof current === 'object' ? current : createRealtimeUsageTotals();
+  if (type === 'live_session') {
+    const seconds = toTokenCount(usage?.seconds);
+    return { ...totals, live: { seconds: seconds === null ? totals.live?.seconds ?? null : Math.max(totals.live?.seconds || 0, seconds), finalized: finalized || totals.live?.finalized === true } };
+  }
   if (type === 'response') {
     return {
       ...totals,
@@ -86,6 +92,10 @@ const formatTokenCount = value => (
 
 export const formatRealtimeUsageText = (value = {}) => {
   const response = value.response || emptyResponseUsage();
+  if (value.live) return [
+    t('Live 语音时长：{seconds} 秒 · {status}', { seconds: value.live.seconds ?? t('未提供'), status: value.live.finalized ? t('已确认') : t('等待最终确认') }),
+    t('推理请求 {count} 次｜输入 {input} · 输出 {output} token', { count: value.responseCount || 0, input: formatTokenCount(response.inputTokens), output: formatTokenCount(response.outputTokens) }),
+  ].join('\n');
   const transcription = value.transcription || emptyTranscriptionUsage();
   return [
     `语音回应 ${Number(value.responseCount || 0)} 次｜输入：文字 ${formatTokenCount(response.inputTextTokens)} · 音频 ${formatTokenCount(response.inputAudioTokens)} · 合计 ${formatTokenCount(response.inputTokens)}｜输出：文字 ${formatTokenCount(response.outputTextTokens)} · 音频 ${formatTokenCount(response.outputAudioTokens)} · 合计 ${formatTokenCount(response.outputTokens)}`,

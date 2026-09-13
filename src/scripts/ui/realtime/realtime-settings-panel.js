@@ -1,3 +1,4 @@
+import { isOpenAiLive, OPENAI_LIVE_MODEL, OPENAI_LIVE_BACKEND_MODEL } from './openai-live-config.js';
 import { getRealtimeSettingsTarget, startRealtimeSettingsCall } from './realtime-settings-target.js';
 import { getRealtimeProfileStore } from '../../storage/realtime-profile-store.js';
 import { REALTIME_PROVIDERS, makeRealtimeProfile, isDoubaoSc2, GEMINI_VERTEX_MODELS, GEMINI_VERTEX_REGIONS, isGeminiVertex, usesGeminiServiceAccount } from './realtime-provider-catalog.js';
@@ -20,7 +21,7 @@ const button = (id, label) => `<button type="button" id="${id}" class="api-confi
 export class RealtimeSettingsPanel {
   constructor({ card, store = getRealtimeProfileStore(), enrollment = new RealtimeVoiceEnrollment(), modelDiscovery = new RealtimeModelDiscovery(), voiceDiscovery = new RealtimeVoiceDiscovery() }) {
     this.card = card; this.store = store; this.enrollment = enrollment; this.draft = null; this.dirty = false; this.busy = false; this.secretDraft = {};
-    this.modelDiscovery = modelDiscovery; this.modelOptions = []; this.modelSource = '';
+    this.modelDiscovery = modelDiscovery; this.modelOptions = []; this.modelSource = ''; this.backendModelOptions = []; this.backendModelSource = '';
     this.voiceDiscovery = voiceDiscovery;
     this.enrollmentView = new RealtimeEnrollmentView({ isBusy: () => this.busy });
     this.root = document.createElement('div'); this.root.className = 'api-config-realtime-profiles';
@@ -62,7 +63,7 @@ export class RealtimeSettingsPanel {
   capture() {
     if (!this.draft) return;
     this.root.querySelectorAll('[data-secret]').forEach(node => { this.secretDraft[node.dataset.secret] = node.value; });
-    for (const [field, id] of Object.entries({ name: 'rt-name', model: 'rt-model', region: 'rt-region', workspaceId: 'rt-workspace', idleTimeoutMinutes: 'rt-idle', voiceKind: 'rt-voice-kind', voice: 'rt-voice', geminiBackend: 'rt-gemini-backend', vertexaiAuthMode: 'rt-vertex-auth-mode', vertexaiProjectId: 'rt-vertex-project', replyLanguage: 'rt-reply-language', transcriptionLanguage: 'rt-transcription-language' })) {
+    for (const [field, id] of Object.entries({ name: 'rt-name', model: 'rt-model', openaiBackend: 'rt-openai-backend', liveBackendModel: 'rt-backend-model', region: 'rt-region', workspaceId: 'rt-workspace', idleTimeoutMinutes: 'rt-idle', voiceKind: 'rt-voice-kind', voice: 'rt-voice', geminiBackend: 'rt-gemini-backend', vertexaiAuthMode: 'rt-vertex-auth-mode', vertexaiProjectId: 'rt-vertex-project', replyLanguage: 'rt-reply-language', transcriptionLanguage: 'rt-transcription-language' })) {
       const element = this.root.querySelector(`#${id}`); if (element) this.draft[field] = element.value;
     }
   }
@@ -74,9 +75,10 @@ export class RealtimeSettingsPanel {
     this.languagePicker?.destroy();
     const profile = this.draft, preset = profile && REALTIME_PROVIDERS[profile.provider];
     if (!profile || this.modelSource !== realtimeModelSource(profile)) { this.modelOptions = []; this.modelSource = ''; }
+    if (!profile || this.backendModelSource !== realtimeModelSource(profile)) { this.backendModelOptions = []; this.backendModelSource = ''; }
     this.legacyElements.forEach(element => { element.hidden = Boolean(profile); });
     this.root.innerHTML = `<div class="api-config-realtime-grid">
-      <label class="api-config-realtime-field is-wide">${helpTitle('实时语音设置档', ['保存多份实时语音配置；保存并使用后应用于下次通话。'])}<select id="rt-profile">${option('', translateUiText('沿用原 OpenAI 配置'))}${this.store.list().map(item => option(item.id, `${item.name} · ${REALTIME_PROVIDERS[item.provider].label}${item.id === this.store.activeId ? ' ✓' : ''}`)).join('')}${profile && !profile.id ? option('__new', translateUiText('新设置档（未保存）')) : ''}</select></label>
+      <label class="api-config-realtime-field is-wide">${helpTitle('实时语音设置档', ['保存多份实时语音配置；保存并使用后应用于下次通话。'])}<select id="rt-profile">${option('', translateUiText('沿用原 OpenAI 配置'))}${this.store.list().map(item => option(item.id, `${item.name} · ${isOpenAiLive(item) ? 'OpenAI GPT-Live' : REALTIME_PROVIDERS[item.provider].label}${item.id === this.store.activeId ? ' ✓' : ''}`)).join('')}${profile && !profile.id ? option('__new', translateUiText('新设置档（未保存）')) : ''}</select></label>
       <div class="api-config-realtime-actions">${button('rt-new', '新建设置档')}${profile?.id ? button('rt-copy', '复制设置档') + button('rt-delete', '删除设置档') : ''}${!profile ? button('rt-use-legacy', '使用原 OpenAI 配置') : ''}</div>
     </div>${profile ? this.fields(profile, preset) : ''}
     ${this.targetFields()}
@@ -115,10 +117,20 @@ export class RealtimeSettingsPanel {
     this.languagePicker = bindRealtimeReplyLanguagePicker(this.root.querySelector('#rt-reply-language'), { provider: profile.provider });
     const set = (id, value) => { const el = this.root.querySelector(`#${id}`); if (el) el.value = String(value ?? ''); };
     set('rt-provider', profile.provider); set('rt-region', profile.region); set('rt-voice-kind', profile.voiceKind); set('rt-voice', profile.voice);
+    set('rt-openai-backend', profile.openaiBackend || 'realtime');
     set('rt-gemini-backend', profile.geminiBackend); set('rt-vertex-auth-mode', profile.vertexaiAuthMode);
     set('rt-transcription-language', profile.transcriptionLanguage);
     this.root.querySelector('#rt-provider').disabled = Boolean(profile.id);
     this.root.querySelector('#rt-provider').onchange = event => { this.secretDraft = {}; this.draft = makeRealtimeProfile(event.target.value); this.dirty = true; this.render(); };
+    this.root.querySelector('#rt-openai-backend')?.addEventListener('change', () => {
+      const previousBackend = this.draft.openaiBackend || 'realtime';
+      this.capture();
+      this.draft.model = isOpenAiLive(this.draft) ? OPENAI_LIVE_MODEL : preset.models[0];
+      if (!getRealtimeSystemVoices(this.draft).some(voice => voice.id === this.draft.voice)) this.draft.voice = 'marin';
+      if (!this.draft.liveBackendModel) this.draft.liveBackendModel = OPENAI_LIVE_BACKEND_MODEL;
+      if (this.draft.name === 'OpenAI Realtime' || this.draft.name === 'OpenAI GPT-Live') this.draft.name = isOpenAiLive(this.draft) ? 'OpenAI GPT-Live' : 'OpenAI Realtime';
+      this.dirty = previousBackend !== this.draft.openaiBackend || this.dirty; this.render();
+    });
     this.root.querySelector('#rt-gemini-backend')?.addEventListener('change', () => {
       this.capture(); this.draft.model = isGeminiVertex(this.draft) ? GEMINI_VERTEX_MODELS[0] : preset.models[0];
       if (isGeminiVertex(this.draft) && !GEMINI_VERTEX_REGIONS.includes(this.draft.region)) this.draft.region = GEMINI_VERTEX_REGIONS[0];
@@ -153,6 +165,16 @@ export class RealtimeSettingsPanel {
         this.status(result.remote ? t('成功获取 {count} 个可用模型', { count: this.modelOptions.length }) : result.message);
       } finally { refreshButton.textContent = translateUiText('刷新列表'); }
     }, '操作已取消');
+    this.root.querySelector('#rt-backend-model')?.addEventListener('input', () => this.renderModelOptions(true));
+    this.root.querySelector('#rt-refresh-backend-models')?.addEventListener('click', () => this.run(async signal => {
+      this.capture(); const profile = cloneData(this.draft), source = realtimeModelSource(profile);
+      this.status('正在获取模型列表...');
+      const credentials = await this.readCredentials() || await this.store.credentials(this.store.get(profile.id));
+      const result = await this.modelDiscovery.listBackendModels(profile, credentials, { signal });
+      if (signal.aborted || !this.draft || source !== realtimeModelSource(this.draft)) return;
+      this.backendModelOptions = result.models; this.backendModelSource = source; this.renderModelOptions(true);
+      this.status(t('成功获取 {count} 个可用模型', { count: result.models.length }));
+    }, '操作已取消'));
     this.voicePicker = new RealtimeVoicePicker({ root: this.root.querySelector('#rt-voice-picker'), profile: this.draft });
     this.root.querySelector('#rt-refresh-voices')?.addEventListener('click', () => this.run(async signal => {
       this.capture(); const profile = cloneData(this.draft), source = realtimeModelSource(profile);
@@ -194,16 +216,17 @@ export class RealtimeSettingsPanel {
     }); });
     this.root.querySelectorAll('input, select, textarea').forEach(node => { if (!node.id.startsWith('rt-clone') && !['rt-profile', 'rt-voice-id', 'rt-voice-label', 'rt-voice-search'].includes(node.id)) node.addEventListener('input', () => { this.dirty = true; }); });
     this.root.querySelectorAll('[data-secret], #rt-region, #rt-workspace, #rt-vertex-project').forEach(node => node.addEventListener('input', () => {
-      this.modelOptions = []; this.modelSource = ''; this.renderModelOptions();
+      this.modelOptions = []; this.modelSource = ''; this.backendModelOptions = []; this.backendModelSource = ''; this.renderModelOptions(); this.renderModelOptions(true);
       this.voicePicker.setVoices(null);
     }));
-    this.renderModelOptions();
+    this.renderModelOptions(); this.renderModelOptions(true);
   }
-  renderModelOptions() {
-    const container = this.root.querySelector('#rt-model-options'), input = this.root.querySelector('#rt-model');
+  renderModelOptions(backend = false) {
+    const models = backend ? this.backendModelOptions : this.modelOptions;
+    const container = this.root.querySelector(backend ? '#rt-backend-model-options' : '#rt-model-options'), input = this.root.querySelector(backend ? '#rt-backend-model' : '#rt-model');
     if (!container || !input) return;
-    container.replaceChildren(); container.style.display = this.modelOptions.length ? 'flex' : 'none';
-    for (const id of rankModelCandidates(this.modelOptions, input.value.trim())) {
+    container.replaceChildren(); container.style.display = models.length ? 'flex' : 'none';
+    for (const id of rankModelCandidates(models, input.value.trim())) {
       const chip = document.createElement('button'); chip.type = 'button'; chip.className = 'api-config-model-chip'; chip.textContent = id;
       chip.classList.toggle('is-selected', input.value.trim() === id); chip.ariaPressed = String(input.value.trim() === id);
       chip.classList.toggle('is-match', Boolean(input.value.trim() && id.toLowerCase().includes(input.value.trim().toLowerCase())));
@@ -226,13 +249,18 @@ export class RealtimeSettingsPanel {
       : [...(profile.provider === 'doubao_realtime' ? [['appId', '豆包 App ID']] : []), ['apiKey', profile.provider === 'doubao_realtime' ? 'Access Token' : 'API Key']];
     return `<div class="api-config-realtime-grid">
       ${input('rt-name', '设置档名称', profile.name)}
-      <label class="api-config-realtime-field">${helpTitle('服务商', [profile.provider === 'openai' ? '每轮语音转写后更新角色上下文；转写模型独立计费。' : '通话开始时加载角色上下文；通话中修改角色设定，下次通话生效。'])}<select id="rt-provider">${Object.entries(REALTIME_PROVIDERS).map(([id, item]) => option(id, item.label)).join('')}</select></label>
+      <label class="api-config-realtime-field">${helpTitle('服务商', [isOpenAiLive(profile) ? 'GPT-Live 支持同时听说；语音按通话时长计费，推理模型另计。通话开始时加载角色上下文。' : profile.provider === 'openai' ? '每轮语音转写后更新角色上下文；转写模型独立计费。' : '通话开始时加载角色上下文；通话中修改角色设定，下次通话生效。'])}<select id="rt-provider">${Object.entries(REALTIME_PROVIDERS).map(([id, item]) => option(id, id === 'openai' ? 'OpenAI' : item.label)).join('')}</select></label>
+      ${profile.provider === 'openai' ? `<label class="api-config-realtime-field"><span>${tr('OpenAI 语音接入方式')}</span><select id="rt-openai-backend">${option('realtime', 'Realtime')}${option('live', 'GPT-Live')}</select></label>` : ''}
       ${profile.provider === 'gemini_live' ? `<label class="api-config-realtime-field"><span>${tr('Gemini Live 接入方式')}</span><select id="rt-gemini-backend">${option('developer', 'Gemini API (AI Studio)')}${option('vertex', 'Vertex AI')}</select></label>` : ''}
       ${vertex ? `<label class="api-config-realtime-field">${helpTitle('连接模式', [serviceAccount ? 'Vertex Live 使用项目额度和所选区域。' : 'Express 使用 Vertex AI 专用 API Key；模型访问权限取决于账号。'])}<select id="rt-vertex-auth-mode">${option('service_account', translateUiText('完整模式（Service Account）'))}${option('express', translateUiText('Express 模式（API Key）'))}</select></label>` : ''}
       <div class="api-config-realtime-field is-wide">
-        <label class="api-config-field-label" for="rt-model">${helpTitle('Realtime 模型', ['要使用的模型 ID（可输入或从列表选择）', ...(profile.provider === 'nova_sonic' ? ['Nova 2 Sonic 的支持语言暂不包含中文；长通话会自动续接。'] : [])])}<button type="button" id="rt-refresh-models" class="api-config-refresh-action">${tr('刷新列表')}</button></label>
+        <label class="api-config-field-label" for="rt-model">${helpTitle(isOpenAiLive(profile) ? 'GPT-Live 模型' : 'Realtime 模型', ['要使用的模型 ID（可输入或从列表选择）', ...(profile.provider === 'nova_sonic' ? ['Nova 2 Sonic 的支持语言暂不包含中文；长通话会自动续接。'] : [])])}<button type="button" id="rt-refresh-models" class="api-config-refresh-action">${tr('刷新列表')}</button></label>
         <div class="api-config-model-picker"><input id="rt-model" type="text" value="${escape(profile.model)}" autocomplete="off"><div id="rt-model-options" class="api-config-model-options" aria-label="${tr('可用 Realtime 模型列表')}" style="display:none;"></div></div>
       </div>
+      ${isOpenAiLive(profile) ? `<div class="api-config-realtime-field is-wide">
+        <label class="api-config-field-label" for="rt-backend-model">${helpTitle('推理模型', ['使用此设置档的 OpenAI API Key 调用 Responses，为语音提供推理。可刷新候选或自行填写，访问权限以 API 为准。'])}<button type="button" id="rt-refresh-backend-models" class="api-config-refresh-action">${tr('刷新列表')}</button></label>
+        <div class="api-config-model-picker"><input id="rt-backend-model" type="text" value="${escape(profile.liveBackendModel || OPENAI_LIVE_BACKEND_MODEL)}" autocomplete="off"><div id="rt-backend-model-options" class="api-config-model-options" aria-label="${tr('可用推理模型列表')}" style="display:none;"></div></div>
+      </div>` : ''}
       ${regions ? `<label class="api-config-realtime-field"><span>${tr(preset.regionLabel || '区域')}</span><select id="rt-region">${regions.map(region => option(region, translateUiText(preset.regionLabels?.[region] || region))).join('')}</select></label>` : ''}
       ${serviceAccount ? `${input('rt-vertex-project', 'Project ID', profile.vertexaiProjectId, 'text', '', ['留空时从 Service Account JSON 识别 Project ID。'])}<label class="api-config-realtime-field is-wide">${helpTitle('Service Account JSON', ['粘贴从 Google Cloud 下载的 Service Account JSON；Project ID 会自动识别。凭证保存在本机加密 Keyring。'])}<textarea id="rt-secret-vertexaiServiceAccount" data-secret="vertexaiServiceAccount" autocomplete="off" spellcheck="false" rows="4" placeholder="${tr(profile.credentialId ? '已保存；留空保持原值' : '尚未填写')}">${escape(this.secretDraft.vertexaiServiceAccount || '')}</textarea></label>` : ''}
       ${profile.provider === 'qwen_audio_realtime' ? input('rt-workspace', 'Workspace ID（可选）', profile.workspaceId) : ''}
@@ -240,7 +268,7 @@ export class RealtimeSettingsPanel {
       <label class="api-config-realtime-field">${helpTitle('声音类型', profile.provider === 'doubao_realtime' ? ['SC2.0 使用 saturn_ 系统声音或 S_ 克隆声音；预设角色音色可能影响角色表现。'] : [])}<select id="rt-voice-kind">${option('system', translateUiText('系统声音'))}${preset.clone ? option('custom', translateUiText('自定义声音')) : ''}</select></label>
       ${input('rt-idle', '静音挂断（分钟）', profile.idleTimeoutMinutes, 'number', 'min="1" max="30"')}
       ${realtimeReplyLanguageField('rt-reply-language', profile.replyLanguage)}
-      ${profile.provider === 'openai' ? `<label class="api-config-realtime-field">${helpTitle('输入识别语言', ['用于输入转写，独立于角色的回复语言。'])}<select id="rt-transcription-language">${option('', translateUiText('自动识别'))}${[['zh', '普通话／中文'], ['en', '英文'], ['ja', '日文'], ['ko', '韩文'], ['fr', '法语'], ['de', '德语'], ['es', '西班牙语']].map(([id, label]) => option(id, translateUiText(label))).join('')}</select></label>` : ''}
+      ${profile.provider === 'openai' && !isOpenAiLive(profile) ? `<label class="api-config-realtime-field">${helpTitle('输入识别语言', ['用于输入转写，独立于角色的回复语言。'])}<select id="rt-transcription-language">${option('', translateUiText('自动识别'))}${[['zh', '普通话／中文'], ['en', '英文'], ['ja', '日文'], ['ko', '韩文'], ['fr', '法语'], ['de', '德语'], ['es', '西班牙语']].map(([id, label]) => option(id, translateUiText(label))).join('')}</select></label>` : ''}
       ${realtimeVoicePickerFields(profile)}
     </div>
     <div class="api-config-realtime-actions">${button('rt-save', '保存并使用')}</div>

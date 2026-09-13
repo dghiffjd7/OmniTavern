@@ -1,3 +1,5 @@
+import { isOpenAiLive, buildOpenAiLiveSessionConfig } from './openai-live-config.js';
+import { createOpenAiLiveCallEvents } from './openai-live-call-events.js';
 import { t } from '../../i18n/index.js';
 import {
   buildOpenAiRealtimeSessionConfig,
@@ -38,6 +40,7 @@ export const createRealtimeCallRuntime = ({
   isTargetCurrent = () => true,
   commitUserMessage,
   commitAssistantMessage,
+  commitLiveTranscript,
   onStateChange = null,
   onCaption = null,
   onAudioLevel = null,
@@ -60,6 +63,7 @@ export const createRealtimeCallRuntime = ({
     error: '',
   };
   let sessionClient = null;
+  let liveEvents = null;
   let target = null;
   let connection = null;
   let responseRecords = new Map();
@@ -77,6 +81,7 @@ export const createRealtimeCallRuntime = ({
   let suppressAssistantCommit = false;
   const pendingNaturalInputs = new Set();
   const deferredNaturalResponses = new Map();
+  const isLive = () => isOpenAiLive(connection?.settings);
   const isNatural = () => connection?.settings?.contextMode === 'session_snapshot';
   const generationChannel = () => connection?.config?.provider && connection.config.provider !== 'openai'
     ? connection.config.provider : 'openai_realtime';
@@ -232,7 +237,9 @@ export const createRealtimeCallRuntime = ({
 
   const handleServerEvent = event => {
     const type = String(event?.type || '').trim();
-    if (!type || state.status === 'idle' || state.status === 'ending') return;
+    if (!type || state.status === 'idle') return;
+    if (isLive()) { liveEvents?.handle(event); return; }
+    if (state.status === 'ending') return;
     if (type === 'warning') { onWarning?.(event.message); return; }
     if (type === 'usage.delta') { onUsage?.({ type: 'response', usage: event.usage }); return; }
     if (type === 'input.transcript.preview') { onCaption?.({ role: 'user', text: event.text, final: false }); return; }
@@ -349,11 +356,13 @@ export const createRealtimeCallRuntime = ({
 
   const handleConnectionState = connectionState => {
     const normalized = String(connectionState || '').trim().toLowerCase();
+    if (isLive() && normalized === 'connected' && state.status === 'reconnecting') { emitState('listening'); return; }
     if ((normalized === 'failed' || normalized === 'disconnected') && state.status !== 'ending' && state.status !== 'idle') {
       emitState('reconnecting');
       const error = new Error('实时语音连接已中断，请结束后重新拨号');
       error.code = 'connection_lost';
       try { onError?.(error); } catch {}
+      if (isLive() && normalized === 'failed') void end('connection_lost');
     }
   };
 
@@ -406,7 +415,7 @@ export const createRealtimeCallRuntime = ({
     committedMessageIds = new Set();
     activeResponseId = '';
     connection = null;
-    emitState('requesting_permission', { target: { ...target }, error: '', provider: '' });
+    emitState('requesting_permission', { target: { ...target }, error: '', provider: '', openaiBackend: '', sessionId: '' });
     const startedAt = now();
     try {
       const resolved = await resolveConnection?.({ target });
@@ -425,17 +434,26 @@ export const createRealtimeCallRuntime = ({
       const snapshotInstructions = String(snapshot?.instructions || '').trim();
       if (!snapshotInstructions) throw new Error('无法构建当前角色的语音上下文');
       const instructions = applyRealtimeReplyLanguage(snapshotInstructions, connection.settings);
+      if (isLive()) {
+        if (typeof commitLiveTranscript !== 'function') throw new Error(t('语音字幕保存功能不可用'));
+        liveEvents = createOpenAiLiveCallEvents({ target, settings: connection.settings, commitTranscript: commitLiveTranscript,
+          isTargetCurrent, onCaption, onUsage, onError, onWarning, enqueue, onActivity: touchActivity,
+          onStarted: sessionId => emitState(state.status, { sessionId }),
+          onEnded: reason => { if (state.status !== 'ending') void end(reason); },
+        });
+      }
       sessionClient = createSessionClient?.({
         provider: connection.config.provider || 'openai',
+        openaiBackend: isLive() ? 'live' : 'realtime',
         onEvent: event => { if (generation === startGeneration) handleServerEvent(event); },
         onConnectionState: value => { if (generation === startGeneration) handleConnectionState(value); },
-        onAudioLevel: value => { if (generation === startGeneration) onAudioLevel?.(value); },
+        onAudioLevel: value => { if (generation === startGeneration) { if (isLive() && (value?.input?.level > 0.03 || value?.output?.level > 0.03)) touchActivity(); onAudioLevel?.(value); } },
       });
       if (!sessionClient) throw new Error('实时语音客户端初始化失败');
-      emitState('connecting', { startedAt, elapsedMs: 0, provider: connection.config.provider || 'openai' });
+      emitState('connecting', { startedAt, elapsedMs: 0, provider: connection.config.provider || 'openai', openaiBackend: isLive() ? 'live' : 'realtime' });
       await sessionClient.connect({
         config: connection.config,
-        sessionConfig: isNatural() ? { ...connection.settings, instructions } : buildOpenAiRealtimeSessionConfig({
+        sessionConfig: isLive() ? buildOpenAiLiveSessionConfig({ ...connection.settings, instructions }) : isNatural() ? { ...connection.settings, instructions } : buildOpenAiRealtimeSessionConfig({
           ...connection.settings,
           instructions,
         }),
@@ -453,7 +471,9 @@ export const createRealtimeCallRuntime = ({
       if (generation === startGeneration) connectAbortController = null;
       return true;
     } catch (error) {
+      if (state.status === 'ending' && endingPromise) { await endingPromise; return false; }
       try { await sessionClient?.close?.(); } catch {}
+      liveEvents?.dispose(); liveEvents = null;
       sessionClient = null;
       if (generation === startGeneration) connectAbortController = null;
       if (error?.name === 'AbortError' || error?.cancelled === true || generation !== startGeneration) {
@@ -468,7 +488,7 @@ export const createRealtimeCallRuntime = ({
   };
 
   const interrupt = async () => {
-    if (!sessionClient || state.status === 'ending' || state.status === 'idle') return false;
+    if (isLive() || !sessionClient || state.status === 'ending' || state.status === 'idle') return false;
     try { sessionClient.sendEvent({ type: 'response.cancel' }); } catch {}
     const interruptedResponseId = activeResponseId;
     if (interruptedResponseId) await enqueue(() => finalizeAssistant(interruptedResponseId, { interrupted: true }));
@@ -479,7 +499,8 @@ export const createRealtimeCallRuntime = ({
   const end = async (reason = 'user') => {
     if (state.status === 'idle') return true;
     if (endingPromise) return endingPromise;
-    startGeneration += 1;
+    const drainLive = isLive();
+    if (!drainLive) startGeneration += 1;
     try { connectAbortController?.abort?.(); } catch {}
     connectAbortController = null;
     endingPromise = (async () => {
@@ -492,6 +513,11 @@ export const createRealtimeCallRuntime = ({
       }
       await eventQueue;
       try { await sessionClient?.close?.(); } catch {}
+      if (drainLive) {
+        startGeneration += 1;
+        await enqueue(() => liveEvents?.flush());
+        liveEvents?.dispose(); liveEvents = null;
+      }
       sessionClient = null;
       target = null;
       connection = null;

@@ -1,4 +1,5 @@
 import { getRealtimeProvider } from './realtime-provider-catalog.js';
+import { isOpenAiLive, OPENAI_LIVE_MODEL, OPENAI_LIVE_BACKEND_MODEL } from './openai-live-config.js';
 import { normalizeVoiceTranscriptionLanguages } from '../../api/voice-client.js';
 
 const REALTIME_CONFIG_SCOPES = new Set(['chat', 'voice_shared', 'voice_tts', 'voice_stt']);
@@ -55,6 +56,14 @@ export const applyRealtimeReplyLanguage = (instructions, settings = {}) => {
 
 export const normalizeRealtimeVoiceSettings = (value = {}) => {
   const input = value && typeof value === 'object' ? value : {};
+  if (isOpenAiLive(input)) {
+    return { ...normalizeRealtimeVoiceSettings({}), ...input, provider: 'openai', openaiBackend: 'live',
+      realtimeModel: normalizeModelId(input.realtimeModel || input.model, OPENAI_LIVE_MODEL),
+      liveBackendModel: normalizeModelId(input.liveBackendModel, OPENAI_LIVE_BACKEND_MODEL),
+      voice: String(input.voice || 'marin').trim(), replyLanguage: normalizeReplyLanguage(input.replyLanguage),
+      idleTimeoutMinutes: Math.round(clampNumber(input.idleTimeoutMinutes, 10, 1, 30)),
+      transcriptionModel: '', transcriptionLanguage: '', contextMode: 'full_duplex' };
+  }
   if (input.provider && input.provider !== 'openai' && getRealtimeProvider(input.provider)) {
     return { ...normalizeRealtimeVoiceSettings({}), ...input, replyLanguage: normalizeReplyLanguage(input.replyLanguage), voice: String(input.voice || '').trim(), contextMode: 'session_snapshot' };
   }

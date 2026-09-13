@@ -220,7 +220,8 @@ export class MemoryTemplateStore {
       if (!record) throw new Error('template not found');
       const input = buildTemplateInputFromRecord(record, { isDefault: record?.is_default, isBuiltin: record?.is_builtin });
       input.injection = injection || null;
-      return this.saveTemplate(input);
+      // Already inside queueWrite; re-queueing would wait on this same task.
+      return this.saveTemplateRaw(input);
     });
   }
 
@@ -244,7 +245,7 @@ export class MemoryTemplateStore {
         const isDefault = String(record?.id || '') === String(id || '');
         const input = buildTemplateInputFromRecord(record, { isDefault });
         if (!input.id || !input.name) continue;
-        await this.saveTemplate(input);
+        await this.saveTemplateRaw(input);
       }
       return true;
     });

@@ -1443,8 +1443,20 @@ const scheduleChatFormatGuardianModelReview = ({
         ...(customFormatGuide ? ['customFormatGuide'] : []),
       ],
     };
+    const referenceSignal = modelOptions.requestOptions?.signal || modelOptions.signal || options.signal;
+    const checkReferenceSignal = () => {
+      if (referenceSignal?.aborted) throw Object.assign(new Error('任务已取消'), { name: 'AbortError' });
+    };
+    checkReferenceSignal();
+    const referenceContext = typeof modelOptions.resolveReferenceContext === 'function'
+      ? await modelOptions.resolveReferenceContext({
+        targetMessageId: options.repairTarget?.sourceMessageId || parserResult?.sourceMessageId || message.id,
+        signal: referenceSignal,
+      }) : modelOptions.referenceContext;
+    checkReferenceSignal();
     const prompt = buildChatFormatGuardianModelPrompt({
       assistantText: inputText,
+      agentConfig: modelOptions.agentConfig, referenceContext,
       formatReminderText,
       customFormatGuide,
       enabledFormats: formatProfile.enabledFormats,
@@ -1457,15 +1469,17 @@ const scheduleChatFormatGuardianModelReview = ({
       repairTarget: options.repairTarget,
     });
     const requestReview = async (messages) => {
+      checkReferenceSignal();
       const raw = await runChatFormatGuardianBackgroundChat(
         modelOptions.backgroundChat,
         messages,
-        modelOptions.requestOptions || {
+        { ...(modelOptions.requestOptions || {
           temperature: 0,
           maxTokens: FORMAT_PATCH_MODEL_MAX_TOKENS,
-        },
+        }), ...(referenceSignal ? { signal: referenceSignal } : {}) },
         { timeoutMs: modelOptions.timeoutMs },
       );
+      checkReferenceSignal();
       const normalizedReview = normalizeChatFormatGuardianModelReview(raw, {
         originalText: inputText,
         baseRevision: options.baseRevision,

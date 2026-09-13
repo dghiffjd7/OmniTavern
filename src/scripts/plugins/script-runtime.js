@@ -512,6 +512,14 @@ const makeCompatDollar = () => {
         nodes.forEach(node => node?.setAttribute?.(name, value));
         return api;
       },
+      removeAttr: (name) => {
+        const names = typeof name === 'string' ? (name.match(/[^\\x20\\t\\r\\n\\f]+/g) || []) : [];
+        nodes.forEach(node => {
+          if (node?.nodeType !== 1) return;
+          names.forEach(key => node.removeAttribute?.(key));
+        });
+        return api;
+      },
       prop: (name, value) => {
         if (value === undefined) return nodes[0]?.[name];
         nodes.forEach(node => {
@@ -1877,6 +1885,7 @@ const makeCompatElement = (tagName = 'div') => {
       delete attrs[key];
       if (key === 'id') element.id = '';
       else if (key === 'class') element.className = '';
+      else if (key === 'style') element.style.cssText = '';
       else if (key.startsWith('data-')) {
         const dsKey = key.slice(5).replace(/-([a-z])/g, (_m, c) => c.toUpperCase());
         delete element.dataset[dsKey];

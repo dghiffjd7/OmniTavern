@@ -19,7 +19,7 @@ export const showContextMenuCore = ({
   hideReactionPicker = null,
   resolveContextMenuContext = null,
   buildContextMenuActions = null,
-  canCheckFormatForMessage = null,
+  canCheckFormatForMessage = null, canEditWithAgent = null,
   isThreadingEnabledForMessage = null,
   normalizeReactionEntries = null,
   createContextMenuReactionRow = null,
@@ -68,6 +68,7 @@ export const showContextMenuCore = ({
       isThreadingEnabled: threadingEnabled,
       inlineGeneratedImage,
       canCheckFormat: canCheckFormatForMessage?.(resolvedMessage) === true,
+      canEditWithAgent: canEditWithAgent?.(resolvedMessage) === true,
     }) || []),
   ];
   contextMenu.innerHTML = '';

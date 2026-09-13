@@ -12,6 +12,7 @@ import {
   validateBuiltinPhoneFormat,
 } from '../../utils/builtin-phone-format-contract.js';
 import { getLocalizedPromptText } from '../../i18n/prompt-locale.js';
+import { getBuiltinAgentTask, resolveBuiltinAgentTask } from '../../agent/agent-builtin-defaults.js';
 
 export const CHAT_FORMAT_EVENT_TYPES = Object.freeze({
   privateMessage: 'private_message',
@@ -462,7 +463,7 @@ const compactParserReportForPrompt = (report = null, { maxEvents = 6, maxIssues 
 export const buildChatFormatGuardianModelPrompt = ({
   assistantText = '',
   formatReminderText = '',
-  customFormatGuide = '',
+  customFormatGuide = '', agentConfig = null, referenceContext = null,
   enabledFormats = {},
   parserReport = null,
   userName = '我',
@@ -507,13 +508,16 @@ export const buildChatFormatGuardianModelPrompt = ({
         ? getPromptLine('format_guardian.no_events.custom')
         : getPromptLine('format_guardian.no_events.empty')))
     : '';
+  const defaultTaskLines = getBuiltinAgentTask('reply_check').split('\n');
+  const task = resolveBuiltinAgentTask(agentConfig, 'reply_check');
+  const replacesTask = agentConfig?.taskPromptMode === 'replace';
+  const protocol = getPromptLine('format_guardian.system.protocol', { version: FORMAT_PATCH_PROTOCOL_VERSION });
+  // Preserve the existing default/legacy message shape. Explicit task edits
+  // replace the business instructions, while patch and scene rules still apply.
   const system = [
-    getPromptLine('format_guardian.system.role'),
-    getPromptLine('format_guardian.system.protocol', { version: FORMAT_PATCH_PROTOCOL_VERSION }),
-    getPromptLine('format_guardian.system.task'),
-    getPromptLine('format_guardian.system.scope'),
-    getPromptLine('format_guardian.system.allowed'),
-    getPromptLine('format_guardian.system.forbidden'),
+    ...(replacesTask && task !== defaultTaskLines.join('\n')
+      ? [task, protocol]
+      : [defaultTaskLines[0], protocol, ...defaultTaskLines.slice(1)]),
     hasPrivateFormat ? getPromptLine('format_guardian.system.private') : '',
     hasChatFormat ? getPromptLine('format_guardian.system.loose_rows') : '',
     customGuide ? getPromptLine('format_guardian.system.custom') : '',
@@ -575,7 +579,17 @@ export const buildChatFormatGuardianModelPrompt = ({
   return {
     messages: [
       { role: 'system', content: system },
+      ...(!replacesTask && agentConfig?.prompt?.trim() ? [{ role: 'system', content: agentConfig.prompt }] : []),
+      ...(agentConfig?.blocks || []).filter(b => b.enabled !== false && b.text?.trim()).map(b => ({ role: b.role === 'user' ? 'user' : 'system', content: b.text })),
+      ...(referenceContext?.text ? [{ role: 'user', content: `Reference context (read only):\n${referenceContext.text}` }] : []),
       { role: 'user', content: user },
+    ],
+    sections: [
+      { source: '格式检查协议' },
+      ...(!replacesTask && agentConfig?.prompt?.trim() ? [{ source: '任务要求' }] : []),
+      ...(agentConfig?.blocks || []).filter(b => b.enabled !== false && b.text?.trim()).map(b => ({ source: b.name || '自定义区块' })),
+      ...(referenceContext?.text ? [{ source: referenceContext.truncated ? '参考上下文 · 已截断' : '参考上下文' }] : []),
+      { source: '格式要求与原始回复' },
     ],
     responseFormat: 'json_object',
     enabledFormatIds: formatEntries.map(entry => entry.id),

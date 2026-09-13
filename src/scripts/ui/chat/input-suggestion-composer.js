@@ -32,7 +32,9 @@ export const bindInputSuggestionComposer = ({ input, getSettings, getContext, re
     const context = getContext();
     return {
       contextKey: context?.key,
+      agentContext: context?.agentContext ? { ...context.agentContext } : undefined,
       requestContext: context?.requestContext,
+      referenceContext: context?.referenceContext,
       active: context?.active !== false && doc.activeElement === input && !composing && !input.disabled && !input.readOnly
         && start === end && input.getClientRects().length > 0,
       before: input.value.slice(0, start), after: input.value.slice(end), settings: getSettings(),

@@ -301,6 +301,49 @@ export const renderMessageBubbleContentCore = ({
       break;
     case 'text':
     default: {
+      const generated = message?.meta?.generatedMedia && typeof message.meta.generatedMedia === 'object'
+        ? message.meta.generatedMedia
+        : null;
+      const generatedImage = generated && (!generated.kind || generated.kind === 'image');
+      // An image attempt owns the displayed status; retained RP raw data belongs
+      // to an older reply and must not hide the current prompt or retry action.
+      if (generatedImage && generated.status === 'running') {
+        bubble.textContent = String(message?.content ?? '');
+        bubble.style.whiteSpace = 'pre-wrap';
+        break;
+      }
+      if (generatedImage && ['failed', 'cancelled', 'interrupted'].includes(generated.status)) {
+        const error = String(generated.error || '').trim();
+        const card = documentLike.createElement(error ? 'details' : 'div');
+        card.className = 'card generated-media-error-card';
+        const heading = documentLike.createElement(error ? 'summary' : 'div');
+        heading.className = 'card-title';
+        const title = documentLike.createElement('span');
+        title.className = 'generated-media-error-title';
+        const fallback = generated.status === 'cancelled' ? '图片生成已取消'
+          : generated.status === 'interrupted' ? '图片生成已中断' : '图片生成失败';
+        title.textContent = String(message?.content || translateText(fallback));
+        appendChild(heading, title);
+        if (String(generated.prompt || '').trim()) {
+          const retry = documentLike.createElement('button');
+          retry.type = 'button';
+          retry.className = 'card-button generated-media-error-retry';
+          retry.dataset.action = 'retry-generated-media';
+          retry.textContent = translateText('重新生成图片');
+          appendChild(heading, retry);
+        }
+        appendChild(card, heading);
+        if (error) {
+          const body = documentLike.createElement('pre');
+          body.className = 'card-subtitle';
+          body.style.whiteSpace = 'pre-wrap';
+          body.style.margin = '8px 0 0';
+          body.textContent = String(generated.error);
+          appendChild(card, body);
+        }
+        appendChild(bubble, card);
+        break;
+      }
       if (message?.meta?.renderRich) {
         const target = prepareTextContainer?.(bubble, message);
         if (message?.meta?.isGreeting) {
@@ -321,37 +364,9 @@ export const renderMessageBubbleContentCore = ({
         renderSwipeDraftPlaceholder?.(target, message?.meta?.activeSwipeDraft?.label || '生成新回复中...');
         break;
       }
-      const generated = message?.meta?.generatedMedia && typeof message.meta.generatedMedia === 'object'
-        ? message.meta.generatedMedia
-        : null;
-      if (generated?.status === 'failed' && String(generated?.error || '').trim()) {
-        const details = documentLike.createElement('details');
-        details.className = 'card generated-media-error-card';
-        const summary = documentLike.createElement('summary');
-        summary.className = 'card-title';
-        const titleText = documentLike.createElement('span');
-        titleText.className = 'generated-media-error-title';
-        titleText.textContent = String(message?.content || translateText('图片生成失败'));
-        appendChild(summary, titleText);
-        if (String(generated?.prompt || '').trim()) {
-          const retry = documentLike.createElement('button');
-          retry.type = 'button';
-          retry.className = 'card-button generated-media-error-retry';
-          retry.dataset.action = 'retry-generated-media';
-          retry.textContent = translateText('重新生成图片');
-          appendChild(summary, retry);
-        }
-        const body = documentLike.createElement('pre');
-        body.className = 'card-subtitle';
-        body.style.whiteSpace = 'pre-wrap';
-        body.style.margin = '8px 0 0';
-        body.textContent = String(generated.error || '');
-        appendChild(details, summary);
-        appendChild(details, body);
-        appendChild(bubble, details);
-        break;
-      }
-      const baseText = typeof message?.raw === 'string' ? message.raw : message?.content;
+      // 与流式结束一致，显示经过正则处理的 content（包括被规则清空的结果）。
+      // 历史回复分支会带回 raw，仅在旧记录缺少 content 时用它回退。
+      const baseText = message?.content ?? message?.raw;
       const normalizedSource = message?.role === 'assistant'
         ? (normalizeAssistantLineBreaks?.(baseText) ?? String(baseText ?? ''))
         : String(baseText ?? '');

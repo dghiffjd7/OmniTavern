@@ -166,13 +166,14 @@ export const createRealtimeCallPanel = ({
     state = { ...state, ...(nextState || {}) };
     if (!panel) return;
     panel.dataset.state = state.status || 'idle';
+    panel.classList.toggle('is-live', state.openaiBackend === 'live');
     panel.classList.toggle('is-muted', state.muted === true);
     panel.querySelector('.realtime-call-muted-mark').hidden = state.muted !== true;
-    const provider = translateUiText(getRealtimeProvider(state.provider)?.label || '当前实时语音服务');
+    const provider = state.provider === 'openai' && state.openaiBackend === 'live' ? 'OpenAI GPT-Live' : translateUiText(getRealtimeProvider(state.provider)?.label || '当前实时语音服务');
     const status = panel.querySelector('.realtime-call-status');
     const statusText = state.status === 'connecting' && state.provider
       ? t('正在连接 {provider}…', { provider })
-      : translateUiText(state.status === 'listening' && state.muted ? '麦克风已静音' : STATUS_LABELS[state.status] || '通话中');
+      : translateUiText(state.status === 'listening' && state.muted ? '麦克风已静音' : state.status === 'listening' && state.openaiBackend === 'live' ? '通话中' : STATUS_LABELS[state.status] || '通话中');
     status.textContent = statusText;
     status.title = statusText;
     const disclosure = panel.querySelector('.realtime-call-disclosure');
@@ -187,6 +188,7 @@ export const createRealtimeCallPanel = ({
     output.classList.toggle('is-active', state.outputMuted === true);
     output.querySelector('span').textContent = translateUiText(state.outputMuted ? '开启扬声器' : '扬声器');
     panel.querySelector('[data-call-action="interrupt"]').disabled = !['thinking', 'speaking'].includes(state.status);
+    panel.querySelector('[data-call-action="interrupt"]').hidden = state.openaiBackend === 'live';
   };
 
   const show = ({ name = '角色', avatar = '' } = {}, { expanded: openControls = true } = {}) => {
@@ -228,9 +230,27 @@ export const createRealtimeCallPanel = ({
     if (hadFocus && previousFocus?.isConnected) previousFocus.focus?.({ preventScroll: true });
   };
 
-  const setCaption = ({ role = '', text = '' } = {}) => {
+  const setCaption = ({ role = '', text = '', captions = null } = {}) => {
     ensure();
     if (!panel) return;
+    const container = panel.querySelector('.realtime-call-caption');
+    container.classList.toggle('is-live-captions', Array.isArray(captions));
+    if (Array.isArray(captions)) {
+      const wasFollowing = container.scrollHeight - container.scrollTop - container.clientHeight < 24;
+      container.replaceChildren();
+      for (const caption of captions) {
+        const label = documentRef.createElement('span'); label.className = 'realtime-call-caption-role';
+        label.textContent = translateUiText(caption.role === 'user' ? '你' : '角色');
+        const paragraph = documentRef.createElement('p'); paragraph.textContent = String(caption.text || '');
+        container.append(label, paragraph);
+      }
+      if (wasFollowing) container.scrollTop = container.scrollHeight;
+      return;
+    }
+    if (container.children.length !== 2) {
+      const label = documentRef.createElement('span'); label.className = 'realtime-call-caption-role';
+      container.replaceChildren(label, documentRef.createElement('p'));
+    }
     panel.querySelector('.realtime-call-caption-role').textContent = translateUiText(role === 'user' ? '你' : role === 'assistant' ? '角色' : '字幕');
     const content = panel.querySelector('.realtime-call-caption p');
     content.textContent = String(text || '') || '…';

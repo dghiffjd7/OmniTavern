@@ -140,6 +140,55 @@ assert.equal(isEsmLikeScriptForTests('async function load() { return await Promi
 console.log('ok - script runtime recognizes actual ESM import and export syntax');
 
 {
+  const { sandbox, messages } = createWorkerHarness();
+  await sandbox.self.onmessage({
+    data: { type: 'sync', settings: { allowNetwork: false }, context: { sessionId: 'remove-attr' }, scripts: [] },
+  });
+  const result = vm.runInContext(`(() => {
+    const root = document.createElement('section');
+    document.body.appendChild(root);
+    const nodes = [document.createElement('button'), document.createElement('button')];
+    nodes.forEach((node, index) => {
+      node.setAttribute('id', 'remove-attr-' + index);
+      node.setAttribute('disabled', 'disabled');
+      node.setAttribute('data-pending', '1');
+      node.setAttribute('aria-busy', 'true');
+      node.setAttribute('title', 'keep');
+      node.setAttribute('style', 'display: none; color: red');
+      root.appendChild(node);
+    });
+    const styles = nodes.map(node => node.style);
+    const selected = $(nodes);
+    const sameCollection = selected.removeAttr('disabled  data-pending\\taria-busy\\nstyle') === selected;
+    const stylesCleared = nodes.every((node, index) => node.style === styles[index] && node.style.cssText === '');
+    selected.css('display', 'block').attr('data-ready', 'yes');
+    const attrsRemoved = nodes.every(node => !node.hasAttribute('disabled') && !node.hasAttribute('data-pending') && !node.hasAttribute('aria-busy'));
+    const indexesCleared = document.querySelectorAll('button[data-pending="1"]').length === 0;
+    const chainingWorks = nodes.every(node => node.style.display === 'block' && node.getAttribute('data-ready') === 'yes' && node.getAttribute('title') === 'keep');
+    const noOpInputs = [undefined, null, '', '  ', 0, {}].every(value => selected.removeAttr(value) === selected);
+    const mixed = $([document, document.createTextNode('text'), nodes[0]]);
+    const nonElementsIgnored = mixed.removeAttr('data-ready') === mixed && !nodes[0].hasAttribute('data-ready');
+    const empty = $([]);
+    return { sameCollection, stylesCleared, attrsRemoved, indexesCleared, chainingWorks, noOpInputs, nonElementsIgnored, emptySafe: empty.removeAttr('disabled') === empty };
+  })()`, sandbox);
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+    sameCollection: true,
+    stylesCleared: true,
+    attrsRemoved: true,
+    indexesCleared: true,
+    chainingWorks: true,
+    noOpInputs: true,
+    nonElementsIgnored: true,
+    emptySafe: true,
+  });
+  await flushTimers();
+  const projected = messages.filter(msg => msg.type === 'ui_update').at(-1)?.payload?.roots?.join('') || '';
+  assert.match(projected, /display: block/);
+  assert.doesNotMatch(projected, /disabled=|data-pending=|aria-busy=|display: none|color: red/);
+  console.log('ok - worker removeAttr clears selected attributes and styles, preserves chaining and updates projected UI');
+}
+
+{
   const { sandbox, messages } = createWorkerHarness({
     chatMessages: [
       { id: 'record-user-a', role: 'user', raw: 'hello' },

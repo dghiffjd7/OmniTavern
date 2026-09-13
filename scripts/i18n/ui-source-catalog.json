@@ -338,6 +338,12 @@
     ]
   },
   {
+    "source": "· 已截断",
+    "references": [
+      "src/scripts/agent/agent-request-builder.js#ui-definition"
+    ]
+  },
+  {
     "source": "· 已配置",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -768,7 +774,9 @@
   {
     "source": "{count} 步",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-run-cards.js#ui-call",
+      "src/scripts/ui/agent-run-cards.js#ui-definition"
     ]
   },
   {
@@ -830,6 +838,12 @@
     ]
   },
   {
+    "source": "{count} 轮",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "{count} 区块",
     "references": [
       "src/scripts/ui/preset-panel.js#ui-call"
@@ -839,6 +853,7 @@
     "source": "{count} 条",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-reference-editor.js#ui-definition",
       "src/scripts/ui/chat-fc-compatibility-panel.js#dom-assignment",
       "src/scripts/ui/maid-settings-panel.js#dom-assignment"
     ]
@@ -925,6 +940,10 @@
     "source": "{count} 字",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-configuration-editor.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
+      "src/scripts/ui/agent-reference-editor.js#ui-call",
+      "src/scripts/ui/agent-reference-editor.js#ui-definition",
       "src/scripts/ui/app.js#dom-assignment",
       "src/scripts/ui/maid-settings-panel.js#dom-assignment"
     ]
@@ -1026,6 +1045,13 @@
     "source": "{name}（{count} 行）",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "{steps} 步 · {tools} 次工具",
+    "references": [
+      "src/scripts/ui/agent-run-cards.js#ui-call",
+      "src/scripts/ui/agent-run-cards.js#ui-definition"
     ]
   },
   {
@@ -2321,6 +2347,12 @@
     ]
   },
   {
+    "source": "爱尔兰风格 · 自然音色",
+    "references": [
+      "src/scripts/ui/realtime/realtime-voice-catalog.js#ui-definition"
+    ]
+  },
+  {
     "source": "安排失败，重试",
     "references": [
       "src/scripts/ui/chat/chat-structured-route-status-utils.js#dom-assignment"
@@ -2430,6 +2462,12 @@
     ]
   },
   {
+    "source": "按当前场景和已启用功能加入格式范例，并加入下方填写的格式要求。",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "按当前会话、输入草稿与已保存设置组装；发送脚本和前置 Agent 的新产物在执行时加入。",
     "references": [
       "src/scripts/ui/chat/agent-request-preview.js#ui-call"
@@ -2484,6 +2522,12 @@
     ]
   },
   {
+    "source": "按轮",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "按能力标签委派模型任务",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -2514,15 +2558,62 @@
     ]
   },
   {
+    "source": "按下快捷键",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-toolbox.js#ui-call",
+      "src/scripts/ui/agent-toolbox.js#ui-definition"
+    ]
+  },
+  {
+    "source": "按消息",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "按行拆分条目",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
+    "source": "按需读取对话、记忆表格、角色、变量、预设等资料。",
+    "references": [
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
+    ]
+  },
+  {
+    "source": "按需求搜索应用内建功能。",
+    "references": [
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
+    ]
+  },
+  {
+    "source": "按需添加",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "按需召回",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "按照回复流程的编排顺序，处理已完成的回复。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "按正文规则",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -2598,7 +2689,25 @@
     ]
   },
   {
+    "source": "澳大利亚风格 · 生成音色",
+    "references": [
+      "src/scripts/ui/realtime/realtime-voice-catalog.js#ui-definition"
+    ]
+  },
+  {
+    "source": "澳大利亚风格 · 自然音色",
+    "references": [
+      "src/scripts/ui/realtime/realtime-voice-catalog.js#ui-definition"
+    ]
+  },
+  {
     "source": "澳大利亚英语",
+    "references": [
+      "src/scripts/ui/realtime/realtime-voice-catalog.js#ui-definition"
+    ]
+  },
+  {
+    "source": "巴西风格 · 自然音色",
     "references": [
       "src/scripts/ui/realtime/realtime-voice-catalog.js#ui-definition"
     ]
@@ -2906,6 +3015,7 @@
       "src/index.html#html-text",
       "src/scripts/ui/agent-center-panel.js#html-text",
       "src/scripts/ui/agent-center-panel.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
       "src/scripts/ui/app.js#html-text",
       "src/scripts/ui/chat/code-viewer-ui-utils.js#dom-assignment",
       "src/scripts/ui/chat/inline-edit-ui-utils.js#html-attribute",
@@ -2978,6 +3088,18 @@
     "source": "保存并使用",
     "references": [
       "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
+    ]
+  },
+  {
+    "source": "保存并试运行",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "保存并运行",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -3159,6 +3281,8 @@
   {
     "source": "保存失败",
     "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call",
       "src/scripts/ui/memory-table-editor.js#ui-call"
     ]
@@ -3315,6 +3439,12 @@
     ]
   },
   {
+    "source": "北美风格 · 自然音色",
+    "references": [
+      "src/scripts/ui/realtime/realtime-voice-catalog.js#ui-definition"
+    ]
+  },
+  {
     "source": "备注",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
@@ -3413,6 +3543,18 @@
     "source": "本次留空",
     "references": [
       "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "本次没有参考资料",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "本次没有附加资料",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
     ]
   },
   {
@@ -3530,6 +3672,12 @@
     ]
   },
   {
+    "source": "本次选取",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "本次用量",
     "references": [
       "src/scripts/ui/realtime/realtime-call-panel.js#html-text"
@@ -3625,6 +3773,12 @@
     "source": "本地规则最多保存 64 条。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "本地解析结果",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -4030,6 +4184,12 @@
     ]
   },
   {
+    "source": "变更预览",
+    "references": [
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition"
+    ]
+  },
+  {
     "source": "变更预览工具",
     "references": [
       "src/scripts/ui/chat/hopscotch-variable-card-view.js#ui-call"
@@ -4105,7 +4265,9 @@
   {
     "source": "变量变更预览",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
     ]
   },
   {
@@ -4419,6 +4581,12 @@
     ]
   },
   {
+    "source": "标志",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "标准",
     "references": [
       "src/index.html#html-text",
@@ -4716,6 +4884,18 @@
     "source": "补全完成，已写入内容并保存",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "捕获组",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "捕获组需唯一匹配。使用精确边界；匹配缺失或歧义时停止本次处理。",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -5022,6 +5202,12 @@
     ]
   },
   {
+    "source": "部分来源暂不可用",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "部分模型或中转不支持结构化调用时可开启；女仆会改用旧版文本规划，后续支持结构化的聊天也会同步切换。创意写作不受影响。",
     "references": [
       "src/scripts/ui/general-settings-panel.js#ui-property"
@@ -5038,6 +5224,12 @@
     "references": [
       "src/scripts/ui/chat/hopscotch-court-view.js#ui-call",
       "src/scripts/ui/chat/hopscotch-turn-runtime.js#ui-call"
+    ]
+  },
+  {
+    "source": "部分显示文字无法对应原文，请改用指定部分",
+    "references": [
+      "src/scripts/agent/agent-rendered-target.js#ui-definition"
     ]
   },
   {
@@ -5071,6 +5263,15 @@
     ]
   },
   {
+    "source": "采纳",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
+      "src/scripts/ui/agent-run-cards.js#ui-definition",
+      "src/scripts/ui/agent-toolbox.js#ui-definition"
+    ]
+  },
+  {
     "source": "采纳输入建议",
     "references": [
       "src/scripts/ui/chat/input-suggestion-composer.js#ui-call"
@@ -5082,6 +5283,51 @@
       "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/scripts/ui/image-generation-params-utils.js#ui-builder",
       "src/scripts/ui/image-generation-params-utils.js#ui-definition"
+    ]
+  },
+  {
+    "source": "采样温度",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "参考范围与上限",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-call",
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "参考内容已按字数上限裁剪，优先保留最近对话",
+    "references": [
+      "src/scripts/agent/agent-reference-context.js#ui-definition"
+    ]
+  },
+  {
+    "source": "参考上下文",
+    "references": [
+      "src/scripts/agent/agent-configuration-service.js#ui-definition",
+      "src/scripts/agent/input-agent-runtime.js#ui-definition"
+    ]
+  },
+  {
+    "source": "参考上下文 · 已截断",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "参考上下文已截断；光标前后保留 2400 / 600 字符",
+    "references": [
+      "src/scripts/agent/agent-configuration-service.js#ui-definition"
+    ]
+  },
+  {
+    "source": "参考数量",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-call",
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
     ]
   },
   {
@@ -5128,6 +5374,27 @@
     ]
   },
   {
+    "source": "参考消息过长，请缩小范围",
+    "references": [
+      "src/scripts/agent/agent-reference-context.js#ui-definition",
+      "src/scripts/agent/agent-reference-context.js#ui-property"
+    ]
+  },
+  {
+    "source": "参考消息尚未完成读取",
+    "references": [
+      "src/scripts/agent/agent-reference-context.js#ui-definition",
+      "src/scripts/agent/agent-reference-context.js#ui-property"
+    ]
+  },
+  {
+    "source": "参考消息暂时无法读取",
+    "references": [
+      "src/scripts/agent/agent-reference-context.js#ui-definition",
+      "src/scripts/agent/agent-reference-context.js#ui-property"
+    ]
+  },
+  {
     "source": "参考音频",
     "references": [
       "src/scripts/ui/realtime/realtime-enrollment-view.js#ui-definition"
@@ -5149,6 +5416,32 @@
     "source": "参考音频文字（可选）",
     "references": [
       "src/scripts/ui/realtime/realtime-enrollment-view.js#ui-definition"
+    ]
+  },
+  {
+    "source": "参考与约束",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/agent/input-agent-runtime.js#ui-definition"
+    ]
+  },
+  {
+    "source": "参考资料",
+    "references": [
+      "src/scripts/agent/agent-request-builder.js#ui-definition",
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "参考资料帮助理解背景；允许修改的内容由“处理内容”单独决定。",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "参考资料暂时无法读取",
+    "references": [
+      "src/scripts/agent/agent-reference-context.js#ui-definition"
     ]
   },
   {
@@ -5215,6 +5508,12 @@
     ]
   },
   {
+    "source": "参与自动流程",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "操作",
     "references": [
       "src/scripts/ui/memory-table-editor.js#dom-assignment"
@@ -5229,6 +5528,7 @@
   {
     "source": "操作失败",
     "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call",
       "src/scripts/ui/session-config-panel.js#ui-call"
     ]
@@ -5246,9 +5546,30 @@
     ]
   },
   {
+    "source": "草稿",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-toolbox.js#ui-definition"
+    ]
+  },
+  {
+    "source": "草稿超过 40000 字符，请缩小内容",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/agent/input-agent-runtime.js#ui-definition"
+    ]
+  },
+  {
     "source": "草稿说明混入正文",
     "references": [
       "src/scripts/ui/chat/chat-body-quality-guardian-utils.js#ui-property"
+    ]
+  },
+  {
+    "source": "草稿已变化，请重新运行",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/agent/input-agent-runtime.js#ui-definition"
     ]
   },
   {
@@ -5418,7 +5739,14 @@
   {
     "source": "插图生成已取消",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/chat/chat-image-job-runtime.js#ui-definition"
+    ]
+  },
+  {
+    "source": "插图生成已中断",
+    "references": [
+      "src/scripts/ui/chat/chat-image-job-runtime.js#ui-definition"
     ]
   },
   {
@@ -5448,6 +5776,12 @@
     ]
   },
   {
+    "source": "查看本次正文",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "查看冲突",
     "references": [
       "src/scripts/ui/world-editor.js#ui-property"
@@ -5463,6 +5797,20 @@
     "source": "查看当前 APP 状态",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "查看当前界面",
+    "references": [
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
+    ]
+  },
+  {
+    "source": "查看当前页面、会话与应用状态。",
+    "references": [
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
     ]
   },
   {
@@ -5496,15 +5844,50 @@
     ]
   },
   {
+    "source": "查看会话列表",
+    "references": [
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
+    ]
+  },
+  {
     "source": "查看角色资料，再决定是否开始聊天",
     "references": [
       "src/scripts/ui/contact-detail-runtime-utils.js#html-text"
     ]
   },
   {
+    "source": "查看结果",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-toolbox.js#ui-call",
+      "src/scripts/ui/agent-toolbox.js#ui-definition"
+    ]
+  },
+  {
+    "source": "查看近期错误记录，辅助定位问题。",
+    "references": [
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
+    ]
+  },
+  {
+    "source": "查看匹配内容",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "查看清单",
     "references": [
       "src/scripts/ui/maid-onboarding-entry-ui.js#ui-definition"
+    ]
+  },
+  {
+    "source": "查看实际参考文字",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-call",
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
     ]
   },
   {
@@ -5523,6 +5906,15 @@
     "source": "查看详情",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "查看修改",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
+      "src/scripts/ui/agent-run-cards.js#ui-definition",
+      "src/scripts/ui/agent-toolbox.js#ui-call",
+      "src/scripts/ui/agent-toolbox.js#ui-definition"
     ]
   },
   {
@@ -5559,6 +5951,13 @@
     ]
   },
   {
+    "source": "查看指定应用功能的使用方法。",
+    "references": [
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
+    ]
+  },
+  {
     "source": "查看最近写表请求提示词",
     "references": [
       "src/scripts/ui/memory-table-editor.js#dom-assignment"
@@ -5568,6 +5967,47 @@
     "source": "查看最近写表原始输出",
     "references": [
       "src/scripts/ui/memory-table-editor.js#dom-assignment"
+    ]
+  },
+  {
+    "source": "查询女仆保存的偏好、关系与重要事件。",
+    "references": [
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
+    ]
+  },
+  {
+    "source": "查找保存的联系人画像。",
+    "references": [
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
+    ]
+  },
+  {
+    "source": "查找参考 · {value}",
+    "references": [
+      "src/scripts/agent/custom-agent-request-runtime.js#ui-property"
+    ]
+  },
+  {
+    "source": "查找会话及其基本信息。",
+    "references": [
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
+    ]
+  },
+  {
+    "source": "查找世界书",
+    "references": [
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
+    ]
+  },
+  {
+    "source": "查找应用功能",
+    "references": [
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
     ]
   },
   {
@@ -6028,6 +6468,55 @@
     ]
   },
   {
+    "source": "处理对象",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-toolbox.js#ui-call",
+      "src/scripts/ui/agent-toolbox.js#ui-definition"
+    ]
+  },
+  {
+    "source": "处理内容",
+    "references": [
+      "src/scripts/agent/agent-request-builder.js#ui-definition",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "处理失败",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "处理完成",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "处理文本超过 40000 字符，请缩小范围",
+    "references": [
+      "src/scripts/agent/agent-text-target.js#ui-definition"
+    ]
+  },
+  {
+    "source": "处理文本过长，请缩小范围",
+    "references": [
+      "src/scripts/agent/agent-rendered-target.js#ui-definition"
+    ]
+  },
+  {
+    "source": "处理中",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
+      "src/scripts/ui/agent-run-cards.js#ui-definition",
+      "src/scripts/ui/agent-toolbox.js#ui-call",
+      "src/scripts/ui/agent-toolbox.js#ui-definition"
+    ]
+  },
+  {
     "source": "处理中...",
     "references": [
       "src/scripts/ui/persona-panel.js#dom-assignment"
@@ -6236,7 +6725,8 @@
   {
     "source": "创建失败",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
   },
   {
@@ -6515,6 +7005,27 @@
     ]
   },
   {
+    "source": "此 Agent 尚未允许当前调用方式",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/agent/input-agent-runtime.js#ui-definition"
+    ]
+  },
+  {
+    "source": "此 Agent 尚未允许手动调用",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/agent/agent-configuration-service.js#ui-definition"
+    ]
+  },
+  {
+    "source": "此 Agent 暂无全局配置",
+    "references": [
+      "src/scripts/agent/agent-configuration-service.js#ui-definition",
+      "src/scripts/agent/agent-configuration-service.js#ui-property"
+    ]
+  },
+  {
     "source": "此 ID 未列入当前候选，请确认模型支持",
     "references": [
       "src/scripts/ui/realtime/realtime-voice-picker.js#ui-definition"
@@ -6542,6 +7053,12 @@
     "source": "此处无法放置",
     "references": [
       "src/scripts/ui/chat/hopscotch-drag-utils.js#ui-call"
+    ]
+  },
+  {
+    "source": "此处已达编排上限，可先移走或移除房子。",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
   },
   {
@@ -6576,6 +7093,24 @@
     ]
   },
   {
+    "source": "此工具已被权限设置停用",
+    "references": [
+      "src/scripts/ui/chat/custom-agent-app-runtime.js#ui-definition"
+    ]
+  },
+  {
+    "source": "此工具已不可用",
+    "references": [
+      "src/scripts/agent/custom-agent-request-runtime.js#ui-definition"
+    ]
+  },
+  {
+    "source": "此回复正在进行格式修复",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "此会话已锁定",
     "references": [
       "src/scripts/ui/persona-panel.js#html-attribute"
@@ -6591,6 +7126,12 @@
     "source": "此接入方式暂不支持在线模型列表；已显示内建候选，也可手动填写",
     "references": [
       "src/scripts/ui/realtime/realtime-model-discovery.js#ui-call"
+    ]
+  },
+  {
+    "source": "此模型需要选择 GPT-Live 接入方式",
+    "references": [
+      "src/scripts/ui/realtime/realtime-provider-catalog.js#ui-definition"
     ]
   },
   {
@@ -6613,6 +7154,12 @@
   },
   {
     "source": "此声音属于其他账号、区域或工作空间，请重新登记",
+    "references": [
+      "src/scripts/ui/realtime/realtime-provider-catalog.js#ui-definition"
+    ]
+  },
+  {
+    "source": "此声音需要 GPT-Live 接入方式，请重新选择声音并检查角色绑定",
     "references": [
       "src/scripts/ui/realtime/realtime-provider-catalog.js#ui-definition"
     ]
@@ -6841,7 +7388,9 @@
     "references": [
       "src/scripts/ui/agent-center-panel.js#html-text",
       "src/scripts/ui/agent-center-panel.js#ui-property",
-      "src/scripts/ui/app.js#ui-property"
+      "src/scripts/ui/app.js#ui-property",
+      "src/scripts/ui/chat/custom-agent-app-runtime.js#ui-definition",
+      "src/scripts/ui/chat/custom-agent-app-runtime.js#ui-property"
     ]
   },
   {
@@ -7143,6 +7692,14 @@
     ]
   },
   {
+    "source": "待查看",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-toolbox.js#ui-call",
+      "src/scripts/ui/agent-toolbox.js#ui-definition"
+    ]
+  },
+  {
     "source": "待出发",
     "references": [
       "src/scripts/ui/chat/hopscotch-court-view.js#ui-call"
@@ -7153,6 +7710,12 @@
     "references": [
       "src/scripts/ui/agent-center-panel.js#html-text",
       "src/scripts/ui/agent-center-view-model.js#ui-property"
+    ]
+  },
+  {
+    "source": "待处理回复已不存在，已跳过对话参考",
+    "references": [
+      "src/scripts/agent/agent-reference-context.js#ui-definition"
     ]
   },
   {
@@ -7586,6 +8149,15 @@
     ]
   },
   {
+    "source": "当前草稿",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/agent/input-agent-runtime.js#ui-definition",
+      "src/scripts/ui/agent-toolbox.js#ui-call",
+      "src/scripts/ui/agent-toolbox.js#ui-definition"
+    ]
+  },
+  {
     "source": "当前场景格式提示词",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -7635,6 +8207,26 @@
     ]
   },
   {
+    "source": "当前范围的独立配置",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "当前范围内引用此 Agent 的房子将显示为停用。",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "当前范围最多 8 个回复 Agent",
+    "references": [
+      "src/scripts/agent/agent-configuration-service.js#ui-definition",
+      "src/scripts/agent/agent-configuration-service.js#ui-property"
+    ]
+  },
+  {
     "source": "当前分类：{categories}",
     "references": [
       "src/scripts/ui/preset-panel.js#ui-call"
@@ -7654,6 +8246,12 @@
     ]
   },
   {
+    "source": "当前格式规则",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "当前格式未通过，正在以传统格式重试…",
     "references": [
       "src/scripts/ui/bridge.js#ui-property"
@@ -7663,6 +8261,14 @@
     "source": "当前格式修复候选已经不可用",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "当前工具或处理对象已变化",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-toolbox.js#ui-call",
+      "src/scripts/ui/agent-toolbox.js#ui-definition"
     ]
   },
   {
@@ -7936,9 +8542,27 @@
     ]
   },
   {
+    "source": "当前环境无法执行正则匹配，请使用起止标签",
+    "references": [
+      "src/scripts/agent/agent-text-target.js#ui-definition"
+    ]
+  },
+  {
     "source": "当前环境暂不支持生成画像候选",
     "references": [
       "src/scripts/ui/contact-settings-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "当前回复没有可提取的显示正文，请选择另一条回复或指定范围",
+    "references": [
+      "src/scripts/ui/chat/agent-rendered-body.js#ui-definition"
+    ]
+  },
+  {
+    "source": "当前回复尚未完成显示，请稍后重试",
+    "references": [
+      "src/scripts/ui/chat/agent-rendered-body.js#ui-definition"
     ]
   },
   {
@@ -8120,6 +8744,12 @@
     ]
   },
   {
+    "source": "当前会话已变化，请重新运行",
+    "references": [
+      "src/scripts/ui/chat/custom-agent-app-runtime.js#ui-definition"
+    ]
+  },
+  {
     "source": "当前会话已切换",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -8205,6 +8835,13 @@
     ]
   },
   {
+    "source": "当前角色或存档已变化，请重新打开",
+    "references": [
+      "src/scripts/agent/agent-configuration-service.js#ui-definition",
+      "src/scripts/ui/chat/agent-reference-app-runtime.js#ui-definition"
+    ]
+  },
+  {
     "source": "当前角色记忆行 ({value})",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -8214,6 +8851,7 @@
     "source": "当前角色卡",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
   },
@@ -8239,6 +8877,13 @@
     "source": "当前角色下的聊天室、创意写作和动态可分别勾选。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "当前角色已变化，请重新打开",
+    "references": [
+      "src/scripts/agent/agent-configuration-service.js#ui-definition",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -8384,6 +9029,7 @@
     "source": "当前聊天",
     "references": [
       "src/index.html#html-text",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
   },
@@ -8508,6 +9154,12 @@
     ]
   },
   {
+    "source": "当前没有可用工具",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "当前没有可用上下文",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -8568,6 +9220,12 @@
     ]
   },
   {
+    "source": "当前模式已变化，请重新运行",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "当前模型：{provider} / {model}",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -8589,6 +9247,18 @@
     "source": "当前模型没有返回可选上游",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "当前模型配置的联网已关闭",
+    "references": [
+      "src/scripts/agent/custom-agent-request-runtime.js#ui-definition"
+    ]
+  },
+  {
+    "source": "当前模型配置的联网已关闭，请调整工具选择或模型配置",
+    "references": [
+      "src/scripts/agent/custom-agent-request-runtime.js#ui-definition"
     ]
   },
   {
@@ -9818,6 +10488,12 @@
     ]
   },
   {
+    "source": "等待确认",
+    "references": [
+      "src/scripts/ui/agent-run-cards.js#ui-definition"
+    ]
+  },
+  {
     "source": "等待授权",
     "references": [
       "src/scripts/ui/chat/execution-flow-runtime-utils.js#ui-property"
@@ -9851,6 +10527,12 @@
     "source": "等待状态更新",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "等待最终确认",
+    "references": [
+      "src/scripts/ui/realtime/realtime-usage-utils.js#ui-call"
     ]
   },
   {
@@ -10359,6 +11041,27 @@
     "source": "调试与实验功能",
     "references": [
       "src/scripts/ui/general-settings-panel.js#html-text"
+    ]
+  },
+  {
+    "source": "调用方式",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-configuration-editor.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "调用工具",
+    "references": [
+      "src/scripts/ui/agent-run-cards.js#ui-definition"
+    ]
+  },
+  {
+    "source": "调用上限",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-call",
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
     ]
   },
   {
@@ -11073,6 +11776,40 @@
     ]
   },
   {
+    "source": "读取当前可见面板的文字与结构。",
+    "references": [
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
+    ]
+  },
+  {
+    "source": "读取格式规范",
+    "references": [
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
+    ]
+  },
+  {
+    "source": "读取工具失败",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "读取功能说明",
+    "references": [
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
+    ]
+  },
+  {
+    "source": "读取会话已保存的输出格式规范及其来源。",
+    "references": [
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
+    ]
+  },
+  {
     "source": "读取记忆",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -11085,6 +11822,19 @@
     ]
   },
   {
+    "source": "读取近期错误",
+    "references": [
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
+    ]
+  },
+  {
+    "source": "读取来源失败",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "读取联系人",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -11093,13 +11843,17 @@
   {
     "source": "读取联系人画像",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
     ]
   },
   {
     "source": "读取联系人列表",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
     ]
   },
   {
@@ -11127,6 +11881,13 @@
     ]
   },
   {
+    "source": "读取女仆记忆",
+    "references": [
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
+    ]
+  },
+  {
     "source": "读取失败",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -11135,7 +11896,9 @@
   {
     "source": "读取世界书",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
     ]
   },
   {
@@ -11189,6 +11952,13 @@
     ]
   },
   {
+    "source": "读取网页",
+    "references": [
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
+    ]
+  },
+  {
     "source": "读取文件失败",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -11207,15 +11977,50 @@
     ]
   },
   {
+    "source": "读取应用状态",
+    "references": [
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
+    ]
+  },
+  {
+    "source": "读取应用资料",
+    "references": [
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
+    ]
+  },
+  {
     "source": "读取用户清单",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
+    "source": "读取用户提供或搜索结果中的公开网页正文。",
+    "references": [
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
+    ]
+  },
+  {
     "source": "读取正文图片提示，等待所有图片完成。",
     "references": [
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "读取指定联系人的资料与关系。",
+    "references": [
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
+    ]
+  },
+  {
+    "source": "读取指定世界书的条目、关键词与正文。",
+    "references": [
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
     ]
   },
   {
@@ -11596,6 +12401,10 @@
   {
     "source": "返回格式",
     "references": [
+      "src/scripts/agent/agent-configuration-service.js#ui-definition",
+      "src/scripts/agent/agent-request-builder.js#ui-definition",
+      "src/scripts/agent/input-agent-runtime.js#ui-definition",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
       "src/scripts/ui/image-generation-params-utils.js#ui-builder",
       "src/scripts/ui/image-generation-params-utils.js#ui-definition"
     ]
@@ -11756,6 +12565,12 @@
     "source": "非流式",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "菲律宾风格 · 生成音色",
+    "references": [
+      "src/scripts/ui/realtime/realtime-voice-catalog.js#ui-definition"
     ]
   },
   {
@@ -12000,6 +12815,12 @@
     ]
   },
   {
+    "source": "服务商已结束本次语音通话",
+    "references": [
+      "src/scripts/ui/realtime/openai-live-call-events.js#ui-call"
+    ]
+  },
+  {
     "source": "服务商已选为 {value}。请贴上 API Key；Key 只保存在本机，引导只检查是否填写。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -12092,6 +12913,12 @@
     ]
   },
   {
+    "source": "附加参考资料",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "附加参数",
     "references": [
       "src/scripts/ui/request-params-panel.js#ui-call"
@@ -12113,6 +12940,12 @@
     "source": "附件写入失败",
     "references": [
       "src/scripts/ui/app.js#ui-call"
+    ]
+  },
+  {
+    "source": "附上解析结果、会话信息与回复版本，供模型检查并定位修改。",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -12209,6 +13042,8 @@
   {
     "source": "复制",
     "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
       "src/scripts/ui/app.js#html-text",
       "src/scripts/ui/chat/context-menu-ui-utils.js#ui-property",
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call",
@@ -12250,9 +13085,43 @@
     ]
   },
   {
+    "source": "复制到聊天全局设置，初始设为停用。",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "复制到另一模式",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "复制到世界书",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "复制到所有角色卡的配置，初始设为停用。",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "复制结果",
+    "references": [
+      "src/scripts/ui/agent-run-cards.js#ui-call",
+      "src/scripts/ui/agent-run-cards.js#ui-definition",
+      "src/scripts/ui/agent-toolbox.js#ui-call",
+      "src/scripts/ui/agent-toolbox.js#ui-definition"
+    ]
+  },
+  {
+    "source": "复制配置",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -12277,6 +13146,10 @@
   {
     "source": "复制失败",
     "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
+      "src/scripts/ui/agent-run-cards.js#ui-call",
+      "src/scripts/ui/agent-run-cards.js#ui-definition",
+      "src/scripts/ui/agent-toolbox.js#ui-definition",
       "src/scripts/ui/app.js#ui-call",
       "src/scripts/ui/debug-panel.js#ui-call",
       "src/scripts/ui/memory-table-editor.js#ui-call",
@@ -12931,6 +13804,12 @@
     ]
   },
   {
+    "source": "格式检查协议",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "格式结尾",
     "references": [
       "src/scripts/ui/agent-center-card-catalog.js#ui-definition"
@@ -12958,6 +13837,7 @@
     "source": "格式修复",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/storage/agent-config-store.js#ui-definition",
       "src/scripts/ui/chat/hopscotch-court-view.js#ui-call"
     ]
   },
@@ -13082,9 +13962,16 @@
     ]
   },
   {
+    "source": "格式修改建议",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "格式要求",
     "references": [
-      "src/scripts/ui/agent-center-panel.js#ui-call"
+      "src/scripts/ui/agent-center-panel.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -13103,7 +13990,15 @@
   {
     "source": "格式要求已更新，请重新打开后编辑",
     "references": [
+      "src/scripts/agent/agent-configuration-service.js#ui-definition",
+      "src/scripts/agent/agent-configuration-service.js#ui-property",
       "src/scripts/ui/chat/format-review-settings-utils.js#ui-call"
+    ]
+  },
+  {
+    "source": "格式要求与原始回复",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -13187,6 +14082,13 @@
     ]
   },
   {
+    "source": "根据用户的草稿，给出简短、有用的写作建议。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/agent/agent-configuration-service.js#ui-definition"
+    ]
+  },
+  {
     "source": "跟随 APP 内建默认",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -13214,6 +14116,19 @@
     "source": "跟随当前聊天模型",
     "references": [
       "src/scripts/ui/agent-center-panel.js#ui-property"
+    ]
+  },
+  {
+    "source": "跟随当前模型",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "跟随当前模型使用这次聊天选择的连接与模型，也可为此 Agent 单独指定。",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -13246,6 +14161,12 @@
     "references": [
       "src/scripts/ui/session-config-panel.js#ui-call",
       "src/scripts/ui/session-config-panel.js#ui-property"
+    ]
+  },
+  {
+    "source": "跟随全局配置",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -13302,6 +14223,8 @@
     "source": "更多操作",
     "references": [
       "src/index.html#html-attribute",
+      "src/scripts/ui/agent-configuration-editor.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
       "src/scripts/ui/persona-panel.js#html-attribute",
       "src/scripts/ui/plugin-panel.js#html-attribute",
       "src/scripts/ui/variable-panel-runtime.js#html-attribute",
@@ -13390,6 +14313,14 @@
     ]
   },
   {
+    "source": "更新处理对象",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-toolbox.js#ui-call",
+      "src/scripts/ui/agent-toolbox.js#ui-definition"
+    ]
+  },
+  {
     "source": "更新冻结群聊成员",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -13465,6 +14396,12 @@
     ]
   },
   {
+    "source": "工具参数过长，已停止本次执行",
+    "references": [
+      "src/scripts/agent/custom-agent-request-runtime.js#ui-definition"
+    ]
+  },
+  {
     "source": "工具调用",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -13477,9 +14414,36 @@
     ]
   },
   {
+    "source": "工具设置",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-toolbox.js#ui-call",
+      "src/scripts/ui/agent-toolbox.js#ui-definition"
+    ]
+  },
+  {
+    "source": "工具已失效",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-call",
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "工具遇到错误，我正在尝试修正参数。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "工具暂不可用",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "工具执行超时",
+    "references": [
+      "src/scripts/agent/custom-agent-request-runtime.js#ui-definition"
     ]
   },
   {
@@ -13619,12 +14583,6 @@
     ]
   },
   {
-    "source": "共享设置会影响使用此 Agent 的其他会话。",
-    "references": [
-      "src/scripts/ui/agent-center-panel.js#ui-call"
-    ]
-  },
-  {
     "source": "共享设置尚未保存，关闭将丢弃这些修改。",
     "references": [
       "src/scripts/ui/agent-center-panel.js#ui-call",
@@ -13656,6 +14614,12 @@
     ]
   },
   {
+    "source": "勾选允许此 Agent 按需使用的工具；工具结果作为参考，修改建议仍需确认。",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "构建本次 Prompt 预览失败",
     "references": [
       "src/scripts/ui/app.js#ui-call"
@@ -13679,6 +14643,12 @@
     "source": "构建语音上下文时会话已切换",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "构建预览失败",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
     ]
   },
   {
@@ -13720,6 +14690,13 @@
     ]
   },
   {
+    "source": "固定提示词",
+    "references": [
+      "src/scripts/agent/agent-reference-context.js#ui-definition",
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "固定正向",
     "references": [
       "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
@@ -13754,6 +14731,8 @@
     "references": [
       "src/index.html#html-attribute",
       "src/scripts/ui/agent-center-panel.js#html-attribute",
+      "src/scripts/ui/agent-toolbox.js#ui-call",
+      "src/scripts/ui/agent-toolbox.js#ui-definition",
       "src/scripts/ui/app-confirm.js#html-attribute",
       "src/scripts/ui/app.js#html-attribute",
       "src/scripts/ui/app.js#html-text",
@@ -14277,6 +15256,14 @@
     ]
   },
   {
+    "source": "管理工具",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-toolbox.js#ui-call",
+      "src/scripts/ui/agent-toolbox.js#ui-definition"
+    ]
+  },
+  {
     "source": "管理记忆表格注入、更新和写入预览。",
     "references": [
       "src/scripts/ui/agent-center-card-catalog.js#ui-definition"
@@ -14352,6 +15339,31 @@
     "source": "管理摘要提示词和摘要记忆替代策略。",
     "references": [
       "src/scripts/ui/agent-center-card-catalog.js#ui-definition"
+    ]
+  },
+  {
+    "source": "光标后文本",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "光标前后保留 2400 / 600 字符",
+    "references": [
+      "src/scripts/agent/agent-configuration-service.js#ui-definition"
+    ]
+  },
+  {
+    "source": "光标前后文本",
+    "references": [
+      "src/scripts/agent/agent-configuration-service.js#ui-definition",
+      "src/scripts/agent/input-agent-runtime.js#ui-definition"
+    ]
+  },
+  {
+    "source": "光标前文本",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -14891,6 +15903,12 @@
     ]
   },
   {
+    "source": "后置提示词",
+    "references": [
+      "src/scripts/ui/chat/agent-reference-sources.js#ui-definition"
+    ]
+  },
+  {
     "source": "后置指令: {value}",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -14978,6 +15996,7 @@
     "source": "忽略",
     "references": [
       "src/scripts/ui/agent-center-panel.js#html-text",
+      "src/scripts/ui/agent-run-cards.js#ui-definition",
       "src/scripts/ui/memory-table-editor.js#dom-assignment"
     ]
   },
@@ -15127,7 +16146,9 @@
   {
     "source": "恢复",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-configuration-editor.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -15158,7 +16179,22 @@
     "source": "恢复默认",
     "references": [
       "src/index.html#html-text",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
       "src/scripts/ui/custom-bundle-exporter.js#html-text"
+    ]
+  },
+  {
+    "source": "恢复默认任务",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "恢复配置",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -15188,6 +16224,7 @@
   {
     "source": "回复",
     "references": [
+      "src/scripts/ui/agent-toolbox.js#ui-definition",
       "src/scripts/ui/chat/context-menu-ui-utils.js#ui-property"
     ]
   },
@@ -15202,12 +16239,6 @@
     "references": [
       "src/index.html#html-text",
       "src/scripts/ui/chat/rejected-format-repair-banner-utils.js#dom-assignment"
-    ]
-  },
-  {
-    "source": "回复后",
-    "references": [
-      "src/scripts/ui/chat/hopscotch-court-view.js#ui-call"
     ]
   },
   {
@@ -15241,6 +16272,13 @@
     ]
   },
   {
+    "source": "回复任务",
+    "references": [
+      "src/scripts/ui/agent-toolbox.js#ui-call",
+      "src/scripts/ui/agent-toolbox.js#ui-definition"
+    ]
+  },
+  {
     "source": "回复时显示跳动的小点动画。",
     "references": [
       "src/scripts/ui/general-settings-panel.js#ui-property"
@@ -15250,6 +16288,12 @@
     "source": "回复视角",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "回复完成后",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -15407,8 +16451,16 @@
     ]
   },
   {
+    "source": "会话已变化，请重新运行",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "会话已切换，请重新打开格式要求",
     "references": [
+      "src/scripts/agent/agent-configuration-service.js#ui-definition",
+      "src/scripts/agent/agent-configuration-service.js#ui-property",
       "src/scripts/ui/chat/format-review-settings-utils.js#ui-call"
     ]
   },
@@ -15648,6 +16700,19 @@
     ]
   },
   {
+    "source": "计入当前这一轮",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "计数方式",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-call",
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "记录 RP 每轮推进后的阶段性摘要。每次推进必须新增一行，禁止用 update 覆盖旧行。",
     "references": [
       "src/scripts/memory/default-template.js#ui-definition"
@@ -15785,7 +16850,9 @@
   {
     "source": "记忆变更预览",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
     ]
   },
   {
@@ -16206,7 +17273,15 @@
     "source": "记住执行",
     "references": [
       "src/scripts/ui/agent-center-panel.js#html-text",
-      "src/scripts/ui/app.js#ui-property"
+      "src/scripts/ui/app.js#ui-property",
+      "src/scripts/ui/chat/custom-agent-app-runtime.js#ui-definition",
+      "src/scripts/ui/chat/custom-agent-app-runtime.js#ui-property"
+    ]
+  },
+  {
+    "source": "继承旧版设置",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -16588,6 +17663,27 @@
     ]
   },
   {
+    "source": "检查拟议的变量更新及差异。",
+    "references": [
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
+    ]
+  },
+  {
+    "source": "检查拟议的记忆表格变更及差异。",
+    "references": [
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
+    ]
+  },
+  {
+    "source": "检查拟议的世界书条目变更及差异。",
+    "references": [
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
+    ]
+  },
+  {
     "source": "检查世界书条目",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -16909,6 +18005,12 @@
     ]
   },
   {
+    "source": "交互页面请使用指定标签或选取原文，定位要优化的正文",
+    "references": [
+      "src/scripts/ui/chat/agent-rendered-body.js#ui-definition"
+    ]
+  },
+  {
     "source": "骄傲",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -16923,7 +18025,9 @@
   {
     "source": "角色",
     "references": [
+      "src/scripts/agent/agent-reference-context.js#ui-definition",
       "src/scripts/ui/agent-center-panel.js#html-text",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
       "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition",
       "src/scripts/ui/realtime/realtime-call-panel.js#html-text",
       "src/scripts/ui/realtime/realtime-call-panel.js#ui-definition",
@@ -17576,6 +18680,13 @@
     ]
   },
   {
+    "source": "较长的执行详情已截取",
+    "references": [
+      "src/scripts/ui/agent-run-cards.js#ui-call",
+      "src/scripts/ui/agent-run-cards.js#ui-definition"
+    ]
+  },
+  {
     "source": "教程",
     "references": [
       "src/scripts/ui/maid-intent-presets.js#ui-definition"
@@ -17781,7 +18892,22 @@
   {
     "source": "结果",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-run-cards.js#ui-definition"
+    ]
+  },
+  {
+    "source": "结果形式",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "结合搜索与网页阅读，整理带来源的资料。",
+    "references": [
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
     ]
   },
   {
@@ -17795,6 +18921,12 @@
     "references": [
       "src/scripts/ui/chat/creative-execution-lane-runtime-utils.js#html-text",
       "src/scripts/ui/realtime/realtime-call-panel.js#html-text"
+    ]
+  },
+  {
+    "source": "结束标签",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -18023,9 +19155,9 @@
     ]
   },
   {
-    "source": "仅手动检查",
+    "source": "仅替换选定范围",
     "references": [
-      "src/scripts/ui/chat/hopscotch-activation-utils.js#ui-call"
+      "src/scripts/agent/text-edit-runtime.js#ui-definition"
     ]
   },
   {
@@ -18222,7 +19354,8 @@
   {
     "source": "进行中",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-run-cards.js#ui-definition"
     ]
   },
   {
@@ -18631,6 +19764,12 @@
     ]
   },
   {
+    "source": "开始标签",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "开始导入",
     "references": [
       "src/scripts/ui/custom-bundle-exporter.js#ui-property",
@@ -18895,6 +20034,12 @@
     ]
   },
   {
+    "source": "可用工具",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "可用命令： {value}",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -18910,6 +20055,12 @@
     "source": "可用输入转写模型列表",
     "references": [
       "src/scripts/ui/config-panel.js#html-attribute"
+    ]
+  },
+  {
+    "source": "可用推理模型列表",
+    "references": [
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
     ]
   },
   {
@@ -19228,6 +20379,20 @@
     ]
   },
   {
+    "source": "来源已失效",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-call",
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "来源已停用",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-call",
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "来自生成参数或图片记录；此处修改随本次图片保存",
     "references": [
       "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
@@ -19392,6 +20557,13 @@
     "references": [
       "src/scripts/ui/agent-center-panel.js#ui-property",
       "src/scripts/ui/preset-prompt-inject-utils.js#ui-property"
+    ]
+  },
+  {
+    "source": "历史回复",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-toolbox.js#ui-definition"
     ]
   },
   {
@@ -19583,6 +20755,12 @@
     ]
   },
   {
+    "source": "例如最近三轮：前两轮和本轮用户输入作为参考；待处理的 AI 回复单独发送。关闭时取目标之前的完整轮次。",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "连接成功：{value}",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -19623,6 +20801,12 @@
     "source": "连接失败: {value}",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "连接已释放，服务端最终通话用量尚未确认",
+    "references": [
+      "src/scripts/ui/realtime/openai-live-call-events.js#ui-call"
     ]
   },
   {
@@ -19692,6 +20876,7 @@
   {
     "source": "联网",
     "references": [
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
       "src/scripts/ui/config-panel.js#html-text"
     ]
   },
@@ -19699,6 +20884,13 @@
     "source": "联网可能产生额外费用，并会把本次请求交给模型服务商或搜索服务处理。要为当前 API 设置档开启吗？",
     "references": [
       "src/scripts/ui/config-panel.js#ui-property"
+    ]
+  },
+  {
+    "source": "联网搜索",
+    "references": [
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
     ]
   },
   {
@@ -20191,6 +21383,7 @@
   {
     "source": "聊天全局设置",
     "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
   },
@@ -20398,6 +21591,13 @@
     ]
   },
   {
+    "source": "列出已保存的世界书，按名称或关键词查找。",
+    "references": [
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
+    ]
+  },
+  {
     "source": "列出已存世界书 ID",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -20561,6 +21761,12 @@
     "references": [
       "src/scripts/ui/world-editor.js#dom-assignment",
       "src/scripts/ui/world-editor.js#html-attribute"
+    ]
+  },
+  {
+    "source": "留空使用所选 API 配置中的模型，可填写同一连接下的其他模型名称。",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -20830,6 +22036,12 @@
     ]
   },
   {
+    "source": "没有可应用的修改",
+    "references": [
+      "src/scripts/agent/text-edit-runtime.js#ui-definition"
+    ]
+  },
+  {
     "source": "没有可用的聊天连线设置档",
     "references": [
       "src/scripts/ui/chat-fc-compatibility-panel.js#html-text"
@@ -20848,9 +22060,24 @@
     ]
   },
   {
+    "source": "没有匹配的工具",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-reference-editor.js#ui-definition",
+      "src/scripts/ui/agent-toolbox.js#ui-call",
+      "src/scripts/ui/agent-toolbox.js#ui-definition"
+    ]
+  },
+  {
     "source": "没有匹配的角色。",
     "references": [
       "src/scripts/ui/custom-bundle-exporter.js#html-text"
+    ]
+  },
+  {
+    "source": "没有匹配的来源",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
     ]
   },
   {
@@ -20899,6 +22126,12 @@
     "source": "没有生效条件",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "没有识别到可处理的显示正文",
+    "references": [
+      "src/scripts/agent/agent-rendered-target.js#ui-definition"
     ]
   },
   {
@@ -21128,6 +22361,13 @@
     ]
   },
   {
+    "source": "每类最多选择 {count} 个来源",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-call",
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "每轮",
     "references": [
       "src/scripts/ui/variable-panel-runtime.js#html-text"
@@ -21195,6 +22435,12 @@
     ]
   },
   {
+    "source": "美国南部风格 · 生成音色",
+    "references": [
+      "src/scripts/ui/realtime/realtime-voice-catalog.js#ui-definition"
+    ]
+  },
+  {
     "source": "美式英语",
     "references": [
       "src/scripts/ui/realtime/realtime-voice-catalog.js#ui-definition"
@@ -21233,10 +22479,29 @@
     ]
   },
   {
+    "source": "描述希望检查、查找或分析的内容，以及结果的呈现方式。",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "描述想要的风格、角色、动作与情绪（可简短）",
     "references": [
       "src/scripts/ui/app.js#dom-assignment",
       "src/scripts/ui/app.js#html-attribute"
+    ]
+  },
+  {
+    "source": "描述需要完成的输入辅助任务，以及语气、长度和保留的内容。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "描述要改进的内容与保留的事实。模型只提交修改建议。",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -21248,6 +22513,7 @@
   {
     "source": "名称",
     "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call",
       "src/scripts/ui/contact-settings-panel.js#html-text",
       "src/scripts/ui/maid-settings-panel.js#html-text",
@@ -21669,6 +22935,7 @@
     "references": [
       "src/scripts/ui/agent-center-panel.js#html-attribute",
       "src/scripts/ui/agent-center-panel.js#html-text",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
       "src/scripts/ui/chat/creative-execution-lane-runtime-utils.js#ui-property",
       "src/scripts/ui/config-panel.js#html-text",
       "src/scripts/ui/maid-settings-panel.js#html-text"
@@ -21703,6 +22970,18 @@
     ]
   },
   {
+    "source": "模型处理",
+    "references": [
+      "src/scripts/ui/agent-run-cards.js#ui-definition"
+    ]
+  },
+  {
+    "source": "模型调用了未允许的工具，已停止本次执行",
+    "references": [
+      "src/scripts/agent/custom-agent-request-runtime.js#ui-definition"
+    ]
+  },
+  {
     "source": "模型发现格式问题",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -21715,6 +22994,25 @@
     ]
   },
   {
+    "source": "模型返回的工具参数格式有误",
+    "references": [
+      "src/scripts/agent/custom-agent-request-runtime.js#ui-definition"
+    ]
+  },
+  {
+    "source": "模型返回的修改无法验证",
+    "references": [
+      "src/scripts/agent/input-agent-runtime.js#ui-definition",
+      "src/scripts/agent/text-edit-runtime.js#ui-definition"
+    ]
+  },
+  {
+    "source": "模型返回可插入光标处的续写文字，侧边预览展示实际任务与返回规则。",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "模型返回了空回复（HTTP {value}{value2}）{value3}",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -21724,6 +23022,12 @@
     "source": "模型返回为空",
     "references": [
       "src/scripts/ui/chat/hopscotch-turn-runtime.js#ui-call"
+    ]
+  },
+  {
+    "source": "模型返回最小行补丁，APP 校验原文和版本后展示修改建议。侧边预览展示完整协议。",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -21819,6 +23123,12 @@
     ]
   },
   {
+    "source": "模型名称",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "模型判断：{value}",
     "references": [
       "src/scripts/ui/app.js#html-text"
@@ -21872,6 +23182,13 @@
     "source": "模型输出不符合格式补丁协议",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "模型思考",
+    "references": [
+      "src/scripts/ui/agent-run-cards.js#ui-call",
+      "src/scripts/ui/agent-run-cards.js#ui-definition"
     ]
   },
   {
@@ -22194,6 +23511,12 @@
     ]
   },
   {
+    "source": "目标聊天或存档已变化",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "目标聊天室已删除",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -22290,6 +23613,12 @@
     ]
   },
   {
+    "source": "目录中未找到推理模型；可手动填写支持 Responses 的模型 ID",
+    "references": [
+      "src/scripts/ui/realtime/realtime-model-discovery.js#ui-call"
+    ]
+  },
+  {
     "source": "目前没有本机观察证据。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -22345,6 +23674,12 @@
     ]
   },
   {
+    "source": "内建 Agent",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "内建房子「{value}」每板最多一个",
     "references": [
       "src/scripts/ui/chat/hopscotch-board-utils.js#ui-call"
@@ -22373,6 +23708,18 @@
     "source": "内建明暗主题、主题导入导出，以及基础显示风格。",
     "references": [
       "src/scripts/ui/general-settings-panel.js#html-attribute"
+    ]
+  },
+  {
+    "source": "内建默认",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "内建任务使用固定采样温度；最终请求参数可在侧边预览中查看。",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -22423,6 +23770,7 @@
   {
     "source": "内容为空",
     "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition",
       "src/scripts/ui/moment-summary-panel.js#ui-call"
     ]
   },
@@ -22941,7 +24289,14 @@
   {
     "source": "配图生成已取消",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/chat/chat-image-job-runtime.js#ui-definition"
+    ]
+  },
+  {
+    "source": "配图生成已中断",
+    "references": [
+      "src/scripts/ui/chat/chat-image-job-runtime.js#ui-definition"
     ]
   },
   {
@@ -22955,14 +24310,21 @@
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/scripts/ui/agent-center-panel.js#ui-call",
+      "src/scripts/ui/agent-toolbox.js#ui-call",
+      "src/scripts/ui/agent-toolbox.js#ui-definition",
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "配置 · 保存后生效",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
     "source": "配置 · 修改后即时生效",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual",
-      "src/scripts/ui/agent-center-panel.js#ui-call"
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -22978,6 +24340,26 @@
     ]
   },
   {
+    "source": "配置范围",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "配置合并后每类最多 8 个自定义 Agent，请先移除其他 Agent",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/storage/agent-config-store.js#ui-definition",
+      "src/scripts/storage/agent-config-store.js#ui-property"
+    ]
+  },
+  {
+    "source": "配置合并后最多 8 个修改 Agent，请先移除其他 Agent",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "配置检查模型",
     "references": [
       "src/scripts/ui/agent-center-panel.js#ui-property"
@@ -22987,6 +24369,12 @@
     "source": "配置模型",
     "references": [
       "src/scripts/ui/maid-intent-presets.js#ui-definition"
+    ]
+  },
+  {
+    "source": "配置已变化，请重新打开",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -23110,6 +24498,18 @@
     ]
   },
   {
+    "source": "匹配到的内容为空",
+    "references": [
+      "src/scripts/agent/agent-text-target.js#ui-definition"
+    ]
+  },
+  {
+    "source": "匹配到多个范围，请用更精确的规则",
+    "references": [
+      "src/scripts/agent/agent-text-target.js#ui-definition"
+    ]
+  },
+  {
     "source": "匹配来源",
     "references": [
       "src/scripts/ui/world-editor/world-block-overview.js#html-text"
@@ -23187,6 +24587,12 @@
     "source": "屏幕选区（{value}×{value2}）",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "葡萄牙语",
+    "references": [
+      "src/scripts/ui/realtime/realtime-voice-catalog.js#ui-definition"
     ]
   },
   {
@@ -23276,6 +24682,8 @@
     "source": "启用",
     "references": [
       "src/scripts/ui/agent-center-panel.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
       "src/scripts/ui/memory-table-editor.js#dom-assignment",
       "src/scripts/ui/memory-table-editor.js#html-attribute",
       "src/scripts/ui/preset-panel.js#html-text",
@@ -23512,6 +24920,12 @@
     ]
   },
   {
+    "source": "起止标签",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "气泡",
     "references": [
       "src/scripts/ui/theme-manager.js#ui-property"
@@ -23676,6 +25090,8 @@
   {
     "source": "切换",
     "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
       "src/scripts/ui/character-card-transfer.js#ui-property",
       "src/scripts/ui/custom-bundle-import-diagnostics-utils.js#ui-property",
       "src/scripts/ui/experience-pack-import-utils.js#ui-property",
@@ -23803,6 +25219,13 @@
     ]
   },
   {
+    "source": "切换配置范围将丢弃当前草稿。",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "切换设置档会放弃未保存的修改。",
     "references": [
       "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition",
@@ -23897,6 +25320,8 @@
     "source": "清除",
     "references": [
       "src/index.html#html-text",
+      "src/scripts/ui/agent-toolbox.js#ui-call",
+      "src/scripts/ui/agent-toolbox.js#ui-definition",
       "src/scripts/ui/app.js#html-text",
       "src/scripts/ui/chat-fc-compatibility-panel.js#html-text",
       "src/scripts/ui/world-panel.js#html-text"
@@ -24241,6 +25666,18 @@
     ]
   },
   {
+    "source": "请检查凭证、模型权限与网络",
+    "references": [
+      "src/scripts/ui/realtime/openai-live-session-client.js#ui-call"
+    ]
+  },
+  {
+    "source": "请简化正则，使用明确的起止边界和捕获组",
+    "references": [
+      "src/scripts/agent/agent-text-target.js#ui-definition"
+    ]
+  },
+  {
     "source": "请求",
     "references": [
       "src/scripts/ui/chat/creative-execution-lane-runtime-utils.js#ui-property",
@@ -24534,6 +25971,12 @@
     ]
   },
   {
+    "source": "请缩短正则或待匹配文本",
+    "references": [
+      "src/scripts/agent/agent-text-target.js#ui-definition"
+    ]
+  },
+  {
     "source": "请提供世界书 ID",
     "references": [
       "src/scripts/ui/command-runner.js#ui-call"
@@ -24562,6 +26005,13 @@
     "source": "请填写 Base URL / 模型",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "请填写 GPT-Live 模型 ID，例如 gpt-live-1",
+    "references": [
+      "src/scripts/ui/realtime/openai-live-config.js#ui-call",
+      "src/scripts/ui/realtime/realtime-provider-catalog.js#ui-definition"
     ]
   },
   {
@@ -24637,6 +26087,12 @@
     ]
   },
   {
+    "source": "请填写开始和结束标签",
+    "references": [
+      "src/scripts/agent/agent-text-target.js#ui-definition"
+    ]
+  },
+  {
     "source": "请填写宽 × 高，例如 3840 × 2160。",
     "references": [
       "src/scripts/ui/image-generation-params-utils.js#ui-definition"
@@ -24646,6 +26102,13 @@
     "source": "请填写模型",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "请填写任务要求",
+    "references": [
+      "src/scripts/agent/agent-configuration-service.js#ui-definition",
+      "src/scripts/agent/agent-configuration-service.js#ui-property"
     ]
   },
   {
@@ -24663,6 +26126,13 @@
   {
     "source": "请填写有效的 Google Cloud Project ID",
     "references": [
+      "src/scripts/ui/realtime/realtime-provider-catalog.js#ui-definition"
+    ]
+  },
+  {
+    "source": "请填写有效的推理模型 ID",
+    "references": [
+      "src/scripts/ui/realtime/openai-live-config.js#ui-call",
       "src/scripts/ui/realtime/realtime-provider-catalog.js#ui-definition"
     ]
   },
@@ -24790,11 +26260,30 @@
     ]
   },
   {
+    "source": "请先启用并保存此 Agent",
+    "references": [
+      "src/scripts/agent/agent-configuration-service.js#ui-definition"
+    ]
+  },
+  {
     "source": "请先设置格式要求",
     "references": [
       "src/scripts/ui/agent-center-panel.js#ui-call",
       "src/scripts/ui/app.js#ui-call",
       "src/scripts/ui/chat/hopscotch-activation-utils.js#ui-call"
+    ]
+  },
+  {
+    "source": "请先设置完整的处理范围",
+    "references": [
+      "src/scripts/agent/agent-configuration-service.js#ui-definition",
+      "src/scripts/agent/agent-configuration-service.js#ui-property"
+    ]
+  },
+  {
+    "source": "请先设置正文识别规则",
+    "references": [
+      "src/scripts/agent/agent-text-target.js#ui-definition"
     ]
   },
   {
@@ -24837,6 +26326,13 @@
     "source": "请先填写服务商凭证",
     "references": [
       "src/scripts/storage/realtime-profile-store.js#ui-definition"
+    ]
+  },
+  {
+    "source": "请先填写格式要求",
+    "references": [
+      "src/scripts/agent/agent-configuration-service.js#ui-definition",
+      "src/scripts/agent/agent-configuration-service.js#ui-property"
     ]
   },
   {
@@ -24899,6 +26395,14 @@
     "source": "请先选择连线配置",
     "references": [
       "src/scripts/ui/maid-settings-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "请先选择模型",
+    "references": [
+      "src/scripts/agent/agent-configuration-service.js#ui-definition",
+      "src/scripts/agent/agent-configuration-service.js#ui-property",
+      "src/scripts/ui/chat/custom-agent-app-runtime.js#ui-definition"
     ]
   },
   {
@@ -24974,6 +26478,13 @@
     ]
   },
   {
+    "source": "请先选中文字",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "请先选中要复制的节点",
     "references": [
       "src/scripts/ui/world-editor/world-node-editor-core.js#ui-call"
@@ -24995,12 +26506,6 @@
     "source": "请先选中要整理的节点",
     "references": [
       "src/scripts/ui/world-editor/world-node-editor-core.js#ui-call"
-    ]
-  },
-  {
-    "source": "请先在 Agent Center 开启「检查回复格式」",
-    "references": [
-      "src/scripts/ui/app.js#ui-call"
     ]
   },
   {
@@ -25046,6 +26551,14 @@
     ]
   },
   {
+    "source": "请先在输入框填写内容",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/agent/input-agent-runtime.js#ui-definition",
+      "src/scripts/ui/agent-toolbox.js#ui-definition"
+    ]
+  },
+  {
     "source": "请先在语音 API 设置中选择 OpenAI 设置档",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -25054,6 +26567,8 @@
   {
     "source": "请选择",
     "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
       "src/scripts/ui/app-confirm.js#html-attribute",
       "src/scripts/ui/app-confirm.js#html-text",
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call",
@@ -25090,6 +26605,13 @@
     "source": "请选择 OpenAI 连线设置档",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "请选择 OpenAI 语音接入方式",
+    "references": [
+      "src/scripts/ui/realtime/realtime-model-discovery.js#ui-call",
+      "src/scripts/ui/realtime/realtime-provider-catalog.js#ui-definition"
     ]
   },
   {
@@ -25131,6 +26653,12 @@
     ]
   },
   {
+    "source": "请选择处理范围",
+    "references": [
+      "src/scripts/agent/agent-text-target.js#ui-definition"
+    ]
+  },
+  {
     "source": "请选择导出范围：",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -25158,6 +26686,12 @@
     "source": "请选择另一本世界书",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "请选择模型",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -25223,6 +26757,13 @@
     ]
   },
   {
+    "source": "请在 Agent Center 启用格式修复，并允许手动调用",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/app.js#ui-call"
+    ]
+  },
+  {
     "source": "请至少接受一处修改",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -25264,10 +26805,19 @@
     "source": "区块名称",
     "references": [
       "src/scripts/ui/agent-center-panel.js#ui-property",
+      "src/scripts/ui/agent-configuration-editor.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
       "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition",
       "src/scripts/ui/preset-panel.js#dom-assignment",
       "src/scripts/ui/preset-panel.js#html-attribute",
       "src/scripts/ui/preset-panel.js#ui-property"
+    ]
+  },
+  {
+    "source": "区块内容",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -25295,9 +26845,26 @@
     ]
   },
   {
+    "source": "取光标后的文字，帮助续写与后文衔接。",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "取光标前最近的文字，帮助衔接当前输入。",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "取消",
     "references": [
       "src/index.html#html-text",
+      "src/scripts/ui/agent-center-panel.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
+      "src/scripts/ui/agent-run-cards.js#ui-definition",
+      "src/scripts/ui/agent-toolbox.js#ui-call",
+      "src/scripts/ui/agent-toolbox.js#ui-definition",
       "src/scripts/ui/app-confirm.js#html-text",
       "src/scripts/ui/app.js#html-text",
       "src/scripts/ui/app.js#ui-property",
@@ -25408,6 +26975,12 @@
     "source": "取消修改",
     "references": [
       "src/scripts/ui/agent-center-panel.js#html-text"
+    ]
+  },
+  {
+    "source": "取消选取",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -26456,6 +28029,13 @@
     ]
   },
   {
+    "source": "确认移除这个提示词区块？",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "确认正文变更",
     "references": [
       "src/scripts/ui/text-diff-view-utils.js#html-attribute"
@@ -26919,6 +28499,16 @@
     ]
   },
   {
+    "source": "任务要求",
+    "references": [
+      "src/scripts/agent/agent-configuration-service.js#ui-definition",
+      "src/scripts/agent/agent-request-builder.js#ui-definition",
+      "src/scripts/agent/input-agent-runtime.js#ui-definition",
+      "src/scripts/ui/agent-configuration-editor.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "任务已经完成，并已打开主要结果。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -26928,6 +28518,29 @@
     "source": "任务已经完成，我来激活主要角色卡。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "任务已取消",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/agent/agent-reference-context.js#ui-definition",
+      "src/scripts/agent/input-agent-runtime.js#ui-definition",
+      "src/scripts/ui/chat/agent-reference-app-runtime.js#ui-definition",
+      "src/scripts/ui/chat/agent-reference-sources.js#ui-definition"
+    ]
+  },
+  {
+    "source": "任务已取消或草稿已变化",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/agent/input-agent-runtime.js#ui-definition"
+    ]
+  },
+  {
+    "source": "任务已取消或目标已变化",
+    "references": [
+      "src/scripts/agent/text-edit-runtime.js#ui-definition"
     ]
   },
   {
@@ -27086,6 +28699,13 @@
     ]
   },
   {
+    "source": "润色正文，保留事实、人物语气和原意。",
+    "references": [
+      "src/scripts/agent/agent-configuration-service.js#ui-definition",
+      "src/scripts/agent/agent-request-builder.js#ui-definition"
+    ]
+  },
+  {
     "source": "若反代不要求单独鉴权，这里留空即可。",
     "references": [
       "src/scripts/ui/config-panel.js#html-attribute"
@@ -27185,6 +28805,13 @@
     "source": "删除 {value} 个正则集合：{value2}{value3}？",
     "references": [
       "src/scripts/ui/regex-panel.js#ui-property"
+    ]
+  },
+  {
+    "source": "删除 Agent",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -27919,6 +29546,9 @@
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/scripts/ui/agent-center-panel.js#html-text",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
+      "src/scripts/ui/agent-toolbox.js#ui-call",
+      "src/scripts/ui/agent-toolbox.js#ui-definition",
       "src/scripts/ui/memory-template-panel.js#dom-assignment",
       "src/scripts/ui/world-editor.js#html-attribute",
       "src/scripts/ui/world-editor.js#html-text"
@@ -27971,6 +29601,13 @@
     "source": "尚未绑定连线配置",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "尚未保存",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -28236,6 +29873,14 @@
     ]
   },
   {
+    "source": "设置快捷键",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-toolbox.js#ui-call",
+      "src/scripts/ui/agent-toolbox.js#ui-definition"
+    ]
+  },
+  {
     "source": "设置上级分组",
     "references": [
       "src/scripts/ui/group-panel.js#html-attribute"
@@ -28463,6 +30108,13 @@
     ]
   },
   {
+    "source": "生成结果",
+    "references": [
+      "src/scripts/agent/custom-agent-request-runtime.js#ui-definition",
+      "src/scripts/agent/custom-agent-request-runtime.js#ui-property"
+    ]
+  },
+  {
     "source": "生成结果缺少图片地址",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -28472,6 +30124,12 @@
     "source": "生成结果无法验证目标比例",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "生成连接已中断，可重新生成",
+    "references": [
+      "src/scripts/ui/chat/chat-image-job-runtime.js#ui-definition"
     ]
   },
   {
@@ -28909,6 +30567,8 @@
     "references": [
       "src/scripts/ui/agent-center-panel.js#ui-property",
       "src/scripts/ui/agent-center-status-chip.js#ui-property",
+      "src/scripts/ui/agent-run-cards.js#ui-definition",
+      "src/scripts/ui/agent-toolbox.js#ui-definition",
       "src/scripts/ui/chat/execution-flow-runtime-utils.js#ui-property",
       "src/scripts/ui/chat/hopscotch-court-view.js#ui-call",
       "src/scripts/ui/maid-settings-panel.js#ui-property",
@@ -29146,6 +30806,12 @@
     ]
   },
   {
+    "source": "实时语音字幕达到本次通话的保存上限，请重新拨号",
+    "references": [
+      "src/scripts/ui/realtime/openai-live-transcript.js#ui-call"
+    ]
+  },
+  {
     "source": "实时预览",
     "references": [
       "src/scripts/ui/variable-schema-editor.js#html-text"
@@ -29221,6 +30887,18 @@
     ]
   },
   {
+    "source": "使用此设置档的 OpenAI API Key 调用 Responses，为语音提供推理。可刷新候选或自行填写，访问权限以 API 为准。",
+    "references": [
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
+    ]
+  },
+  {
+    "source": "使用待检查回复的完整原文，并附行号定位格式修改。",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "使用当前配置与预设组装示例请求；实际正文和 Agent 使用各自上下文与任务限制。",
     "references": [
       "src/scripts/ui/request-params-panel.js#ui-call"
@@ -29275,6 +30953,12 @@
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/scripts/ui/preset-panel.js#html-text"
+    ]
+  },
+  {
+    "source": "使用选取",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -29347,11 +31031,20 @@
     "source": "世界书",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/agent/agent-reference-context.js#ui-definition",
       "src/scripts/ui/agent-center-resource-contract.js#ui-property",
+      "src/scripts/ui/agent-reference-editor.js#ui-definition",
       "src/scripts/ui/chat/lineage-graph-view-utils.js#ui-property",
       "src/scripts/ui/regex-panel.js#html-text",
       "src/scripts/ui/regex-session-panel.js#html-text",
       "src/scripts/ui/world-editor.js#html-text"
+    ]
+  },
+  {
+    "source": "世界书 {count}",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-call",
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
     ]
   },
   {
@@ -29423,7 +31116,9 @@
   {
     "source": "世界书变更预览",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
     ]
   },
   {
@@ -29454,6 +31149,12 @@
     "source": "世界书存储暂时无法读取，已阻止写入以保护现有数据。请重新载入 APP 后重试。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "世界书读取失败，请重试",
+    "references": [
+      "src/scripts/ui/chat/agent-reference-sources.js#ui-definition"
     ]
   },
   {
@@ -29505,6 +31206,12 @@
     "source": "世界书内容冲突",
     "references": [
       "src/scripts/ui/world-editor.js#ui-property"
+    ]
+  },
+  {
+    "source": "世界书内容暂时无法读取",
+    "references": [
+      "src/scripts/ui/chat/agent-reference-sources.js#ui-definition"
     ]
   },
   {
@@ -29720,6 +31427,12 @@
     ]
   },
   {
+    "source": "试运行",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "是",
     "references": [
       "src/scripts/memory/default-template.js#ui-definition"
@@ -29876,6 +31589,15 @@
     ]
   },
   {
+    "source": "收起结果",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-run-cards.js#ui-definition",
+      "src/scripts/ui/agent-toolbox.js#ui-call",
+      "src/scripts/ui/agent-toolbox.js#ui-definition"
+    ]
+  },
+  {
     "source": "收起评论",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -29911,6 +31633,10 @@
   {
     "source": "手动",
     "references": [
+      "src/scripts/agent/agent-invocation.js#ui-definition",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
+      "src/scripts/ui/chat/hopscotch-activation-utils.js#ui-call",
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call",
       "src/scripts/ui/variable-panel-runtime.js#html-text"
     ]
   },
@@ -30210,7 +31936,8 @@
   {
     "source": "输入",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-run-cards.js#ui-definition"
     ]
   },
   {
@@ -30263,6 +31990,13 @@
     ]
   },
   {
+    "source": "输入工具正在运行，请稍候",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/agent/input-agent-runtime.js#ui-definition"
+    ]
+  },
+  {
     "source": "输入关键词",
     "references": [
       "src/scripts/ui/app.js#dom-assignment",
@@ -30273,6 +32007,20 @@
     "source": "输入后按 Enter 直接生成图片",
     "references": [
       "src/scripts/ui/app.js#html-text"
+    ]
+  },
+  {
+    "source": "输入建议请选择独立模型配置",
+    "references": [
+      "src/scripts/agent/agent-configuration-service.js#ui-definition",
+      "src/scripts/agent/agent-configuration-service.js#ui-property"
+    ]
+  },
+  {
+    "source": "输入建议已达到本分钟频率限制",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/agent/input-agent-runtime.js#ui-definition"
     ]
   },
   {
@@ -30292,6 +32040,13 @@
     "source": "输入框",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "输入框暂不可用",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/agent/agent-configuration-service.js#ui-definition"
     ]
   },
   {
@@ -30332,15 +32087,17 @@
     ]
   },
   {
-    "source": "输入任意内容",
+    "source": "输入任务",
     "references": [
-      "src/scripts/ui/maid-onboarding-flows.js#ui-definition"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-toolbox.js#ui-call",
+      "src/scripts/ui/agent-toolbox.js#ui-definition"
     ]
   },
   {
-    "source": "输入时",
+    "source": "输入任意内容",
     "references": [
-      "src/scripts/ui/chat/hopscotch-court-view.js#ui-call"
+      "src/scripts/ui/maid-onboarding-flows.js#ui-definition"
     ]
   },
   {
@@ -30361,6 +32118,20 @@
     "references": [
       "src/scripts/ui/app.js#dom-assignment",
       "src/scripts/ui/app.js#html-attribute"
+    ]
+  },
+  {
+    "source": "输入停顿",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "输入停顿后处理当前草稿；继续输入时更新任务。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -30391,6 +32162,13 @@
     "source": "输入新好友名称（同时作为聊天室 ID）",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "输入已暂停",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/agent/input-agent-runtime.js#ui-definition"
     ]
   },
   {
@@ -30443,6 +32221,15 @@
     "references": [
       "src/scripts/ui/preset-panel.js#dom-assignment",
       "src/scripts/ui/preset-panel.js#html-attribute"
+    ]
+  },
+  {
+    "source": "输入助手",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/agent/agent-configuration-service.js#ui-definition",
+      "src/scripts/agent/agent-configuration-service.js#ui-property",
+      "src/scripts/storage/agent-config-store.js#ui-definition"
     ]
   },
   {
@@ -30542,13 +32329,28 @@
   {
     "source": "刷新",
     "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
       "src/scripts/ui/debug-panel-viewer-utils.js#dom-assignment"
+    ]
+  },
+  {
+    "source": "刷新工具",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-call",
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
     ]
   },
   {
     "source": "刷新角色推荐失败",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "刷新来源",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-call",
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
     ]
   },
   {
@@ -30834,6 +32636,14 @@
     ]
   },
   {
+    "source": "搜索 Agent",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-toolbox.js#ui-call",
+      "src/scripts/ui/agent-toolbox.js#ui-definition"
+    ]
+  },
+  {
     "source": "搜索 Token",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
@@ -30887,6 +32697,20 @@
     ]
   },
   {
+    "source": "搜索并核对资料",
+    "references": [
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
+    ]
+  },
+  {
+    "source": "搜索参考图片",
+    "references": [
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
+    ]
+  },
+  {
     "source": "搜索存档",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -30916,6 +32740,27 @@
     "references": [
       "src/scripts/ui/config-panel.js#dom-assignment",
       "src/scripts/ui/config-panel.js#html-attribute"
+    ]
+  },
+  {
+    "source": "搜索工具",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-call",
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "搜索公开图片的链接与出处。",
+    "references": [
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
+    ]
+  },
+  {
+    "source": "搜索公开网页与最新资料。",
+    "references": [
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
     ]
   },
   {
@@ -30956,6 +32801,13 @@
     "references": [
       "src/scripts/ui/app.js#dom-assignment",
       "src/scripts/ui/app.js#html-attribute"
+    ]
+  },
+  {
+    "source": "搜索来源",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-call",
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
     ]
   },
   {
@@ -31168,8 +33020,15 @@
     ]
   },
   {
+    "source": "所有参考来源共用这个上限；展开预览可查看实际加入的来源与截断情况。",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "所有角色卡",
     "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
   },
@@ -31303,13 +33162,21 @@
     "source": "提示词 {count}",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
-      "src/scripts/ui/agent-center-panel.js#ui-property"
+      "src/scripts/ui/agent-center-panel.js#ui-property",
+      "src/scripts/ui/agent-reference-editor.js#ui-call",
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
     ]
   },
   {
     "source": "提示词 {value}/{value2}",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "提示词 / 正则",
+    "references": [
+      "src/scripts/agent/agent-text-target.js#ui-definition"
     ]
   },
   {
@@ -31323,6 +33190,12 @@
     "references": [
       "src/scripts/agent/agent-feature-settings.js#ui-definition",
       "src/scripts/agent/agent-feature-settings.js#ui-property"
+    ]
+  },
+  {
+    "source": "提示词过长",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -31573,6 +33446,20 @@
     "source": "添加联系人到分组「{value}」",
     "references": [
       "src/scripts/ui/contact-group-renderer.js#dom-assignment"
+    ]
+  },
+  {
+    "source": "添加区块",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "添加手动工具",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-toolbox.js#ui-call",
+      "src/scripts/ui/agent-toolbox.js#ui-definition"
     ]
   },
   {
@@ -32743,7 +34630,14 @@
   {
     "source": "图片生成已取消",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/chat/chat-image-job-runtime.js#ui-definition"
+    ]
+  },
+  {
+    "source": "图片生成已中断",
+    "references": [
+      "src/scripts/ui/chat/chat-image-job-runtime.js#ui-definition"
     ]
   },
   {
@@ -32992,6 +34886,12 @@
     ]
   },
   {
+    "source": "推理模型",
+    "references": [
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
+    ]
+  },
+  {
     "source": "推理前缀（prefix）",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -33009,6 +34909,12 @@
       "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/scripts/ui/preset-panel.js#dom-assignment",
       "src/scripts/ui/session-config-panel.js#dom-assignment"
+    ]
+  },
+  {
+    "source": "推理请求 {count} 次｜输入 {input} · 输出 {output} token",
+    "references": [
+      "src/scripts/ui/realtime/realtime-usage-utils.js#ui-call"
     ]
   },
   {
@@ -33236,6 +35142,12 @@
     ]
   },
   {
+    "source": "完整回复",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "完整模式（Service Account）",
     "references": [
       "src/scripts/ui/config-panel.js#html-text",
@@ -33283,6 +35195,12 @@
     "source": "完整图",
     "references": [
       "src/scripts/ui/chat/lineage-graph-view-utils.js#ui-property"
+    ]
+  },
+  {
+    "source": "完整原始回复",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -33483,6 +35401,8 @@
     "source": "未保存的修改",
     "references": [
       "src/scripts/ui/agent-center-panel.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
   },
@@ -33795,7 +35715,9 @@
   {
     "source": "未启用",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-reference-editor.js#ui-call",
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
     ]
   },
   {
@@ -33904,7 +35826,14 @@
   {
     "source": "未提供",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/realtime-usage-utils.js#ui-call"
+    ]
+  },
+  {
+    "source": "未添加",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
     ]
   },
   {
@@ -34391,7 +36320,9 @@
   {
     "source": "未执行",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-run-cards.js#ui-definition",
+      "src/scripts/ui/agent-toolbox.js#ui-definition"
     ]
   },
   {
@@ -34541,6 +36472,7 @@
     "references": [
       "src/scripts/agent/agent-feature-settings.js#ui-definition",
       "src/scripts/agent/agent-feature-settings.js#ui-property",
+      "src/scripts/storage/agent-config-store.js#ui-definition",
       "src/scripts/ui/chat/hopscotch-court-view.js#ui-call"
     ]
   },
@@ -34836,6 +36768,12 @@
     ]
   },
   {
+    "source": "无法读取工具结果",
+    "references": [
+      "src/scripts/agent/custom-agent-request-runtime.js#ui-definition"
+    ]
+  },
+  {
     "source": "无法读取所选设置档",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -35089,6 +37027,13 @@
     ]
   },
   {
+    "source": "无需修改",
+    "references": [
+      "src/scripts/ui/agent-run-cards.js#ui-definition",
+      "src/scripts/ui/agent-toolbox.js#ui-definition"
+    ]
+  },
+  {
     "source": "无音频地址",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -35164,6 +37109,24 @@
     ]
   },
   {
+    "source": "希望如何检查和修复回复格式？",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "希望这个 Agent 如何帮助你输入？",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "希望这个 Agent 怎样处理正文？",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "喜好",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
@@ -35219,6 +37182,7 @@
   {
     "source": "系统提示词",
     "references": [
+      "src/scripts/ui/chat/agent-reference-sources.js#ui-definition",
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call",
       "src/scripts/ui/preset-panel.js#ui-property",
       "src/scripts/ui/regex-panel.js#ui-property"
@@ -35336,6 +37300,9 @@
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/scripts/ui/agent-center-panel.js#html-text",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
+      "src/scripts/ui/agent-toolbox.js#ui-call",
+      "src/scripts/ui/agent-toolbox.js#ui-definition",
       "src/scripts/ui/memory-template-panel.js#dom-assignment",
       "src/scripts/ui/world-editor.js#html-attribute",
       "src/scripts/ui/world-editor.js#html-text"
@@ -35530,6 +37497,18 @@
     ]
   },
   {
+    "source": "显示的正文",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "显示的正文提取消息中可阅读的叙事文字，排除思考过程、记忆表格与摘要；展开查看本次实际处理内容。",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "显示会话面板",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -35548,9 +37527,29 @@
     ]
   },
   {
+    "source": "显示模型返回的思考内容或思考摘要。",
+    "references": [
+      "src/scripts/ui/agent-run-cards.js#ui-call",
+      "src/scripts/ui/agent-run-cards.js#ui-definition"
+    ]
+  },
+  {
+    "source": "显示前 {count} 项，可搜索更多来源",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-call",
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "显示世界书面板",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "显示顺序与原文不同，请改用指定部分",
+    "references": [
+      "src/scripts/agent/agent-rendered-target.js#ui-definition"
     ]
   },
   {
@@ -35572,9 +37571,21 @@
     ]
   },
   {
+    "source": "显示正文在原文中重复出现，请改用指定部分",
+    "references": [
+      "src/scripts/agent/agent-rendered-target.js#ui-definition"
+    ]
+  },
+  {
     "source": "现在选择模型",
     "references": [
       "src/scripts/ui/agent-center-panel.js#ui-property"
+    ]
+  },
+  {
+    "source": "限制此 Agent 单次输出长度；可在内建默认值上调整。",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -35792,9 +37803,21 @@
     ]
   },
   {
+    "source": "写回失败，请重新运行",
+    "references": [
+      "src/scripts/agent/text-edit-runtime.js#ui-definition"
+    ]
+  },
+  {
     "source": "写回提示词",
     "references": [
       "src/scripts/ui/preset-panel.js#html-text"
+    ]
+  },
+  {
+    "source": "写明必要的标签、字段和结构，例如 {tag} 的使用格式。创意写作启用前需填写。",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -35901,6 +37924,12 @@
       "src/index.html#html-attribute",
       "src/scripts/ui/image-generation-params-panel.js#html-text",
       "src/scripts/ui/preset-panel.js#html-text"
+    ]
+  },
+  {
+    "source": "新建 Agent",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
   },
   {
@@ -36087,6 +38116,12 @@
     ]
   },
   {
+    "source": "新增 · 修改文本",
+    "references": [
+      "src/scripts/ui/agent-center-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "新增 ▾",
     "references": [
       "src/scripts/ui/world-editor.js#html-text"
@@ -36132,6 +38167,7 @@
   {
     "source": "新增并行房子",
     "references": [
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call",
       "src/scripts/ui/chat/hopscotch-court-view.js#ui-call"
     ]
   },
@@ -36145,12 +38181,6 @@
     "source": "新增档案时插入。",
     "references": [
       "src/scripts/memory/default-template.js#ui-definition"
-    ]
-  },
-  {
-    "source": "新增房子",
-    "references": [
-      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
   },
   {
@@ -36248,6 +38278,13 @@
     ]
   },
   {
+    "source": "新增输入 Agent",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/chat/hopscotch-court-view.js#ui-call"
+    ]
+  },
+  {
     "source": "新增条件链",
     "references": [
       "src/scripts/ui/world-editor/world-node-editor-core.js#ui-property"
@@ -36268,6 +38305,7 @@
   {
     "source": "新增一行",
     "references": [
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call",
       "src/scripts/ui/chat/hopscotch-court-view.js#ui-call",
       "src/scripts/ui/chat/hopscotch-pointer-drag.js#ui-call"
     ]
@@ -36470,6 +38508,26 @@
     ]
   },
   {
+    "source": "修改草稿",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "修改后的段落无法安全对应原文，请保留段落结构或改用指定部分",
+    "references": [
+      "src/scripts/agent/agent-rendered-target.js#ui-definition"
+    ]
+  },
+  {
+    "source": "修改建议待查看",
+    "references": [
+      "src/scripts/agent/text-edit-runtime.js#ui-definition",
+      "src/scripts/ui/agent-run-cards.js#ui-definition"
+    ]
+  },
+  {
     "source": "修改聊天内容",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -36488,6 +38546,20 @@
     ]
   },
   {
+    "source": "修改涉及功能区块，请调整任务要求或处理范围",
+    "references": [
+      "src/scripts/agent/text-edit-runtime.js#ui-definition",
+      "src/scripts/agent/text-edit-runtime.js#ui-property"
+    ]
+  },
+  {
+    "source": "修改涉及思考区块，请缩小处理范围",
+    "references": [
+      "src/scripts/agent/text-edit-runtime.js#ui-definition",
+      "src/scripts/agent/text-edit-runtime.js#ui-property"
+    ]
+  },
+  {
     "source": "修改世界书条目",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -36503,6 +38575,30 @@
     "source": "修改提示词",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "修改文本",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-utils.js#ui-property"
+    ]
+  },
+  {
+    "source": "修改文本：选择回复正文并生成修改建议，确认后替换。自定义提示词：独立执行任务，结果可供后续房子引用。",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "修改正文",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "修改正文通过差异预览确认；资料与建议独立显示，适合点评、检查与查找资料。",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -36622,10 +38718,37 @@
     ]
   },
   {
+    "source": "续写插入光标处；修改通过差异预览确认；资料与建议在工具箱查看。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "续写建议",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "续写建议需要将光标放在插入位置",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/agent/input-agent-runtime.js#ui-definition"
+    ]
+  },
+  {
     "source": "续写流程",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/scripts/ui/app.js#ui-call"
+    ]
+  },
+  {
+    "source": "续写文本",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -36657,6 +38780,12 @@
     "source": "选渠道前请留意：",
     "references": [
       "src/scripts/ui/maid-settings-panel.js#html-text"
+    ]
+  },
+  {
+    "source": "选取原文",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -36844,6 +38973,24 @@
     ]
   },
   {
+    "source": "选择世界书",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "选择提示词",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "选择条目",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "选择文件",
     "references": [
       "src/scripts/ui/world-panel.js#html-text"
@@ -36917,6 +39064,13 @@
     ]
   },
   {
+    "source": "选择一条回复",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-toolbox.js#ui-definition"
+    ]
+  },
+  {
     "source": "选择一条记录可直接打开对应世界书并定位到条目/分页。",
     "references": [
       "src/scripts/ui/app.js#html-text"
@@ -36967,6 +39121,13 @@
     ]
   },
   {
+    "source": "选择最新一轮已完成的回复",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-toolbox.js#ui-definition"
+    ]
+  },
+  {
     "source": "选中比较节点后，可在属性区设置比较符和值（如 > 10）。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -36979,6 +39140,12 @@
     ]
   },
   {
+    "source": "选中的工具已不可用，请检查 Agent 工具设置",
+    "references": [
+      "src/scripts/agent/custom-agent-request-runtime.js#ui-definition"
+    ]
+  },
+  {
     "source": "选中文字",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -36988,6 +39155,19 @@
     "source": "选中文字（位于 {value}）",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "选中文字无法唯一定位，请在 Agent 配置中选取原文",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/agent/agent-configuration-service.js#ui-definition"
+    ]
+  },
+  {
+    "source": "选中文字已变化，请重新选择",
+    "references": [
+      "src/scripts/agent/agent-text-target.js#ui-definition"
     ]
   },
   {
@@ -37223,6 +39403,12 @@
     ]
   },
   {
+    "source": "一次任务内最多进行的工具调用轮数；达到上限后生成结果。",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "一次性建立缺少的私聊，已存在项按精确名称复用。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -37253,6 +39439,18 @@
     ]
   },
   {
+    "source": "依据当前草稿提供续写、修改或独立建议。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "依据任务要求生成修改建议，确认后替换选定文本。",
+    "references": [
+      "src/scripts/ui/agent-center-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "依赖的房子已停用",
     "references": [
       "src/scripts/ui/chat/hopscotch-activation-utils.js#ui-call"
@@ -37267,6 +39465,9 @@
   {
     "source": "移除",
     "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
+      "src/scripts/ui/agent-reference-editor.js#ui-call",
+      "src/scripts/ui/agent-reference-editor.js#ui-definition",
       "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition",
       "src/scripts/ui/maid-selection-mode.js#html-attribute"
     ]
@@ -37290,6 +39491,13 @@
     ]
   },
   {
+    "source": "移除当前范围的独立配置，恢复继承。",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "移除登记",
     "references": [
       "src/scripts/ui/realtime/realtime-enrollment-view.js#ui-definition"
@@ -37304,6 +39512,8 @@
   {
     "source": "移除区块",
     "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
       "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
     ]
   },
@@ -37424,6 +39634,13 @@
     ]
   },
   {
+    "source": "已按字符上限截取",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-call",
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "已绑定",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
@@ -37456,9 +39673,17 @@
     ]
   },
   {
+    "source": "已包含在整本中",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "已保存",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-configuration-editor.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -38016,6 +40241,10 @@
   {
     "source": "已复制",
     "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
+      "src/scripts/ui/agent-run-cards.js#ui-call",
+      "src/scripts/ui/agent-run-cards.js#ui-definition",
+      "src/scripts/ui/agent-toolbox.js#ui-definition",
       "src/scripts/ui/app.js#ui-call",
       "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition",
       "src/scripts/ui/memory-table-editor.js#ui-call",
@@ -38139,7 +40368,9 @@
   {
     "source": "已过期",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-run-cards.js#ui-definition",
+      "src/scripts/ui/agent-toolbox.js#ui-definition"
     ]
   },
   {
@@ -38299,6 +40530,12 @@
     "source": "已接受修改并保存",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "已截断",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
     ]
   },
   {
@@ -38513,6 +40750,8 @@
     "source": "已取消",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-run-cards.js#ui-definition",
+      "src/scripts/ui/agent-toolbox.js#ui-definition",
       "src/scripts/ui/chat/execution-flow-runtime-utils.js#ui-property",
       "src/scripts/ui/chat/hopscotch-court-view.js#ui-call"
     ]
@@ -38605,6 +40844,12 @@
     "source": "已取消应用，候选仍保留在当前会话。",
     "references": [
       "src/scripts/ui/app.js#ui-property"
+    ]
+  },
+  {
+    "source": "已确认",
+    "references": [
+      "src/scripts/ui/realtime/realtime-usage-utils.js#ui-call"
     ]
   },
   {
@@ -38722,6 +40967,13 @@
     ]
   },
   {
+    "source": "已收起",
+    "references": [
+      "src/scripts/ui/agent-run-cards.js#ui-definition",
+      "src/scripts/ui/agent-toolbox.js#ui-definition"
+    ]
+  },
+  {
     "source": "已手动拉黑",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -38779,6 +41031,12 @@
     "source": "已填",
     "references": [
       "src/scripts/ui/variable-panel.js#html-text"
+    ]
+  },
+  {
+    "source": "已跳过",
+    "references": [
+      "src/scripts/ui/agent-run-cards.js#ui-definition"
     ]
   },
   {
@@ -38864,7 +41122,9 @@
   {
     "source": "已完成",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-run-cards.js#ui-definition",
+      "src/scripts/ui/agent-toolbox.js#ui-definition"
     ]
   },
   {
@@ -38990,6 +41250,13 @@
     ]
   },
   {
+    "source": "已选 {count} 项",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-call",
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "已选 {value} / {value2}",
     "references": [
       "src/scripts/ui/regex-panel.js#dom-assignment"
@@ -39020,9 +41287,31 @@
     ]
   },
   {
+    "source": "已选草稿文字",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-toolbox.js#ui-call",
+      "src/scripts/ui/agent-toolbox.js#ui-definition"
+    ]
+  },
+  {
     "source": "已选成员",
     "references": [
       "src/scripts/ui/group-chat-panels.js#html-text"
+    ]
+  },
+  {
+    "source": "已选来源",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-call",
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "已选取 {count} 字符",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -39107,6 +41396,8 @@
   {
     "source": "已应用",
     "references": [
+      "src/scripts/ui/agent-run-cards.js#ui-definition",
+      "src/scripts/ui/agent-toolbox.js#ui-definition",
       "src/scripts/ui/request-param-report-view.js#ui-call"
     ]
   },
@@ -39162,6 +41453,12 @@
     "source": "已优先最稳格式；仅在必要时暂不启用思考。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "已有 Agent",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
   },
   {
@@ -39297,6 +41594,12 @@
       "src/scripts/ui/chat/lineage-graph-view-utils.js#html-text",
       "src/scripts/ui/chat/lineage-graph-view-utils.js#ui-property",
       "src/scripts/ui/chat/prompt-preview-view-utils.js#html-text"
+    ]
+  },
+  {
+    "source": "已自定义",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -39538,6 +41841,7 @@
     "source": "应用",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
       "src/scripts/ui/variable-panel-runtime.js#dom-assignment"
     ]
   },
@@ -39677,6 +41981,12 @@
     "source": "应用正文优化失败",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "英国风格 · 自然音色",
+    "references": [
+      "src/scripts/ui/realtime/realtime-voice-catalog.js#ui-definition"
     ]
   },
   {
@@ -39985,6 +42295,8 @@
     "source": "用户",
     "references": [
       "src/index.html#html-text",
+      "src/scripts/agent/agent-reference-context.js#ui-definition",
+      "src/scripts/ui/agent-reference-editor.js#ui-definition",
       "src/scripts/ui/app.js#html-text"
     ]
   },
@@ -40653,6 +42965,31 @@
     ]
   },
   {
+    "source": "语音字幕保存功能不可用",
+    "references": [
+      "src/scripts/ui/realtime/realtime-call-runtime.js#ui-call"
+    ]
+  },
+  {
+    "source": "语音字幕保存失败",
+    "references": [
+      "src/scripts/ui/realtime/openai-live-call-events.js#ui-call",
+      "src/scripts/ui/realtime/openai-live-transcript.js#ui-call"
+    ]
+  },
+  {
+    "source": "预览参考资料",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "预览附加资料",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "预览格式目标",
     "references": [
       "src/scripts/ui/agent-center-panel.js#html-text"
@@ -40943,6 +43280,12 @@
     ]
   },
   {
+    "source": "原文或存档已变化，请重新运行",
+    "references": [
+      "src/scripts/agent/text-edit-runtime.js#ui-definition"
+    ]
+  },
+  {
     "source": "原文校验未通过",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -40991,6 +43334,12 @@
     ]
   },
   {
+    "source": "原文已变化，请重新运行",
+    "references": [
+      "src/scripts/agent/text-edit-runtime.js#ui-definition"
+    ]
+  },
+  {
     "source": "原因",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -41036,6 +43385,12 @@
     "source": "远景大纲",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "阅读提供的内容，给出简明、有用的建议。",
+    "references": [
+      "src/scripts/agent/agent-request-builder.js#ui-definition"
     ]
   },
   {
@@ -41130,6 +43485,13 @@
     ]
   },
   {
+    "source": "允许调用工具",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-call",
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "允许动态评论任务在公开评论外，少量写入相关私聊或群聊。",
     "references": [
       "src/scripts/ui/general-settings-panel.js#ui-property"
@@ -41176,6 +43538,12 @@
     "source": "允许消息类型",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "允许修改的文本",
+    "references": [
+      "src/scripts/agent/agent-request-builder.js#ui-definition"
     ]
   },
   {
@@ -41228,6 +43596,13 @@
     ]
   },
   {
+    "source": "运行设置",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "运行时按当前场景生成格式提醒。",
     "references": [
       "src/scripts/ui/preset-panel.js#dom-assignment"
@@ -41237,6 +43612,12 @@
     "source": "运行时内容",
     "references": [
       "src/scripts/ui/custom-bundle-exporter.js#html-text"
+    ]
+  },
+  {
+    "source": "运行一次",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -41360,6 +43741,12 @@
     ]
   },
   {
+    "source": "在原文中选中文字后点击“使用选取”；该选择仅用于本次手动运行。",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "在这里改条件细节",
     "references": [
       "src/scripts/ui/world-editor.js#ui-property"
@@ -41393,6 +43780,12 @@
     "source": "暂不",
     "references": [
       "src/scripts/ui/chat/send-prompt-gates.js#ui-property"
+    ]
+  },
+  {
+    "source": "暂不可用",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
     ]
   },
   {
@@ -41436,6 +43829,13 @@
     "source": "暂停",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "暂停或启用此 Agent，保留调用方式与配置。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -41744,6 +44144,12 @@
     ]
   },
   {
+    "source": "暂无可处理的回复",
+    "references": [
+      "src/scripts/agent/agent-configuration-service.js#ui-definition"
+    ]
+  },
+  {
     "source": "暂无可发送的提示词。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -41801,6 +44207,18 @@
     ]
   },
   {
+    "source": "暂无可选世界书",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "暂无可选提示词",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "暂无可应用的格式修复候选",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -41827,8 +44245,7 @@
   {
     "source": "暂无可预览的 Prompt",
     "references": [
-      "src/scripts/ui/app.js#ui-call",
-      "src/scripts/ui/chat/agent-request-preview.js#ui-call"
+      "src/scripts/ui/app.js#ui-call"
     ]
   },
   {
@@ -42140,6 +44557,7 @@
   {
     "source": "摘要",
     "references": [
+      "src/scripts/agent/agent-rendered-target.js#ui-definition",
       "src/scripts/memory/default-template.js#ui-definition",
       "src/scripts/ui/bridge.js#html-text",
       "src/scripts/ui/group-chat-panels.js#html-text",
@@ -42727,6 +45145,18 @@
     ]
   },
   {
+    "source": "这里显示当前落点可添加的功能；已放入流程或融合组的项目可直接在房子中配置。",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "这里显示实际使用的任务提示词，可直接修改；恢复默认后再保存即可使用内建任务。",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "这里写完整生图提示词",
     "references": [
       "src/scripts/ui/chat/auto-image-prompt-utils.js#html-text"
@@ -42793,6 +45223,13 @@
     ]
   },
   {
+    "source": "这条回复没有可处理的文本",
+    "references": [
+      "src/scripts/agent/agent-rendered-target.js#ui-definition",
+      "src/scripts/agent/agent-text-target.js#ui-definition"
+    ]
+  },
+  {
     "source": "这条回复没有可检查的完整原始内容",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -42811,6 +45248,12 @@
     ]
   },
   {
+    "source": "这条回复未匹配到完整的目标范围",
+    "references": [
+      "src/scripts/agent/agent-text-target.js#ui-definition"
+    ]
+  },
+  {
     "source": "这条阶段条件需要改写",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -42820,6 +45263,20 @@
     "source": "这条消息没有可朗读的文字。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "这条消息需要显示正文才能提取",
+    "references": [
+      "src/scripts/agent/agent-reference-context.js#ui-definition",
+      "src/scripts/agent/agent-reference-context.js#ui-property"
+    ]
+  },
+  {
+    "source": "这条消息暂无可用的显示内容",
+    "references": [
+      "src/scripts/ui/chat/agent-reference-app-runtime.js#ui-definition",
+      "src/scripts/ui/chat/agent-reference-app-runtime.js#ui-property"
     ]
   },
   {
@@ -42958,6 +45415,13 @@
     ]
   },
   {
+    "source": "整本",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-call",
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "整次请求的输入总预算 B，包含人设、世界书、记忆、前文与召回；最终仍受模型上下文上限约束。",
     "references": [
       "src/scripts/ui/general-settings-panel.js#html-attribute"
@@ -43045,6 +45509,12 @@
     ]
   },
   {
+    "source": "正文包含通过样式隐藏的内容，请使用指定标签或选取原文",
+    "references": [
+      "src/scripts/ui/chat/agent-rendered-body.js#ui-definition"
+    ]
+  },
+  {
     "source": "正文不可用",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -43075,6 +45545,12 @@
     ]
   },
   {
+    "source": "正文规则按当前配置范围共享，其他使用“正文”的修改 Agent 同样生效。",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "正文检查",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -43099,6 +45575,14 @@
     ]
   },
   {
+    "source": "正文润色",
+    "references": [
+      "src/scripts/agent/agent-configuration-service.js#ui-definition",
+      "src/scripts/agent/agent-configuration-service.js#ui-property",
+      "src/scripts/storage/agent-config-store.js#ui-definition"
+    ]
+  },
+  {
     "source": "正文生成",
     "references": [
       "src/scripts/ui/chat/creative-execution-lane-runtime-utils.js#ui-property",
@@ -43115,6 +45599,12 @@
     "source": "正文生成需保持启用",
     "references": [
       "src/scripts/ui/chat/hopscotch-board-utils.js#ui-call"
+    ]
+  },
+  {
+    "source": "正文识别",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -43211,6 +45701,8 @@
   {
     "source": "正在保存…",
     "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
       "src/scripts/ui/chat/inline-edit-ui-utils.js#dom-assignment"
     ]
   },
@@ -43254,6 +45746,13 @@
     "source": "正在测试{value}（{value2}/{value3}）…",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "正在查看",
+    "references": [
+      "src/scripts/ui/agent-run-cards.js#ui-definition",
+      "src/scripts/ui/agent-toolbox.js#ui-definition"
     ]
   },
   {
@@ -43323,9 +45822,28 @@
     ]
   },
   {
+    "source": "正在读取…",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-call",
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "正在读取当前模型的可用上游...",
     "references": [
       "src/scripts/ui/config-panel.js#dom-assignment"
+    ]
+  },
+  {
+    "source": "正在读取工具…",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "正在读取来源…",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
     ]
   },
   {
@@ -43356,6 +45874,8 @@
     "source": "正在构建预览…",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-reference-editor.js#ui-call",
+      "src/scripts/ui/agent-reference-editor.js#ui-definition",
       "src/scripts/ui/chat/agent-request-preview.js#ui-call",
       "src/scripts/ui/preset-panel.js#html-text"
     ]
@@ -43600,6 +46120,13 @@
     ]
   },
   {
+    "source": "正在提取正文…",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "正在听",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
@@ -43729,6 +46256,18 @@
     ]
   },
   {
+    "source": "正则表达式",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "正则捕获组",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "正则存储暂时无法读取，已阻止写入以保护现有数据。请重新载入 APP 后重试。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -43762,6 +46301,24 @@
     "source": "正则匹配 (regex)",
     "references": [
       "src/scripts/ui/world-editor.js#ui-property"
+    ]
+  },
+  {
+    "source": "正则匹配超时，请简化表达式",
+    "references": [
+      "src/scripts/agent/agent-text-target.js#ui-definition"
+    ]
+  },
+  {
+    "source": "正则未匹配到指定捕获组",
+    "references": [
+      "src/scripts/agent/agent-text-target.js#ui-definition"
+    ]
+  },
+  {
+    "source": "正则无效，或当前系统不支持捕获组位置；可使用起止标签",
+    "references": [
+      "src/scripts/agent/agent-text-target.js#ui-definition"
     ]
   },
   {
@@ -43870,6 +46427,15 @@
     ]
   },
   {
+    "source": "执行过程",
+    "references": [
+      "src/scripts/ui/agent-run-cards.js#ui-call",
+      "src/scripts/ui/agent-run-cards.js#ui-definition",
+      "src/scripts/ui/agent-toolbox.js#ui-call",
+      "src/scripts/ui/agent-toolbox.js#ui-definition"
+    ]
+  },
+  {
     "source": "执行聊天候选",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -43906,6 +46472,12 @@
     ]
   },
   {
+    "source": "执行时按当前输入或待处理回复自动组装，完整内容可从侧边预览展开查看。",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "执行写入预览",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -43915,7 +46487,9 @@
     "source": "执行一次",
     "references": [
       "src/scripts/ui/agent-center-panel.js#html-text",
-      "src/scripts/ui/app.js#ui-property"
+      "src/scripts/ui/app.js#ui-property",
+      "src/scripts/ui/chat/custom-agent-app-runtime.js#ui-definition",
+      "src/scripts/ui/chat/custom-agent-app-runtime.js#ui-property"
     ]
   },
   {
@@ -44167,8 +46741,21 @@
     ]
   },
   {
+    "source": "指定部分 · 标签",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "指定部分 · 正则",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "指定的模型配置不存在",
     "references": [
+      "src/scripts/ui/chat/custom-agent-app-runtime.js#ui-definition",
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call",
       "src/scripts/ui/chat/hopscotch-sidecar-executors.js#ui-call",
       "src/scripts/ui/chat/hopscotch-turn-runtime.js#ui-call"
@@ -44181,6 +46768,12 @@
     ]
   },
   {
+    "source": "指定回复",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "指定联系人",
     "references": [
       "src/scripts/ui/memory-template-panel.js#ui-property"
@@ -44190,6 +46783,13 @@
     "source": "指定模型：{value}",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "指定模型名称",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -44290,6 +46890,8 @@
   {
     "source": "置顶",
     "references": [
+      "src/scripts/ui/agent-toolbox.js#ui-call",
+      "src/scripts/ui/agent-toolbox.js#ui-definition",
       "src/scripts/ui/memory-table-editor.js#dom-assignment",
       "src/scripts/ui/memory-table-editor.js#html-attribute",
       "src/scripts/ui/world-editor.js#html-attribute"
@@ -45107,7 +47709,8 @@
   {
     "source": "资料",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition"
     ]
   },
   {
@@ -45195,6 +47798,15 @@
     ]
   },
   {
+    "source": "资料与建议",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
+      "src/scripts/ui/agent-run-cards.js#ui-definition",
+      "src/scripts/ui/agent-toolbox.js#ui-definition"
+    ]
+  },
+  {
     "source": "资源",
     "references": [
       "src/scripts/ui/agent-center-panel.js#ui-property",
@@ -45242,6 +47854,12 @@
     "references": [
       "src/scripts/ui/world-editor/world-variable-picker.js#dom-assignment",
       "src/scripts/ui/world-editor/world-variable-picker.js#html-text"
+    ]
+  },
+  {
+    "source": "字符上限",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
     ]
   },
   {
@@ -45395,6 +48013,13 @@
     ]
   },
   {
+    "source": "自定义区块",
+    "references": [
+      "src/scripts/agent/agent-configuration-service.js#ui-definition",
+      "src/scripts/agent/agent-request-builder.js#ui-definition"
+    ]
+  },
+  {
     "source": "自定义声音",
     "references": [
       "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
@@ -45415,6 +48040,8 @@
   {
     "source": "自定义提示词区块",
     "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
       "src/scripts/ui/preset-panel.js#ui-property"
     ]
   },
@@ -45502,6 +48129,8 @@
   {
     "source": "自动",
     "references": [
+      "src/scripts/agent/agent-invocation.js#ui-definition",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
       "src/scripts/ui/image-generation-params-utils.js#ui-definition",
       "src/scripts/ui/image-generation-params-utils.js#ui-property",
       "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
@@ -45511,6 +48140,27 @@
     "source": "自动（跟随对话）",
     "references": [
       "src/scripts/ui/realtime/realtime-reply-language-picker.js#ui-definition"
+    ]
+  },
+  {
+    "source": "自动＋手动",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/agent/agent-invocation.js#ui-definition",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "自动按设定时机执行；手动从工具箱调用。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "自动包含",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -45602,6 +48252,13 @@
     ]
   },
   {
+    "source": "自动流程引用了仅手动的 Agent，请为上游开启自动调用或移除引用",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "自动排版",
     "references": [
       "src/scripts/ui/world-editor/world-node-editor-core.js#ui-property"
@@ -45671,6 +48328,13 @@
     "source": "自动生图总开关未开启，实际发送不会注入",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "自动时机",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -45903,6 +48567,12 @@
     ]
   },
   {
+    "source": "最大输出 Tokens",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "最大行数",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
@@ -45926,6 +48596,26 @@
     "source": "最低",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "最多 {count} 字符",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-call",
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "最多工具轮次",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "最多选择 {count} 个工具",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-call",
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
     ]
   },
   {
@@ -45973,6 +48663,18 @@
     ]
   },
   {
+    "source": "最近 {count} 轮",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "最近 {count} 条消息",
+    "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "最近 50 条",
     "references": [
       "src/scripts/ui/experience-pack-transfer.js#html-text"
@@ -45988,7 +48690,16 @@
   {
     "source": "最近对话",
     "references": [
+      "src/scripts/ui/agent-reference-editor.js#ui-call",
+      "src/scripts/ui/agent-reference-editor.js#ui-definition",
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "最近回复",
+    "references": [
+      "src/scripts/agent/agent-text-target.js#ui-definition",
+      "src/scripts/ui/agent-toolbox.js#ui-definition"
     ]
   },
   {
@@ -46063,6 +48774,12 @@
     "source": "最小值不能大于最大值",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "最新回复",
+    "references": [
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
     ]
   },
   {
@@ -46271,9 +48988,16 @@
     ]
   },
   {
+    "source": "Agent 返回内容过长，请缩小处理范围",
+    "references": [
+      "src/scripts/agent/custom-agent-request-runtime.js#ui-definition"
+    ]
+  },
+  {
     "source": "Agent 工具",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/chat/context-menu-ui-utils.js#ui-property"
     ]
   },
   {
@@ -46285,7 +49009,9 @@
   {
     "source": "Agent 工具权限",
     "references": [
-      "src/scripts/ui/app.js#ui-property"
+      "src/scripts/ui/app.js#ui-property",
+      "src/scripts/ui/chat/custom-agent-app-runtime.js#ui-definition",
+      "src/scripts/ui/chat/custom-agent-app-runtime.js#ui-property"
     ]
   },
   {
@@ -46325,15 +49051,41 @@
     ]
   },
   {
+    "source": "Agent 工具箱",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-toolbox.js#ui-call",
+      "src/scripts/ui/agent-toolbox.js#ui-definition"
+    ]
+  },
+  {
     "source": "Agent 工具已允许并执行",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
+    "source": "Agent 结果待查看",
+    "references": [
+      "src/scripts/agent/text-edit-runtime.js#ui-definition"
+    ]
+  },
+  {
     "source": "Agent 开启",
     "references": [
       "src/scripts/ui/agent-center-status-chip.js#ui-property"
+    ]
+  },
+  {
+    "source": "Agent 已停止",
+    "references": [
+      "src/scripts/agent/custom-agent-request-runtime.js#ui-definition"
+    ]
+  },
+  {
+    "source": "Agent 执行超时，请稍后重试",
+    "references": [
+      "src/scripts/agent/custom-agent-request-runtime.js#ui-definition"
     ]
   },
   {
@@ -47300,6 +50052,72 @@
     ]
   },
   {
+    "source": "GPT-Live 返回了无效的连接响应",
+    "references": [
+      "src/scripts/ui/realtime/openai-live-session-client.js#ui-call"
+    ]
+  },
+  {
+    "source": "GPT-Live 服务发生错误",
+    "references": [
+      "src/scripts/ui/realtime/openai-live-call-events.js#ui-call"
+    ]
+  },
+  {
+    "source": "GPT-Live 会话尚未就绪或正在结束",
+    "references": [
+      "src/scripts/ui/realtime/openai-live-session-client.js#ui-call"
+    ]
+  },
+  {
+    "source": "GPT-Live 会话在连接完成前已结束",
+    "references": [
+      "src/scripts/ui/realtime/openai-live-session-client.js#ui-call"
+    ]
+  },
+  {
+    "source": "GPT-Live 连接超时，请检查网络与模型权限",
+    "references": [
+      "src/scripts/ui/realtime/openai-live-session-client.js#ui-call"
+    ]
+  },
+  {
+    "source": "GPT-Live 连接失败（HTTP {status}）：{message}",
+    "references": [
+      "src/scripts/ui/realtime/openai-live-session-client.js#ui-call"
+    ]
+  },
+  {
+    "source": "GPT-Live 连接已中断",
+    "references": [
+      "src/scripts/ui/realtime/openai-live-session-client.js#ui-call"
+    ]
+  },
+  {
+    "source": "GPT-Live 模型",
+    "references": [
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
+    ]
+  },
+  {
+    "source": "GPT-Live 启动失败",
+    "references": [
+      "src/scripts/ui/realtime/openai-live-session-client.js#ui-call"
+    ]
+  },
+  {
+    "source": "GPT-Live 推理请求失败",
+    "references": [
+      "src/scripts/ui/realtime/openai-live-call-events.js#ui-call"
+    ]
+  },
+  {
+    "source": "GPT-Live 支持同时听说；语音按通话时长计费，推理模型另计。通话开始时加载角色上下文。",
+    "references": [
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
+    ]
+  },
+  {
     "source": "Groq OpenAI 兼容 Audio API 基础 URL",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -47542,6 +50360,12 @@
     ]
   },
   {
+    "source": "Live 语音时长：{seconds} 秒 · {status}",
+    "references": [
+      "src/scripts/ui/realtime/realtime-usage-utils.js#ui-call"
+    ]
+  },
+  {
     "source": "main 之后",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -47743,6 +50567,12 @@
     "source": "OpenAI 推理模型会映射到 reasoning_effort。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "OpenAI 语音接入方式",
+    "references": [
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
     ]
   },
   {
@@ -48537,6 +51367,12 @@
     "source": "WebRTC 未生成 SDP offer",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "WebRTC ICE 收集超时，请检查网络连接",
+    "references": [
+      "src/scripts/ui/realtime/openai-realtime-session-client.js#ui-call"
     ]
   },
   {

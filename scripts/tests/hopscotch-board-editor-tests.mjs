@@ -1,9 +1,45 @@
 import assert from 'node:assert/strict';
 import { editHopscotchBoard } from '../../src/scripts/ui/chat/hopscotch-board-editor-utils.js';
-import { buildDefaultHopscotchBoard } from '../../src/scripts/ui/chat/hopscotch-board-utils.js';
+import { buildDefaultHopscotchBoard, compileBoardToLaneTasks, HOPSCOTCH_LIMITS } from '../../src/scripts/ui/chat/hopscotch-board-utils.js';
+import { resolveHopscotchActivation } from '../../src/scripts/ui/chat/hopscotch-activation-utils.js';
 import { renderHopscotchCourt } from '../../src/scripts/ui/chat/hopscotch-court-view.js';
 
 const initial = buildDefaultHopscotchBoard({});
+{
+  const original = structuredClone(initial);
+  const placeholder = { enabled: false, reason: 'disabled' };
+  const before = renderHopscotchCourt(initial, { editable: true, formatReview: placeholder });
+  assert.equal((before.match(/class="hop-plus hop-side"/g) || []).length, 2, '正文和停用格式修复都提供同行新增');
+  assert.equal((before.match(/class="hop-plus hop-gap"/g) || []).length, 3, '两行共用中间插入口，保留顶部与底部');
+  const parallel = editHopscotchBoard(initial, { type: 'add', kind: 'custom_prompt', anchorKind: 'format_review', newRow: false });
+  assert.equal(parallel.ok, true, parallel.reason);
+  assert.deepEqual(parallel.board.rows.map(row => row.houses.map(h => h.kind)), [['body'], ['format_review', 'custom_prompt']]);
+  const review = parallel.board.rows[1].houses[0];
+  const peer = parallel.board.rows[1].houses[1];
+  const tasks = compileBoardToLaneTasks(parallel.board).tasks;
+  assert.equal(tasks.find(t => t.id === review.id).timeBucket, tasks.find(t => t.id === peer.id).timeBucket);
+  assert.deepEqual(tasks.find(t => t.id === peer.id).dependsOn, ['body'], '同一行依赖正文，两者并行');
+  assert.equal(resolveHopscotchActivation(parallel.board, { replyCheck: placeholder }).houses[review.id].enabled, false, '新增邻居保留共享功能停用状态');
+  const after = editHopscotchBoard(initial, { type: 'add', kind: 'custom_prompt', anchorKind: 'format_review', newRow: true });
+  assert.equal(after.ok, true, after.reason);
+  assert.deepEqual(after.board.rows.map(row => row.houses.map(h => h.kind)), [['body'], ['format_review'], ['custom_prompt']]);
+  const afterTasks = compileBoardToLaneTasks(after.board).tasks;
+  assert.deepEqual(afterTasks.find(t => t.id === after.board.rows[2].houses[0].id).dependsOn, [after.board.rows[1].houses[0].id]);
+  const above = editHopscotchBoard(initial, { type: 'add', kind: 'custom_prompt', rowIndex: initial.rows.length, newRow: true });
+  assert.equal(above.ok, true);
+  const aboveHtml = renderHopscotchCourt(above.board, { editable: true, formatReview: placeholder });
+  assert(aboveHtml.indexOf('data-hop-house="' + above.board.rows[1].houses[0].id + '"') < aboveHtml.indexOf('data-hop-format-review'));
+  const promoted = renderHopscotchCourt(parallel.board, { editable: true, formatReview: placeholder });
+  assert.equal((promoted.match(/data-hop-kind="format_review"/g) || []).length, 1, '纳入草稿后只显示一次格式修复');
+  assert.doesNotMatch(promoted, /data-hop-anchor=/, '实体行沿用普通行操作');
+  assert.equal(editHopscotchBoard(initial, { type: 'add', kind: 'format_review', anchorKind: 'format_review' }).ok, false, '内建 Agent 保持唯一');
+  const full = structuredClone(initial);
+  while (full.rows.length < HOPSCOTCH_LIMITS.maxRows) full.rows.push({ id: 'extra-' + full.rows.length, houses: [{ id: 'extra-' + full.rows.length, kind: 'custom_prompt' }] });
+  assert.equal(editHopscotchBoard(full, { type: 'add', kind: 'custom_prompt', anchorKind: 'format_review' }).ok, false, '展示锚点也遵守行数限制');
+  assert.equal(full.rows.length, HOPSCOTCH_LIMITS.maxRows, '失败原子回退');
+  assert.deepEqual(initial, original, '浏览、取消或失败均不改写原板');
+  console.log('ok - every execution row has add controls; review placeholder promotes atomically with parallel/sequential dependencies and limits');
+}
 const saved = structuredClone(initial);
 let result = editHopscotchBoard(initial, { type: 'add', kind: 'custom_prompt', rowIndex: 0, newRow: true });
 assert.equal(result.ok, true);

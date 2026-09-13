@@ -14,7 +14,7 @@ export const HOPSCOTCH_HOUSE_KINDS = Object.freeze({
   imagePrompt: 'image_prompt',
   variable: 'variable',
   variableRules: 'variable_rules',
-  customPrompt: 'custom_prompt',
+  customPrompt: 'custom_prompt', textEdit: 'text_edit',
 });
 
 export const HOPSCOTCH_FUSED_KINDS = Object.freeze(['memory_table', 'image_prompt', 'variable']);
@@ -29,6 +29,7 @@ export const HOPSCOTCH_HOUSE_CATALOG = Object.freeze([
   { kind: 'summary_compaction', label: '摘要压缩', icon: 'compress', position: 'post', unique: true },
   { kind: 'format_review', label: '格式复核', icon: 'check', position: 'post', unique: true },
   { kind: 'image_generation', label: '图片生成', icon: 'image', position: 'post', unique: true },
+  { kind: 'text_edit', label: '修改文本', icon: 'edit', position: 'post', unique: false },
   { kind: 'custom_prompt', label: '自定义提示词', icon: 'spark', position: 'any', unique: false },
 ]);
 
@@ -117,6 +118,7 @@ const normalizeHouse = (house = {}, rowIndex = 0, houseIndex = 0, allocateMember
       kind: memberKind, enabled: out.fusedEnabled[memberKind],
     }, rowIndex, houseIndex)]));
   }
+  if (kind === 'text_edit') out.config = { agentId: trim(src.config?.agentId) };
   if (kind === 'custom_prompt') out.config = normalizeCustomHouseConfig(src.config);
   if (FUSED_SET.has(kind)) out.config = {
     modelMode: src.config?.modelMode === 'profile' ? 'profile' : 'follow_current',
@@ -262,7 +264,7 @@ export const validateHopscotchBoard = (input = {}) => {
           seenIds.add(member.id);
         }
       }
-      if (house.kind === 'custom_prompt') customCount += 1;
+      if (['custom_prompt', 'text_edit'].includes(house.kind)) customCount += 1;
     });
   });
 

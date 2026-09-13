@@ -93,6 +93,7 @@ export const createHopscotchExecutors = ({
   memory = null,          // { runMemoryUpdateAfterChat, runTimelineRepair, abortMemoryUpdate }
   compaction = null,      // { request(sessionId, { place }), place }
   tableMemoryEnabled = false,
+  textEdit = null,
   formatReview = null,    // { run({ sessionId, messageId, signal }) }
   image = null,           // { run({ sessionId, messageId, signal }) }
   sidecars = null,        // 独立图片提示、变量更新及分阶段原生规则
@@ -197,6 +198,10 @@ export const createHopscotchExecutors = ({
       }
     }
   }
+  if (textEdit) executors.text_edit = { run: ({ house, signal }) => {
+    const messageId = getTurnContext()?.body?.messageId;
+    return messageId ? textEdit.run({ agentId: house.config.agentId, sessionId, messageId, signal }) : { status: 'skipped', reason: 'body_message_missing' };
+  } };
   if (formatReview) {
     executors.format_review = {
       run: async ({ signal }) => {
@@ -332,7 +337,7 @@ export const projectHouseStateToLane = (laneRuntime, state) => {
 export const createHopscotchTurnRuntime = ({
   getSettings = () => ({}),
   boardStore = null,
-  resolveWritingSettings = () => ({}),
+  resolveWritingSettings = () => ({}), getTextAgents = () => [],
   laneRuntime = null,
   getLaneRuntime = null,   // 泳道运行时可能晚于本运行时创建：优先延迟读取
   createExecutors = null,   // (turnInfo) => executors（app 注入真实执行器依赖）
@@ -351,15 +356,19 @@ export const createHopscotchTurnRuntime = ({
   const isEnabled = () => getSettings()?.creativeHopscotchEnabled === true;
   const resolveBoard = (sessionId, { place = 'writing', contextSessionId = sessionId, scope = 'effective' } = {}) => {
     if (!boardStore) return { board: null, source: 'derived' };
-    const settings = resolveWritingSettings(contextSessionId, place);
+    const settings = resolveWritingSettings(contextSessionId, place, scope);
     const derived = buildDefaultHopscotchBoard({ ...settings, place });
+    const agents = getTextAgents(contextSessionId, place, scope);
+    for (let index = 0; index < agents.length; index += 4) derived.rows.push({ id: `text-edit-row-${index}`, houses: agents.slice(index, index + 4).map(config => ({ id: config.id.replace(':', '-'), kind: 'text_edit', label: config.title, enabled: true, config: { agentId: config.id } })) });
     // 聊天不能读到创意写作的自定义板，也不能借此接管聊天发送。
     if (place === 'chat') return { board: derived, source: 'derived' };
     const resolved = boardStore.resolveEffectiveBoard({ sessionId, derivedBoard: derived, scope });
-    return { ...resolved, board: projectHopscotchVariableRules(resolved.board, settings?.variables?.activity) };
+    const board = projectHopscotchVariableRules(resolved.board, settings?.variables?.activity);
+    board.rows.forEach(row => row.houses.forEach(house => { if (house.kind === 'text_edit') house.label = agents.find(c => c.id === house.config.agentId)?.title || house.label; }));
+    return { ...resolved, board };
   };
 
-  const resolveActivation = (board, sessionId, { place = 'writing' } = {}) => resolveHopscotchActivation(board, resolveWritingSettings(sessionId, place));
+  const resolveActivation = (board, sessionId, { place = 'writing', scope = 'effective' } = {}) => resolveHopscotchActivation(board, { ...resolveWritingSettings(sessionId, place, scope), textAgents: getTextAgents(sessionId, place, scope) });
   const resolveFusionCapabilities = (sessionId, { place = 'writing' } = {}) => {
     const settings = resolveWritingSettings(sessionId, place);
     return {
@@ -370,7 +379,7 @@ export const createHopscotchTurnRuntime = ({
   const resolveExecutionPlan = (sessionId, { place = 'writing' } = {}) => {
     const resolved = resolveBoard(sessionId, { place });
     const settings = resolveWritingSettings(sessionId, place);
-    const activation = resolveHopscotchActivation(resolved.board, settings);
+    const activation = resolveActivation(resolved.board, sessionId, { place });
     return { ...resolved, activation, memory: cloneData(settings?.memory || {}), fused: getActiveHopscotchFused(resolved.board, activation), custom: place === 'writing' && isEnabled() && resolved.source !== 'derived' };
   };
 

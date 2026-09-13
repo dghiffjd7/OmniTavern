@@ -54,7 +54,7 @@ export const buildContextMenuActions = (message, {
   hasRpMessageActions = false,
   isThreadingEnabled = false,
   inlineGeneratedImage = null,
-  canCheckFormat = false,
+  canCheckFormat = false, canEditWithAgent = false,
 } = {}) => {
   const actions = [];
   const inlineGeneratedAsset = resolveInlineGeneratedImageAsset(message, inlineGeneratedImage);
@@ -94,6 +94,7 @@ export const buildContextMenuActions = (message, {
   }
   if (message?.role === 'assistant') {
     // 朗读入口改为菜单顶部的复合行（朗读 + 最近声音 chips + ⋯），不再占动作清单
+    if (canEditWithAgent === true && !message?.meta?.generatedMedia && String(message?.type || 'text') === 'text') actions.push({ key: 'text-edit-agent', label: 'Agent 工具', group: 'main' });
     if (canCheckFormat === true) {
       actions.push({ key: 'check-format', label: '检查格式', group: 'main' });
     }

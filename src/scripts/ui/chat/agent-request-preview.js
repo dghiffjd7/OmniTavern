@@ -10,13 +10,14 @@ const button = (action, label, glyph, className = '') => `<button type="button" 
 
 export const renderAgentRequestPreview = request => {
   const messages = Array.isArray(request?.messages) ? request.messages : [];
-  if (!messages.length) return `<p class="hop-request-empty">${escapeHtml(t('暂无可预览的 Prompt'))}</p>`;
+  if (!messages.length) return `<p class="hop-request-empty">${escapeHtml(t(request?.previewNote || '暂无可预览的 Prompt'))}</p>`;
   const items = messages.map((message, index) => {
     const plain = buildFullPromptDocument({ messages: [message] }).plain;
-    return `<article class="hop-request-message"><header><span>${escapeHtml(message.role || 'message')}</span><small>${String(index + 1).padStart(2, '0')}</small></header><pre data-i18n-skip="true">${escapeHtml(plain.slice(plain.indexOf('\n') + 1))}</pre></article>`;
+    return `<article class="hop-request-message"><header><span>${escapeHtml(t(request.sections?.[index]?.source || message.role || 'message'))}</span><small>${String(index + 1).padStart(2, '0')}</small></header><pre data-i18n-skip="true">${escapeHtml(plain.slice(plain.indexOf('\n') + 1))}</pre></article>`;
   });
   if (request.responsePrefix) items.push(`<article class="hop-request-message"><header>assistant prefill</header><pre data-i18n-skip="true">${escapeHtml(request.responsePrefix)}</pre></article>`);
-  const options = request.wireRequest?.body || { ...(request.options || {}), ...(request.requestOptions || {}) };
+  if (request.previewNote) items.unshift(`<p class="hop-request-empty">${escapeHtml(t(request.previewNote))}</p>`);
+  const options = request.wireRequest?.body || { ...(request.params || {}), ...(request.options || {}), ...(request.requestOptions || {}) };
   const omitted = new Set(['model', 'messages', 'contents', 'input', 'system', 'systemInstruction',
     'stream', 'signal', 'nativeRequestId', 'requestParamConstraints', 'requestContext']);
   const params = Object.fromEntries(Object.entries(options).filter(([key, value]) => !omitted.has(key)

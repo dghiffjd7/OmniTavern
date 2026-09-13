@@ -95,7 +95,9 @@ try {
   await reset('公园👩🏽‍💻散步，顺便买一杯咖啡。', '，晚上回来。'); baseline = await state(); await hold();
   await touch('touchMove', await pointAt(3));
   current = await state(); assert.equal(current.selected, '公园👩🏽‍💻散');
-  await touch('touchMove', await pointAt(2)); current = await state();
+  await touch('touchMove', await pointAt(2));
+  // CDP may acknowledge a coalesced touch move before WebView dispatches pointermove.
+  await pause(); current = await state();
   assert.equal(current.selected, '公园👩🏽‍💻'); assert.equal(current.events, baseline.events); assert.equal(current.focused, true);
   assert(current.preview && current.preview.left >= 0 && current.preview.right <= 390);
   assert.equal(await ev(`return String(window.getSelection());`), '', 'system text selection should remain inactive');

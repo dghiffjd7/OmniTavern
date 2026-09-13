@@ -1,4 +1,5 @@
 import { t } from '../../i18n/index.js';
+import { isOpenAiLive, OPENAI_LIVE_MODEL, filterOpenAiLiveModels, filterOpenAiLiveBackendModels } from './openai-live-config.js';
 import { safeInvoke } from '../../utils/tauri.js';
 import { invokeNativeHttpRequest, createLinkedAbortController } from '../../api/abort.js';
 import { buildVoiceModelsRequest, parseVoiceModelCatalog } from '../../api/voice-client.js';
@@ -6,9 +7,10 @@ import { REALTIME_PROVIDERS, GEMINI_VERTEX_MODELS, isGeminiVertex, validateRealt
 
 const aborted = () => new DOMException('Cancelled', 'AbortError');
 const checkSignal = signal => { if (signal?.aborted) throw aborted(); };
-export const realtimeModelDefaults = profile => [...(isGeminiVertex(profile) ? GEMINI_VERTEX_MODELS : REALTIME_PROVIDERS[profile.provider]?.models || [])];
-export const realtimeModelSource = profile => JSON.stringify([profile.id || '', profile.provider, profile.geminiBackend || '', profile.vertexaiAuthMode || '', profile.region || '', profile.workspaceId || '', profile.vertexaiProjectId || '', profile.credentialId || '']);
+export const realtimeModelDefaults = profile => isOpenAiLive(profile) ? [OPENAI_LIVE_MODEL] : [...(isGeminiVertex(profile) ? GEMINI_VERTEX_MODELS : REALTIME_PROVIDERS[profile.provider]?.models || [])];
+export const realtimeModelSource = profile => JSON.stringify([profile.id || '', profile.provider, profile.openaiBackend || '', profile.geminiBackend || '', profile.vertexaiAuthMode || '', profile.region || '', profile.workspaceId || '', profile.vertexaiProjectId || '', profile.credentialId || '']);
 export const filterRealtimeModels = (profile, items) => {
+  if (isOpenAiLive(profile)) return filterOpenAiLiveModels(items);
   if (profile.provider === 'openai') return parseVoiceModelCatalog({ data: items }, { provider: 'openai', capability: 'realtime' });
   const ids = items.filter(item => item && item.modelLifecycle?.status !== 'END_OF_LIFE').map(item => {
     const id = String(typeof item === 'string' ? item : item.id || item.modelId || item.model || item.name || '').split('/').pop();
@@ -56,6 +58,19 @@ export class RealtimeModelDiscovery {
     const linked = createLinkedAbortController({ signal, timeoutMs: 30000 });
     try { return await this.load(profile, credentials, linked.controller.signal); }
     finally { linked.cleanup(); }
+  }
+  async listBackendModels(profile, credentials, { signal } = {}) {
+    if (!isOpenAiLive(profile)) throw new Error(t('请选择 OpenAI 语音接入方式'));
+    validateRealtimeCredentials('openai', credentials, profile);
+    const linked = createLinkedAbortController({ signal, timeoutMs: 30000 });
+    try {
+      const { url, headers } = buildVoiceModelsRequest({ provider: 'openai', baseUrl: 'https://api.openai.com/v1', apiKey: credentials.apiKey });
+      const data = await this.request(url, headers, linked.controller.signal);
+      if (!Array.isArray(data.data)) throw new Error(t('模型列表返回了无效响应'));
+      const models = filterOpenAiLiveBackendModels(data.data);
+      if (!models.length) throw new Error(t('目录中未找到推理模型；可手动填写支持 Responses 的模型 ID'));
+      return { models, remote: true };
+    } finally { linked.cleanup(); }
   }
   async load(profile, credentials, signal) {
     checkSignal(signal);

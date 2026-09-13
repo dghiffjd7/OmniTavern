@@ -1,4 +1,5 @@
 import { microphonePermissionRecovery } from '../microphone-permission-recovery.js';
+import { t } from '../../i18n/index.js';
 import { createRealtimeAudioMeter } from './realtime-audio-meter.js';
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 30000;
@@ -18,6 +19,25 @@ const makeAbortError = () => {
   error.name = 'AbortError';
   error.cancelled = true;
   return error;
+};
+
+const acquireMicrophone = async (access, options, signal) => {
+  if (signal?.aborted) throw makeAbortError();
+  let cancelled = false, rejectAbort;
+  const abort = new Promise((_, reject) => { rejectAbort = reject; });
+  const onAbort = () => { cancelled = true; rejectAbort(makeAbortError()); };
+  signal?.addEventListener?.('abort', onAbort, { once: true });
+  try {
+    const acquire = Promise.resolve().then(() => access.acquire(options)).then(stream => {
+      if (cancelled) {
+        (stream?.getTracks?.() || stream?.getAudioTracks?.() || []).forEach(track => track.stop?.());
+        throw makeAbortError();
+      }
+      return stream;
+    });
+    if (signal?.aborted) onAbort();
+    return await Promise.race([acquire, abort]);
+  } finally { signal?.removeEventListener?.('abort', onAbort); }
 };
 
 const createRealtimeRequestId = () => {
@@ -77,6 +97,22 @@ const waitForDataChannelOpen = (channel, { timeoutMs, signal } = {}) => {
   });
 };
 
+export const waitForIceGatheringComplete = (peer, { timeoutMs = DEFAULT_CONNECT_TIMEOUT_MS, signal } = {}) => new Promise((resolve, reject) => {
+  let timer;
+  const finish = error => {
+    clearTimeout(timer);
+    peer.removeEventListener?.('icegatheringstatechange', changed);
+    signal?.removeEventListener?.('abort', aborted);
+    if (error) reject(error); else resolve();
+  };
+  const changed = () => { if (peer.iceGatheringState === 'complete') finish(); };
+  const aborted = () => finish(makeAbortError());
+  timer = setTimeout(() => finish(new Error(t('WebRTC ICE 收集超时，请检查网络连接'))), timeoutMs);
+  peer.addEventListener?.('icegatheringstatechange', changed);
+  signal?.addEventListener?.('abort', aborted, { once: true });
+  if (signal?.aborted) aborted(); else changed();
+});
+
 export class OpenAiRealtimeSessionClient {
   constructor({
     invoke = undefined,
@@ -86,8 +122,11 @@ export class OpenAiRealtimeSessionClient {
     createAudioElement = () => globalThis.document?.createElement?.('audio') || null,
     onEvent = null,
     onConnectionState = null,
+    onDataChannelClose = null,
     onAudioLevel = null,
     createMeter = createRealtimeAudioMeter,
+    exchangeOffer = null,
+    gatherIce = false,
   } = {}) {
     this.invoke = invoke === undefined ? getDefaultInvoker() : invoke;
     this.PeerConnection = peerConnectionClass;
@@ -98,12 +137,15 @@ export class OpenAiRealtimeSessionClient {
     this.onConnectionState = typeof onConnectionState === 'function' ? onConnectionState : null;
     this.onAudioLevel = onAudioLevel;
     this.createMeter = createMeter;
+    this.exchangeOffer = exchangeOffer;
+    this.gatherIce = gatherIce;
     this.peerConnection = null;
     this.dataChannel = null;
     this.localStream = null;
     this.remoteAudio = null;
     this.closed = true;
     this.handleDataMessage = event => this.receiveDataMessage(event);
+    this.handleDataClose = () => onDataChannelClose?.();
   }
 
   async connect({ config = {}, sessionConfig = {}, signal = null, timeoutMs = DEFAULT_CONNECT_TIMEOUT_MS } = {}) {
@@ -139,7 +181,7 @@ export class OpenAiRealtimeSessionClient {
         try { this.remoteAudio.play?.()?.catch?.(() => {}); } catch {}
       };
 
-      const localStream = await this.microphoneAccess.acquire({
+      const localStream = await acquireMicrophone(this.microphoneAccess, {
         mediaDevices: this.mediaDevices,
         constraints: {
           audio: {
@@ -148,8 +190,11 @@ export class OpenAiRealtimeSessionClient {
             autoGainControl: true,
           },
         },
-      });
-      if (signal?.aborted) throw makeAbortError();
+      }, signal);
+      if (signal?.aborted || this.closed) {
+        (localStream?.getTracks?.() || localStream?.getAudioTracks?.() || []).forEach(track => track.stop?.());
+        throw makeAbortError();
+      }
       this.localStream = localStream;
       this.meter?.attach('input', localStream);
       const tracks = typeof localStream?.getAudioTracks === 'function'
@@ -160,12 +205,14 @@ export class OpenAiRealtimeSessionClient {
       const dataChannel = peerConnection.createDataChannel('oai-events');
       this.dataChannel = dataChannel;
       dataChannel.addEventListener?.('message', this.handleDataMessage);
+      dataChannel.addEventListener?.('close', this.handleDataClose);
 
       const offer = await peerConnection.createOffer();
       await peerConnection.setLocalDescription(offer);
+      if (this.gatherIce) await waitForIceGatheringComplete(peerConnection, { timeoutMs, signal });
       const offerSdp = String(peerConnection.localDescription?.sdp || offer?.sdp || '');
       if (!offerSdp.trim()) throw new Error('WebRTC 未生成 SDP offer');
-      const answerSdp = await invokeRealtimeBroker({
+      const answerSdp = this.exchangeOffer ? await this.exchangeOffer({ invoke: this.invoke, config, sessionConfig, sdp: offerSdp, signal, timeoutMs }) : await invokeRealtimeBroker({
         invoke: this.invoke,
         signal,
         args: {
@@ -223,6 +270,7 @@ export class OpenAiRealtimeSessionClient {
     const meter = this.meter; this.meter = null;
     const meterClosed = meter?.close();
     try { this.dataChannel?.removeEventListener?.('message', this.handleDataMessage); } catch {}
+    try { this.dataChannel?.removeEventListener?.('close', this.handleDataClose); } catch {}
     try { this.dataChannel?.close?.(); } catch {}
     const tracks = this.localStream?.getTracks?.() || this.localStream?.getAudioTracks?.() || [];
     tracks.forEach(track => {

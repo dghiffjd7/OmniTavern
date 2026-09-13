@@ -9,12 +9,12 @@ const smoke = async () => {
   host.innerHTML = '<div class="chat-input-wrap"><textarea class="chat-input" rows="3" aria-label="测试输入"></textarea></div>';
   document.body.append(host);
   const input = host.querySelector('textarea');
-  let requests = 0, inputEvents = 0;
+  let requests = 0, inputEvents = 0, capturedContext;
   let settings = { enabled: false, modelMode: 'profile', modelProfileId: 'mock' };
   let key = 'chat:a';
   const controller = bindInputSuggestionComposer({
-    input, getSettings: () => settings, getContext: () => ({ key }),
-    request: async () => { requests++; return '公园散步。'; }, runtimeOptions: { delayMs: 10 },
+    input, getSettings: () => settings, getContext: () => ({ key, agentContext: { sessionId: 'fixture', place: 'chat', archiveId: 'fixture-archive' } }),
+    request: async snapshot => { requests++; capturedContext = snapshot.agentContext; return '公园散步。'; }, runtimeOptions: { delayMs: 10 },
   });
   const check = (value, message) => { if (!value) throw new Error(message); };
   const pause = () => new Promise(resolve => setTimeout(resolve, 60));
@@ -37,6 +37,7 @@ const smoke = async () => {
     check(!tab({ isComposing: true }).defaultPrevented, 'IME Tab was intercepted');
     input.dispatchEvent(new CompositionEvent('compositionend')); await pause();
     check(requests === 1, 'composition end should request once');
+    check(capturedContext?.sessionId === 'fixture' && capturedContext?.archiveId === 'fixture-archive', 'request must retain the captured agent context for lazy reference resolution');
     check(input.value === '今天想去公', 'ghost changed the draft');
     check(!host.querySelector('.input-suggestion-mirror').hidden, 'ghost is missing');
     check(!host.querySelector('.input-suggestion-shortcut'), 'suggestion bar should contain text without shortcut icons');

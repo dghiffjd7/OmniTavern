@@ -1,3 +1,5 @@
+import { createAgentConfigurationEditor } from './agent-configuration-editor.js';
+import { isConfigurableAgent } from '../storage/agent-config-store.js';
 import { buildAgentCenterView } from './agent-center-view-model.js';
 import { rankModelCandidates } from '../utils/model-candidates.js';
 import { findAgentCenterResource } from './agent-center-resource-contract.js';
@@ -3257,6 +3259,7 @@ export class AgentCenterPanel {
         globalThis.window?.addEventListener?.('memory-storage-mode-changed', this.boundMemoryStorageModeChanged);
         this.boundAgentFeatureSettingsChanged = (event) => this.handleAgentFeatureSettingsChanged(event);
         globalThis.window?.addEventListener?.('agent-feature-settings-changed', this.boundAgentFeatureSettingsChanged);
+        globalThis.window?.addEventListener?.('agent-text-edit-changed', this.boundAgentFeatureSettingsChanged);
     }
 
     setMaximized(value, { persist = true } = {}) {
@@ -3405,6 +3408,9 @@ export class AgentCenterPanel {
         this.activityStatus = normalizeActivityStatus(opts.activityStatus || opts.status || '');
         this.surface = normalizeSurface(opts.surface || '');
         if (agentId) {
+            this.floatingAgentMessageId = trim(opts.messageId);
+            this.floatingAgentConfigScope = opts.scope || 'local';
+            this.floatingAgentContext = opts.context || null;
             this.floatingAgentId = agentId;
             this.floatingAgentFlipped = opts.configure === true;
             this.floatingAgentEntryPending = true;
@@ -3456,6 +3462,8 @@ export class AgentCenterPanel {
         target?.removeEventListener?.('config-profile-changed', this.boundConfigProfileChanged);
         target?.removeEventListener?.('memory-storage-mode-changed', this.boundMemoryStorageModeChanged);
         target?.removeEventListener?.('agent-feature-settings-changed', this.boundAgentFeatureSettingsChanged);
+        target?.removeEventListener?.('agent-text-edit-changed', this.boundAgentFeatureSettingsChanged);
+        this.commonAgentEditors?.forEach(editor => editor.dispose()); this.commonAgentEditors?.clear();
         this.boundConfigProfileChanged = null;
         this.boundMemoryStorageModeChanged = null;
         this.boundAgentFeatureSettingsChanged = null;
@@ -3688,8 +3696,40 @@ export class AgentCenterPanel {
     }
 
     getAgentCards() {
-        return this.view.agentCards || this.view.agents || [];
+        const cards = this.view.agentCards || this.view.agents || [];
+        const actions = this.getActions?.() || {};
+        const records = actions.listAgentConfigurations?.({ scope: this.getHopscotchPanel()?.getConfigScope?.() || 'local' }) || [];
+        const custom = records.filter(item => ['text_edit', 'input_agent'].includes(item.config?.kind)).map(({ config, context }) => ({
+            id: config.id, title: config.title, enabled: config.enabled, implemented: true, category: context?.place === 'writing' ? 'creative' : 'chat', cardGroup: 'agent', accent: 'dialogue',
+            featureState: config,
+            summary: t(config.kind === 'input_agent' ? '依据当前草稿提供续写、修改或独立建议。' : '依据任务要求生成修改建议，确认后替换选定文本。'), detail: [],
+        }));
+        return [...cards.map(card => { const record = records.find(item => item.id === card.id); return record ? { ...card, enabled: record.config.enabled, featureState: record.config } : card; }), ...custom];
     }
+
+    mountCommonAgentEditors(root) {
+        const actions = this.getActions?.() || {};
+        if (!actions.getAgentConfiguration) return;
+        this.commonAgentEditors ||= new Map();
+        for (const host of root.querySelectorAll('[data-agent-config-host]')) {
+            const id = host.dataset.agentConfigHost;
+            const shared = this.sharedAgentConfig?.host === root;
+            const scope = shared ? this.sharedAgentConfig.configScope : this.floatingAgentConfigScope || this.getHopscotchPanel()?.getConfigScope?.();
+            const messageId = shared ? '' : this.floatingAgentMessageId || '';
+            const record = actions.getAgentConfiguration({ id, scope, ...(!shared && this.floatingAgentContext ? { context: this.floatingAgentContext } : {}) });
+            if (!record.config) continue;
+            const key = JSON.stringify([id, record.context, scope || 'local', messageId]);
+            let editor = this.commonAgentEditors.get(key);
+            if (!editor) {
+                editor = createAgentConfigurationEditor({ actions, id, scope, context: record.context, messageId, documentRef: root.ownerDocument,
+                    onDeleted: () => { this.closeFloatingAgentCard({ force: true }); this.sharedAgentConfig?.onClose?.(); void this.refresh(); } });
+                this.commonAgentEditors.set(key, editor);
+            }
+            editor.attach(host);
+        }
+        for (const [key, editor] of this.commonAgentEditors) if (!editor.node.isConnected && !editor.hasDraft()) { editor.dispose(); this.commonAgentEditors.delete(key); }
+    }
+
 
     getPromptModuleCards() {
         return this.view.promptModules || [];
@@ -3709,7 +3749,10 @@ export class AgentCenterPanel {
 
     getAgentCardById(agentId = '') {
         const id = trim(agentId);
-        return (this.getAllCenterCards() || []).find(item => item.id === id) || null;
+        const card = (this.getAllCenterCards() || []).find(item => item.id === id);
+        if (card) return card;
+        const record = /^(text-edit|input-agent):/.test(id) && this.getActions?.()?.getAgentConfiguration?.({ id, scope: this.floatingAgentConfigScope || 'local', context: this.floatingAgentContext || undefined });
+        return record?.config ? { id, title: record.config.title, enabled: record.config.enabled, implemented: true, category: record.context?.place === 'writing' ? 'creative' : 'chat', cardGroup: 'agent', accent: 'dialogue', summary: t('依据任务要求生成修改建议，确认后替换选定文本。') } : null;
     }
 
     renderAgentRuntimeState(agent = {}) {
@@ -4148,7 +4191,7 @@ export class AgentCenterPanel {
         `;
     }
 
-    renderFloatingAgentBack(agent = {}, { configuration = this.renderAgentConfiguration(agent), subtitle = t('配置 · 修改后即时生效'), toolbarExtra = '' } = {}) {
+    renderFloatingAgentBack(agent = {}, { configuration = this.renderAgentConfiguration(agent), subtitle = t(isConfigurableAgent(agent.id) ? '配置 · 保存后生效' : '配置 · 修改后即时生效'), toolbarExtra = '' } = {}) {
         return `
             <div class="agent-center-agent-title-row">
                 <div class="agent-center-agent-title-main">
@@ -4169,6 +4212,7 @@ export class AgentCenterPanel {
     }
 
     renderAgentConfiguration(agent = {}, { preview = true } = {}) {
+        if (isConfigurableAgent(agent.id) && this.getActions?.()?.getAgentConfiguration) return `<div data-agent-config-host="${escapeHtml(agent.id)}"></div>`;
         return `
             ${this.renderAgentEnabledSetting(agent)}
             ${this.renderAgentFeatureSettings(agent)}
@@ -4184,9 +4228,9 @@ export class AgentCenterPanel {
         `;
     }
 
-    mountHopscotchAgentCard(host, { agentId = '', card, frontExtra = '', toolbarExtra = '', content, configure = false, readOnly = false, onClose, fusedConfigs = [], onOpenFused = null, buildPromptPreview = null, workflowState = null } = {}) {
+    mountHopscotchAgentCard(host, { agentId = '', card, frontExtra = '', toolbarExtra = '', content, configure = false, readOnly = false, onClose, fusedConfigs = [], onOpenFused = null, buildPromptPreview = null, workflowState = null, configScope = 'local' } = {}) {
         if (!host) return null;
-        const entry = { host, agentId, card, frontExtra, toolbarExtra, content, readOnly, onClose, fusedConfigs, onOpenFused, buildPromptPreview, workflowState, preview: null, flipped: configure, entering: true };
+        const entry = { host, agentId, card, frontExtra, toolbarExtra, content, readOnly, onClose, fusedConfigs, onOpenFused, buildPromptPreview, workflowState, configScope, preview: null, flipped: configure, entering: true };
         this.sharedAgentConfig = entry;
         this.refreshSharedAgentConfig();
         return {
@@ -4198,7 +4242,7 @@ export class AgentCenterPanel {
                 host.querySelectorAll('[data-action="remove"], [data-action="toggle-enabled"], [data-action="variable-settings"], [data-action="variable-preview-tools"], [data-request-action]').forEach(button => { button.disabled = true; });
             },
             closePreview: () => entry.preview?.close() || false,
-            dispose: () => { entry.preview?.dispose(); if (this.sharedAgentConfig === entry) this.sharedAgentConfig = null; },
+            dispose: () => { entry.preview?.dispose(); for (const [key, editor] of this.commonAgentEditors || []) if (entry.host.contains(editor.node)) { editor.dispose(); this.commonAgentEditors.delete(key); } if (this.sharedAgentConfig === entry) this.sharedAgentConfig = null; },
         };
     }
 
@@ -4217,14 +4261,14 @@ export class AgentCenterPanel {
         entry.content?.remove();
         const fusedLinks = entry.fusedConfigs.length ? `<div class="agent-center-card-actions">${entry.fusedConfigs.map(config => `<button type="button" class="agent-center-card-action" data-hop-fused-open="${escapeHtml(config.id)}">${escapeHtml(config.label)}</button>`).join('')}</div>` : '';
         const configuration = linkedAgent
-            ? `<p class="agent-center-card-sub">${escapeHtml(t('共享设置会影响使用此 Agent 的其他会话。'))}</p>${this.renderAgentConfiguration(agent)}`
+            ? this.renderAgentConfiguration(agent)
             : agent.id === 'body' ? this.renderAgentPromptPreviewAction(agent) + (fusedLinks ? `<div class="agent-center-agent-section"><div class="agent-center-agent-section-title">${escapeHtml(t('配置'))}</div>${fusedLinks}</div>` : '') : '';
         entry.host.innerHTML = this.renderFloatingAgentCard({
             agent, flipped: entry.flipped, entering: entry.entering,
             toolbarExtra: entry.readOnly ? '' : entry.toolbarExtra,
             frontExtra: entry.frontExtra + fusedLinks,
             configuration: `<fieldset data-hop-agent-config class="hop-card-fields" ${entry.readOnly ? 'disabled' : ''}>${configuration}</fieldset><p class="hop-error" role="alert">${escapeHtml(this.lastError)}</p>`,
-            subtitle: entry.readOnly ? t('本轮') : agent.contextual ? t('当前角色') : linkedAgent ? t('配置 · 修改后即时生效') : t('配置'),
+            subtitle: entry.readOnly ? t('本轮') : agent.contextual ? t('当前角色') : linkedAgent ? t(isConfigurableAgent(agent.id) ? '配置 · 保存后生效' : '配置 · 修改后即时生效') : t('配置'),
         });
         entry.entering = false;
         if (entry.content) entry.host.querySelector('.agent-center-floating-face-back').append(entry.content);
@@ -4300,9 +4344,17 @@ export class AgentCenterPanel {
     }
 
     renderAgents() {
+        const actions = this.getActions?.() || {};
+        const context = actions.getAgentConfiguration?.({ id: 'text_completion' })?.context;
+        const runActions = (actions.listTextEditRuns?.() || []).filter(j => ['sessionId', 'scopeId', 'place', 'archiveId'].every(key => String(j.context?.[key] || (key === 'sessionId' ? j.sessionId : '') || '') === String(context?.[key] || '')) && ['ready', 'running', 'failed', 'expired'].includes(j.status)).slice(-6).map(j => {
+            const note = j.outputMode === 'note';
+            const label = j.status === 'ready' && note ? '资料与建议' : ({ ready: '修改建议待查看', running: '处理中', failed: '失败', expired: '已过期' })[j.status];
+            return `<div class="agent-center-card-actions"><span class="agent-center-card-sub">${escapeHtml(j.title)} · ${escapeHtml(t(label))}</span>${j.status === 'ready' ? `<button class="agent-center-card-action" ${note ? 'data-text-agent-result' : 'data-text-edit-run'}="${escapeHtml(j.id)}">${escapeHtml(t(note ? '查看结果' : '查看修改'))}</button>` : j.status === 'running' ? `<button class="agent-center-card-action" data-text-edit-cancel="${escapeHtml(j.id)}">${escapeHtml(t('取消'))}</button>` : `<span class="agent-center-card-sub">${escapeHtml(t(j.message))}</span>`}</div>`;
+        }).join('');
+        const addButton = actions.createTextEditAgent ? `<div class="agent-center-card-actions"><button class="agent-center-card-action" data-add-text-agent>${escapeHtml(t('新增 · 修改文本'))}</button></div>` : '';
         const cards = this.renderCardList(this.getAgentCards(), '还没有可启用的 Agent');
-        if (!this.getHopscotchPanel()) return cards;
-        return `<div data-agent-hopscotch-host></div><details class="hop-agent-library" data-agent-library${this.agentLibraryOpen ? ' open' : ''}><summary>${escapeHtml(t('全部 Agent'))}</summary>${cards}</details>`;
+        if (!this.getHopscotchPanel()) return runActions + addButton + cards;
+        return `${runActions}${addButton}<div data-agent-hopscotch-host></div><details class="hop-agent-library" data-agent-library${this.agentLibraryOpen ? ' open' : ''}><summary>${escapeHtml(t('全部 Agent'))}</summary>${cards}</details>`;
     }
 
     renderPromptModules() {
@@ -4682,12 +4734,15 @@ export class AgentCenterPanel {
         this.openFloatingAgentCard(agentId);
     }
 
-    openFloatingAgentCard(agentId = '') {
+    openFloatingAgentCard(agentId = '', { messageId = '', scope = '', context = null } = {}) {
         const id = trim(agentId);
+        this.floatingAgentConfigScope = scope;
+        this.floatingAgentContext = context;
         if (!id || !this.getAgentCardById(id)) return;
         const mountedCard = this.contentElement?.querySelector?.('.agent-center-floating-card');
         this.floatingAgentEntryPending = !mountedCard || this.floatingAgentId !== id;
         this.floatingAgentId = id;
+        this.floatingAgentMessageId = messageId;
         this.floatingAgentFlipped = false;
         this.render();
     }
@@ -4703,7 +4758,9 @@ export class AgentCenterPanel {
 
     closeFloatingAgentCard({ force = false } = {}) {
         if (!force && !this.requestAgentCardClose(() => this.closeFloatingAgentCard({ force: true }))) return false;
+        this.commonAgentEditors?.forEach(editor => editor.dispose()); this.commonAgentEditors?.clear();
         this.floatingAgentId = '';
+        this.floatingAgentMessageId = ''; this.floatingAgentConfigScope = ''; this.floatingAgentContext = null;
         this.floatingAgentFlipped = false;
         this.floatingAgentEntryPending = false;
         this.render();
@@ -4776,11 +4833,10 @@ export class AgentCenterPanel {
         this.setAgentQuickTogglePending(button, true);
         this.setAgentQuickToggleVisual(button, enabling, agent.title);
         try {
-            const result = await this.callAction('setAgentCardEnabled', {
-                id,
-                enabled: enabling,
-                reason: 'agent center card toggle',
-            }, null);
+            const actions = this.getActions?.() || {};
+            const record = isConfigurableAgent(id) && actions.getAgentConfiguration?.({ id, scope: this.floatingAgentConfigScope || this.getHopscotchPanel()?.getConfigScope?.() || 'local', context: this.floatingAgentContext || undefined });
+            const result = record ? await actions.saveAgentConfiguration({ id, context: record.context, scope: record.scope, revision: record.revision, config: { ...record.config, enabled: enabling } })
+                : await this.callAction('setAgentCardEnabled', { id, enabled: enabling, reason: 'agent center card toggle' }, null);
             if (result === null || result === false || result?.ok === false) {
                 this.setAgentQuickToggleVisual(button, originalEnabled, agent.title);
                 const reason = trim(result?.message || result?.reason || this.lastError, '当前环境不能切换这个卡片');
@@ -6687,6 +6743,22 @@ export class AgentCenterPanel {
 
     bindAgentCardEvents(root = this.contentElement, { onFlip = () => this.toggleFloatingAgentCard(), onClose = () => this.closeFloatingAgentCard(), onPromptPreview = id => this.handleAgentPromptPreview(id) } = {}) {
         if (!root) return;
+        this.mountCommonAgentEditors(root);
+        root.querySelectorAll('[data-add-text-agent]').forEach(button => { button.onclick = async () => {
+            const actions = this.getActions?.() || {};
+            const result = await actions.createTextEditAgent?.({ scope: this.getHopscotchPanel()?.getConfigScope?.() || 'local' });
+            if (!result?.ok) { this.lastError = t(result?.message || '创建失败'); this.render(); return; }
+            this.getHopscotchPanel()?.addTextAgent?.(result.config);
+            await this.refresh(); this.openFloatingAgentCard(result.id); this.toggleFloatingAgentCard();
+        }; });
+        root.querySelectorAll('[data-text-edit-run]').forEach(button => { button.onclick = () => this.getActions().openTextEditRun(button.dataset.textEditRun); });
+        root.querySelectorAll('[data-text-agent-result]').forEach(button => { button.onclick = () => {
+            const actions = this.getActions(), job = (actions.listTextEditRuns?.() || []).find(item => item.id === button.dataset.textAgentResult);
+            if (!job || job.outputMode !== 'note') return;
+            this.openFloatingAgentCard(job.agentId, { messageId: job.messageId, context: job.context });
+            this.toggleFloatingAgentCard();
+        }; });
+        root.querySelectorAll('[data-text-edit-cancel]').forEach(button => { button.onclick = () => this.getActions().cancelTextEditRun(button.dataset.textEditCancel); });
         root.querySelectorAll('[data-agent-card-open]').forEach((card) => {
             const open = () => this.openFloatingAgentCard(card.dataset.agentCardOpen || '');
             card.addEventListener('click', (event) => {

@@ -1,5 +1,6 @@
 import { realtimeTargetBindingKey } from '../ui/realtime/realtime-settings-target.js';
 import { safeInvoke } from '../utils/tauri.js';
+import { isOpenAiLive } from '../ui/realtime/openai-live-config.js';
 import { makeRealtimeProfile, getRealtimeProvider, validateRealtimeProfile, validateRealtimeCredentials, usesGeminiServiceAccount, parseRealtimeServiceAccount } from '../ui/realtime/realtime-provider-catalog.js';
 
 export const REALTIME_PROFILE_STORE_KEY = 'realtime_profiles_v1';
@@ -12,6 +13,7 @@ const cleanProfile = input => {
   for (const key of ['id', 'name', 'model', 'voice', 'region', 'workspaceId', 'credentialId']) result[key] = text(result[key]);
   for (const key of ['replyLanguage', 'transcriptionLanguage']) result[key] = text(result[key]).replace(/\s+/g, ' ').slice(0, 80);
   if (result.provider === 'step_realtime' && !result.region) result.region = 'cn';
+  if (result.provider === 'openai') for (const key of ['openaiBackend', 'liveBackendModel']) result[key] = text(result[key]);
   if (result.provider === 'gemini_live') for (const key of ['geminiBackend', 'vertexaiAuthMode', 'vertexaiProjectId']) result[key] = text(result[key]);
   result.idleTimeoutMinutes = Math.min(30, Math.max(1, Number(result.idleTimeoutMinutes) || 10));
   result.voiceKind = input.voiceKind === 'custom' ? 'custom' : 'system';
@@ -116,7 +118,7 @@ export class RealtimeProfileStore {
   async resolveProfile(profile) {
     validateRealtimeProfile(profile);
     const credentials = validateRealtimeCredentials(profile.provider, await this.credentials(profile), profile);
-    return { ok: true, settings: { ...profile, realtimeModel: profile.model, transcriptionModel: 'gpt-4o-mini-transcribe', contextMode: profile.provider === 'openai' ? 'per_turn' : 'session_snapshot' },
+    return { ok: true, settings: { ...profile, realtimeModel: profile.model, transcriptionModel: isOpenAiLive(profile) ? '' : 'gpt-4o-mini-transcribe', contextMode: isOpenAiLive(profile) ? 'full_duplex' : profile.provider === 'openai' ? 'per_turn' : 'session_snapshot' },
       config: { ...profile, credentials, apiKey: credentials.apiKey || '', baseUrl: profile.provider === 'openai' ? 'https://api.openai.com/v1' : '' } };
   }
   async resolve() {

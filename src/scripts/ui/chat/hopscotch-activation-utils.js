@@ -1,6 +1,7 @@
 import { t } from '../../i18n/index.js';
 import { extractHouseReferences } from './hopscotch-board-utils.js';
 import { resolveFormatReviewAvailability } from './format-review-settings-utils.js';
+import { allowsAgentInvocation, getAgentInvocationMode } from '../../agent/agent-invocation.js';
 
 export const hopscotchInactiveLabel = reason => ({
   disabled: t('已停用'),
@@ -13,7 +14,7 @@ export const hopscotchInactiveLabel = reason => ({
   no_variable_rules: t('当前角色暂无此阶段的变量规则'),
   dependency_disabled: t('依赖的房子已停用'),
   format_guide_missing: t('请先设置格式要求'),
-  manual_only: t('仅手动检查'),
+  manual_only: t('手动'),
   model_unavailable: t('请先选择检查模型'),
 })[reason] || t('已停用');
 
@@ -40,11 +41,17 @@ export const resolveHopscotchActivation = (board, settings = {}) => {
     if (house.kind === 'variable' && variable && (!variable.enabled || !variable.updateModes?.includes('inline'))) reason = variable.reason || 'no_variable_updates';
     if (house.kind === 'variable_rules' && variable && (!variable.enabled || !variable.rulePhases?.includes(house.config.phase))) reason = variable.reason || 'no_variable_rules';
     if (house.kind === 'image_generation' && (prompt ? prompt.enabled === false : fused.image_prompt?.enabled === false)) reason = 'image_prompt_disabled';
+    if (house.kind === 'text_edit') {
+      const config = settings.textAgents?.find(c => c.id === house.config?.agentId);
+      reason = !config?.enabled ? 'disabled' : config.triggerMode === 'manual' ? 'manual_only' : config.modelMode === 'none' || (config.modelMode === 'profile' && !config.modelProfileId) ? 'model_unavailable' : '';
+    }
     if (house.kind === 'custom_prompt') {
       const refs = extractHouseReferences(`${house.config?.prompt || ''}\n${house.config?.systemPrompt || ''}`);
       if (refs.some(id => houses[id]?.enabled === false)) reason = 'dependency_disabled';
     }
     houses[house.id] = status(house.kind === 'body' || house.enabled !== false, reason);
+    const config = house.kind === 'text_edit' ? settings.textAgents?.find(c => c.id === house.config?.agentId) : house.kind === 'format_review' ? settings.replyCheck : null;
+    if (config) Object.assign(houses[house.id], { invocationMode: getAgentInvocationMode(config), manualEnabled: allowsAgentInvocation(config, 'manual') });
   }
   return { houses, fused, variable: variable || null };
 };
@@ -53,3 +60,10 @@ export const getActiveHopscotchFused = (board, activation = resolveHopscotchActi
   const body = (board?.rows || []).flatMap(row => row.houses || []).find(house => house.kind === 'body');
   return (body?.fused || []).filter(kind => activation.fused?.[kind]?.enabled !== false);
 };
+
+// 自动引用只能等待同一轮自动运行的上游。
+export const findManualHopscotchDependencies = (board, activation) => (board?.rows || []).flatMap(row => row.houses || [])
+  .filter(h => h.kind === 'custom_prompt' && h.enabled !== false)
+  .flatMap(h => extractHouseReferences(`${h.config?.prompt || ''}\n${h.config?.systemPrompt || ''}`)
+    .filter(id => activation.houses?.[id]?.invocationMode === 'manual')
+    .map(id => ({ houseId: h.id, dependencyId: id })));

@@ -1,6 +1,20 @@
 # Realtime 多服务商与自定义声音
 
-实现日期：2026-09-06，更新：2026-09-09。代码与 Windows 离线验证已完成；Gemini 已验证真实音频收发，Step 国际入口已验证鉴权与模型刷新（当时账户余额为零，通话返回 402）。其余真实云端通话、付费复刻及 Android 真机验收尚未完成。
+实现日期：2026-09-06，更新：2026-09-11。代码与 Windows 离线验证已完成；Gemini 已验证真实音频收发，Step 国际入口已验证鉴权与模型刷新（当时账户余额为零，通话返回 402）。GPT-Live 已完成协议适配与模拟验证；真实 Live 通话、付费复刻及 Android 真机验收尚未完成。
+
+## OpenAI 的 Realtime / GPT-Live
+
+入口：实时语音设置档 → 服务商 **OpenAI** → **OpenAI 语音接入方式 → GPT-Live**。默认语音模型 `gpt-live-1`，独立推理模型 `gpt-5.6-luna`。两者都支持手填、刷新候选与点击选择；刷新保留当前输入，模型目录没有截取前 100 项。旧设置档默认保持 Realtime，切换接入方式会调整模型默认值及声音候选。
+
+- **连接**：Live 使用项目 API Key、`POST /v1/live/sessions` 的 JSON WebRTC 握手，等待 ICE 完成后发送 SDP，再等待 `session.started`。原 Realtime 保持 `/v1/realtime/calls`。Live 通过既有可取消原生 HTTP 发起，取消、超时和迟到的麦克风授权均释放资源。
+- **推理与上下文**：采用托管 Responses delegation，使用同一设置档的 OpenAI Key。启动时将角色、预设、历史与回复语言的语义上下文提供给语音及推理模型。此版本尚未接入跨服务商文本设置档或 AC 工具；语音按时长计费，推理用量另计，费用说明放在标题帮助。云端录音存储保持 `store:false`。
+- **声音与界面**：原有 10 个声音加 Live 文档新增的 12 个声音，共 22 个。沿用搜索列表、桌面悬停和手机点选详情；新增音色附官方声音呈现、语言和地域风格，地域风格不表示口音准确度保证。Live 输入语言自动识别，回复语言继续使用可输入选单。弹窗、药丸、侧边球和音量声纹沿用；同时显示双方字幕，取消传统 `response.cancel` 按钮。麦克风静音控制本机轨道及 Live mute/unmute，扬声器静音只控制本机播放。
+- **字幕保存**：Live 没有权威的回合完成事件。保留 delta 原文、到达顺序与时间区间，按说话人及间隔形成展示分组；重叠和迟到内容可以更新已有分组。每 750 ms 合并写回同一条聊天记录，保护手动编辑、删除及角色切换。普通字幕不进入完整文本回合的正则、表格、格式修复及 after-receive 流程。单组约 6000 字，本次上限为 20000 片段/300000 字；达到总量上限后结束并提示重新拨号。
+- **结束与用量**：发送 `session.close` 后最多等待 5 秒，保留连接接收尾段字幕和 `session.closed`。后台仍结束通话，Live 在保存尾段之后才使该通话生命周期标记失效；换角色、清空和作用域保护保留。异常进程退出只能保证已写回的内容。语音秒数按累计快照更新，推理用量按响应 ID 去重，最后一组有效字幕保存用量与最终确认状态；缺少最终事件会显示未确认提示。静音挂断与本机 60 分钟通话上限沿用。
+
+协议依据：[GPT-Live](https://developers.openai.com/api/docs/models/gpt-live-1)、[WebRTC](https://developers.openai.com/api/docs/guides/voice-webrtc?api=live)、[会话、声音与结束事件](https://developers.openai.com/api/docs/guides/live-conversations)、[Responses delegation](https://developers.openai.com/api/docs/guides/live-delegation)。
+
+Windows 验证：`scripts/tests/openai-live-tests.mjs` 覆盖模型目录、加密设置、握手/启动确认、取消/超时/资源释放、字幕修订/写回保护、后台尾段保存及用量。相邻 Realtime 测试通过；`scripts/tests/dev-openai-live-cdp-smoke.mjs` 使用隔离 WebView 夹具验证保存/刷新/切换、22 个音色、1100/390/320px 简繁英及字幕安全显示。截图在忽略目录 `scripts/dev/tmp/openai-live/`。本次未发起真实计费模型请求，未改写用户凭证、配置或聊天记录。
 
 ## 悬浮通话药丸
 
@@ -19,7 +33,7 @@
 
 回复语言通过通话指令引导，覆盖原生会话初始化、续接和 OpenAI 每轮上下文刷新；实际支持范围与发音效果取决于模型和音色。Gemini 原生音频自动识别语言，官方建议用系统指令约束回复语言，未发送其不支持的 `languageCode`。[Gemini 说明](https://ai.google.dev/gemini-api/docs/live-api/capabilities)、[OpenAI 语言与口音指令](https://developers.openai.com/api/docs/guides/realtime-models-prompting#control-language-and-accent-separately)。
 
-OpenAI 设置档另有独立的“输入识别语言”，传给输入转写模型；其余现有接入继续由服务商自动识别。Nova 的默认候选仅列部分支持语言，模型限制继续见模型标题帮助。说明采用标题悬停/手机点按帮助。
+OpenAI Realtime 设置档另有独立的“输入识别语言”，传给输入转写模型；GPT-Live 与其余现有接入继续由服务商自动识别。Nova 的默认候选仅列部分支持语言，模型限制继续见模型标题帮助。说明采用标题悬停/手机点按帮助。
 
 ## 使用入口
 
@@ -31,7 +45,7 @@ OpenAI 设置档另有独立的“输入识别语言”，传给输入转写模�
 
 | 服务商 | 内建模型 | 凭证/声音 |
 | --- | --- | --- |
-| OpenAI | gpt-realtime-2.1 | API Key；也可继续使用旧引用式配置 |
+| OpenAI | Realtime：gpt-realtime-2.1；GPT-Live：gpt-live-1 | API Key；Live 另选推理模型，也可继续使用旧 Realtime 引用式配置 |
 | Gemini Live | AI Studio：gemini-3.1-flash-live-preview、gemini-2.5-flash-native-audio-preview-12-2025；Vertex：gemini-live-2.5-flash-native-audio | 同一服务商内选择 Gemini API / Vertex AI；保留 Kore 等声音 ID 的大小写 |
 | 豆包 Realtime | O2.0=1.2.1.1、SC2.0=2.2.0.0 | App ID + Access Token；系统声或 S_ 克隆声 |
 | Qwen Audio Realtime | qwen-audio-3.0-realtime-plus / flash | API Key、区域、可选 Workspace ID；系统声或与目标模型绑定的克隆声 |

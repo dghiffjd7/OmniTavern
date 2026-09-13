@@ -1,16 +1,18 @@
 import { t, translateUiText } from '../../i18n/index.js';
 import { getHopscotchHouseDisplayStatus } from './hopscotch-board-utils.js';
 import { hopscotchInactiveLabel, resolveHopscotchActivation } from './hopscotch-activation-utils.js';
+import { agentInvocationLabel } from '../../agent/agent-invocation.js';
 
 export const escapeHopscotchHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const e = escapeHopscotchHtml;
 export const hopscotchStatusLabel = status => ({ queued: t('等待'), running: t('执行中'), succeeded: t('完成'), failed: t('失败'), cancelled: t('已取消'), skipped: t('跳过'), partial: t('部分失败') })[status] || t('待出发');
-export const hopscotchHouseLabel = house => house.kind === 'format_review' ? t('格式修复') : house.kind === 'custom_prompt' ? house.label : house.kind === 'variable_rules' ? (house.config?.phase === 'before' ? t('发送前变量规则') : t('回复后变量规则')) : translateUiText(house.label);
+export const hopscotchHouseLabel = house => house.kind === 'format_review' ? t('格式修复') : ['custom_prompt', 'text_edit'].includes(house.kind) ? house.label : house.kind === 'variable_rules' ? (house.config?.phase === 'before' ? t('发送前变量规则') : t('回复后变量规则')) : translateUiText(house.label);
 export const hopscotchFusedLabel = kind => translateUiText(({ memory_table: '记忆表格', image_prompt: '图片提示', variable: '变量' })[kind] || kind);
 
 // 图标随节点类型着色；SVG 不参与名称与点击目标的识别。
 const COURT_ICONS = {
   body: '<path class="hop-glyph-wash" d="m3 10 18-7-7 18-3-8z"/><path d="m3 10 18-7-7 18-3-8zM11 13l5-5"/>',
+  text_edit: '<path d="m4 17 10-10 3 3L7 20H4v-3ZM13 8l3 3M4 4h8M4 8h4M14 19h6"/>',
   custom_prompt: '<path class="hop-glyph-solid" d="M12 2.5c1.8 6 3.5 7.7 9.5 9.5-6 1.8-7.7 3.5-9.5 9.5C10.2 15.5 8.5 13.8 2.5 12c6-1.8 7.7-3.5 9.5-9.5Z"/>',
   memory_table: '<rect class="hop-glyph-wash" x="3" y="4" width="18" height="16" rx="3"/><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 10h18M9 10v10M9 15h12"/>',
   image_prompt: '<path class="hop-glyph-wash" d="m4 16 1 4 4-1L20 8l-4-4Z"/><path d="m4 16 1 4 4-1L20 8l-4-4ZM13 7l4 4M4 4v4M2 6h4"/>',
@@ -39,24 +41,29 @@ const resolveStoneRow = (board, states) => {
 };
 
 // 编辑器、运行面板共享一张板；DOM 与视觉均按执行顺序从上向下。
-export const renderHopscotchCourt = (board, { editable = false, states = {}, status = '', place = '', taskAttribute = 'data-hop-house', inputSuggestion = null, formatReview = null, activation = resolveHopscotchActivation(board) } = {}) => {
+export const renderHopscotchCourt = (board, { editable = false, states = {}, status = '', place = '', taskAttribute = 'data-hop-house', inputSuggestion = null, inputAgents = [], agentRuns = [], canAddInput = false, formatReview = null, activation = resolveHopscotchActivation(board) } = {}) => {
   let number = 0;
   const live = Boolean(status) || Object.keys(states).length > 0;
   const stoneRow = live ? resolveStoneRow(board, states) : -1;
-  const plus = (index, newRow) => `<button type="button" class="hop-plus ${newRow ? 'hop-gap' : 'hop-side'}" data-hop-add="${index}" data-hop-new="${newRow ? '1' : '0'}" aria-label="${e(newRow ? t('新增一行') : t('新增并行房子'))}">+</button>`;
+  const plus = (index, newRow, anchorKind = '') => `<button type="button" class="hop-plus ${newRow ? 'hop-gap' : 'hop-side'}" data-hop-add="${index}" data-hop-new="${newRow ? '1' : '0'}"${anchorKind ? ` data-hop-anchor="${e(anchorKind)}"` : ''} aria-label="${e(newRow ? t('新增一行') : t('新增并行房子'))}" title="${e(newRow ? t('新增一行') : t('新增并行房子'))}">+</button>`;
   const tick = (tail = false) => `<span class="hop-tick${tail ? ' hop-tail' : ''}" aria-hidden="true"></span>`;
   const cellStatus = (displayStatus, extra = '') => {
     const label = displayStatus ? hopscotchStatusLabel(displayStatus) : extra;
     if (!label) return '';
     return `<span class="hop-cell-status">${e(label)}</span>${displayStatus ? `<span class="hop-cell-mark" aria-hidden="true">${glyphFor(displayStatus)}</span>` : ''}`;
   };
+  const runBadge = id => {
+    const job = [...agentRuns].reverse().find(j => j.agentId === id && ['running', 'ready', 'reviewing'].includes(j.status));
+    return job ? `<span class="hop-agent-run-status" role="status" data-running="${job.status === 'running'}">${e(t(job.status === 'running' ? '处理中' : job.status === 'reviewing' ? '正在查看' : '待查看'))}</span>` : '';
+  };
   const roofGlyph = !status || status === 'succeeded' ? courtIcon('finish') : glyphFor(status);
-  const inactiveBadge = active => active?.enabled === false ? `<span class="hop-disabled-mark" title="${e(hopscotchInactiveLabel(active.reason))}"><span aria-hidden="true">Ⅱ</span>${e(t('已停用'))}</span>` : '';
+  const visibleEnabled = active => active?.enabled !== false || active?.manualEnabled === true;
+  const inactiveBadge = active => !visibleEnabled(active) ? `<span class="hop-disabled-mark" title="${e(hopscotchInactiveLabel(active.reason))}"><span aria-hidden="true">Ⅱ</span>${e(t('已停用'))}</span>` : active?.invocationMode ? `<span class="hop-input-stage-label">${e(t(agentInvocationLabel(active)))}</span>` : '';
   const dragAttrs = id => editable ? `data-hop-node="${e(id)}" draggable="false" aria-keyshortcuts="Space"` : '';
   const grip = editable ? `<span class="hop-drag-grip" data-hop-grip title="${e(t('按住拖动；空格键选择落点'))}" aria-hidden="true">⠿</span>` : '';
   return `<div class="hop-court-scroll"><div class="hop-court${live ? ' is-live' : ''}" aria-label="${e(t('从上往下执行，同一行并行'))}">
     <div class="hop-origin" aria-hidden="true"></div>
-    ${inputSuggestion ? `<div class="hop-input-stage"><button type="button" class="hop-cell${inputSuggestion.enabled ? '' : ' is-disabled'}" data-hop-kind="text_completion" data-hop-input-suggestion aria-label="${e(t('文本建议'))}" data-hop-enabled="${inputSuggestion.enabled === true}">${courtIcon('text_completion')}<span class="hop-title">${e(t('文本建议'))}</span><span class="hop-input-stage-label">${e(inputSuggestion.enabled ? t('输入时') : t('已停用'))}</span></button></div>${editable ? '' : tick()}` : ''}
+    ${inputSuggestion || inputAgents.length ? `<div class="hop-input-stage"><div class="hop-cells">${[...(inputSuggestion ? [{ ...inputSuggestion, id: 'text_completion', title: t('文本建议') }] : []), ...inputAgents].map(config => `<button type="button" class="hop-cell${config.enabled ? '' : ' is-disabled'}${config.invocationMode === 'manual' ? ' is-manual' : ''}" data-hop-kind="text_completion" ${config.id === 'text_completion' ? 'data-hop-input-suggestion' : `data-hop-input-agent="${e(config.id)}"`} aria-label="${e(config.title)}" data-hop-enabled="${config.enabled === true}">${runBadge(config.id)}${courtIcon('text_completion')}<span class="hop-title">${e(config.title)}</span><span class="hop-input-stage-label">${e(config.enabled ? t(agentInvocationLabel(config)) : t('已停用'))}</span></button>`).join('')}</div>${canAddInput ? `<button type="button" class="hop-plus hop-side" data-hop-add-input aria-label="${e(t('新增输入 Agent'))}" title="${e(t('新增输入 Agent'))}">+</button>` : ''}</div>${editable ? '' : tick()}` : ''}
     ${board.rows.map((row, ri) => `${editable ? plus(ri, true) : (ri ? tick() : '')}<div class="hop-row${stoneRow === ri ? ' has-stone' : ''}" data-hop-row="${ri}" data-hop-row-id="${e(row.id)}">
       ${stoneRow === ri ? `<span class="hop-stone${status === 'running' ? ' is-hopping' : ''}" aria-hidden="true"></span>` : ''}
       ${row.houses.length > 1 ? `<span class="hop-parallel" aria-hidden="true"><span>${e(t('并行'))}</span></span>` : ''}
@@ -79,15 +86,15 @@ export const renderHopscotchCourt = (board, { editable = false, states = {}, sta
             </button>`; }).join('')}</div>${statusHtml}
           </div>`;
         }
-        return `<button type="button" class="hop-cell ${house.kind === 'body' ? 'hop-body' : ''} is-${e(displayStatus || 'idle')}${active?.enabled === false ? ' is-disabled' : ''}" data-hop-enabled="${active?.enabled !== false}" data-hop-kind="${e(house.kind)}" ${taskAttribute}="${e(house.id)}" ${dragAttrs(house.id)} aria-label="${e(`${hopscotchHouseLabel(house)} · ${active?.enabled === false ? hopscotchInactiveLabel(active.reason) : hopscotchStatusLabel(displayStatus)}`)}">
-          ${grip}${courtIcon(house.kind)}${mark}
+        return `<button type="button" class="hop-cell ${house.kind === 'body' ? 'hop-body' : ''} is-${e(displayStatus || 'idle')}${!visibleEnabled(active) ? ' is-disabled' : ''}${active?.invocationMode === 'manual' && active?.manualEnabled ? ' is-manual' : ''}" data-hop-enabled="${active?.enabled !== false}" data-hop-kind="${e(house.kind)}" ${taskAttribute}="${e(house.id)}" ${dragAttrs(house.id)} aria-label="${e(`${hopscotchHouseLabel(house)} · ${!visibleEnabled(active) ? hopscotchInactiveLabel(active.reason) : active?.invocationMode ? t(agentInvocationLabel(active)) : hopscotchStatusLabel(displayStatus)}`)}">
+          ${grip}${runBadge(house.kind === 'text_edit' ? house.config?.agentId : house.kind === 'format_review' ? 'reply_check' : '')}${courtIcon(house.kind)}${mark}
           <span class="hop-title" data-i18n-skip="true">${e(hopscotchHouseLabel(house))}</span>
           ${statusHtml}
           ${inactiveBadge(active)}
         </button>`;
       }).join('')}</div>${editable ? plus(ri, false) : ''}</div>`).join('')}
     ${editable ? plus(board.rows.length, true) : tick(true)}
-    ${formatReview && !board.rows.some(row => row.houses.some(house => house.kind === 'format_review')) ? `<div class="hop-input-stage hop-review-stage"><button type="button" class="hop-cell${formatReview.enabled ? '' : ' is-disabled'}" data-hop-kind="format_review" data-hop-format-review data-hop-enabled="${formatReview.enabled === true}" aria-label="${e(t('格式修复'))}" aria-description="${e(formatReview.enabled ? t('回复后') : hopscotchInactiveLabel(formatReview.reason))}">${courtIcon('format_review')}<span class="hop-title">${e(t('格式修复'))}</span><span class="hop-input-stage-label">${e(formatReview.enabled ? t('回复后') : t('已停用'))}</span></button></div>${tick(true)}` : ''}
+    ${formatReview && !board.rows.some(row => row.houses.some(house => house.kind === 'format_review')) ? `<div class="hop-row hop-input-stage hop-review-stage"><button type="button" class="hop-cell${visibleEnabled(formatReview) ? '' : ' is-disabled'}${formatReview.invocationMode === 'manual' && formatReview.manualEnabled ? ' is-manual' : ''}" data-hop-kind="format_review" data-hop-format-review data-hop-enabled="${formatReview.enabled === true}" aria-label="${e(t('格式修复'))}" aria-description="${e(visibleEnabled(formatReview) ? t(agentInvocationLabel(formatReview)) : hopscotchInactiveLabel(formatReview.reason))}">${runBadge('reply_check')}${courtIcon('format_review')}<span class="hop-title">${e(t('格式修复'))}</span><span class="hop-input-stage-label">${e(visibleEnabled(formatReview) ? t(agentInvocationLabel(formatReview)) : t('已停用'))}</span></button>${editable ? plus(board.rows.length, false, 'format_review') : ''}</div>${editable ? plus(board.rows.length + 1, true, 'format_review') : tick(true)}` : ''}
     <div class="hop-roof is-${e(status || 'idle')}" aria-label="${e(hopscotchStatusLabel(status))}"><span aria-hidden="true">${roofGlyph}</span></div>
   </div></div>`;
 };

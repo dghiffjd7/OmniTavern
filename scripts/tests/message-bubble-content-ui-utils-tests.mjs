@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 
 import { renderMessageBubbleContentCore } from '../../src/scripts/ui/chat/message-bubble-content-ui-utils.js';
+import { finishMessageDomCore } from '../../src/scripts/ui/chat/assistant-stream-ui-utils.js';
+import { buildHistoryRenderMessage } from '../../src/scripts/ui/chat/message-list-ui-utils.js';
+import { normalizeCheckpointSwipeState } from '../../src/scripts/ui/chat/turn-checkpoint-message-runtime-utils.js';
+import { resolveActiveSwipeMessageCore } from '../../src/scripts/ui/chat/swipe-ui-utils.js';
 
 const createFakeDocument = () => {
   class FakeElement {
@@ -198,6 +202,64 @@ const createFakeDocument = () => {
 
 {
   const documentLike = createFakeDocument();
+  const generated = {
+    id: 'reply-with-display-regex', role: 'assistant', type: 'text',
+    raw: '<thinking>隐藏的推演过程</thinking><content>可见正文</content>',
+    content: '<content>可见正文</content>',
+  };
+  const original = structuredClone(generated);
+  const liveTarget = documentLike.createElement('div');
+  finishMessageDomCore({
+    finalMessage: generated,
+    messageEl: liveTarget,
+    normalizeAssistantLineBreaks: text => text,
+    renderTextWithStickers: () => false,
+  });
+  assert.equal(liveTarget.textContent, '可见正文');
+
+  // Table-memory checkpoints create a reply branch even without regeneration.
+  const checkpoint = normalizeCheckpointSwipeState(generated, { clonePlainObject: structuredClone });
+  const persisted = JSON.parse(JSON.stringify({
+    ...generated,
+    meta: { ...checkpoint.meta, swipes: checkpoint.swipes, activeSwipe: checkpoint.activeSwipeIndex },
+  }));
+  const restored = resolveActiveSwipeMessageCore(buildHistoryRenderMessage(persisted));
+  assert.equal(restored.raw, original.raw);
+  const restoredBeforeRender = structuredClone(restored);
+  const restoredTarget = documentLike.createElement('div');
+  renderMessageBubbleContentCore({
+    bubble: restoredTarget, message: restored, documentLike,
+    prepareTextContainer: bubble => bubble,
+    normalizeAssistantLineBreaks: text => text,
+    renderTextWithStickers: () => false,
+  });
+  assert.equal(restoredTarget.textContent, liveTarget.textContent);
+  assert.deepEqual(restored, restoredBeforeRender);
+  assert.deepEqual(generated, original);
+  console.log('ok - checkpoint history restoration preserves the display-regex result shown at stream completion');
+}
+
+{
+  const documentLike = createFakeDocument();
+  for (const role of ['assistant', 'user']) {
+    for (const content of ['', '经过显示规则的文字']) {
+      const target = documentLike.createElement('div');
+      const stickerInputs = [];
+      renderMessageBubbleContentCore({
+        bubble: target, message: { role, type: 'text', content, raw: '隐藏的原始文字' }, documentLike,
+        prepareTextContainer: bubble => bubble,
+        normalizeAssistantLineBreaks: text => text,
+        renderTextWithStickers: (_target, text) => { stickerInputs.push(text); return false; },
+      });
+      assert.equal(target.textContent, content);
+      assert.deepEqual(stickerInputs, [content]);
+    }
+  }
+  console.log('ok - plain display and sticker rendering respect filtered content including an intentionally empty result');
+}
+
+{
+  const documentLike = createFakeDocument();
   const bubble = documentLike.createElement('div');
   const target = documentLike.createElement('div');
   const drafts = [];
@@ -239,6 +301,74 @@ const createFakeDocument = () => {
   assert.equal(retry.dataset.action, 'retry-generated-media');
   assert.equal(retry.textContent, '重新生成图片');
   console.log('ok - renderMessageBubbleContentCore renders retry button for failed generated media');
+}
+
+{
+  const documentLike = createFakeDocument();
+  const bubble = documentLike.createElement('div');
+  const message = {
+    id: 'image-retry', type: 'text', role: 'assistant', content: '正在生成插图：<content>海边的白色灯塔</content>',
+    raw: '<div>上一次错误</div>', rawSource: '<div>旧显示正文</div>', rawOriginal: '<think>旧思考</think><content>旧正文</content>',
+    meta: { renderRich: true, isGreeting: true, activeSwipeDraft: { active: true }, generatedMedia: {
+      kind: 'image', status: 'running', prompt: '<content>海边的白色灯塔</content>', negativePrompt: '模糊', generationParams: { width: 1536, height: 1024 },
+    } },
+  };
+  const before = structuredClone(message);
+  renderMessageBubbleContentCore({ bubble, message, documentLike,
+    prepareTextContainer: () => { throw Error('image status must not prepare old RP headers'); },
+    renderRichText: () => { throw Error('image prompt must not use stale rich content'); },
+    renderSwipeDraftPlaceholder: () => { throw Error('image attempt owns the placeholder'); },
+  });
+  assert.equal(bubble.textContent, message.content);
+  assert.equal(bubble.style.whiteSpace, 'pre-wrap');
+  assert.equal(bubble.children.length, 0);
+  assert.deepEqual(message, before);
+  console.log('ok - running image attempt shows its literal current prompt ahead of retained RP rich/raw metadata');
+}
+
+{
+  const documentLike = createFakeDocument();
+  for (const status of ['failed', 'cancelled', 'interrupted']) {
+    for (const error of ['', '服务商返回的错误详情']) {
+      const bubble = documentLike.createElement('div');
+      const message = {
+        type: 'text', role: 'assistant', content: `本次图片状态：${status}`, raw: '旧错误', rawSource: '<div>旧正文</div>',
+        meta: { renderRich: true, generatedMedia: { kind: 'image', status, error, prompt: '海边灯塔', negativePrompt: '模糊', generationParams: { quality: 'high' } } },
+      };
+      const before = structuredClone(message);
+      renderMessageBubbleContentCore({ bubble, message, documentLike,
+        renderRichText: () => { throw Error('terminal image state must expose retry ahead of rich rendering'); },
+      });
+      const card = bubble.children[0], heading = card.children[0];
+      assert.equal(card.tagName, error ? 'DETAILS' : 'DIV');
+      assert.equal(heading.tagName, error ? 'SUMMARY' : 'DIV');
+      assert.equal(heading.children[0].textContent, message.content);
+      assert.equal(heading.children[1].dataset.action, 'retry-generated-media');
+      assert.equal(card.children.length, error ? 2 : 1);
+      if (error) assert.equal(card.children[1].textContent, error);
+      assert.deepEqual(message, before);
+    }
+  }
+  const withoutPrompt = documentLike.createElement('div');
+  renderMessageBubbleContentCore({ bubble: withoutPrompt, documentLike,
+    message: { type: 'text', meta: { renderRich: true, generatedMedia: { kind: 'image', status: 'interrupted' } } },
+    translateText: value => value === '图片生成已中断' ? 'Image generation interrupted' : value,
+  });
+  assert.equal(withoutPrompt.children[0].children[0].children.length, 1);
+  assert.equal(withoutPrompt.children[0].children[0].children[0].textContent, 'Image generation interrupted');
+  console.log('ok - failed/cancelled/interrupted image attempts retain parameters and expose retry, with details only for an error');
+}
+
+{
+  const documentLike = createFakeDocument();
+  const bubble = documentLike.createElement('div');
+  renderMessageBubbleContentCore({ bubble, documentLike,
+    message: { type: 'image', content: 'https://example.test/ready.png', raw: '旧失败', meta: { renderRich: true, generatedMedia: { kind: 'image', status: 'succeeded', prompt: '海边灯塔' } } },
+    resolveMediaUrl: (kind, url) => url,
+  });
+  assert.equal(bubble.children[0].tagName, 'IMG');
+  assert.equal(bubble.children[0].src, 'https://example.test/ready.png');
+  console.log('ok - successful generated images keep the existing image renderer despite old RP metadata');
 }
 
 {

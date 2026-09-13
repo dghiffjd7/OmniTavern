@@ -1,4 +1,5 @@
-import { REALTIME_SYSTEM_VOICES, getRealtimeSystemVoices } from './realtime-voice-catalog.js';
+import { REALTIME_SYSTEM_VOICES, OPENAI_LIVE_VOICES, getRealtimeSystemVoices } from './realtime-voice-catalog.js';
+import { isOpenAiLive, isOpenAiLiveModel, OPENAI_LIVE_BACKEND_MODEL } from './openai-live-config.js';
 // Presets are deliberately protocol specific. Voice identifiers remain case sensitive.
 const voiceIds = provider => REALTIME_SYSTEM_VOICES[provider].map(voice => voice.id);
 export const REALTIME_PROVIDERS = Object.freeze({
@@ -32,12 +33,22 @@ export const makeRealtimeProfile = (provider = 'gemini_live') => {
   const preset = getRealtimeProvider(provider);
   if (!preset) throw new Error('未知实时语音服务商');
   return { id: '', name: preset.label, provider, model: preset.models[0], voice: preset.voices[0], voiceKind: 'system', region: preset.regions?.[0] || '', workspaceId: '', credentialId: '', customVoices: [], idleTimeoutMinutes: 10, replyLanguage: '', transcriptionLanguage: '',
+    ...(provider === 'openai' ? { openaiBackend: 'realtime', liveBackendModel: OPENAI_LIVE_BACKEND_MODEL } : {}),
     ...(provider === 'gemini_live' ? { geminiBackend: 'developer', vertexaiAuthMode: 'service_account', vertexaiProjectId: '' } : {}) };
 };
 export const validateRealtimeProfile = profile => {
   const preset = getRealtimeProvider(profile?.provider);
   if (!preset) throw new Error('未知实时语音服务商');
   if (!String(profile.name || '').trim() || !String(profile.model || '').trim()) throw new Error('请填写设置档名称和模型');
+  if (profile.provider === 'openai') {
+    if (!['realtime', 'live'].includes(profile.openaiBackend || 'realtime')) throw new Error('请选择 OpenAI 语音接入方式');
+    if (isOpenAiLive(profile)) {
+      if (!isOpenAiLiveModel(profile.model)) throw new Error('请填写 GPT-Live 模型 ID，例如 gpt-live-1');
+      if (!String(profile.liveBackendModel || '').trim() || /[\s<>]/.test(profile.liveBackendModel)) throw new Error('请填写有效的推理模型 ID');
+    } else if (isOpenAiLiveModel(profile.model)) throw new Error('此模型需要选择 GPT-Live 接入方式');
+    if (!isOpenAiLive(profile) && OPENAI_LIVE_VOICES.some(voice => voice.id === profile.voice)
+      && !REALTIME_SYSTEM_VOICES.openai.some(voice => voice.id === profile.voice)) throw new Error('此声音需要 GPT-Live 接入方式，请重新选择声音并检查角色绑定');
+  }
   if (profile.provider === 'gemini_live') {
     if (!['developer', 'vertex'].includes(profile.geminiBackend || 'developer')) throw new Error('请选择 Gemini Live 接入方式');
     if (isGeminiVertex(profile)) {

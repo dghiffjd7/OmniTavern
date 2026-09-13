@@ -6,7 +6,7 @@ import { closeCustomSelectMenu, createCustomSelectWrapper, bindCustomSelectButto
 import { HOPSCOTCH_HOUSE_CATALOG, HOPSCOTCH_FUSED_KINDS, validateHopscotchBoard, getHopscotchHouseDisplayStatus } from './hopscotch-board-utils.js';
 import { editHopscotchBoard } from './hopscotch-board-editor-utils.js';
 import { escapeHopscotchHtml as e, hopscotchHouseLabel, hopscotchFusedLabel, hopscotchStatusLabel, renderHopscotchCourt } from './hopscotch-court-view.js';
-import { hopscotchInactiveLabel, resolveHopscotchActivation } from './hopscotch-activation-utils.js';
+import { hopscotchInactiveLabel, resolveHopscotchActivation, findManualHopscotchDependencies } from './hopscotch-activation-utils.js';
 import { buildHopscotchVariableCard, renderHopscotchVariableInfo } from './hopscotch-variable-card-view.js';
 import { bindHopscotchPointerDrag } from './hopscotch-pointer-drag.js';
 import { listHopscotchDropTargets } from './hopscotch-drag-utils.js';
@@ -37,7 +37,9 @@ export const createHopscotchBoardPanel = ({
   closeRelatedLayer = () => false, buildPromptPreview = null,
   openVariableSettings = null, openVariablePreviewTools = null,
   getInputSuggestion = () => null, openInputSuggestion = null,
+  getAgentRuns = () => [], getInputAgents = () => [], createInputAgent = null, openInputAgent = null,
   getFormatReview = () => null, openFormatReview = null,
+  createTextAgent = null, openTextAgent = null, listTextAgents = () => [], onScopeChange = () => {},
 } = {}) => {
   const doc = documentRef;
   const panel = doc.createElement(embedded ? 'section' : 'dialog');
@@ -138,7 +140,7 @@ export const createHopscotchBoardPanel = ({
   const scopeOptions = () => place === 'writing'
     ? (sid ? option(boardStore.getPersonaBoard ? 'persona' : 'session', t('当前角色卡'), target) : '') + option('global', t('所有角色卡'), target)
     : option('global', t('聊天全局设置'), target) + (sid ? option('session', t('当前聊天'), target) : '');
-  const resolveActivation = board => runtime.resolveActivation?.(board, sid, { place }) || resolveHopscotchActivation(board);
+  const resolveActivation = board => runtime.resolveActivation?.(board, sid, { place, scope: target === 'global' ? 'global' : 'effective' }) || resolveHopscotchActivation(board);
   const loadDraft = () => {
     const resolved = resolveBoard();
     draft = cloneData(resolved.board);
@@ -257,7 +259,7 @@ export const createHopscotchBoardPanel = ({
         ${embedded ? '' : iconBtn('close', t('关闭'))}
         ${place === 'writing' ? `<div class="hop-menu hop-secondary-actions" role="menu" hidden>${button('settings', t('执行规则'), 'role="menuitem"' + (editable ? '' : ' disabled'))}${button('transfer', t('导入 / 导出'), 'role="menuitem"' + (editable ? '' : ' disabled'))}${button('reset', target !== 'global' ? t('跟随默认') : t('恢复推导'), 'role="menuitem"' + (editable ? '' : ' disabled'))}</div>` : ''}
       </div></div>
-      ${renderHopscotchCourt(live ? latest.board : draft, { editable, states, place, activation, inputSuggestion: live ? null : getInputSuggestion(), formatReview: live ? null : getFormatReview(), status: live ? latest.result?.status || 'running' : '' })}
+      ${renderHopscotchCourt(live ? latest.board : draft, { editable, states, place, activation, inputSuggestion: live ? null : getInputSuggestion(target), inputAgents: live ? [] : getInputAgents(target), agentRuns: getAgentRuns(), canAddInput: !live && !saving && Boolean(createInputAgent), formatReview: live ? null : getFormatReview(target), status: live ? latest.result?.status || 'running' : '' })}
       <p class="hop-error" role="alert">${e(error)}</p>
       ${place === 'writing' ? `<div class="hop-footer hop-board-footer">${undoStack.length ? iconBtn('undo', t('撤销上一步'), editable ? '' : 'disabled') : ''}${button('save', saveLabel, `class="hop-primary" ${saveDisabled ? 'disabled' : ''}`)}</div>` : ''}`;
     fitCourt();
@@ -267,8 +269,8 @@ export const createHopscotchBoardPanel = ({
       if (dirty) {
         event.target.value = target;
         frameDetail(t('未保存的修改'), `<p>${e(t('切换范围将丢弃当前草稿。'))}</p>`, button('discard-switch', t('丢弃并切换')));
-        detail.querySelector('[data-action="discard-switch"]').onclick = () => { target = next; loadDraft(); closeDetail(); render(); };
-      } else { target = next; loadDraft(); render(); }
+        detail.querySelector('[data-action="discard-switch"]').onclick = () => { target = next; loadDraft(); closeDetail(); render(); onScopeChange(); };
+      } else { target = next; loadDraft(); render(); onScopeChange(); }
     };
     bindBoardSelects(panel);
   };
@@ -289,8 +291,10 @@ export const createHopscotchBoardPanel = ({
     const variableActivity = activation.variable || {};
     const variableInfo = variableCard ? renderHopscotchVariableInfo(variableActivity, active, { execution: member ? '' : house.kind === 'variable_rules' ? 'rules' : 'standalone' }) : '';
     const canToggle = editable && (member || house.kind !== 'body');
-    const unavailable = active.requested && !active.enabled;
-    const toggle = canToggle ? `<div class="agent-center-setting-row is-status hop-flow-toggle-row"><span class="agent-center-setting-label has-help" data-help-mode="tap" data-help="${e(unavailable ? hopscotchInactiveLabel(active.reason) : t('保存后用于后续轮次，房子的位置与配置保留。'))}">${e(t('参与此流程'))}</span><span class="agent-center-setting-value">${e(active.enabled ? t('已启用') : t('已停用'))}</span><button type="button" class="agent-center-switch${active.enabled ? ' is-on' : ''}" role="switch" aria-checked="${active.enabled}" aria-label="${e(t('参与此流程'))}" data-action="toggle-enabled" ${unavailable ? 'disabled' : ''}><span class="agent-center-switch-track" aria-hidden="true"><span class="agent-center-switch-thumb"></span></span></button></div>` : '';
+    const unavailable = active.requested && !active.enabled && active.reason !== 'manual_only';
+    const flowLabel = active.invocationMode ? t('参与自动流程') : t('参与此流程');
+    const flowOn = active.invocationMode ? active.requested !== false : active.enabled;
+    const toggle = canToggle ? `<div class="agent-center-setting-row is-status hop-flow-toggle-row"><span class="agent-center-setting-label has-help" data-help-mode="tap" data-help="${e(unavailable ? hopscotchInactiveLabel(active.reason) : t('保存后用于后续轮次，房子的位置与配置保留。'))}">${e(flowLabel)}</span><span class="agent-center-setting-value">${e(active.invocationMode === 'manual' ? t('手动') : active.enabled ? t('已启用') : t('已停用'))}</span><button type="button" class="agent-center-switch${flowOn ? ' is-on' : ''}" role="switch" aria-checked="${flowOn}" aria-label="${e(flowLabel)}" data-action="toggle-enabled" ${unavailable ? 'disabled' : ''}><span class="agent-center-switch-track" aria-hidden="true"><span class="agent-center-switch-thumb"></span></span></button></div>` : '';
     const hints = { body: t('融合项与正文共享一次请求。'), custom_prompt: t('每次执行通常增加 1 次文本模型请求。'), memory_table: t('独立请求更新记忆，保留频率规则。'), summary_compaction: t('未达到压缩阈值时跳过。'), format_review: t('生成待确认候选，不自动替换正文。'), image_generation: t('读取正文图片提示，等待所有图片完成。') };
     const front = state ? `<p class="hop-card-status">${e(hopscotchStatusLabel(getHopscotchHouseDisplayStatus(state)))}${state.reason ? ` · ${e(state.enabled === false ? hopscotchInactiveLabel(state.reason) : state.reason)}` : ''}</p>
         <p class="hop-hint">${e(state?.usage?.latencyMs != null ? `${state.usage.latencyMs} ms` : '')} · ${e(t('用量'))}: ${e(state?.usage?.providerUsage ? JSON.stringify(state.usage.providerUsage) : t('未知'))}</p>
@@ -321,7 +325,7 @@ export const createHopscotchBoardPanel = ({
     if (independentModel) content += `<div class="agent-center-agent-settings"><div class="agent-center-setting-row is-model"><span class="agent-center-setting-label">${e(t('模型配置'))}</span><select name="model" aria-label="${e(t('模型配置'))}">${option('', t('跟随正文'), cfg.modelMode === 'profile' ? cfg.modelProfileId : '')}${getProfiles().map(profile => option(profile.id, profile.name, cfg.modelProfileId)).join('')}</select></div><div class="agent-center-setting-row is-model"><span class="agent-center-setting-label">${e(t('模型覆盖'))}</span><input class="agent-center-agent-input" name="modelOverride" aria-label="${e(t('模型覆盖'))}" value="${e(cfg.modelOverride || '')}"></div></div>`;
     // 摘要压缩使用专用压缩提示，不能把记忆表格模板冒充其共享配置。
     const fusedAgents = { memory_table: 'memory_table_agent', image_prompt: 'image_director' };
-    const agentId = variableCard ? '' : member ? fusedAgents[member] : ({ memory_table: 'memory_table_agent', format_review: 'reply_check', image_generation: 'image_director', image_prompt: 'image_director' })[house.kind];
+    const agentId = house.kind === 'text_edit' ? house.config.agentId : variableCard ? '' : member ? fusedAgents[member] : ({ memory_table: 'memory_table_agent', format_review: 'reply_check', image_generation: 'image_director', image_prompt: 'image_director' })[house.kind];
     const dropChoices = editable ? listHopscotchDropTargets(board, nodeId, { capabilities: capabilities() }).filter(item => item.ok && item.changed) : [];
     if (editable) {
       content += `<details class="hop-move-section"><summary>${e(t('移动'))}</summary><div class="hop-move">${dropChoices.map((item, index) => button(`drop:${index}`, item.type === 'fuse' ? t('叠进正文') : item.type === 'gap' ? t('独立到第 {value} 行', { value: item.beforeRowId ? board.rows.findIndex(row => row.id === item.beforeRowId) + 1 : board.rows.length + 1 }) : t('第 {value} 行 · {value2}', { value: board.rows.findIndex(row => row.id === item.rowId) + 1, value2: item.beforeId ? hopscotchHouseLabel(board.rows.flatMap(row => row.houses).find(h => h.id === item.beforeId)) + ' ←' : t('末尾') }), mountAgentCard ? 'class="agent-center-card-action"' : '')).join('')}</div></details>`;
@@ -341,7 +345,7 @@ export const createHopscotchBoardPanel = ({
       bindBoardSelects(boardContent);
       const previewSessionId = sid, previewPlace = place;
       sharedConfig = mountAgentCard(detail, {
-        agentId, card: variableCard ? { ...buildHopscotchVariableCard(variableActivity, active), ...(house.kind === 'variable_rules' ? { title: hopscotchHouseLabel(house) } : {}) } : { id: house.kind, title: hopscotchHouseLabel(house), summary: hints[house.kind], detail: [hints[house.kind]], category: place === 'writing' ? 'creative' : 'chat', accent: house.kind === 'summary_compaction' ? 'summary' : 'dialogue', implemented: true, enabled: true },
+        agentId, configScope: target === 'global' ? 'global' : 'local', card: variableCard ? { ...buildHopscotchVariableCard(variableActivity, active), ...(house.kind === 'variable_rules' ? { title: hopscotchHouseLabel(house) } : {}) } : { id: house.kind, title: hopscotchHouseLabel(house), summary: hints[house.kind], detail: [hints[house.kind]], category: place === 'writing' ? 'creative' : 'chat', accent: house.kind === 'summary_compaction' ? 'summary' : 'dialogue', implemented: true, enabled: true },
         workflowState: active,
         frontExtra: toggle + (variableCard ? variableInfo + (state && !member ? `<div class="agent-center-agent-section">${front}</div>` : '') : member ? '' : `<span class="hop-card-mark">${String(number).padStart(2, '0')}</span>` + (state ? `<div class="agent-center-agent-section">${front}</div>` : '')),
         toolbarExtra: member ? '' : removeButton,
@@ -410,19 +414,59 @@ export const createHopscotchBoardPanel = ({
       if (operation && edit(operation)) { closeDetail(); if (operation.type === 'fuse') openHouse(id, true); }
     };
   };
-  const openPicker = (rowIndex, newRow) => {
+  const openPicker = (rowIndex, newRow, anchorKind = '') => {
+    if (!draft || place !== 'writing' || busy() || saving || sid !== String(getSessionId() || '')) return;
+    const placement = { rowIndex, newRow, anchorKind };
+    const scope = target === 'global' ? 'global' : 'local';
+    const context = { sid, place, target, viewEpoch };
     // 压缩是记忆内部维护，不是可新增的 Agent；旧板节点仍可读取和删除。
-    const choices = HOPSCOTCH_HOUSE_CATALOG.filter(item => item.kind !== 'body' && item.kind !== 'summary_compaction').flatMap(item => item.kind === 'variable_rules' ? ['before', 'after'].map(phase => ({ ...item, config: { phase } })) : [item]);
-    frameDetail(t('新增房子'), `<div class="hop-picker">${choices.map((item, index) => button(`add:${index}`, hopscotchHouseLabel(item), editHopscotchBoard(draft, { type: 'add', kind: item.kind, house: { config: item.config }, rowIndex, newRow }).ok ? '' : 'disabled')).join('')}</div>`);
-    detail.onclick = event => {
+    const placed = new Set(draft.rows.flatMap(row => row.houses).map(h => h.config?.agentId).filter(Boolean));
+    const textAgents = listTextAgents(target);
+    const canAdd = item => editHopscotchBoard(draft, { type: 'add', kind: item.kind,
+      // 新建入口尚无持久 ID，但位置、并行数与自定义房子上限仍按真实 text_edit 校验。
+      house: { config: item.kind === 'text_edit' && !item.config?.agentId ? { agentId: 'text-edit:picker-candidate' } : item.config }, ...placement }).ok;
+    const choices = HOPSCOTCH_HOUSE_CATALOG.filter(item => item.kind !== 'body' && item.kind !== 'summary_compaction').flatMap(item => item.kind === 'variable_rules' ? ['before', 'after'].map(phase => ({ ...item, config: { phase } }))
+      : item.kind === 'text_edit' ? [...(createTextAgent && textAgents.length < 8 ? [item] : []), ...textAgents.filter(config => !placed.has(config.id)).map(config => ({ ...item, label: config.title, config: { agentId: config.id } }))] : [item]).filter(canAdd);
+    const group = item => item.kind === 'text_edit' && item.config?.agentId ? 'existing' : ['text_edit', 'custom_prompt'].includes(item.kind) ? 'new' : 'builtin';
+    const sections = [
+      { id: 'new', title: t('新建 Agent'), help: t('修改文本：选择回复正文并生成修改建议，确认后替换。自定义提示词：独立执行任务，结果可供后续房子引用。') },
+      { id: 'existing', title: t('已有 Agent') },
+      { id: 'builtin', title: t('内建 Agent'), help: t('这里显示当前落点可添加的功能；已放入流程或融合组的项目可直接在房子中配置。') },
+    ].map(section => {
+      const items = choices.flatMap((item, index) => group(item) === section.id ? [button(`add:${index}`, hopscotchHouseLabel(item))] : []);
+      return items.length ? `<section class="agent-center-agent-section"><div class="agent-center-agent-section-title${section.help ? ' has-help' : ''}"${section.help ? ` data-help-mode="tap" data-help="${e(section.help)}" tabindex="0"` : ''}>${e(section.title)}</div><div class="hop-picker">${items.join('')}</div></section>` : '';
+    }).join('');
+    frameDetail(newRow ? t('新增一行') : t('新增并行房子'), sections || `<p class="hop-hint">${e(t('此处已达编排上限，可先移走或移除房子。'))}</p>`);
+    const epoch = detailEpoch;
+    let creating = false;
+    const current = () => detail.open && epoch === detailEpoch && context.viewEpoch === viewEpoch && context.sid === sid
+      && context.sid === String(getSessionId() || '') && context.place === place && context.place === getPlace() && context.target === target && !busy() && !saving;
+    detail.onclick = async event => {
       const action = event.target.closest('[data-action]')?.dataset.action;
-      if (!action?.startsWith('add:')) return;
+      if (!action?.startsWith('add:') || event.target.closest('button')?.disabled || creating || !current()) return;
       const item = choices[Number(action.slice(4))];
-      if (item && edit({ type: 'add', kind: item.kind, house: { config: item.config }, rowIndex, newRow })) closeDetail();
+      if (!item || !canAdd(item)) return;
+      if (item?.kind === 'text_edit' && item.config?.agentId) {
+        if (edit({ type: 'add', kind: item.kind, house: { label: item.label, config: item.config }, ...placement })) closeDetail();
+      } else if (item?.kind === 'text_edit' && createTextAgent) {
+        creating = true;
+        detail.querySelectorAll('.hop-picker button').forEach(control => { control.disabled = true; });
+        try {
+          const result = await createTextAgent({ scope });
+          if (!current()) return;
+          if (!result?.ok) { showError(result?.message || t('创建失败')); return; }
+          if (edit({ type: 'add', kind: 'text_edit', house: { label: result.config.title, config: { agentId: result.id } }, ...placement })) { closeDetail(); openTextAgent?.(result.id, { scope }); }
+        } catch (err) { if (current()) showError(err.message || t('创建失败')); }
+        finally { creating = false; if (current()) detail.querySelectorAll('.hop-picker button').forEach(control => { control.disabled = false; }); }
+      } else if (item && edit({ type: 'add', kind: item.kind, house: { config: item.config }, ...placement })) closeDetail();
     };
   };
   const save = async (reset = false) => {
     if (saving) return;
+    if (!reset && findManualHopscotchDependencies(draft, resolveActivation(draft)).length) {
+      showError(t('自动流程引用了仅手动的 Agent，请为上游开启自动调用或移除引用'));
+      return;
+    }
     const epoch = viewEpoch;
     saving = true;
     render();
@@ -464,12 +508,28 @@ export const createHopscotchBoardPanel = ({
     return false;
   };
   panel.onclick = event => {
+    const inputAgent = event.target.closest('[data-hop-input-agent]');
+    if (inputAgent) { openInputAgent?.(inputAgent.dataset.hopInputAgent, { scope: target === 'global' ? 'global' : 'local' }); return; }
+    const addInput = event.target.closest('[data-hop-add-input]');
+    if (addInput && createInputAgent) {
+      const captured = JSON.stringify([sid, place, target]);
+      addInput.disabled = true;
+      void (async () => {
+        try {
+          const result = await createInputAgent({ scope: target === 'global' ? 'global' : 'local' });
+          if (captured !== JSON.stringify([sid, place, target])) return;
+          if (!result?.ok) { showError(result?.message || t('创建失败')); return; }
+          render(); openInputAgent?.(result.id, { scope: target === 'global' ? 'global' : 'local' });
+        } catch (err) { if (captured === JSON.stringify([sid, place, target])) showError(err.message); }
+        finally { addInput.disabled = false; }
+      })(); return;
+    }
     if (event.target.closest('[data-hop-input-suggestion]')) { openInputSuggestion?.(); return; }
     if (event.target.closest('[data-hop-format-review]')) { openFormatReview?.(); return; }
     const cell = event.target.closest('[data-hop-house]');
     if (cell) { openHouse(cell.dataset.hopHouse, false, event.target.closest('[data-hop-part]')?.dataset.hopPart); return; }
     const add = event.target.closest('[data-hop-add]');
-    if (add) { openPicker(Number(add.dataset.hopAdd), add.dataset.hopNew === '1'); return; }
+    if (add) { openPicker(Number(add.dataset.hopAdd), add.dataset.hopNew === '1', add.dataset.hopAnchor); return; }
     const action = event.target.closest('[data-action]')?.dataset.action;
     if (action !== 'more' && !event.target.closest('.hop-menu')) closeMenu();
     if (action === 'more') {
@@ -560,11 +620,14 @@ export const createHopscotchBoardPanel = ({
   };
   doc.defaultView?.addEventListener('app-settings-changed', onSettingsChanged);
   const onInputSuggestionChanged = event => {
-    if (!['text_completion', 'reply_check'].includes(event?.detail?.id) || !(mounted || panel.open)) return;
-    if (event.detail.id === 'reply_check') refreshSettings();
+    if (!(['text_completion', 'reply_check'].includes(event?.detail?.id) || /^(input-agent|text-edit):/.test(String(event?.detail?.id))) || !(mounted || panel.open)) return;
+    if (event.detail.id !== 'text_completion') refreshSettings();
     if (!dragController.isActive() && !saving) render();
   };
   doc.defaultView?.addEventListener('agent-feature-settings-changed', onInputSuggestionChanged);
+  const onAgentRunsChanged = () => { if ((mounted || panel.open) && !detail.open && !saving && !dragController.isActive()) render(); };
+  const agentRunEvents = ['agent-input-changed', 'agent-text-edit-changed'];
+  agentRunEvents.forEach(type => doc.defaultView?.addEventListener(type, onAgentRunsChanged));
   const variableEvents = ['chatapp-variable-changed', 'chatapp-variable-schema-changed', 'chatapp-variable-rules-changed', 'chatapp-stage-schema-changed', 'chatapp-variable-runtime-changed'];
   const onVariablesChanged = event => { if (!event?.detail?.sessionId || event.detail.sessionId === sid) refreshSettings(); };
   variableEvents.forEach(type => doc.defaultView?.addEventListener(type, onVariablesChanged));
@@ -580,6 +643,12 @@ export const createHopscotchBoardPanel = ({
     }
   });
   return {
+    getConfigScope: () => target === 'global' ? 'global' : 'local',
+    addTextAgent: config => {
+      if (!draft || !config || draft.rows.some(row => row.houses.some(h => h.config?.agentId === config.id))) return;
+      const last = draft.rows.length - 1;
+      edit({ type: 'add', kind: 'text_edit', house: { label: config.title, config: { agentId: config.id } }, rowIndex: last, newRow: true });
+    },
     show: () => {
       if (embedded) { onOpen(); return; }
       if (!panel.open) { initialize(); panel.showModal(); resizeObserver?.observe(panel); scheduleFit(); }
@@ -612,6 +681,6 @@ export const createHopscotchBoardPanel = ({
       panel.querySelector('[data-action="close"]').click();
       return true;
     },
-    dispose: () => { close(); dragController.dispose(); unsubscribe(); unbindBackdrop(); resizeObserver?.disconnect?.(); doc.defaultView?.removeEventListener('app-settings-changed', onSettingsChanged); doc.defaultView?.removeEventListener('agent-feature-settings-changed', onInputSuggestionChanged); variableEvents.forEach(type => doc.defaultView?.removeEventListener(type, onVariablesChanged)); detailLayer?.remove(); detail.remove(); panel.remove(); },
+    dispose: () => { close(); dragController.dispose(); unsubscribe(); unbindBackdrop(); resizeObserver?.disconnect?.(); doc.defaultView?.removeEventListener('app-settings-changed', onSettingsChanged); doc.defaultView?.removeEventListener('agent-feature-settings-changed', onInputSuggestionChanged); agentRunEvents.forEach(type => doc.defaultView?.removeEventListener(type, onAgentRunsChanged)); variableEvents.forEach(type => doc.defaultView?.removeEventListener(type, onVariablesChanged)); detailLayer?.remove(); detail.remove(); panel.remove(); },
   };
 };

@@ -45,6 +45,12 @@ import {
   console.log('ok - buildContextMenuActions exposes cancel action for running media generation');
 }
 
+for (const status of ['interrupted', 'cancelled']) {
+  const actions = buildContextMenuActions({ role: 'assistant', type: 'text', meta: { renderRich: true, generatedMedia: { kind: 'image', status, prompt: 'original prompt' } } });
+  assert.equal(actions.some(item => item.key === 'cancel-media-generation'), false);
+  assert.equal(actions.find(item => item.key === 'generate-image')?.label, '重新生成图片');
+}
+
 {
   const actions = buildContextMenuActions(
     { role: 'user', type: 'text', meta: { generatedMedia: { status: 'failed', prompt: 'blue sky' } } },

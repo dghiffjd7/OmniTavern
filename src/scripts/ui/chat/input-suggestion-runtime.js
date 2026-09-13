@@ -1,8 +1,8 @@
+import { buildConfigurableInputMessages } from '../../agent/agent-request-builder.js';
+import { allowsAgentInvocation } from '../../agent/agent-invocation.js';
+
 // 输入阶段的短句续写：独立模型、可取消请求；不进入发送链或 Agent 运行记录。
-export const buildInputSuggestionMessages = ({ before = '', after = '' } = {}) => [
-  { role: 'system', content: 'Continue the text the user is typing at the cursor. Output only a short continuation in the same language and tone. Keep existing text unchanged. Do not repeat the prefix or suffix. Do not add explanations, quotes, Markdown fences, or answer the user. If no useful continuation is available, output nothing.' },
-  { role: 'user', content: JSON.stringify({ before: String(before).slice(-2400), after: String(after).slice(0, 600) }) },
-];
+export const buildInputSuggestionMessages = buildConfigurableInputMessages;
 
 export const normalizeInputSuggestion = (value, before = '') => {
   let text = String(value ?? '').replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '').replace(/^```[^\n]*\n([\s\S]*?)\n```\s*$/, '$1').trimEnd();
@@ -33,27 +33,30 @@ export const splitInputSuggestionCharacters = (value, Segmenter = globalThis.Int
   return characters;
 };
 
-export const createInputSuggestionRequest = ({ getProfileConfig, createClient } = {}) => async (snapshot, signal) => {
+export const createInputSuggestionRequest = ({ getProfileConfig, createClient, resolveReference } = {}) => async (snapshot, signal) => {
   const { settings } = snapshot;
   if (settings?.modelMode !== 'profile' || !settings.modelProfileId) return '';
   const config = await getProfileConfig(settings.modelProfileId);
-  if (signal.aborted || !config) return '';
+  if (signal?.aborted || !config) return '';
+  const referenceContext = typeof resolveReference === 'function'
+    ? await resolveReference(snapshot, signal) : snapshot.referenceContext;
+  if (signal?.aborted) return '';
   const client = createClient({ ...config, ...(settings.modelOverride ? { model: settings.modelOverride } : {}) });
-  return client.chat(buildInputSuggestionMessages(snapshot), { signal, requestContext: snapshot.requestContext,
-    maxTokens: 96, temperature: 0.3, tools: [], toolChoice: 'none',
-    requestParamConstraints: { maxOutputTokens: 96, tools: 'none' } });
+  return client.chat(buildInputSuggestionMessages({ ...snapshot, referenceContext }), { signal, requestContext: snapshot.requestContext,
+    maxTokens: settings.maxTokens || 96, temperature: 0.3, tools: [], toolChoice: 'none',
+    requestParamConstraints: { maxOutputTokens: settings.maxTokens || 96, tools: 'none' } });
 };
 
 export const createInputSuggestionRuntime = ({
   getSnapshot, request, onSuggestion = () => {}, onStatus = () => {},
-  delayMs = 500, maxPerMinute = 12, timeoutMs = 12000,
+  delayMs = 500, maxPerMinute = 12, timeoutMs = 12000, requestBudget = null,
   now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout,
 } = {}) => {
   let timer = null, controller = null, epoch = 0, disposed = false;
   let failures = 0, contextKey = '', accepted = null;
   let recent = [];
   const key = snapshot => JSON.stringify([snapshot?.contextKey, snapshot?.before, snapshot?.after, snapshot?.settings]);
-  const valid = snapshot => snapshot?.active === true && snapshot.settings?.enabled === true
+  const valid = snapshot => snapshot?.active === true && allowsAgentInvocation({ ...snapshot.settings, id: 'text_completion' })
     && snapshot.settings.modelMode === 'profile' && Boolean(snapshot.settings.modelProfileId)
     && String(snapshot.before || '').trim().length >= 2;
   const cancel = () => {
@@ -80,6 +83,7 @@ export const createInputSuggestionRuntime = ({
     timer = setTimer(async () => {
       timer = null;
       if (disposed || epoch !== stamp || key(getSnapshot()) !== snapshotKey || !valid(getSnapshot())) return;
+      if (requestBudget && !requestBudget.take(snapshot.contextKey)) return;
       const activeController = new AbortController();
       controller = activeController;
       recent.push(now());

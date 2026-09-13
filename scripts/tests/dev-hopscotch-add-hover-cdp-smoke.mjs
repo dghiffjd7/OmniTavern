@@ -35,12 +35,15 @@ const inspect = () => evaluateInApp(`(() => {
 })()`);
 try {
   await command('Emulation.setTouchEmulationEnabled', { enabled: false });
-  await command('Emulation.setDeviceMetricsOverride', { width: 1200, height: 844, deviceScaleFactor: 1, mobile: false });
+  await command('Emulation.setDeviceMetricsOverride', { width: 1200, height: 1000, deviceScaleFactor: 1, mobile: false });
   await evaluateInApp(`(async () => {
     const { renderHopscotchCourt } = await import('/scripts/ui/chat/hopscotch-court-view.js');
     window.__hopAddHoverSmokeFocus = document.activeElement;
     const root = document.createElement('dialog'); root.id = 'hop-add-hover-smoke'; root.className = 'hop-dialog';
-    root.innerHTML = '<button type="button" autofocus>Test only</button>' + renderHopscotchCourt({ rows: [{ houses: [{ id: 'body', kind: 'body', label: '正文', fused: [] }] }] }, { editable: true });
+    root.innerHTML = '<button type="button" autofocus>Test only</button>' + renderHopscotchCourt({ rows: [
+      { houses: [{ id: 'body', kind: 'body', label: '正文', fused: ['memory_table', 'variable'] }] },
+      { houses: [{ id: 'post', kind: 'custom_prompt', label: '自定义 Agent' }] },
+    ] }, { editable: true, formatReview: { enabled: false, reason: 'disabled' } });
     root.addEventListener('click', event => { const plus = event.target.closest('[data-hop-add]'); if (plus) root.dataset.clicked = plus.dataset.hopNew; });
     document.body.append(root); root.showModal();
   })()`);
@@ -48,7 +51,7 @@ try {
   await settle();
   const desktop = await inspect();
   assert.ok(desktop.hover && !desktop.coarse, 'desktop pointer emulation unavailable');
-  assert.equal(desktop.buttons.length, 3);
+  assert.equal(desktop.buttons.length, 7, 'three rows have three side buttons and four shared row gaps');
   assert.ok(desktop.buttons.every(button => button.opacity === 0), 'desktop plus buttons should be hidden at rest');
   for (const [index, button] of desktop.buttons.entries()) {
     // 图形外 6px、仍在扩展热区内；不用精确瞄准隐藏的 26px 圆钮。
@@ -64,7 +67,7 @@ try {
   await command('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point });
   assert.equal(await evaluateInApp("document.getElementById('hop-add-hover-smoke').dataset.clicked"), '0', 'revealed parallel add remains clickable');
   await command('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1, y: 1 });
-  await evaluateInApp("document.querySelector('#hop-add-hover-smoke .hop-cell').focus()");
+  await evaluateInApp("document.querySelector('#hop-add-hover-smoke [data-hop-house=\"post\"]').focus()");
   await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
   await command('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 });
   await settle();

@@ -1,3 +1,4 @@
+import { OpenAiLiveSessionClient } from './openai-live-session-client.js';
 import { getRealtimeProfileStore } from '../../storage/realtime-profile-store.js';
 import { registerRealtimeSettingsTarget } from './realtime-settings-target.js';
 import { NativeRealtimeSessionClient } from './native-realtime-session-client.js';
@@ -66,13 +67,14 @@ export const createRealtimeCallAppRuntime = ({
   isTargetCurrent,
   commitUserMessage,
   commitAssistantMessage,
+  commitLiveTranscript,
   openVoiceSettings = null,
   onLifecycleInvalidated = null,
   toast = null,
   createPanel = createRealtimeCallPanel,
   createRuntime = createRealtimeCallRuntime,
   createSessionClient = callbacks => callbacks.provider && callbacks.provider !== 'openai'
-    ? new NativeRealtimeSessionClient(callbacks) : new OpenAiRealtimeSessionClient(callbacks),
+    ? new NativeRealtimeSessionClient(callbacks) : callbacks.openaiBackend === 'live' ? new OpenAiLiveSessionClient(callbacks) : new OpenAiRealtimeSessionClient(callbacks),
 } = {}) => {
   let usageTotals = createRealtimeUsageTotals();
   let runtime = null;
@@ -109,6 +111,7 @@ export const createRealtimeCallAppRuntime = ({
     isTargetCurrent,
     commitUserMessage,
     commitAssistantMessage,
+    commitLiveTranscript,
     onStateChange: state => {
       panel?.renderState?.(state);
       if (state.status === 'idle') panel?.hide?.();
@@ -163,14 +166,20 @@ export const createRealtimeCallAppRuntime = ({
 
   const unregisterSettingsTarget = registerRealtimeSettingsTarget(getCallTarget, handleButtonClick);
 
-  const handlePageHide = () => {
-    onLifecycleInvalidated?.('page_hidden');
-    void endAndHide('page_hidden');
+  const endForLifecycle = reason => {
+    // Live drains timestamped fragments and final usage before invalidation.
+    // end() enters 'ending' immediately; target/scope checks still reject a
+    // character or archive change during that drain.
+    if (runtime?.getState?.().openaiBackend === 'live') {
+      return endAndHide(reason).finally(() => onLifecycleInvalidated?.(reason));
+    }
+    onLifecycleInvalidated?.(reason);
+    return endAndHide(reason);
   };
+  const handlePageHide = () => { void endForLifecycle('page_hidden'); };
   const handleVisibilityChange = () => {
     if (documentRef?.visibilityState !== 'hidden') return;
-    onLifecycleInvalidated?.('app_background');
-    void endAndHide('app_background');
+    void endForLifecycle('app_background');
   };
 
   button?.addEventListener?.('click', handleButtonClick);

@@ -677,6 +677,9 @@ body[data-reduced-motion='on'] .chat-realtime-call-btn {
 .realtime-call-caption p { max-height: 7.5em; overflow: auto; overflow-wrap: anywhere; margin: 0; color: var(--app-text-primary); font-size: 13px; line-height: 1.6; user-select: text; }
 .realtime-call-warning { margin: 0 2px 12px; color: var(--app-warning-text, #9a6700); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .realtime-call-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; }
+.realtime-call-panel.is-live .realtime-call-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.realtime-call-caption.is-live-captions { max-height: 220px; overflow: auto; align-content: start; }
+.realtime-call-caption.is-live-captions p { max-height: none; overflow: visible; }
 
 .realtime-call-action {
   min-width: 0;

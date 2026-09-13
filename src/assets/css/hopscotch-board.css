@@ -221,7 +221,7 @@ body[data-theme-mode='dark'] :is(.hop-dialog, .hop-board-card-controls) { --app-
 .hop-side { position: absolute; top: calc(50% - 13px); right: -36px; }
 @media (hover: hover) and (pointer: fine) {
   .hop-plus { opacity: 0; }
-  .hop-plus:hover, .hop-plus:focus-visible { opacity: 1; }
+  .hop-plus:hover, .hop-plus:focus-visible, .hop-input-stage:hover > [data-hop-add-input], .hop-input-stage:focus-within > [data-hop-add-input] { opacity: 1; }
 }
 @media (any-pointer: coarse) {
   .hop-plus { opacity: 1; }
@@ -232,6 +232,9 @@ body[data-theme-mode='dark'] :is(.hop-dialog, .hop-board-card-controls) { --app-
 .hop-source.is-custom i { background: var(--app-success); }
 .hop-source.is-dirty i { background: var(--app-accent-primary); box-shadow: 0 0 0 3px var(--app-accent-soft); }
 .hop-input-stage { display: flex; justify-content: center; position: relative; }
+.hop-input-stage > .hop-cells { display: grid; grid-template-columns: repeat(2, max-content); }
+.hop-input-stage > .hop-cells > :only-child { grid-column: 1 / -1; }
+.hop-cell.is-manual { border-style: dashed; }
 .hop-input-stage .hop-cell { min-height: 98px; }
 .hop-input-stage-label { font-size: 11px; color: var(--app-text-secondary); }
 .hop-cell[data-hop-kind="text_completion"] { --hop-kind: var(--hop-sky); }
@@ -382,3 +385,6 @@ body[data-reduced-motion='on'] .hop-court * { animation: none !important; transi
 .hop-drop-tip { position: fixed; z-index: 3; transform: translateX(-50%); max-width: min(260px, calc(100vw - 28px)); padding: 8px 14px; border: 1px solid var(--app-border-default); border-radius: 14px; background: var(--app-surface-card); box-shadow: var(--app-shadow-md); color: var(--app-accent-primary); font-size: 12px; line-height: 1.5; text-align: center; }
 .hop-drop-tip.is-invalid { color: var(--app-text-secondary); }
 @media (hover: none), (pointer: coarse) { .hop-drag-grip { opacity: .4; } }
+
+.hop-agent-run-status { position:absolute; top:8px; right:8px; padding:2px 6px; border-radius:8px; font-size:10px; color:var(--app-accent-primary); background:var(--app-surface-card); }
+.hop-agent-run-status[data-running="true"]::before { content:""; display:inline-block; width:5px; height:5px; margin-right:4px; border-radius:50%; background:currentColor; }

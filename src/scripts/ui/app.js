@@ -1,3 +1,4 @@
+import { createLiveTranscriptCommitter } from './realtime/openai-live-transcript.js';
 import { ImagePromptEditor } from './image-prompt/image-prompt-editor.js';
 import { IMAGE_PROMPT_TEXT_KEYS, fillImagePromptScene, restoreImagePromptFromAsset } from './image-prompt/image-prompt-utils.js';
 import { createImagePromptRuntime } from './image-prompt/image-prompt-runtime.js';
@@ -471,6 +472,7 @@ import {
   createPresetRuntime,
   buildReplyPromptHint as buildReplyPromptHintCore,
   resolveEnabledPreset,
+  resolveResolvedPreset,
 } from './chat/prompt-context-utils.js';
 import { createScenePresetAccess, createScenePromptPreviewRequestBuilder, evaluateScenePreviewMacro } from './scene-prompt-preview-utils.js';
 import {
@@ -506,6 +508,13 @@ import { createHopscotchBoardPanel } from './chat/hopscotch-board-panel.js';
 import { createFormatGuideSettingsRuntime, resolveFormatReviewAvailability } from './chat/format-review-settings-utils.js';
 import { createFormatReviewExecutor, createCreativeFormatReviewRuntime } from './chat/format-review-runtime.js';
 import { bindInputSuggestionComposer } from './chat/input-suggestion-composer.js';
+import { createAgentConfigStore, BODY_SELECTOR_ID } from '../storage/agent-config-store.js';
+import { createScopedAgentFeatures } from '../agent/scoped-agent-features.js';
+import { createAgentToolsAppRuntime } from './agent-tools-app-runtime.js';
+import { allowsAgentInvocation, createInputRequestBudget } from '../agent/agent-invocation.js';
+import { createAgentReferenceAppRuntime } from './chat/agent-reference-app-runtime.js';
+import { createCustomAgentAppRuntime } from './chat/custom-agent-app-runtime.js';
+import { createChatImageJobRuntime } from './chat/chat-image-job-runtime.js';
 import { createInputSuggestionRequest } from './chat/input-suggestion-runtime.js';
 import { createExecutionFlowRuntime } from './chat/execution-flow-runtime-utils.js';
 import { createPromptPreviewRuntime } from './chat/prompt-preview-runtime-utils.js';
@@ -2934,14 +2943,30 @@ const initApp = async () => {
   } catch (err) {
     logger.debug('capability retrieval store load skipped', err);
   }
-  const agentFeatureSettingsStore = createAgentFeatureSettingsStore({
+  const legacyAgentFeatureSettingsStore = createAgentFeatureSettingsStore({
     onChange: detail => window.dispatchEvent(new CustomEvent('agent-feature-settings-changed', { detail })),
   });
   try {
-    await agentFeatureSettingsStore.hydrate?.();
+    await legacyAgentFeatureSettingsStore.hydrate?.();
   } catch (err) {
     logger.debug('agent feature settings hydrate skipped', err);
   }
+  let readLegacyAgentGuide = () => '';
+  const getAgentConfigContext = (sid = chatStore.getCurrent()) => ({
+    place: String(sid || '').startsWith('rp:') ? 'writing' : 'chat',
+    sessionId: String(sid || ''), scopeId: activePersonaScopeKey,
+  });
+  const agentConfigStore = createAgentConfigStore({
+    loadKv: name => safeInvoke('load_kv', { name }),
+    saveKv: (name, data) => safeInvoke('save_kv', { name, data }),
+    getLegacy: (id, context, { includeLocal }) => {
+      const old = legacyAgentFeatureSettingsStore.getSettings().features[id];
+      return old ? { ...old, ...(id === 'reply_check' && includeLocal ? { formatGuide: readLegacyAgentGuide(context.sessionId) } : {}) } : null;
+    },
+    onChange: detail => window.dispatchEvent(new CustomEvent('agent-feature-settings-changed', { detail })), logger,
+  });
+  await agentConfigStore.hydrate();
+  const agentFeatureSettingsStore = createScopedAgentFeatures({ legacy: legacyAgentFeatureSettingsStore, store: agentConfigStore, getContext: getAgentConfigContext });
   const agentCenterSettingsStore = createAgentCenterSettingsStore({
     officialPromptDefaults: getCanonicalBuiltinPromptDefaults(),
   });
@@ -2952,7 +2977,7 @@ const initApp = async () => {
     logger.debug('agent center settings hydrate/migrate skipped', err);
   }
   ui.canCheckFormatForMessage = message => (
-    agentFeatureSettingsStore.isEnabled(AGENT_FEATURE_IDS.replyCheck) &&
+    allowsAgentInvocation(agentFeatureSettingsStore.getSettings()?.features?.[AGENT_FEATURE_IDS.replyCheck], 'manual') &&
     canCheckLatestFormatRepairTarget({
       message,
       sessionId: chatStore.getCurrent(),
@@ -5755,6 +5780,9 @@ const initApp = async () => {
     messageDecorationCacheEpoch += 1;
   };
 
+  let chatImageJobs = null;
+  const getChatImageJobContextKey = sid => JSON.stringify([chatStore.scopeId || '', String(sid || ''), chatStore.getCurrentArchiveId(sid) || '']);
+
   const sessionEnterRequestTracker = createSessionEnterRequestTracker({
     getCurrentSessionId: () => chatStore.getCurrent(),
   });
@@ -6294,6 +6322,10 @@ const initApp = async () => {
         }
       }
 
+      if ((m.type === 'text' || !m.type) && m.meta?.generatedMedia?.kind === 'image'
+        && ['running', 'failed', 'cancelled', 'interrupted'].includes(m.meta.generatedMedia.status)) {
+        return setCachedDecoratedMessage(m, sid, decorationSignature, { ...m, avatar, content: String(m.content || ''), sessionId: sid, meta });
+      }
       if (m.role === 'assistant' && (m.type === 'text' || !m.type)) {
         if (m?.meta?.renderRich) {
           if (creativeSource) {
@@ -6394,9 +6426,11 @@ const initApp = async () => {
   };
 
   const ensureRecentMessagesAndWorlds = async (sessionId) => {
+    const imageContext = getChatImageJobContextKey(sessionId);
     const messages = await chatStore.ensureRecentMessagesLoaded(sessionId);
     await ensureWorldsForSessionDisplay(sessionId);
-    return messages;
+    return imageContext === getChatImageJobContextKey(sessionId) && chatImageJobs
+      ? chatImageJobs.recover(messages, sessionId) : messages;
   };
 
   const refreshRenderedMessageAvatars = (sessionId = '') => {
@@ -17315,10 +17349,11 @@ const initApp = async () => {
     });
     return maidFormatProfileStore.get?.(sid, sourceState) || null;
   };
-  const getSessionFormatGuide = (sessionId = '') => {
+  readLegacyAgentGuide = (sessionId = '') => {
     const profile = getSessionFormatProfile(sessionId);
     return profile?.usable === false ? '' : String(profile?.guide || '').trim();
   };
+  const getSessionFormatGuide = (sessionId = '') => agentConfigStore.read('reply_check', getAgentConfigContext(sessionId)).config?.formatGuide || '';
   const formatGuideSettingsRuntime = createFormatGuideSettingsRuntime({
     getSessionId: () => chatStore.getCurrent(), getScopeId: () => activePersonaScopeKey,
     getPlace: () => uiMode === 'rp' ? 'writing' : 'chat',
@@ -17384,9 +17419,9 @@ const initApp = async () => {
     return enabledIds.size ? String(promptContext?.formatReminderText || '').trim().slice(0, 12000) : '';
   };
   const buildChatFormatGuardianPromptPreviewRequest = async ({
-    formatTarget = CHAT_FORMAT_GUARDIAN_TARGETS.auto,
+    formatTarget = CHAT_FORMAT_GUARDIAN_TARGETS.auto, config: agentDraft = null, context: agentContext = null,
   } = {}) => {
-    const sessionId = String(chatStore.getCurrent() || '').trim();
+    const sessionId = String(agentContext?.sessionId || chatStore.getCurrent() || '').trim();
     const message = getLatestAssistantMessageForPromptPreview(sessionId);
     if (!message) {
       window.toastr?.warning?.('当前会话暂无可预览的 AI 回复');
@@ -17455,7 +17490,9 @@ const initApp = async () => {
     const prompt = buildChatFormatGuardianModelPrompt({
       assistantText: text,
       formatReminderText: selectChatFormatReminderTextForProfile(promptContext, formatProfile),
-      customFormatGuide: getSessionFormatGuide(sessionId),
+      customFormatGuide: agentDraft?.formatGuide ?? getSessionFormatGuide(sessionId),
+      agentConfig: agentDraft || agentConfigStore.read('reply_check', getAgentConfigContext(sessionId)).config,
+      referenceContext: await agentReferenceRuntime.resolveReference({ config: (agentDraft || agentConfigStore.read('reply_check', getAgentConfigContext(sessionId)).config).context, context: agentContext || getAgentExecutionContext(sessionId), targetMessageId: sourceMessageId }),
       enabledFormats: formatProfile.enabledFormats,
       parserReport: parserResult,
       userName: getActiveUserProfile()?.name || '我',
@@ -17468,11 +17505,11 @@ const initApp = async () => {
         sessionId: repairTarget.targetSessionId || sessionId,
       },
     });
+    const featureState = agentDraft || agentFeatureSettingsStore.getSettings(sessionId)?.features?.[AGENT_FEATURE_IDS.replyCheck] || {};
     const requestOptions = {
       temperature: 0,
-      maxTokens: FORMAT_PATCH_MODEL_MAX_TOKENS,
+      maxTokens: featureState.maxTokens || FORMAT_PATCH_MODEL_MAX_TOKENS,
     };
-    const featureState = agentFeatureSettingsStore.getSettings()?.features?.[AGENT_FEATURE_IDS.replyCheck] || {};
     const modelMode = String(featureState.modelMode || 'none').trim() || 'none';
     let config = null;
     let configProfile = {
@@ -17487,7 +17524,7 @@ const initApp = async () => {
         if (config && modelOverride) config = { ...config, model: modelOverride };
         configProfile.id = String(featureState.modelProfileId || '').trim();
       } else {
-        const runtime = await window.appBridge.resolveRequestRuntimeConfig?.({ sessionId, uiMode });
+        const runtime = await window.appBridge.resolveRequestRuntimeConfig?.({ sessionId, uiMode: targetUiMode });
         config = runtime?.config || window.appBridge.getConfig?.() || null;
         configProfile = {
           id: runtime?.profileId || '',
@@ -17525,7 +17562,7 @@ const initApp = async () => {
       },
       options: requestOptions,
       requestOptions,
-      messages: prompt.messages,
+      messages: prompt.messages, sections: prompt.sections,
       agentPrompt: {
         id: AGENT_FEATURE_IDS.replyCheck,
         responseFormat: prompt.responseFormat,
@@ -19140,7 +19177,12 @@ const initApp = async () => {
   const sendPendingFromFloat = async (pendingMsg, sessionId = chatStore.getCurrent()) => {
     return pendingFloatRuntime.sendPendingFromFloat(pendingMsg, sessionId);
   };
-  const chatImageGenerationControllers = new Map();
+  chatImageJobs = createChatImageJobRuntime({
+    getContextKey: getChatImageJobContextKey,
+    getMessage: (mid, sid) => chatStore.findMessage(mid, sid),
+    updateMessage: (mid, patch, sid) => chatStore.updateMessage(mid, patch, sid),
+    onUpdated: (mid, message, sid) => { renderStoredMessageIfActive(mid, message, sid); refreshChatAndContacts({ immediate: true }); },
+  });
   const getChatImagePromptModal = createChatImagePromptModal({
     imagePromptRuntime,
     pickFilesFromInput, getReferencePicker: () => chatImageReferencePicker,
@@ -19452,6 +19494,7 @@ const initApp = async () => {
       window.toastr?.warning?.('请先进入一个聊天室');
       return false;
 	    }
+	    const imageContext = getChatImageJobContextKey(sessionId);
 	    const config = await ensureImageConfigReady();
 	    if (!config) return false;
 	    const referenceCapability = resolveImageReferenceCapability(config);
@@ -19462,10 +19505,10 @@ const initApp = async () => {
 	    const resolvedNegativePromptMode = negativePromptMode === 'replace' ? 'replace' : 'append';
 	    await imageGenerationParamsStore.ready;
       if (
-        sessionAsyncWorkRuntime.isClosing(sessionId) ||
+        imageContext !== getChatImageJobContextKey(sessionId) || sessionAsyncWorkRuntime.isClosing(sessionId) ||
         !isChatSendTargetAvailable({ sessionId, chatStore, contactsStore })
       ) {
-        lastChatImageGenerationError = '目标聊天室已删除';
+        lastChatImageGenerationError = imageContext !== getChatImageJobContextKey(sessionId) ? '目标聊天或存档已变化' : '目标聊天室已删除';
         return false;
       }
 	    const imageParamsPreset = imageGenerationParamsStore.getActive();
@@ -19491,8 +19534,8 @@ const initApp = async () => {
       window.toastr?.error?.(lastChatImageGenerationError);
       return false;
     }
-    if (sessionAsyncWorkRuntime.isClosing(sessionId) || !isChatSendTargetAvailable({ sessionId, chatStore, contactsStore })) {
-      lastChatImageGenerationError = '目标聊天室已删除';
+    if (imageContext !== getChatImageJobContextKey(sessionId) || sessionAsyncWorkRuntime.isClosing(sessionId) || !isChatSendTargetAvailable({ sessionId, chatStore, contactsStore })) {
+      lastChatImageGenerationError = imageContext !== getChatImageJobContextKey(sessionId) ? '目标聊天或存档已变化' : '目标聊天室已删除';
       return false;
     }
     const mediaSurface = surface || resolveMediaSurfaceForSession(sessionId);
@@ -19558,6 +19601,8 @@ const initApp = async () => {
 	      : (sourceMessageId && typeof chatStore.insertMessageAfter === 'function'
 	      ? (chatStore.insertMessageAfter(sourceMessageId, pendingMessage, sessionId) || pendingMessage)
 	      : (chatStore.appendMessage(pendingMessage, sessionId) || pendingMessage)));
+    const controller = new AbortController();
+    const generationJob = chatImageJobs.register({ sessionId, messageId: savedPending.id, controller });
 	    if (isSessionActive(sessionId)) {
 	      if (reuseSourceMessage || shouldReplaceMessage) {
 	        renderStoredMessageIfActive(savedPending.id || sourceMessageId, savedPending, sessionId);
@@ -19568,8 +19613,6 @@ const initApp = async () => {
     }
     refreshChatAndContacts({ immediate: true });
 
-    const controller = new AbortController();
-    chatImageGenerationControllers.set(savedPending.id, controller);
     const imageWorkLease = sessionAsyncWorkRuntime.register({
       sessionId,
       kind: 'image_generation',
@@ -19577,7 +19620,7 @@ const initApp = async () => {
     });
     try {
       const runImageRequest = () => {
-        if (controller.signal.aborted) throw makeAbortError();
+        if (controller.signal.aborted || !generationJob.isCurrent()) throw makeAbortError();
         return mediaGenerationService.generateImage({
         prompt: imagePrompt,
         config,
@@ -19595,8 +19638,8 @@ const initApp = async () => {
         ? await enqueueAutoImageGeneration(runImageRequest)
         : await runImageRequest();
       if (
-        controller.signal.aborted ||
-        sessionAsyncWorkRuntime.isClosing(sessionId) ||
+        controller.signal.aborted || !generationJob.isCurrent() ||
+        imageContext !== getChatImageJobContextKey(sessionId) || sessionAsyncWorkRuntime.isClosing(sessionId) ||
         !isChatSendTargetAvailable({ sessionId, chatStore, contactsStore })
       ) {
         throw makeAbortError();
@@ -19652,16 +19695,17 @@ const initApp = async () => {
 		      window.toastr?.success?.(surfaceCopy.successText);
 		      return true;
 	    } catch (err) {
+	      const ownsMessage = generationJob.isCurrent();
 	      const aborted = controller.signal.aborted || err?.name === 'AbortError';
 	      const sessionDeleted = controller.signal.reason === 'session_deleted' ||
-          sessionAsyncWorkRuntime.isClosing(sessionId) ||
+          imageContext !== getChatImageJobContextKey(sessionId) || sessionAsyncWorkRuntime.isClosing(sessionId) ||
           !isChatSendTargetAvailable({ sessionId, chatStore, contactsStore });
 	      const briefError = getImageGenerationBriefError(err);
 	      const detailError = getImageGenerationErrorText(err);
 	      lastChatImageGenerationError = sessionDeleted
           ? '目标聊天室已删除'
           : (aborted ? '用户中止了图片生成' : (detailError || briefError || String(err?.message || err || '')));
-	      patchChatImageGenerationMessage(savedPending.id, {
+	      if (ownsMessage) patchChatImageGenerationMessage(savedPending.id, {
 	        role: sender.role,
 	        type: 'text',
 	        content: aborted ? surfaceCopy.cancelledText : `${surfaceCopy.failedText}：${briefError}`,
@@ -19679,14 +19723,14 @@ const initApp = async () => {
           },
         },
 	      }, sessionId);
-	      if (!aborted) {
+	      if (!aborted && ownsMessage) {
 	        logger.warn('chat image generation failed', err);
 	        window.toastr?.error?.(surfaceCopy.failedText);
 	      }
       return false;
     } finally {
       imageWorkLease.settle();
-      chatImageGenerationControllers.delete(savedPending.id);
+      generationJob.release();
     }
   };
   const isCreativeExecutionTaskStatusTerminal = status => (
@@ -19748,7 +19792,7 @@ const initApp = async () => {
       window.toastr?.warning?.('没有找到要重试的图片消息');
       return false;
     }
-    if (chatImageGenerationControllers.has(mid)) {
+    if (chatImageJobs.has(mid, sid)) {
       window.toastr?.info?.('图片正在生成中');
       return true;
     }
@@ -26638,11 +26682,12 @@ const initApp = async () => {
         if (!st || !Number.isFinite(st.start)) return;
         loading = true;
         try {
+          const imageContext = getChatImageJobContextKey(sid);
           const all = chatStore.getMessages(sid) || [];
           const PAGE = 90;
           if (st.start > 0) {
             const nextStart = Math.max(0, st.start - PAGE);
-            const chunk = all.slice(nextStart, st.start);
+            const chunk = chatImageJobs.recover(all.slice(nextStart, st.start), sid);
             if (chunk.length) {
               ui.prependHistory(decorateMessagesForDisplay(chunk, { sessionId: sid }));
               chatRenderState.set(sid, { start: nextStart });
@@ -26652,8 +26697,9 @@ const initApp = async () => {
             chatRenderState.set(sid, { start: 0 });
           }
           if (!chatStore.hasOlderMessages?.(sid)) return;
-          const older = await chatStore.loadOlderMessages(sid, '', { partCount: 1 });
-          if (String(chatStore.getCurrent() || '').trim() !== sid) return;
+          const loadedOlder = await chatStore.loadOlderMessages(sid, '', { partCount: 1 });
+          if (String(chatStore.getCurrent() || '').trim() !== sid || getChatImageJobContextKey(sid) !== imageContext) return;
+          const older = chatImageJobs.recover(loadedOlder, sid);
           if (older.length) {
             ui.prependHistory(decorateMessagesForDisplay(older, { sessionId: sid }));
             chatRenderState.set(sid, { start: 0 });
@@ -27029,10 +27075,10 @@ const initApp = async () => {
   };
 
   const buildChatFormatGuardianModelReviewOptions = (targetSessionId = '', activeUser = null, {
-    force = false,
+    force = false, configOverride = null,
   } = {}) => {
-    if (!agentFeatureSettingsStore.isEnabled(AGENT_FEATURE_IDS.replyCheck)) return { enabled: false };
-    const featureState = agentFeatureSettingsStore.getSettings()?.features?.[AGENT_FEATURE_IDS.replyCheck] || {};
+    if (!configOverride && !agentFeatureSettingsStore.isEnabled(AGENT_FEATURE_IDS.replyCheck, targetSessionId)) return { enabled: false };
+    const featureState = configOverride || agentFeatureSettingsStore.getSettings(targetSessionId)?.features?.[AGENT_FEATURE_IDS.replyCheck] || {};
     const triggerMode = String(featureState.triggerMode || 'auto').trim() || 'auto';
     if (!force && triggerMode === 'manual') return { enabled: false };
     const modelMode = String(featureState.modelMode || 'none').trim() || 'none';
@@ -27041,25 +27087,31 @@ const initApp = async () => {
     const targetUiMode = resolveUiModeForSession(sid);
     const promptContext = buildChatFormatGuardianModelContext(sid);
     const requestContext = captureRequestContext({ sessionId: sid });
+    const agentContextSnapshot = { ...getAgentConfigContext(sid), archiveId: chatStore.getCurrentArchiveId(sid) || '' };
     const useProfile = modelMode === 'profile' && String(featureState.modelProfileId || '').trim();
-    const backgroundChat = useProfile
-      ? async (messages, options = {}) => {
-        const config = await chatConfigManager.getRuntimeConfigByProfileId(featureState.modelProfileId);
+    if (!useProfile && (!isBridgeConfigured(window.appBridge) || typeof window.appBridge?.backgroundChat !== 'function')) return { enabled: false };
+    // Capture model selection now, before loading disk-backed reply text. Keep an
+    // unused preview/options resolution from producing an unhandled rejection.
+    const modelSnapshot = (async () => {
+      try {
+        const config = useProfile
+          ? await chatConfigManager.getRuntimeConfigByProfileId(featureState.modelProfileId)
+          : (await window.appBridge.resolveRequestRuntimeConfig({ sessionId: sid, uiMode: targetUiMode }))?.config;
         if (!config) throw new Error('Agent 指定模型配置不存在');
         const modelOverride = String(featureState.modelOverride || '').trim();
-        const effectiveConfig = {
+        return { config: {
           ...(modelOverride ? { ...config, model: modelOverride } : config),
           timeout: Math.min(Number(config.timeout) > 0 ? Number(config.timeout) : 240000, 240000),
-        };
-        const { presetContext: _presetContext, ...requestOptions } = options || {};
-        const client = new LLMClient(effectiveConfig);
-        return client.chat(messages, { ...requestOptions, requestContext });
-      }
-      : (...args) => window.appBridge.backgroundChat(...args);
-    if (!useProfile) {
-      if (!isBridgeConfigured(window.appBridge)) return { enabled: false };
-      if (typeof window.appBridge?.backgroundChat !== 'function') return { enabled: false };
-    }
+        } };
+      } catch (error) { return { error }; }
+    })();
+    const backgroundChat = async (messages, options = {}) => {
+      const snapshot = await modelSnapshot;
+      if (snapshot.error) throw snapshot.error;
+      if (!useProfile) return window.appBridge.backgroundChat(messages, { ...options, runtimeConfigOverride: snapshot.config, requestContext });
+      const { presetContext: _presetContext, ...requestOptions } = options || {};
+      return new LLMClient(snapshot.config).chat(messages, { ...requestOptions, requestContext });
+    };
     return {
       enabled: true,
       backgroundChat,
@@ -27068,7 +27120,9 @@ const initApp = async () => {
       enabledFormats: promptContext.enabledFormats,
       formatReminderText: promptContext.formatReminderText,
       formatReminderSections: promptContext.formatReminderSections,
-      customFormatGuide: getSessionFormatGuide(sid),
+      customFormatGuide: configOverride?.formatGuide ?? getSessionFormatGuide(sid),
+      agentConfig: featureState,
+      resolveReferenceContext: ({ targetMessageId, signal } = {}) => agentReferenceRuntime.resolveReference({ config: featureState.context, context: agentContextSnapshot, targetMessageId, signal }),
       reviewNoEvents: targetUiMode === 'chat' && Object.values(promptContext.enabledFormats).some(Boolean),
       force,
       surface: targetUiMode === 'rp'
@@ -27079,7 +27133,7 @@ const initApp = async () => {
       formatTarget: resolveFormatTargetForSession(sid),
       requestOptions: {
         temperature: 0,
-        maxTokens: FORMAT_PATCH_MODEL_MAX_TOKENS,
+        maxTokens: featureState.maxTokens || FORMAT_PATCH_MODEL_MAX_TOKENS,
         presetContext: { sessionId: sid, uiMode: targetUiMode },
       },
       timeoutMs: 60000,
@@ -27091,11 +27145,11 @@ const initApp = async () => {
   const buildChatFormatGuardianOptions = (targetSessionId = '') => {
     const sid = String(targetSessionId || '').trim();
     const activeUser = getActiveUserProfile();
-    const featureState = agentFeatureSettingsStore.getSettings()?.features?.[AGENT_FEATURE_IDS.replyCheck] || {};
+    const featureState = agentFeatureSettingsStore.getSettings(targetSessionId)?.features?.[AGENT_FEATURE_IDS.replyCheck] || {};
     const triggerMode = String(featureState.triggerMode || 'auto').trim() || 'auto';
     const promptContext = buildChatFormatGuardianModelContext(sid);
     return {
-      enabled: agentFeatureSettingsStore.isEnabled(AGENT_FEATURE_IDS.replyCheck) && triggerMode !== 'manual',
+      enabled: agentFeatureSettingsStore.isEnabled(AGENT_FEATURE_IDS.replyCheck, targetSessionId) && triggerMode !== 'manual',
       triggerMode,
       userName: activeUser?.name || '我',
       enabledFormats: promptContext.enabledFormats,
@@ -27140,19 +27194,38 @@ const initApp = async () => {
     logger.debug('maid format profile hydrate skipped', err);
   }
 
+  const getAgentExecutionContext = sid => ({ ...getAgentConfigContext(sid), archiveId: chatStore.getCurrentArchiveId(sid) || '' });
+  const agentReferenceRuntime = createAgentReferenceAppRuntime({
+    getContext: getAgentExecutionContext, getMessages: sid => chatStore.getMessages(sid),
+    getDisplayMessages: (messages, context) => decorateMessagesForDisplay(messages, { sessionId: context.sessionId }),
+    getReasoningBoundaries: context => resolveResolvedPreset(window.appBridge, 'reasoning', { sessionId: context.sessionId, uiMode: context.place === 'writing' ? 'rp' : 'chat' }),
+    getWorldStore: () => window.appBridge.worldStore, getPresetStore: () => presetStore,
+    getResolvedWorldState: (sid, options) => window.appBridge.getResolvedWorldState(sid, options),
+  });
+  const customAgentRequests = createCustomAgentAppRuntime({
+    createClient: config => new LLMClient(config), getProfileConfig: id => chatConfigManager.getRuntimeConfigByProfileId(id),
+    resolveCurrentModel: async context => (await window.appBridge.resolveRequestRuntimeConfig?.({ sessionId: context.sessionId, uiMode: context.place === 'writing' ? 'rp' : 'chat' }))?.config,
+    getContext: getAgentExecutionContext, registry: agentToolRegistry, permissionEvaluator: agentPermissionEvaluator, choosePermission: appChoice,
+  });
+
   // ===== 跳房子编排（创意写作）：板存储 + 单轮运行时；默认关闭，无用户板时沿用固定流程 =====
+  const inputAgentBudget = createInputRequestBudget();
+  const sharedInputBudget = { take: () => inputAgentBudget.take(JSON.stringify([getAgentConfigContext(), chatStore.getCurrentArchiveId?.() || ''])) };
   inputSuggestionComposer = bindInputSuggestionComposer({
     input: ui.inputEl,
     getSettings: () => agentFeatureSettingsStore.getSettings().features[AGENT_FEATURE_IDS.textCompletion],
     getContext: () => ({
       key: `${activePersonaScopeKey}:${uiMode}:${chatStore.getCurrent?.() || ''}:${chatStore.getCurrentArchiveId?.() || ''}`,
       requestContext: captureRequestContext({ sessionId: chatStore.getCurrent?.() }),
+      agentContext: getAgentExecutionContext(),
       active: ['chat', 'rp'].includes(uiMode) && Boolean(chatStore.getCurrent?.()),
     }),
     request: createInputSuggestionRequest({
       getProfileConfig: id => chatConfigManager.getRuntimeConfigByProfileId(id),
       createClient: config => new LLMClient(config),
+      resolveReference: (snapshot, signal) => agentReferenceRuntime.resolveReference({ config: snapshot.settings.context, context: snapshot.agentContext, signal }),
     }),
+    runtimeOptions: { requestBudget: sharedInputBudget },
   });
   hopscotchBoardStore = createScopedHopscotchBoardStore({
     loadKv: name => safeInvoke('load_kv', { name }),
@@ -27183,16 +27256,17 @@ const initApp = async () => {
     listActiveRegexRules: sid => getRegexStore(window.appBridge)?.computeActiveRules?.(window.appBridge?.getRegexContext?.({ sessionId: sid }) || {}) || [],
     listPromptSources: listVariableWorkflowPromptSources,
   });
-  const getHopscotchBoardSettings = (sid = chatStore.getCurrent?.(), place = 'writing') => {
-    const featureState = agentFeatureSettingsStore.getSettings()?.features?.[AGENT_FEATURE_IDS.replyCheck] || {};
+  const getHopscotchBoardSettings = (sid = chatStore.getCurrent?.(), place = 'writing', scope = 'effective') => {
+    const featureState = agentConfigStore.read('reply_check', { ...getAgentConfigContext(sid), place }, scope).config || {};
     return resolveHopscotchBoardSettings({
       settings: appSettings.get(), place,
       replyCheck: {
-        enabled: agentFeatureSettingsStore.isEnabled(AGENT_FEATURE_IDS.replyCheck),
+        enabled: featureState.enabled === true,
         triggerMode: featureState.triggerMode,
+        invocationMode: featureState.invocationMode,
         modelMode: featureState.modelMode,
         modelProfileId: featureState.modelProfileId,
-        hasFormatGuide: Boolean(getSessionFormatGuide(sid)),
+        hasFormatGuide: Boolean(featureState.formatGuide?.trim()),
       },
       autoImageEnabled: isWritingAutoImagePromptEnabled(),
       variableActivity: getVariableWorkflowActivity(sid, { place }),
@@ -27202,18 +27276,59 @@ const initApp = async () => {
     findMessage: (mid, sid) => chatStore.findMessage(mid, sid), resolveTarget: resolveChatFormatRepairTarget,
     getScope: sid => `${activePersonaScopeKey}:${chatStore.getCurrentArchiveId(sid) || ''}`,
     getPlace: sid => resolveUiModeForSession(sid) === 'rp' ? 'writing' : 'chat', getGuide: getSessionFormatGuide,
-    buildOptions: sid => buildManualChatFormatGuardianOptions(sid), createRevision: createFormatPatchRevisionToken,
+    getConfig: sid => agentConfigStore.read('reply_check', getAgentConfigContext(sid)).config,
+    getCurrentSessionId: () => chatStore.getCurrent(),
+    buildOptions: (sid, config) => buildManualChatFormatGuardianOptions(sid, config), createRevision: createFormatPatchRevisionToken,
     runPreview: runChatFormatGuardianPreview,
     onPreview: payload => handleChatFormatGuardianPreview(payload), onRun: payload => handleChatFormatGuardianAgentRun(payload),
     onQueued: payload => handleChatFormatGuardianModelReviewQueued(payload),
     onCompleted: sid => chatFormatRepairActiveSessions.delete(sid), logger,
   });
   const creativeFormatReviewRuntime = createCreativeFormatReviewRuntime({
-    getSettings: () => agentFeatureSettingsStore.getSettings().features[AGENT_FEATURE_IDS.replyCheck],
+    getSettings: sid => agentFeatureSettingsStore.getSettings(sid).features[AGENT_FEATURE_IDS.replyCheck],
     getGuide: getSessionFormatGuide, getPlace: sid => resolveUiModeForSession(sid) === 'rp' ? 'writing' : 'chat',
     getScope: sid => `${activePersonaScopeKey}:${chatStore.getCurrentArchiveId(sid) || ''}`,
     run: runHopscotchFormatReview, sessionAsyncWorkRuntime, logger,
   });
+  const getTextAgentRaw = async (message, sid) => {
+    if (!message) return '';
+    if (isRpSessionId(sid)) return await resolveCreativeFormatRepairRawOriginal(message, sid);
+    return String(message.rawSource ?? message.raw ?? message.content ?? '');
+  };
+  const agentToolsRuntime = createAgentToolsAppRuntime({
+    ui, store: agentConfigStore, budget: sharedInputBudget,
+    toolboxContainer: chatRoom?.querySelector('.chat-action-inline'), toolboxAnchor: stickerToggleBtn,
+    onToolboxOpen: () => { setActionPanelOpen(false); setStickerPanelOpen(false); },
+    getContext: getAgentExecutionContext,
+    getMessages: sid => chatStore.getMessages(sid), findMessage: (mid, sid) => chatStore.findMessage(mid, sid), getRaw: getTextAgentRaw,
+    captureModel: customAgentRequests.captureModel, request: customAgentRequests.request,
+    resolveReference: agentReferenceRuntime.resolveReference, listReferenceSources: agentReferenceRuntime.listSources,
+    listAvailableTools: customAgentRequests.listAvailableTools,
+    commitReply: async ({ job, message, text, sourceSnapshot, canCommit }) => {
+      if (!canCommit()) return false;
+      return ui.actionHandler('edit-assistant-raw', message, { text, source: 'agent_text_edit', sessionId: job.sessionId,
+        sourceSnapshot, canCommit, sourceKind: isRpSessionId(job.sessionId) ? FORMAT_REPAIR_SOURCE_KINDS.creativeRawOriginal : 'bubble_raw' });
+    },
+    notifyReply: ({ title, sessionId, text }) => {
+      if (sessionId === chatStore.getCurrent()) window.toastr?.info?.(t(text || '修改建议待查看'), title, { onclick: () => agentCenterPanel.show({ tab: 'agents' }) });
+    },
+    getEvidence: sid => [
+      ...listVariableWorkflowPromptSources(sid, { place: getAgentConfigContext(sid).place }),
+      ...['description', 'systemPrompt', 'postHistoryInstructions'].map(key => getEffectivePersona(sid)?.[key] || ''),
+      ...(getRegexStore(window.appBridge)?.computeActiveRules?.(window.appBridge?.getRegexContext?.({ sessionId: sid }) || {}) || []).map(rule => rule.findRegex || ''),
+    ],
+    getProfiles: () => chatConfigManager.getProfiles() || [],
+    getDisplaySource: (message, context) => context.sessionId === chatStore.getCurrent()
+      ? decorateMessagesForDisplay(chatStore.getMessages(context.sessionId), { sessionId: context.sessionId }).find(m => m.id === message?.id)?.content : undefined,
+    getReasoningBoundaries: context => resolveResolvedPreset(window.appBridge, 'reasoning', { sessionId: context.sessionId, uiMode: context.place === 'writing' ? 'rp' : 'chat' }),
+    getCurrentModelLabel: async context => String((await window.appBridge.resolveRequestRuntimeConfig?.({ sessionId: context.sessionId, uiMode: context.place === 'writing' ? 'rp' : 'chat' }))?.config?.model || ''),
+    buildFormatPreview: buildChatFormatGuardianPromptPreviewRequest, runFormat: runHopscotchFormatReview,
+    openAgent: (id, options = {}) => agentCenterPanel.show({ tab: 'agents', agentId: id, configure: true, ...options }),
+    openCenter: () => agentCenterPanel.show({ tab: 'agents' }),
+    openFormatResult: () => agentCenterPanel.show({ tab: 'activity' }),
+  });
+  const { textEditRuntime, actions: agentConfigurationActions } = agentToolsRuntime;
+  patchDebugUiRegistry(registry => { Object.assign(registry.actions, agentConfigurationActions); registry.stores.agentConfigStore = agentConfigStore; registry.stores.textEditRuntime = textEditRuntime; registry.stores.agentToolsRuntime = agentToolsRuntime; });
   // 生图房子：等待整组图片任务与回填结束；无提示 → skipped；部分失败 → failed(partial)
   const runHopscotchAutoImage = createHopscotchImageExecutor({
     findMessage: (mid, sid) => chatStore.findMessage(mid, sid),
@@ -27225,6 +27340,7 @@ const initApp = async () => {
     getSettings: () => appSettings.get(),
     boardStore: hopscotchBoardStore,
     resolveWritingSettings: getHopscotchBoardSettings,
+    getTextAgents: (sid, place, scope) => agentConfigStore.list({ ...getAgentConfigContext(sid), place }, scope === 'global' ? 'global' : 'effective').filter(item => item.config.kind === 'text_edit').map(item => item.config),
     getLaneRuntime: () => creativeExecutionLaneRuntime,
     createExecutors: info => createHopscotchExecutors({
       ...info,
@@ -27238,6 +27354,7 @@ const initApp = async () => {
         place: resolveMemoryTablePlace('writing'),
       },
       formatReview: { run: runHopscotchFormatReview, place: 'writing' },
+      textEdit: textEditRuntime,
       image: { run: runHopscotchAutoImage },
       sidecars: createHopscotchSidecarExecutors({
         ...info,
@@ -27325,11 +27442,23 @@ const initApp = async () => {
     getSessionId: () => chatStore.getCurrent?.(),
     getPlace: () => uiMode === 'rp' ? 'writing' : 'chat',
     getProfiles: () => chatConfigManager.getProfiles?.() || [],
-    getInputSuggestion: () => agentFeatureSettingsStore.getSettings().features[AGENT_FEATURE_IDS.textCompletion],
+    getInputSuggestion: target => agentConfigStore.read('text_completion', getAgentConfigContext(), target === 'global' ? 'global' : 'effective').config,
+    getAgentRuns: () => agentToolsRuntime.toolbox.listRuns(),
+    getInputAgents: target => agentConfigStore.list(getAgentConfigContext(), target === 'global' ? 'global' : 'effective').filter(item => item.config.kind === 'input_agent').map(item => item.config),
+    createInputAgent: options => agentConfigurationActions.createInputAgent(options),
+    openInputAgent: (id, options = {}) => {
+      agentCenterPanel.openFloatingAgentCard(id, { ...options, context: getAgentConfigContext() });
+      agentCenterPanel.toggleFloatingAgentCard();
+    },
+    createTextAgent: options => agentConfigurationActions.createTextEditAgent(options),
+    listTextAgents: target => agentConfigStore.list(getAgentConfigContext(), target === 'global' ? 'global' : 'effective').filter(item => item.config.kind === 'text_edit').map(item => item.config),
+    onScopeChange: () => agentCenterPanel.refresh(),
+    openTextAgent: (id, options = {}) => { agentCenterPanel.openFloatingAgentCard(id, { ...options, context: getAgentConfigContext() }); agentCenterPanel.toggleFloatingAgentCard(); },
     openInputSuggestion: () => agentCenterPanel.openFloatingAgentCard(AGENT_FEATURE_IDS.textCompletion),
-    getFormatReview: () => resolveFormatReviewAvailability(agentFeatureSettingsStore.getSettings().features[AGENT_FEATURE_IDS.replyCheck], {
-      place: uiMode === 'rp' ? 'writing' : 'chat', hasFormatGuide: Boolean(getSessionFormatGuide(chatStore.getCurrent())),
-    }),
+    getFormatReview: target => {
+      const config = agentConfigStore.read('reply_check', getAgentConfigContext(), target === 'global' ? 'global' : 'effective').config;
+      return { ...resolveFormatReviewAvailability(config, { place: uiMode === 'rp' ? 'writing' : 'chat', hasFormatGuide: Boolean(config.formatGuide.trim()) }), manualEnabled: allowsAgentInvocation(config, 'manual'), invocationMode: config.invocationMode };
+    },
     openFormatReview: () => agentCenterPanel.openFloatingAgentCard(AGENT_FEATURE_IDS.replyCheck),
     getEnabled: () => appSettings.get().creativeHopscotchEnabled === true,
     enable: value => appSettings.update({ creativeHopscotchEnabled: value === true }),
@@ -27797,6 +27926,7 @@ const initApp = async () => {
       assistantText: inputText,
       formatReminderText,
       customFormatGuide: effectiveFormatHint,
+      agentConfig: modelOptions.agentConfig, referenceContext: modelOptions.referenceContext,
       enabledFormats: formatProfile.enabledFormats,
       parserReport: parserResult,
       userName: modelOptions.userName,
@@ -28198,22 +28328,22 @@ const initApp = async () => {
     },
   });
 
-  const buildManualChatFormatGuardianOptions = (targetSessionId = '') => {
+  const buildManualChatFormatGuardianOptions = (targetSessionId = '', configOverride = null) => {
     const sid = String(targetSessionId || '').trim();
     const activeUser = getActiveUserProfile();
     const base = buildChatFormatGuardianOptions(sid);
-    const featureState = agentFeatureSettingsStore.getSettings()?.features?.[AGENT_FEATURE_IDS.replyCheck] || {};
+    const featureState = configOverride || agentFeatureSettingsStore.getSettings(sid)?.features?.[AGENT_FEATURE_IDS.replyCheck] || {};
     const modelMode = String(featureState.modelMode || 'none').trim() || 'none';
     return {
       ...base,
-      enabled: agentFeatureSettingsStore.isEnabled(AGENT_FEATURE_IDS.replyCheck),
+      enabled: Boolean(configOverride) || agentFeatureSettingsStore.isEnabled(AGENT_FEATURE_IDS.replyCheck, sid),
       manualTrigger: true,
       localOnly: modelMode === 'none',
       showSucceededPreview: false,
       recordSucceededRun: false,
       modelReview: modelMode === 'none'
         ? { enabled: false }
-        : buildChatFormatGuardianModelReviewOptions(sid, activeUser, { force: true }),
+        : buildChatFormatGuardianModelReviewOptions(sid, activeUser, { force: true, configOverride }),
     };
   };
 
@@ -28319,8 +28449,8 @@ const initApp = async () => {
     }
     const baseRevision = createFormatPatchRevisionToken();
     const repairTarget = buildRejectedProtocolRepairTarget(sid, envelope);
-    const featureState = agentFeatureSettingsStore.getSettings()?.features?.[AGENT_FEATURE_IDS.replyCheck] || {};
-    const guardianEnabled = agentFeatureSettingsStore.isEnabled(AGENT_FEATURE_IDS.replyCheck);
+    const featureState = agentFeatureSettingsStore.getSettings(sid)?.features?.[AGENT_FEATURE_IDS.replyCheck] || {};
+    const guardianEnabled = agentFeatureSettingsStore.isEnabled(AGENT_FEATURE_IDS.replyCheck, sid);
     const triggerMode = String(featureState.triggerMode || 'auto').trim() || 'auto';
     const modelMode = String(featureState.modelMode || 'none').trim() || 'none';
     const baseOptions = manualTrigger
@@ -28674,8 +28804,8 @@ const initApp = async () => {
 
   const runManualChatFormatGuardianCheck = async (message = null, targetSessionId = '') => {
     const sid = String(targetSessionId || chatStore.getCurrent() || '').trim();
-    if (!agentFeatureSettingsStore.isEnabled(AGENT_FEATURE_IDS.replyCheck)) {
-      window.toastr?.warning?.('请先在 Agent Center 开启「检查回复格式」');
+    if (!allowsAgentInvocation(agentFeatureSettingsStore.getSettings(sid)?.features?.[AGENT_FEATURE_IDS.replyCheck], 'manual')) {
+      window.toastr?.warning?.(t('请在 Agent Center 启用格式修复，并允许手动调用'));
       return false;
     }
     if (!message || message.role !== 'assistant') return false;
@@ -28710,6 +28840,11 @@ const initApp = async () => {
     ) {
       window.toastr?.warning?.('格式检查 Agent 没有可用模型，请先在 Agent Center 配置');
       return false;
+    }
+    if (options.localOnly !== true) {
+      const result = await runHopscotchFormatReview({ sessionId: sid, messageId: message.id });
+      if (result.status !== 'succeeded') window.toastr?.warning?.(t(result.error || result.reason || '格式复核失败'));
+      return result.status === 'succeeded';
     }
     const repairMessage = {
       ...message,
@@ -28796,6 +28931,14 @@ const initApp = async () => {
       onChatBodyQualityPreview: handleChatFormatGuardianPreview,
       onChatBodyQualityRun: handleChatBodyQualityAgentRun,
     });
+    if (!suppressReplayedFunctionalEffects && !suppressFormatGuardianModelReview && message?.role === 'assistant') {
+      const board = hopscotchTurnRuntime.resolveBoard(targetSessionId, { place: isRpSessionId(targetSessionId) ? 'writing' : 'chat' }).board;
+      void (async () => {
+        for (const house of board?.rows?.flatMap(row => row.houses) || []) {
+          if (house.kind === 'text_edit' && house.enabled !== false) await textEditRuntime.run({ agentId: house.config.agentId, sessionId: targetSessionId, messageId: message.id, signal: formatReviewSignal });
+        }
+      })().catch(error => logger.warn('text edit scheduling failed', error));
+    }
     creativeFormatReviewRuntime.afterReceive({
       message, sessionId: targetSessionId,
       suppressed: suppressReplayedFunctionalEffects || suppressFormatGuardianModelReview,
@@ -31774,6 +31917,16 @@ const initApp = async () => {
     isTargetCurrent: isRealtimeCallTargetCurrent,
     commitUserMessage: commitRealtimeUserMessage,
     commitAssistantMessage: commitRealtimeAssistantMessage,
+    commitLiveTranscript: createLiveTranscriptCommitter({
+      isTargetCurrent: isRealtimeCallTargetCurrent,
+      findMessage: (id, sid) => chatStore.findMessage(id, sid),
+      appendMessage: (message, sid) => chatStore.appendMessage(message, sid),
+      updateMessage: (id, message, sid) => chatStore.updateMessage(id, message, sid),
+      getUser: () => ({ name: getActiveUserProfile()?.name || '我', avatar: getActiveUserAvatar() }),
+      formatTime: formatNowTime,
+      onAdded: (message, target) => { ui.addMessage(message); autoMarkReadIfActive(target.sessionId, message.id); refreshChatAndContacts(); },
+      onUpdated: message => ui.updateMessage(message.id, message),
+    }),
     openVoiceSettings: () => configPanel.show({ tab: 'voice' }),
     onLifecycleInvalidated: () => { realtimeCallLifecycleEpoch += 1; },
     toast: window.toastr,
@@ -32283,6 +32436,12 @@ const initApp = async () => {
         parserReport,
       };
     }
+    if (action === 'text-edit-agent' && message?.role === 'assistant') {
+      const selection = window.getSelection();
+      const selectedText = payload?.wrapper?.contains?.(selection?.anchorNode) && payload?.wrapper?.contains?.(selection?.focusNode) ? selection.toString() : '';
+      agentToolsRuntime.toolbox.open({ messageId: message.id, selectedText });
+      return;
+    }
     if (action === 'check-format' && message?.role === 'assistant') {
       const current = ensureRenderedCancelledPartialPersisted(message) || chatStore.findMessage(message.id, sessionId) || message;
       return runManualChatFormatGuardianCheck(current, sessionId);
@@ -32331,11 +32490,8 @@ const initApp = async () => {
       return true;
     }
     if (action === 'cancel-media-generation') {
-      const controller = chatImageGenerationControllers.get(String(message?.id || ''));
-      if (controller) {
-        controller.abort('cancelled by user');
-        window.toastr?.info?.('已取消图片生成');
-      }
+      const result = chatImageJobs.cancel(String(message?.id || ''), sessionId);
+      if (result.changed) window.toastr?.info?.('已取消图片生成');
       return true;
 	    }
 	    if (action === 'generate-image') {
@@ -32543,6 +32699,9 @@ const initApp = async () => {
           return false;
         }
         sourceSnapshot = activeManualSocialTarget.sourceText;
+      } else if (payload?.source === 'agent_text_edit') {
+        if (!payload.canCommit?.() || await getTextAgentRaw(persistedMessage, sessionId) !== payload.sourceSnapshot) return false;
+        sourceSnapshot = payload.sourceSnapshot;
       } else if (payload?.source === 'maid_body_optimize') {
         const writebackTarget = resolveChatBodyOptimizeWritebackTarget({
           snapshotText: payload?.sourceSnapshot,
@@ -32566,7 +32725,7 @@ const initApp = async () => {
           return false;
         }
       }
-      const functionPayloadValidation = isFormatRepairWrite
+      const functionPayloadValidation = isFormatRepairWrite || payload?.source === 'agent_text_edit'
         ? validateFormatRepairFunctionPayloads({
           originalText: sourceSnapshot,
           candidateText: next,
@@ -32845,9 +33004,10 @@ const initApp = async () => {
 	          meta: mergedMeta,
         };
 	      }
+	      if (payload?.source === 'agent_text_edit' && !payload.canCommit?.()) return false;
 	      const updated = chatStore.updateMessage(message.id, updater, sessionId);
 	      if (updated) {
-	        await executeFormatFunctionSideEffectPlan({
+	        if (payload?.source !== 'agent_text_edit') await executeFormatFunctionSideEffectPlan({
 	          plan: functionSideEffectPlan,
 	          capturedMessages: [{ messageId: message.id, targetSessionId: sessionId }],
 	          fallbackSessionId: sessionId,
