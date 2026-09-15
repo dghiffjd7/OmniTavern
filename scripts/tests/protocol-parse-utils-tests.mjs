@@ -12,14 +12,17 @@ import {
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
 
-test('sanitizeThinkingForProtocolParse keeps raw text when no closing thinking marker exists', () => {
+test('sanitizeThinkingForProtocolParse withholds unfinished thinking from protocol retries', () => {
   assert.equal(
     sanitizeThinkingForProtocolParse('<thinking>abc'),
-    '<thinking>abc',
+    '',
   );
+  const retry = buildProtocolRetryCandidates('<think>MiPhone_start\n格式示例\nMiPhone_end');
+  assert.equal(retry.retryText, '');
+  assert.equal(retry.miPhoneBlock, '');
 });
 
-test('sanitizeThinkingForProtocolParse strips content before the last closing thinking marker', () => {
+test('sanitizeThinkingForProtocolParse accepts orphan closing markers from preset prefills', () => {
   assert.equal(
     sanitizeThinkingForProtocolParse('head</thinking>tail'),
     'tail',
@@ -28,6 +31,18 @@ test('sanitizeThinkingForProtocolParse strips content before the last closing th
     sanitizeThinkingForProtocolParse('a</thinking>b</think>tail'),
     'tail',
   );
+});
+
+test('sanitizeThinkingForProtocolParse removes only standard blocks and preserves surrounding text', () => {
+  assert.equal(sanitizeThinkingForProtocolParse('head<THINKING mode="x">分析</THINKING>tail'), 'headtail');
+  for (const literal of [
+    '<thinking_notes>自定义内容</thinking_notes>',
+    '<think-example>示例</think-example>',
+    '&lt;thinking&gt;转义标签&lt;/thinking&gt;',
+    '<我和小雨的私聊>小雨--引用 <thinking>原文</thinking> 和 </think>--13:40</我和小雨的私聊>',
+  ]) {
+    assert.equal(sanitizeThinkingForProtocolParse(literal), literal);
+  }
 });
 
 test('normalizeMiPhoneMarkers normalizes html-escaped and angle-bracket markers', () => {
@@ -54,6 +69,11 @@ test('extractMiPhoneBlock returns the first bounded block and tolerates missing 
     extractMiPhoneBlock('no markers'),
     '',
   );
+});
+
+test('extractMiPhoneBlock retains later shells so an empty first shell cannot hide the reply', () => {
+  const shells = 'MiPhone_start\nMiPhone_end\nMiPhone_start\n可提取的后续块\nMiPhone_end';
+  assert.equal(extractMiPhoneBlock('prefix\n' + shells + '\n<tableEdit>tail</tableEdit>'), shells);
 });
 
 test('buildProtocolRetryCandidates composes thinking cleanup and MiPhone block extraction', () => {

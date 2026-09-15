@@ -180,7 +180,6 @@ export const createRuntimeIssueReporter = ({
   logger = null,
   documentLike = typeof document !== 'undefined' ? document : null,
   windowLike = typeof window !== 'undefined' ? window : null,
-  getRuntimeReady = () => false,
   nowFn = () => Date.now(),
   setTimeoutFn = typeof setTimeout === 'function' ? setTimeout : null,
   clearTimeoutFn = typeof clearTimeout === 'function' ? clearTimeout : null,
@@ -262,11 +261,10 @@ export const createRuntimeIssueReporter = ({
   };
 
   const reportGlobalRuntimeIssue = (err, label = 'Runtime error') => {
-    if (getRuntimeReady?.()) {
-      reportRuntimeToast(err, label);
-      return;
-    }
-    reportFatalError(err, label);
+    // Preset/Worker callbacks can fail while initApp is still progressing.
+    // Their timing does not make the boot fatal. The awaited boot flow reports
+    // an actual initialization failure explicitly through reportFatalError.
+    reportRuntimeToast(err, label);
   };
 
   return {

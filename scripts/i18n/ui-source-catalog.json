@@ -945,6 +945,7 @@
       "src/scripts/ui/agent-reference-editor.js#ui-call",
       "src/scripts/ui/agent-reference-editor.js#ui-definition",
       "src/scripts/ui/app.js#dom-assignment",
+      "src/scripts/ui/chat/text-fragment-editor.js#ui-call",
       "src/scripts/ui/maid-settings-panel.js#dom-assignment"
     ]
   },
@@ -3338,7 +3339,8 @@
   {
     "source": "保存修改",
     "references": [
-      "src/scripts/ui/agent-center-panel.js#html-text"
+      "src/scripts/ui/agent-center-panel.js#html-text",
+      "src/scripts/ui/chat/text-fragment-editor.js#ui-call"
     ]
   },
   {
@@ -4122,6 +4124,12 @@
     ]
   },
   {
+    "source": "编辑片段",
+    "references": [
+      "src/scripts/ui/chat/text-fragment-editor.js#ui-call"
+    ]
+  },
+  {
     "source": "编辑启用项的附加字段；停用项保留在列表。生成参数仍由预设管理，原值保留供整理。",
     "references": [
       "src/scripts/ui/request-params-panel.js#ui-call"
@@ -4131,6 +4139,12 @@
     "source": "编辑思维链",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "编辑所选文字",
+    "references": [
+      "src/scripts/ui/chat/bubble-text-selection.js#ui-call"
     ]
   },
   {
@@ -8554,6 +8568,12 @@
     ]
   },
   {
+    "source": "当前回复 · 所选文字",
+    "references": [
+      "src/scripts/ui/chat/text-fragment-editor.js#ui-call"
+    ]
+  },
+  {
     "source": "当前回复没有可提取的显示正文，请选择另一条回复或指定范围",
     "references": [
       "src/scripts/ui/chat/agent-rendered-body.js#ui-definition"
@@ -12104,6 +12124,12 @@
     "source": "对象({value})",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "对照原文",
+    "references": [
+      "src/scripts/ui/chat/text-fragment-editor.js#ui-call"
     ]
   },
   {
@@ -19155,6 +19181,12 @@
     ]
   },
   {
+    "source": "仅替换所选文字",
+    "references": [
+      "src/scripts/ui/chat/text-fragment-editor.js#ui-call"
+    ]
+  },
+  {
     "source": "仅替换选定范围",
     "references": [
       "src/scripts/agent/text-edit-runtime.js#ui-definition"
@@ -24529,6 +24561,12 @@
     ]
   },
   {
+    "source": "片段编辑不能新增或修改功能标签，请使用小铅笔编辑原文",
+    "references": [
+      "src/scripts/ui/chat/bubble-selection-edit-runtime.js#ui-call"
+    ]
+  },
+  {
     "source": "频率限制的统计窗口；0 不启用。",
     "references": [
       "src/scripts/ui/general-settings-panel.js#ui-property"
@@ -26874,6 +26912,7 @@
       "src/scripts/ui/chat/code-viewer-ui-utils.js#dom-assignment",
       "src/scripts/ui/chat/inline-edit-ui-utils.js#html-attribute",
       "src/scripts/ui/chat/selection-mode-ui-utils.js#dom-assignment",
+      "src/scripts/ui/chat/text-fragment-editor.js#ui-call",
       "src/scripts/ui/config-panel.js#html-text",
       "src/scripts/ui/contact-group-renderer.js#html-text",
       "src/scripts/ui/contact-settings-panel.js#html-text",
@@ -26913,6 +26952,7 @@
   {
     "source": "取消编辑",
     "references": [
+      "src/scripts/ui/chat/text-fragment-editor.js#ui-call",
       "src/scripts/ui/maid-settings-panel.js#html-text"
     ]
   },
@@ -33014,6 +33054,12 @@
     ]
   },
   {
+    "source": "所选文字无法准确对应原文，请缩小选区或使用小铅笔编辑",
+    "references": [
+      "src/scripts/ui/chat/bubble-selection-edit-runtime.js#ui-call"
+    ]
+  },
+  {
     "source": "所有 FC/JSON 本机成功计数、冷却与熔断状态都会清除；官方内建能力目录与手动本地规则不会被删除。",
     "references": [
       "src/scripts/ui/chat-fc-compatibility-panel.js#ui-property"
@@ -36569,6 +36615,12 @@
     ]
   },
   {
+    "source": "我的消息 · 所选文字",
+    "references": [
+      "src/scripts/ui/chat/text-fragment-editor.js#ui-call"
+    ]
+  },
+  {
     "source": "我来创建 {value} 个聊天室。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -37658,6 +37710,12 @@
     ]
   },
   {
+    "source": "消息、回复分支或存档已变化，请重新选择文字",
+    "references": [
+      "src/scripts/ui/chat/bubble-selection-edit-runtime.js#ui-call"
+    ]
+  },
+  {
     "source": "消息编辑处理器未就绪",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -38521,6 +38579,12 @@
     ]
   },
   {
+    "source": "修改后的原文过长，请缩短片段",
+    "references": [
+      "src/scripts/ui/chat/bubble-selection-edit-runtime.js#ui-call"
+    ]
+  },
+  {
     "source": "修改建议待查看",
     "references": [
       "src/scripts/agent/text-edit-runtime.js#ui-definition",
@@ -38587,6 +38651,12 @@
     "source": "修改文本：选择回复正文并生成修改建议，确认后替换。自定义提示词：独立执行任务，结果可供后续房子引用。",
     "references": [
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "修改文字",
+    "references": [
+      "src/scripts/ui/chat/text-fragment-editor.js#ui-call"
     ]
   },
   {

@@ -4,6 +4,14 @@ import { emitDebugLog } from '../utils/debug-log.js';
 import { serializeForInlineScript } from '../utils/inline-script.js';
 import { buildMacroEngineRuntimeSource } from '../utils/macro-engine.js';
 import { createSillyTavernMacroApi } from '../utils/macro-compat-api.js';
+import { createPresetRequestWorker } from './preset-request-worker.js';
+import { toScriptPreset, fromScriptPreset, mergeScriptPresetChanges, createPresetScriptApi } from './preset-script-api.js';
+import { runScriptGeneration } from './script-generation.js';
+import { patchScriptUiChildren } from './script-ui-dom.js';
+import {
+  PresetRequestTransport, isCreativePresetRequest, makePresetRequestBody,
+  applyPresetRequestBody, createPresetGenerationClient,
+} from './preset-request-transport.js';
 import {
   analyzeScriptCompatibility,
   buildScriptRuntimeErrorDiagnostic,
@@ -29,9 +37,13 @@ const getScriptDiagnosticRevision = (value) => {
 const buildWorkerScript = () => `
 const scripts = new Map();
 let currentContext = { sessionId: '', personaId: '', presetId: '', presetIds: [], worldId: '', worldIds: [] };
+let pendingScriptSync = Promise.resolve();
 let currentSettings = { allowReadMessages: true, allowModifyVariables: true, allowNetwork: false };
 ${buildMacroEngineRuntimeSource()}
 ${createSillyTavernMacroApi.toString()}
+${createPresetRequestWorker.toString()}
+${toScriptPreset.toString()}
+${createPresetScriptApi.toString()}
 const DISPATCH_RESULT_LIMIT = ${SCRIPT_PAYLOAD_LIMIT};
 let seq = 0;
 const pending = new Map();
@@ -288,6 +300,8 @@ const warnNetworkDenied = (kind, url = '') => {
   callRpc('log', { level: 'warn', args: ['脚本网络已禁用，阻止加载', kind, String(url || '')] }).catch(() => {});
 };
 const guardedFetch = (...args) => {
+  const internal = presetRequestWorker.interceptFetch(...args);
+  if (internal) return internal;
   const input = args[0];
   const url = String(input?.url || input || '').trim();
   if (currentSettings.allowNetwork !== true) {
@@ -297,6 +311,15 @@ const guardedFetch = (...args) => {
   if (!nativeFetch) return Promise.reject(new TypeError('fetch is unavailable'));
   return nativeFetch(...args);
 };
+const presetRequestWorker = createPresetRequestWorker({
+  send: value => postMessage(value),
+  getFetch: () => self.fetch,
+  getBaseFetch: () => guardedFetch,
+  getContext: () => currentContext,
+  waitUntilReady: () => pendingScriptSync,
+  dispatch: (event, payload) => dispatchEvent(event, payload, true),
+});
+let compatFetchInstalled = false;
 
 const wrapNativeNetworkObject = (target, guardedConstructor) => new Proxy(target, {
   get(obj, prop) {
@@ -1292,6 +1315,9 @@ const COMPAT_UI_LISTENER_EVENTS = new Set([
   'keydown',
   'keyup',
   'input',
+  'compositionstart',
+  'compositionupdate',
+  'compositionend',
   'change',
   'submit',
 ]);
@@ -1355,7 +1381,7 @@ const collectCompatUiAttributes = (node) => {
     if (node?.[key] !== undefined && node?.[key] !== null && node?.[key] !== '') attrs[key] = String(node[key]);
   });
   const tag = getCompatTagName(node);
-  if ((tag === 'input' || tag === 'textarea' || tag === 'select' || tag === 'option') && node.value != null && node.value !== '') {
+  if ((tag === 'input' || tag === 'select' || tag === 'option') && node.value != null && node.value !== '') {
     attrs.value = String(node.value);
   }
   if (tag === 'input' || tag === 'option') {
@@ -1385,6 +1411,7 @@ const serializeCompatUiNode = (node, depth = 0) => {
   const attrText = serializeCompatUiAttributeText(node);
   const styleText = node.style?.cssText ? ' style="' + escapeCompatHtml(node.style.cssText) + '"' : '';
   if (COMPAT_VOID_TAGS.has(tag)) return '<' + tag + attrText + styleText + '>';
+  if (tag === 'textarea') return '<' + tag + attrText + styleText + '>' + escapeCompatHtml(node.value ?? '') + '</' + tag + '>';
   const childList = Array.isArray(node.childNodes) ? node.childNodes : [];
   const children = childList.length
     ? childList.map(child => serializeCompatUiNode(child, depth + 1)).join('')
@@ -2168,6 +2195,12 @@ const makeCompatDocument = () => {
       node.ownerDocument = document;
       return node;
     },
+    createElementNS(namespaceURI, qualifiedName) {
+      const node = document.createElement(qualifiedName);
+      node.namespaceURI = namespaceURI == null ? null : String(namespaceURI);
+      node.localName = String(qualifiedName).split(':').at(-1);
+      return node;
+    },
     createTextNode(text = '') {
       const node = makeCompatTextNode(text);
       node.ownerDocument = document;
@@ -2373,6 +2406,9 @@ const EVENT_TYPES = {
   MESSAGE_SENT: 'message.after_send',
   MESSAGE_SWIPED: 'message.swiped',
   CHARACTER_MESSAGE_RENDERED: 'message.after_render',
+  CHAT_COMPLETION_PROMPT_READY: 'chat_completion_prompt_ready',
+  CHAT_COMPLETION_SETTINGS_READY: 'chat_completion_settings_ready',
+  OAI_PRESET_CHANGED_AFTER: 'preset.changed',
 };
 
 Object.assign(self.tavern_events, EVENT_TYPES);
@@ -2673,7 +2709,7 @@ const buildCompatCharacters = () => {
   }];
 };
 
-const getPreset = () => {
+const getRawPreset = () => {
   const preset = currentContext.activePreset && typeof currentContext.activePreset === 'object'
     ? currentContext.activePreset
     : {};
@@ -2687,6 +2723,12 @@ const getPreset = () => {
     prompts_unused: Array.isArray(preset.prompts_unused) ? preset.prompts_unused : [],
   };
 };
+
+const presetScriptApi = createPresetScriptApi({
+  getContext: () => currentContext, callRpc, clone,
+  updateContext: context => { currentContext = { ...currentContext, ...context }; ensureSillyTavern(); scheduleCompatUiFlush(); },
+});
+const getPreset = presetScriptApi.getPreset;
 
 const getPromptIdentifier = (prompt = {}, fallback = '') => {
   const candidates = [prompt.identifier, prompt.id, prompt.prompt_id, prompt.promptId, prompt.name, prompt.title, fallback];
@@ -2852,7 +2894,7 @@ const buildCompatChatCompletionSettings = () => ({
   ...(currentContext.chatCompletionSettings && typeof currentContext.chatCompletionSettings === 'object'
     ? currentContext.chatCompletionSettings
     : {}),
-  prompts: getPreset().prompts,
+  prompts: getRawPreset().prompts,
 });
 
 const saveCompatChatCompletionSettings = (settings) => {
@@ -2864,7 +2906,7 @@ const saveCompatChatCompletionSettings = (settings) => {
     ? settings
     : buildCompatChatCompletionSettings();
   const snapshot = clone(source);
-  const preset = getPreset();
+  const preset = getRawPreset();
   currentContext.chatCompletionSettings = snapshot;
   currentContext.activePreset = {
     ...preset,
@@ -3126,7 +3168,7 @@ const ensureCompatGlobals = () => {
   self.document.defaultView = self.window || self;
   if (!self.navigator) self.navigator = { userAgent: 'ChatApp ScriptRuntime' };
   if (!self.location) self.location = { href: '', origin: '' };
-  self.fetch = guardedFetch;
+  if (!compatFetchInstalled) { self.fetch = guardedFetch; compatFetchInstalled = true; }
   self.XMLHttpRequest = GuardedXMLHttpRequest;
   self.WebSocket = GuardedWebSocket;
   self.importScripts = guardedImportScripts;
@@ -3213,6 +3255,11 @@ const ensureCompatGlobals = () => {
   if (typeof self.getChatWorldbookName !== 'function') self.getChatWorldbookName = getChatWorldbookName;
   if (typeof self.getWorldbook !== 'function') self.getWorldbook = getWorldbook;
   if (typeof self.getPreset !== 'function') self.getPreset = getPreset;
+  Object.assign(self, presetScriptApi);
+  if (typeof self.generate !== 'function') self.generate = config => callRpc('generation.generate', { config: clone(config || {}), sessionId: currentContext.sessionId });
+  self.builtin ||= {};
+  self.builtin.reloadAndRenderChatWithoutEvents = () => callRpc('chat.reloadCurrent', { sessionId: currentContext.sessionId });
+  self.builtin.copyText = text => callRpc('ui.copyText', { text: String(text || '') });
   if (typeof self.generateRaw !== 'function') self.generateRaw = generateRaw;
   if (typeof self.isPresetPlaceholderPrompt !== 'function') self.isPresetPlaceholderPrompt = isPresetPlaceholderPrompt;
   if (typeof self.isPresetSystemPrompt !== 'function') self.isPresetSystemPrompt = isPresetSystemPrompt;
@@ -3816,7 +3863,7 @@ const scheduleDataFlush = (() => {
       if (entry) {
         callRpc('script.updateData', {
           scriptId,
-          data: entry.data,
+          data: clone(entry.script?.data || {}),
           scope: entry.record?.scope || '',
           scopeId: entry.record?.scopeId || '',
         }).catch(() => {});
@@ -3974,6 +4021,7 @@ const compileScript = (record) => {
     legacyHandlerMap.set(cb, wrapped);
     on(name, wrapped);
     notifyListener(name);
+    return { stop: () => off(name, wrapped) };
   };
   const eventRemoveListener = (event, cb) => {
     const name = String(event || '').trim();
@@ -3992,6 +4040,52 @@ const compileScript = (record) => {
     scopeId: record.scopeId || '',
     data: makeDataProxy(record.id, clone(record.data || {})),
   };
+  const buttonNames = new Set();
+  const scriptButtons = [];
+  const scoped = {
+    ...presetScriptApi,
+    getScriptId: buttonApi.getScriptId,
+    eventOn,
+    eventMakeFirst: (name, callback) => {
+      const subscription = eventOn(name, callback);
+      const list = handlers.get(name);
+      if (list?.length > 1) list.unshift(list.pop());
+      return subscription;
+    },
+    getButtonEvent: name => {
+      const event = 'script_button:' + record.id + ':' + name;
+      if (!buttonNames.has(name)) {
+        buttonNames.add(name);
+        buttonApi.eventOnButton(name, () => {
+          for (const callback of [...(handlers.get(event) || [])]) runCompatCallback(() => callback({ args: [] }));
+        });
+      }
+      return event;
+    },
+    appendInexistentScriptButtons: buttons => {
+      for (const button of buttons || []) if (!scriptButtons.some(item => item.name === button.name)) scriptButtons.push(clone(button));
+      return buttonApi.replaceScriptButtons(record.id, scriptButtons);
+    },
+    getVariables: option => String(option?.type || option?.scope || '').toLowerCase() === 'script'
+      ? clone(script.data) : getVariables(option),
+    replaceVariables: (value, option = {}) => {
+      if (typeof value === 'string') return replaceVariables(value);
+      if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('变量必须是对象');
+      if (currentSettings.allowModifyVariables !== true) throw new Error('脚本权限已禁用：修改变量');
+      if (option.type === 'script' || option.scope === 'script') {
+        script.data = makeDataProxy(record.id, clone(value));
+        return callRpc('script.updateData', { scriptId: record.id, data: clone(script.data), scope: record.scope, scopeId: record.scopeId });
+      }
+      const scope = normalizeCompatVariableScope(option);
+      const targetKey = getCompatVariableContextKey(scope);
+      currentContext[targetKey] = clone(value);
+      if (scope === 'chat') currentContext.variables = clone(value);
+      return callRpc('variables.replace', { value: clone(value), scope, sessionId: currentContext.sessionId });
+    },
+    generate: config => callRpc('generation.generate', { config: clone(config || {}), sessionId: currentContext.sessionId, scriptId: record.id }),
+    stopGenerationById: generationId => callRpc('generation.stop', { generationId, scriptId: record.id, sessionId: currentContext.sessionId }),
+  };
+  const scopedGlobal = new Proxy(self, { get: (target, key) => Object.hasOwn(scoped, key) ? scoped[key] : target[key] });
   let defaultHandler = null;
   // schemaOnly 脚本不执行代码，仅保留记录（Schema 已在导入时静态解析）
   if (record.schemaOnly === true) {
@@ -4017,7 +4111,8 @@ const compileScript = (record) => {
       'eventOnButton',
       'getTavernRegexes',
       'replaceTavernRegexes',
-      code,
+      '__scriptGlobals',
+      'with (__scriptGlobals) { return (function () {\\n' + code + '\\n}).call(this); }',
     );
     const __import = (url) => runImport(url, getOrigin());
     self.__chatappScriptOn = on;
@@ -4037,6 +4132,7 @@ const compileScript = (record) => {
       buttonApi.eventOnButton,
       getTavernRegexes,
       replaceTavernRegexes,
+      { ...scoped, globalThis: scopedGlobal },
     );
     if (typeof module.exports === 'function') defaultHandler = module.exports;
     else if (module.exports && typeof module.exports.default === 'function') defaultHandler = module.exports.default;
@@ -4143,6 +4239,7 @@ const dispatchEvent = async (eventName, payload, allowMutate = true) => {
 
 self.onmessage = async (e) => {
   const msg = e?.data || {};
+  if (presetRequestWorker.handle(msg)) return;
   if (msg.type === 'rpc_result' || msg.type === 'rpc_error') {
     const pendingItem = pending.get(msg.id);
     if (!pendingItem) return;
@@ -4165,28 +4262,34 @@ self.onmessage = async (e) => {
     return;
   }
   if (msg.type === 'sync') {
-    const list = Array.isArray(msg.scripts) ? msg.scripts : [];
-    scripts.clear();
-    listenedEvents.clear();
-    scriptButtonHandlers.clear();
-    resetCompatDocumentForSync();
-    postMessage({ type: 'ui_reset' });
-    if (msg.settings && typeof msg.settings === 'object') {
-      currentSettings = { ...currentSettings, ...msg.settings };
-    }
-    if (msg.context && typeof msg.context === 'object') {
-      currentContext = { ...currentContext, ...msg.context };
-    }
-    ensureCompatGlobals();
-    await refreshSillyTavernChat();
-    await refreshTavernRegexes();
-    list.forEach(item => {
-      const record = { ...item };
-      record.enabled = item.enabled === true;
-      scripts.set(record.id, compileScript(record));
+    // Requests arriving during async chat/regex refresh must wait until the
+    // scripts have installed their middleware. Serialize overlapping reloads.
+    pendingScriptSync = pendingScriptSync.catch(() => {}).then(async () => {
+      const list = Array.isArray(msg.scripts) ? msg.scripts : [];
+      self.fetch = guardedFetch;
+      scripts.clear();
+      listenedEvents.clear();
+      scriptButtonHandlers.clear();
+      resetCompatDocumentForSync();
+      postMessage({ type: 'ui_reset' });
+      if (msg.settings && typeof msg.settings === 'object') {
+        currentSettings = { ...currentSettings, ...msg.settings };
+      }
+      if (msg.context && typeof msg.context === 'object') {
+        currentContext = { ...currentContext, ...msg.context };
+      }
+      ensureCompatGlobals();
+      await refreshSillyTavernChat();
+      await refreshTavernRegexes();
+      list.forEach(item => {
+        const record = { ...item };
+        record.enabled = item.enabled === true;
+        scripts.set(record.id, compileScript(record));
+      });
+      postMessage({ type: 'sync_done' });
+      scheduleCompatUiFlush();
     });
-    postMessage({ type: 'sync_done' });
-    scheduleCompatUiFlush();
+    await pendingScriptSync;
     return;
   }
   if (msg.type === 'context') {
@@ -5163,8 +5266,13 @@ export class ScriptRuntime {
     this.worker = null;
     this.iframeRuntime = new ScriptIframeRuntime(this);
     this.pending = new Map();
+    this.presetRequestTransport = new PresetRequestTransport({
+      post: value => this.worker?.postMessage(value),
+      onTimeout: () => this.restartWorker('预设请求处理超时，脚本运行器已重启'),
+    });
     this.variableScopeWriteQueues = new Map();
     this.presetSettingsWriteQueues = new Map();
+    this.scriptGenerations = new Map();
     this.seq = 0;
     this.oneTimeScripts = new Map();
     this.listenerEvents = new Set();
@@ -5191,6 +5299,7 @@ export class ScriptRuntime {
     this.uiHasRendered = false;
     this.uiNativeStateRevision = 0;
     this.uiNativeStatePending = new Map();
+    this.uiComposingNodeIds = new Set();
     this.uiPerformanceSamples = [];
     // worker 预热期（脚本编译中）：dispatch 超时放宽，避免大脚本冷启动触发超时重启风暴。
     this.workerWarmingUp = false;
@@ -5265,6 +5374,9 @@ export class ScriptRuntime {
         'keydown',
         'keyup',
         'input',
+        'compositionstart',
+        'compositionupdate',
+        'compositionend',
         'change',
         'toggle',
         'submit',
@@ -5355,6 +5467,7 @@ export class ScriptRuntime {
     this.uiHasRendered = false;
     this.uiNativeStateRevision = 0;
     this.uiNativeStatePending.clear();
+    this.uiComposingNodeIds.clear();
     if (this.uiClickGuardTimer) {
       clearTimeout(this.uiClickGuardTimer);
       this.uiClickGuardTimer = 0;
@@ -5729,6 +5842,8 @@ export class ScriptRuntime {
       const node = nodes.get(nodeId);
       if (!node) return;
       if ('open' in (state || {}) && 'open' in node) node.open = state.open === true;
+      if ('value' in (state || {}) && 'value' in node && node.type !== 'file') node.value = state.value;
+      if ('checked' in (state || {}) && 'checked' in node) node.checked = state.checked === true;
     });
   }
 
@@ -5754,26 +5869,28 @@ export class ScriptRuntime {
     const shadow = this.ensureUiRoot();
     if (!shadow) return;
     try {
-      shadow.replaceChildren();
+      const next = document.createDocumentFragment();
       const baseStyle = document.createElement('style');
       baseStyle.textContent = this.getWorkerUiBaseCss();
-      shadow.appendChild(baseStyle);
+      next.appendChild(baseStyle);
       styles.forEach((css) => {
         const style = document.createElement('style');
         style.textContent = css;
-        shadow.appendChild(style);
+        next.appendChild(style);
       });
       const surface = document.createElement('div');
       surface.className = 'chatapp-script-ui-surface';
       surface.innerHTML = roots.join('');
       this.applyPendingNativeUiState(surface, workerStateRevision);
-      shadow.appendChild(surface);
+      next.appendChild(surface);
+      patchScriptUiChildren(shadow, next, { composing: this.uiComposingNodeIds });
+      const renderedSurface = shadow.querySelector('.chatapp-script-ui-surface');
       const firstLayout = !this.uiHasRendered;
       this.uiHasRendered = true;
       this.recordUiPerformanceSample({
         type: 'render',
         durationMs: this.getUiPerformanceNow() - startedAt,
-        renderedNodeCount: surface.querySelectorAll('[data-chatapp-virtual-node-id]').length,
+        renderedNodeCount: renderedSurface.querySelectorAll('[data-chatapp-virtual-node-id]').length,
         registeredNodeCount: Number(workerPerf?.registeredNodeCount || 0) || 0,
         htmlLength: Number(workerPerf?.htmlLength || 0) || roots.reduce((sum, item) => sum + item.length, 0),
         rootCount: roots.length,
@@ -5826,6 +5943,9 @@ export class ScriptRuntime {
       'pointerId',
       'pointerType',
       'isPrimary',
+      'data',
+      'inputType',
+      'isComposing',
     ].forEach((key) => {
       if (event[key] !== undefined) payload[key] = event[key];
     });
@@ -5867,6 +5987,8 @@ export class ScriptRuntime {
     if (needsImmediateLayout) this.postWorkerUiLayout({ nodeIds: layoutNodeIds });
     else this.scheduleWorkerUiLayoutSync({ nodeIds: layoutNodeIds });
     const eventPayload = this.collectUiEventPayload(event, target);
+    if (event.type === 'compositionstart') this.uiComposingNodeIds.add(nodeId);
+    if (event.type === 'compositionend') this.uiComposingNodeIds.delete(nodeId);
     const traceStartedAt = ['click', 'dblclick', 'input', 'change', 'toggle', 'submit', 'keydown', 'keyup'].includes(event.type)
       ? this.getUiPerformanceNow()
       : null;
@@ -5876,6 +5998,13 @@ export class ScriptRuntime {
       this.uiNativeStatePending.set(nodeId, {
         revision: nativeStateRevision,
         open: eventPayload.open === true,
+      });
+    } else if (['input', 'change', 'compositionstart', 'compositionend'].includes(event.type) && 'value' in eventPayload) {
+      nativeStateRevision = ++this.uiNativeStateRevision;
+      this.uiNativeStatePending.set(nodeId, {
+        revision: nativeStateRevision,
+        value: eventPayload.value,
+        ...('checked' in eventPayload ? { checked: eventPayload.checked } : {}),
       });
     }
     this.worker?.postMessage({
@@ -5959,6 +6088,9 @@ export class ScriptRuntime {
 
   restartWorker(reason = '') {
     const msg = String(reason || '脚本运行器已重启');
+    this.presetRequestTransport.reset(new Error(msg));
+    for (const generation of this.scriptGenerations.values()) generation.controller.abort();
+    this.scriptGenerations.clear();
     try {
       this.worker?.terminate?.();
     } catch {}
@@ -5977,6 +6109,31 @@ export class ScriptRuntime {
   getSessionSettings(sessionId) {
     if (!this.chatStore?.getSessionSettings) return {};
     return this.chatStore.getSessionSettings(sessionId) || {};
+  }
+
+  async prepareCreativeRequest({ messages, options, config, presetContext, context = {},
+    purpose = 'reply', presetSnapshot = null, preview = false, client }) {
+    if (!isCreativePresetRequest({ presetContext, context, purpose })
+      || !this.isEnabled(presetContext.sessionId) || !this.worker
+      || this.presets?.state?.enabled?.openai === false) return null;
+    const resolved = presetSnapshot || this.presets?.getResolvedActive?.('openai', presetContext);
+    const presetId = String(resolved?.presetId || '');
+    const preset = resolved?.preset || {};
+    const once = this.oneTimeScripts.get(presetContext.sessionId);
+    const authorized = (this.store?.getScripts?.('preset', presetId) || []).some(script =>
+      (script.enabled === true && script.authorized === true) || once?.has(script.id));
+    const spreset = authorized ? preset.extensions?.SPreset : null;
+    const session = await this.presetRequestTransport.prepare({
+      body: makePresetRequestBody(messages, options, config, Boolean(config.stream)),
+      stream: Boolean(config.stream), preview, sessionId: presetContext.sessionId, presetId,
+      preset: { prompts: preset.prompts || [], prompt_order: preset.prompt_order || [] },
+      spreset: spreset ? clonePlain(spreset) : null,
+      provider: { provider: config.provider, model: config.model },
+    }, { signal: options.signal });
+    if (session.bypass) return { messages, options, client, session };
+    const prepared = applyPresetRequestBody(session.body, options, config);
+    return { ...prepared, session,
+      client: preview ? client : createPresetGenerationClient({ client, session, config }) };
   }
 
   isEnabled(sessionId) {
@@ -6079,20 +6236,23 @@ export class ScriptRuntime {
     const activeOpenAiPreset = resolvedOpenAiState?.preset || this.presets?.getActive?.('openai') || {};
     const activeOpenAiPresetId = String(resolvedOpenAiState?.presetId || resolvedOpenAI?.presetId || this.presets?.getActiveId?.('openai') || '').trim();
     const chatCompletionSettings = clonePlain(activeOpenAiPreset) || {};
-    const activePresetPrompts = Array.isArray(activeOpenAiPreset?.prompts)
-      ? clonePlain(activeOpenAiPreset.prompts)
-      : [];
-    const activePreset = {
+    const presetView = preset => ({
       id: activeOpenAiPresetId,
-      name: String(activeOpenAiPreset?.name || ''),
-      prompts: activePresetPrompts,
-      prompt_order: Array.isArray(activeOpenAiPreset?.prompt_order)
-        ? clonePlain(activeOpenAiPreset.prompt_order)
+      name: String(preset?.name || ''),
+      ...Object.fromEntries(['temperature', 'top_p', 'top_k', 'max_tokens', 'openai_max_tokens',
+        'frequency_penalty', 'presence_penalty', 'seed', 'stream_openai']
+        .filter(key => preset?.[key] !== undefined).map(key => [key, preset[key]])),
+      prompts: Array.isArray(preset?.prompts) ? clonePlain(preset.prompts) : [],
+      prompt_order: Array.isArray(preset?.prompt_order)
+        ? clonePlain(preset.prompt_order)
         : [],
-      prompts_unused: Array.isArray(activeOpenAiPreset?.prompts_unused)
-        ? clonePlain(activeOpenAiPreset.prompts_unused)
+      prompts_unused: Array.isArray(preset?.prompts_unused)
+        ? clonePlain(preset.prompts_unused)
         : [],
-    };
+    });
+    const activePreset = presetView(activeOpenAiPreset);
+    const inUseRegexes = this.presets?.getInUsePresetRegexOverrides?.('openai', { sessionId: sid, uiMode });
+    const savedPresetRegexes = this.getPresetTavernRegexes(activeOpenAiPresetId);
     const localVariables = variableRuntimeEnabled && sid && this.chatStore?.listVariables
       ? (this.chatStore.listVariables(sid) || {})
       : {};
@@ -6129,10 +6289,14 @@ export class ScriptRuntime {
       worldIds,
       worldbookNames,
       activePreset,
+      savedPreset: inUseRegexes
+        ? presetView(this.presets?.state?.presets?.openai?.[activeOpenAiPresetId] || activeOpenAiPreset) : null,
+      savedPresetRegexes,
       chatCompletionSettings,
       presetPrompts: activePreset.prompts,
-      presetRegexes: this.getPresetTavernRegexes(activeOpenAiPresetId),
+      presetRegexes: inUseRegexes ? this.getPresetTavernRegexes(activeOpenAiPresetId, sid) : savedPresetRegexes,
       presetName: activePreset.name,
+      presetNames: Object.values(this.presets?.state?.presets?.openai || {}).map(preset => String(preset.name || '')).filter(Boolean),
       variables: clonePlain(variables) || {},
       localVariables: clonePlain(localVariables) || {},
       globalVariables: clonePlain(globalVariables) || {},
@@ -6183,10 +6347,13 @@ export class ScriptRuntime {
     ));
   }
 
-  getPresetTavernRegexes(presetId = '') {
+  getPresetTavernRegexes(presetId = '', sessionId = '') {
     const id = String(presetId || '').trim();
     const regexStore = this.bridge?.getRegexStore?.() || this.bridge?.regex || null;
     if (!id || !regexStore) return [];
+    const overrides = sessionId ? this.presets?.getInUsePresetRegexOverrides?.('openai', {
+      sessionId, uiMode: sessionId.startsWith('rp:') ? 'rp' : 'chat',
+    }) || [] : [];
     return (regexStore.listLocalSets?.() || []).filter((set) => {
       const bind = set?.bind;
       if (!bind || bind.type !== 'preset' || String(bind.presetType || '').trim() !== 'openai') return false;
@@ -6196,7 +6363,10 @@ export class ScriptRuntime {
       ].map((value) => String(value || '').trim()).filter(Boolean);
       return ids.includes(id);
     }).flatMap((set) => (
-      (Array.isArray(set?.rules) ? set.rules : []).map(rule => toTavernRegex(rule, set.id))
+      (Array.isArray(set?.rules) ? set.rules : []).map(rule => {
+        const override = overrides.find(item => item.__chatappSetId === set.id && item.id === rule.id);
+        return toTavernRegex(override ? { ...rule, disabled: override.enabled === false } : rule, set.id);
+      })
     ));
   }
 
@@ -6416,7 +6586,16 @@ export class ScriptRuntime {
       ? { ...this.buildContext(contextOverride.sessionId), ...contextOverride }
       : this.buildContext();
     const next = { ...this.context, ...context };
-    const changed = JSON.stringify(next) !== JSON.stringify(this.context);
+    // Variable/prompt snapshots change during a generation. Recompiling the
+    // scripts here destroys open panels, subscriptions and pending diagnostics.
+    const scopeKey = value => JSON.stringify([value.sessionId, value.personaId, value.presetId,
+      value.openaiPresetId, value.presetIds || []]);
+    const scopeChanged = scopeKey(next) !== scopeKey(this.context);
+    const presetChanged = JSON.stringify(next.activePreset) !== JSON.stringify(this.context.activePreset);
+    if (this.context.sessionId && (next.sessionId !== this.context.sessionId
+      || next.openaiPresetId !== this.context.openaiPresetId)) {
+      this.presets?.clearInUsePreset?.('openai', this.context.sessionId);
+    }
     this.context = next;
     const settings = appSettings.get();
     const runtimeSettings = {
@@ -6436,8 +6615,10 @@ export class ScriptRuntime {
     if (this.iframeRuntime) {
       this.iframeRuntime.syncContext(this.context, runtimeSettings);
     }
-    if (changed) {
+    if (scopeChanged) {
       await this.syncScripts(this.context);
+    } else if (presetChanged && this.worker && this.hasListener('preset.changed')) {
+      await this.callWorker('dispatch', { event: 'preset.changed', payload: { args: [next.presetName] }, allowMutate: false });
     }
   }
 
@@ -6498,6 +6679,7 @@ export class ScriptRuntime {
 
   handleWorkerMessage(msg) {
     if (!msg || typeof msg !== 'object') return;
+    if (this.presetRequestTransport.handle(msg)) return;
     if (msg.type === 'sync_done') {
       this.workerWarmingUp = false;
       return;
@@ -6756,6 +6938,26 @@ export class ScriptRuntime {
       )));
       return results.some(Boolean);
     }
+    if (method === 'variables.replace') {
+      if (!allowModifyVariables) denyScriptPermission('修改变量');
+      const value = params.value;
+      if (!value || typeof value !== 'object' || Array.isArray(value) || estimatePayloadSize(value) > SCRIPT_PAYLOAD_LIMIT) {
+        throw new Error('变量内容无效或过大');
+      }
+      const scope = normalizeRpcVariableScope(params.scope);
+      if (scope === 'preset' || scope === 'character') return mutateStoredScopeVariables(scope, next => {
+        for (const key of Object.keys(next)) delete next[key];
+        Object.assign(next, clonePlain(value)); return true;
+      });
+      const current = scope === 'global' ? this.chatStore?.listGlobalVariables?.() : this.chatStore?.listVariables?.(sessionId);
+      for (const key of Object.keys(current || {})) if (!Object.hasOwn(value, key)) {
+        await this.processRpc('variables.delete', { key, scope, sessionId });
+      }
+      for (const [key, item] of Object.entries(value)) {
+        await this.processRpc('variables.set', { key, value: item, scope, sessionId });
+      }
+      return true;
+    }
     if (method === 'variables.inc' || method === 'variables.dec') {
       if (!allowModifyVariables) denyScriptPermission('修改变量');
       const key = String(params.key || '').trim();
@@ -6924,6 +7126,23 @@ export class ScriptRuntime {
       }
       return true;
     }
+    if (method === 'generation.stop') {
+      const id = String(params.generationId || '');
+      const job = this.scriptGenerations.get(id);
+      if (!job || job.scriptId !== String(params.scriptId || '')) return false;
+      job.controller.abort(); return true;
+    }
+    if (method === 'generation.generate') {
+      if (!allowNetwork) denyScriptPermission('访问网络');
+      const config = params.config && typeof params.config === 'object' ? params.config : {};
+      if (estimatePayloadSize(config) > SCRIPT_PAYLOAD_LIMIT) throw new Error('生成请求过大');
+      const id = String(config.generation_id || `script_${Date.now()}_${++this.seq}`);
+      if (this.scriptGenerations.has(id)) throw new Error('生成 ID 已在使用');
+      const controller = new AbortController();
+      this.scriptGenerations.set(id, { controller, scriptId: String(params.scriptId || ''), sessionId });
+      try { return await runScriptGeneration(this, config, sessionId, controller.signal, settings); }
+      finally { this.scriptGenerations.delete(id); }
+    }
     if (method === 'generation.generateRaw') {
       if (!allowNetwork) denyScriptPermission('访问网络');
       const config = params.config && typeof params.config === 'object' && !Array.isArray(params.config)
@@ -7072,6 +7291,10 @@ export class ScriptRuntime {
       }
       return changed;
     }
+    if (method === 'ui.copyText') {
+      await navigator.clipboard.writeText(String(params.text || ''));
+      return true;
+    }
     if (method === 'ui.confirm') {
       const content = String(params.content || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
       return typeof window?.confirm === 'function' ? window.confirm(content) : false;
@@ -7173,6 +7396,61 @@ export class ScriptRuntime {
         return { name: String(active?.name || '') };
       }
       return { name };
+    }
+    if (method === 'preset.getSnapshot' || method === 'preset.update') {
+      const uiMode = sessionId.startsWith('rp:') ? 'rp' : 'chat';
+      const name = String(params.name || 'in_use');
+      const active = this.presets?.getResolvedActive?.('openai', { sessionId, uiMode });
+      const stored = this.presets?.state?.presets?.openai || {};
+      const matches = Object.entries(stored).filter(([id, preset]) => id === name || preset.name === name);
+      const id = name === 'in_use' ? active?.presetId : matches.length === 1 ? matches[0][0] : '';
+      if (!id || !stored[id]) throw new Error('预设不存在或名称重复：' + name);
+      const read = () => {
+        const current = name === 'in_use' ? this.presets.getResolvedActive('openai', { sessionId, uiMode })?.preset : stored[id];
+        return toScriptPreset({ ...current, id }, this.getPresetTavernRegexes(id, name === 'in_use' ? sessionId : ''));
+      };
+      if (method === 'preset.getSnapshot') return { presetId: id, preset: read() };
+      if (!allowModifyVariables) denyScriptPermission('修改变量');
+      if (String(params.presetId || '') !== id) throw new Error('预设已切换，请重新应用设置');
+      if (estimatePayloadSize(params) > SCRIPT_PAYLOAD_LIMIT) throw new Error('预设修改内容过大');
+      const previous = this.presetSettingsWriteQueues.get(id) || Promise.resolve();
+      const task = previous.catch(() => {}).then(async () => {
+        if (name === 'in_use' && this.presets.getResolvedActive('openai', { sessionId, uiMode })?.presetId !== id) {
+          throw new Error('预设已切换，请重新应用设置');
+        }
+        const current = read();
+        const merged = mergeScriptPresetChanges(params.before, params.edited, current);
+        const data = fromScriptPreset(stored[id], merged);
+        const changedRules = merged.extensions?.regex_scripts || merged.regexes || [];
+        const changes = changedRules.filter(rule => current.regexes.some(old => old.id === rule.id && old.enabled !== rule.enabled));
+        if (name === 'in_use') {
+          const savedRules = this.getPresetTavernRegexes(id);
+          const overrides = changedRules.filter(rule => savedRules.some(saved => saved.id === rule.id
+            && saved.__chatappSetId === rule.__chatappSetId && saved.enabled !== rule.enabled));
+          this.presets.setInUsePreset('openai', { sessionId, uiMode }, id, data, overrides);
+        } else if (JSON.stringify(data) !== JSON.stringify(stored[id])) {
+          await this.presets.upsert('openai', { id, name: stored[id].name, data, makeActive: false });
+        }
+        const regexStore = this.bridge?.getRegexStore?.() || this.bridge?.regex;
+        for (const set of name === 'in_use' ? [] : regexStore?.listLocalSets?.() || []) {
+          const patches = changes.filter(rule => rule.__chatappSetId === set.id);
+          if (!patches.length) continue;
+          await regexStore.upsertLocalSet({ id: set.id, name: set.name,
+            enabled: set.manualEnabled !== false && set.enabled !== false, bind: set.bind,
+            rules: set.rules.map(rule => {
+              const patch = patches.find(item => item.id === rule.id);
+              return patch ? { ...rule, disabled: patch.enabled === false } : rule;
+            }),
+          });
+        }
+        const context = this.buildContext(sessionId);
+        if (this.context.sessionId === sessionId) this.context = { ...this.context, ...context };
+        try { window.dispatchEvent(new CustomEvent('preset-changed')); } catch {}
+        return { preset: read(), context };
+      });
+      this.presetSettingsWriteQueues.set(id, task);
+      try { return await task; }
+      finally { if (this.presetSettingsWriteQueues.get(id) === task) this.presetSettingsWriteQueues.delete(id); }
     }
     if (method === 'preset.saveChatCompletionSettings') {
       if (!allowModifyVariables) denyScriptPermission('修改变量');

@@ -559,7 +559,10 @@ export class RegexStore {
                 if (!matchBind(bind, ctx)) continue;
                 for (const r of ensureArr(s.rules)) {
                     if (!r) continue;
-                    out.push(r);
+                    const override = bind.type === 'preset' && bind.presetType === 'openai'
+                        ? ctx.presetRegexOverrides?.find(item => item.__chatappSetId === id && item.id === r.id)
+                        : null;
+                    out.push(override ? { ...r, disabled: override.enabled === false } : r);
                 }
             }
         }

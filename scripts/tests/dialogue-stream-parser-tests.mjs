@@ -13,6 +13,79 @@ const collect = (parser, chunks) => {
   return events;
 };
 
+const phoneReply = content => [
+  'MiPhone_start', 'msg_start', '<我和小雨的私聊>',
+  `小雨--${content}--13:40`, '</我和小雨的私聊>', 'msg_end', 'MiPhone_end',
+].join('\n');
+
+test('skips closed MiPhone shells without extractable content and continues to the real reply', () => {
+  const parser = new DialogueStreamParser();
+  const events = collect(parser, [
+    'MiPhone_start\nMiPhone_end\n',
+    'MiPhone_start\n仅说明格式，没有可提取消息。\n<我和小雨的私聊>\n </我和小雨的私聊>\nMiPhone_end\n' + phoneReply('实际回复'),
+  ]);
+  assert.deepEqual(events.map(event => event.messages[0].content), ['实际回复']);
+  assert.equal(parser.ended, true);
+});
+
+test('a valid MiPhone shell remains final when its event and end marker arrive in different chunks', () => {
+  const parser = new DialogueStreamParser();
+  const first = parser.push(phoneReply('先前分块已提取').replace(/MiPhone_end$/, ''));
+  assert.equal(first.length, 1);
+  assert.equal(parser.ended, false);
+  assert.deepEqual(parser.push('MiPhone_end\n' + phoneReply('不应重复提取')), []);
+  assert.equal(parser.ended, true);
+});
+
+test('filters both standard thinking forms before a valid example can select a shell', () => {
+  for (const tag of ['thinking', 'think']) {
+    const parser = new DialogueStreamParser();
+    const events = collect(parser, [
+      `<${tag}>参考：<content>${phoneReply('思考示例')}</content></${tag}>\n${phoneReply('实际回复')}`,
+    ]);
+    assert.deepEqual(events.map(event => event.messages[0].content), ['实际回复'], tag);
+  }
+});
+
+test('waits for a chunked thinking close instead of emitting the completed example inside it', () => {
+  const parser = new DialogueStreamParser();
+  assert.deepEqual(parser.push('<thi'), []);
+  assert.deepEqual(parser.push('nk>\n<content>' + phoneReply('思考示例') + '</content>\n</thi'), []);
+  assert.equal(parser.inContent, false);
+  const events = collect(parser, ['nk>\n' + phoneReply('实际回复')]);
+  assert.deepEqual(events.map(event => event.messages[0].content), ['实际回复']);
+});
+
+test('handles a prefilled thinking opener before accepting the raw candidate', () => {
+  const events = collect(new DialogueStreamParser(), [
+    '格式参考：\n' + phoneReply('思考示例') + '\n</thinking>\n' + phoneReply('实际回复'),
+  ]);
+  assert.deepEqual(events.map(event => event.messages[0].content), ['实际回复']);
+});
+
+test('thinking inside an open shell cannot close that shell or emit protocol examples', () => {
+  const parser = new DialogueStreamParser();
+  assert.deepEqual(parser.push('MiPhone_start\n<think>' + phoneReply('思考示例')), []);
+  assert.equal(parser.ended, false);
+  const events = collect(parser, [
+    '</think>\n<我和小雨的私聊>小雨--实际回复--13:40</我和小雨的私聊>\nMiPhone_end',
+  ]);
+  assert.deepEqual(events.map(event => event.messages[0].content), ['实际回复']);
+  assert.equal(parser.ended, true);
+});
+
+test('preserves thinking tag literals inside chat payloads, including split and loose contact tags', () => {
+  const body = '原样保留 <thinking>引用内容</thinking> 和 </think>。';
+  for (const tagName of ['我和小雨的私聊', '小雨']) {
+    const parser = new DialogueStreamParser({ resolveLoosePrivateTag: tag => tag === '小雨' ? tag : '' });
+    const events = collect(parser, [
+      `MiPhone_start\n<${tagName}>小雨--原样保留 <thinking>`,
+      `引用内容</thinking> 和 </think>。--13:40</${tagName}>\nMiPhone_end`,
+    ]);
+    assert.deepEqual(events.map(event => event.messages[0].content), [body]);
+  }
+});
+
 test('continues after a leading content block and parses following MiPhone private chat', () => {
   const parser = new DialogueStreamParser({ userName: '阿伟' });
   const events = collect(parser, [

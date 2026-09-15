@@ -144,7 +144,6 @@ const createDocumentLike = () => {
 {
   const documentLike = createDocumentLike();
   const errors = [];
-  let ready = false;
   let now = 1000;
   const cleared = [];
   const timeouts = [];
@@ -153,7 +152,6 @@ const createDocumentLike = () => {
     logger: { error: (...args) => errors.push(args) },
     documentLike,
     windowLike,
-    getRuntimeReady: () => ready,
     nowFn: () => now,
     setTimeoutFn: (fn, delay) => {
       timeouts.push({ fn, delay });
@@ -162,11 +160,10 @@ const createDocumentLike = () => {
     clearTimeoutFn: timer => cleared.push(timer),
   });
 
-  reporter.reportGlobalRuntimeIssue(new Error('boot failed'), 'App init failed');
+  reporter.reportFatalError(new Error('boot failed'), 'App init failed');
   const overlay = documentLike.getElementById('chatapp-fatal-error-overlay');
   assert.equal(overlay.textContent, 'App init failed: boot failed');
 
-  ready = true;
   reporter.reportGlobalRuntimeIssue('runtime failed', 'Runtime error');
   const banner = documentLike.getElementById('chatapp-runtime-error-banner');
   assert.equal(banner.textContent, 'Runtime error: runtime failed');
@@ -178,7 +175,28 @@ const createDocumentLike = () => {
   reporter.reportGlobalRuntimeIssue('runtime failed', 'Runtime error');
   assert.deepEqual(cleared, ['old-timer']);
   assert.equal(errors.length, 3);
-  console.log('ok - createRuntimeIssueReporter routes boot fatal overlay and runtime banner with dedupe');
+  assert.equal(overlay.textContent, 'App init failed: boot failed');
+  console.log('ok - createRuntimeIssueReporter preserves explicit boot failure and deduplicates runtime notices');
+}
+
+{
+  const documentLike = createDocumentLike();
+  const listeners = new Map();
+  const reports = [];
+  const windowLike = {
+    addEventListener: (type, handler) => listeners.set(type, handler),
+    toastr: { error: (...args) => reports.push(args) },
+  };
+  const reporter = createRuntimeIssueReporter({ documentLike, windowLike });
+  registerGlobalRuntimeIssueHandlers({ windowLike, reportGlobalRuntimeIssue: reporter.reportGlobalRuntimeIssue });
+  listeners.get('error')({ message: 'Uncaught Error: K3 元件缺失：fixture' });
+  listeners.get('unhandledrejection')({ reason: new Error('preset startup callback failed') });
+  assert.equal(documentLike.getElementById('chatapp-fatal-error-overlay'), null);
+  assert.deepEqual(reports, [
+    ['Uncaught Error: K3 元件缺失：fixture', 'Runtime error'],
+    ['preset startup callback failed', 'Unhandled rejection'],
+  ]);
+  console.log('ok - global script errors during startup remain notifications instead of blocking a successful boot');
 }
 
 {
@@ -187,7 +205,6 @@ const createDocumentLike = () => {
     logger: { error: () => {} },
     documentLike: createDocumentLike(),
     windowLike: { toastr: { error: (...args) => toastrCalls.push(args) } },
-    getRuntimeReady: () => true,
   });
   reporter.reportGlobalRuntimeIssue('toast failed', 'Runtime error');
   assert.deepEqual(toastrCalls, [['toast failed', 'Runtime error']]);

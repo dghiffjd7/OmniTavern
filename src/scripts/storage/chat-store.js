@@ -2890,6 +2890,28 @@ export class ChatStore {
     return updated;
   }
 
+  // A local text edit changes one message and, when linked, its original protocol
+  // turn. Preserve envelope membership/timestamps; never redistribute the turn.
+  updateMessageTextSelection({ messageId, sessionId, patch, sourceEnvelope = null } = {}) {
+    if (!this.findMessage(messageId, sessionId)) return null;
+    let sourceSession = null;
+    if (sourceEnvelope) {
+      const { sourceSessionId, expected, text } = sourceEnvelope;
+      sourceSession = this.state.sessions[sourceSessionId];
+      const current = this.getLastRawResponseEnvelope(sourceSessionId);
+      if (!sourceSession || !expected || current.truncated || typeof text !== 'string' || text.length > 220_000 ||
+        current.text !== expected.text || current.turnId !== expected.turnId ||
+        JSON.stringify(current.sourceMessageIds) !== JSON.stringify(expected.sourceMessageIds) ||
+        (expected.archiveId !== undefined && (this.getCurrentArchiveId(sourceSessionId) || '') !== expected.archiveId)) return null;
+    }
+    // Both in-memory updates are synchronous; updateMessage persists the shared
+    // session metadata and queues the existing V2 message/raw-original write.
+    if (sourceSession) sourceSession.lastRawResponse = sourceEnvelope.text;
+    const updated = this.updateMessage(messageId, patch, sessionId);
+    if (updated && patch?.rawOriginal === '') this._deleteRawOriginal(updated, sessionId);
+    return updated;
+  }
+
   findMessage(msgId, id = this.currentId) {
     const sid = String(id || '').trim();
     if (!sid) return null;

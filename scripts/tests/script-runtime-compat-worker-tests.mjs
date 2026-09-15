@@ -86,6 +86,11 @@ const createWorkerHarness = ({ chatMessages = [], characterRegexes = [], fetchIm
     Number,
     Boolean,
     URL,
+    AbortController,
+    Response,
+    ReadableStream,
+    TextEncoder,
+    TextDecoder,
     ...(fetchImpl ? { fetch: fetchImpl } : {}),
     XMLHttpRequest: FakeXhr,
     WebSocket: FakeWebSocket,
@@ -121,6 +126,121 @@ const createWorkerHarness = ({ chatMessages = [], characterRegexes = [], fetchIm
 };
 
 const flushTimers = () => new Promise(resolve => setTimeout(resolve, 0));
+
+{
+  const { sandbox, messages } = createWorkerHarness();
+  const script = `
+    'use strict';
+    const getPreset = () => 'local declaration';
+    const generate = () => 'also local';
+    if (getPreset() !== 'local declaration' || generate() !== 'also local') throw Error('name collision');
+    if (globalThis.getPreset().prompts[0].id !== 'p') throw Error('missing scoped preset API');
+    script.data.old = true;
+    replaceVariables({ owner: getScriptId() }, { type: 'script' });
+    if (getVariables({ type: 'script' }).owner !== getScriptId()) throw Error('wrong script scope');
+    appendInexistentScriptButtons([{ name: 'Settings', visible: true }]);
+    appendInexistentScriptButtons([{ name: 'Settings', visible: true }]);
+    globalThis.__compatOrder = [];
+    eventOn('ordered', () => globalThis.__compatOrder.push('last'));
+    eventOn('ordered', () => globalThis.__compatOrder.push('stopped')).stop();
+    eventMakeFirst('ordered', () => globalThis.__compatOrder.push('first'));
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'path'));
+    document.body.appendChild(svg);
+    const textarea = document.createElement('textarea');
+    textarea.value = 'initial <text>\\n中文';
+    document.body.appendChild(textarea);
+  `;
+  await sandbox.self.onmessage({ data: { type: 'sync', context: {
+    sessionId: 'rp:scope', activePreset: { prompts: [{ identifier: 'p', content: 'prompt' }] },
+  }, scripts: [
+    { id: 'scope-a', name: 'scoped APIs', enabled: true, content: script },
+    { id: 'scope-b', name: 'other scope', enabled: true, content: "replaceVariables({owner:getScriptId()}, {type:'script'});" },
+  ] } });
+  await sandbox.self.onmessage({ data: { type: 'dispatch', event: 'ordered', id: 'order', payload: {} } });
+  await new Promise(resolve => setTimeout(resolve, 240));
+  assert.equal(messages.some(msg => msg.params?.scriptError), false);
+  assert.deepEqual(Array.from(sandbox.__compatOrder), ['first', 'last']);
+  const dataWrites = messages.filter(msg => msg.type === 'rpc' && msg.method === 'script.updateData');
+  assert.equal(dataWrites.length, 3, 'two immediate writes plus one pending data flush');
+  for (const message of dataWrites) assert.deepEqual(JSON.parse(JSON.stringify(message.params.data)), { owner: message.params.scriptId });
+  const html = messages.filter(msg => msg.type === 'ui_update').at(-1).payload.roots.join('');
+  assert.equal((html.match(/>Settings</g) || []).length, 1);
+  assert.match(html, /<svg[^>]*><path/);
+  assert.match(html, /<textarea[^>]*>initial &lt;text&gt;\n中文<\/textarea>/, 'textarea live value must become native textarea content');
+  console.log('ok - scoped preset APIs allow local names; script data persists without delayed clearing; subscriptions and SVG work');
+}
+
+{
+  const { sandbox, messages } = createWorkerHarness();
+  const loading = sandbox.self.onmessage({ data: { type: 'sync', context: { sessionId: 'rp:loading', openaiPresetId: 'p' }, scripts: [{
+    id: 'middleware', enabled: true, content: `
+      const previousFetch = parent.fetch;
+      parent.fetch = (url, init) => {
+        const body = JSON.parse(init.body); body.temperature = 0.25;
+        return previousFetch(url, { ...init, body: JSON.stringify(body) });
+      };
+    `,
+  }] } });
+  await sandbox.self.onmessage({ data: { type: 'preset_request', event: 'start', id: 'early',
+    sessionId: 'rp:loading', presetId: 'p', preview: true, body: { messages: [{ role: 'user', content: 'test' }] } } });
+  await loading;
+  await flushTimers();
+  const prepared = messages.find(msg => msg.type === 'preset_request' && msg.event === 'prepared');
+  assert.equal(prepared?.bypass, undefined);
+  assert.equal(prepared?.body.temperature, 0.25, 'an immediate send must wait for async script loading');
+  const installed = sandbox.fetch;
+  await sandbox.self.onmessage({ data: { type: 'context', context: { variables: { changed: true } } } });
+  assert.equal(sandbox.fetch, installed, 'context snapshots must preserve installed middleware');
+  console.log('ok - requests wait for script loading and context refresh preserves middleware');
+}
+
+{
+  const runtime = new ScriptRuntime({ ready: Promise.resolve(), getScripts: () => [] });
+  await runtime.ready;
+  let context = { sessionId: 'rp:a', openaiPresetId: 'p', presetName: 'preset', activePreset: { prompts: [] } };
+  runtime.buildContext = () => structuredClone(context);
+  runtime.context = structuredClone(context);
+  const posted = [];
+  runtime.worker = { postMessage: msg => posted.push(msg) };
+  let reloads = 0;
+  runtime.syncScripts = async () => { reloads++; };
+  const events = [];
+  runtime.callWorker = async (_type, data) => { events.push(data.event); };
+  runtime.hasListener = () => true;
+  context.variables = { updated: true };
+  await runtime.syncContext();
+  assert.equal(reloads, 0);
+  context.activePreset.prompts.push({ id: 'new' });
+  await runtime.syncContext();
+  assert.deepEqual(events, ['preset.changed']);
+  assert.equal(reloads, 0);
+  context.sessionId = 'rp:b';
+  await runtime.syncContext();
+  assert.equal(reloads, 1);
+
+  runtime.isEnabled = () => true;
+  let preparations = 0;
+  runtime.presetRequestTransport.prepare = async () => { preparations++; return { bypass: true }; };
+  const request = { messages: [{ role: 'user', content: 'hello' }], options: { toolConfig: { unknownProviderOption: true } },
+    config: { provider: 'gemini' }, client: {}, presetContext: { sessionId: 'rp:b', uiMode: 'rp' } };
+  const bypass = await runtime.prepareCreativeRequest(request);
+  assert.equal(bypass.options, request.options);
+  assert.equal(bypass.client, request.client);
+  assert.equal(await runtime.prepareCreativeRequest({ ...request, presetContext: { uiMode: 'chat' } }), null);
+  assert.equal(preparations, 1, 'normal chat cannot enter the preset transport');
+  runtime.presets = { state: { enabled: { openai: false } } };
+  assert.equal(await runtime.prepareCreativeRequest(request), null);
+  assert.equal(preparations, 1, 'disabling the preset also disables its request middleware');
+
+  const controller = new AbortController();
+  runtime.scriptGenerations.set('diagnostic', { scriptId: 'owner', controller });
+  assert.equal(await runtime.processRpc('generation.stop', { generationId: 'diagnostic', scriptId: 'other' }), false);
+  assert.equal(controller.signal.aborted, false);
+  assert.equal(await runtime.processRpc('generation.stop', { generationId: 'diagnostic', scriptId: 'owner' }), true);
+  assert.equal(controller.signal.aborted, true);
+  console.log('ok - ordinary context changes preserve panels, no-op requests preserve options, chat is excluded and cancellation is script scoped');
+}
 
 assert.equal(isEsmLikeScriptForTests("import 'https://example.com/loader.js'"), true);
 assert.equal(isEsmLikeScriptForTests('export const value = 1;'), true);
@@ -1484,6 +1604,13 @@ console.log('ok - script runtime recognizes actual ESM import and export syntax'
   details.open = false;
   runtime.applyPendingNativeUiState(surface, 2);
   assert.equal(runtime.uiNativeStatePending.has('9'), false, 'acknowledged native state should leave the pending barrier');
+  const field = { value: 'stale', checked: false, getAttribute: () => 'input' };
+  runtime.uiNativeStatePending.set('input', { revision: 4, value: 'newer typing', checked: true });
+  runtime.applyPendingNativeUiState({ querySelectorAll: () => [field] }, 3);
+  assert.equal(field.value, 'newer typing');
+  assert.equal(field.checked, true);
+  runtime.applyPendingNativeUiState({ querySelectorAll: () => [field] }, 4);
+  assert.equal(runtime.uiNativeStatePending.has('input'), false);
   console.log('ok - native details state barrier survives stale full-tree worker renders until acknowledged');
 }
 

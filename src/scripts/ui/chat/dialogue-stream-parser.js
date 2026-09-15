@@ -1,6 +1,6 @@
 /**
  * Dialogue-mode stream parser (simplified)
- * - Ignores <thinking>...</thinking> and other non-content parts
+ * - Ignores standard <thinking>/<think> blocks outside message payloads
  * - Extracts <content>...</content>, then emits completed chat tags inside
  * - Currently focuses on private chat tags: <X和Y的私聊>...</X和Y的私聊>
  * - Inside private chat tag:
@@ -8,15 +8,9 @@
  *   - Fallback: "speaker--content--HH:MM" per line
  */
 
-const normalizeNewlines = (s) => String(s ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+import { splitProtocolThinking } from './protocol-thinking-utils.js';
 
-const stripThinkingBlocks = (s) => {
-    let out = String(s ?? '');
-    // Remove fully closed <thinking> blocks to avoid confusing tag scanning
-    // (Keep incomplete blocks for later; we'll only strip complete ones)
-    out = out.replace(/<thinking[\s\S]*?>[\s\S]*?<\/thinking>/gi, '');
-    return out;
-};
+const normalizeNewlines = (s) => String(s ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
 const findFirstTagOpen = (s) => s.indexOf('<');
 
@@ -484,6 +478,7 @@ export class DialogueStreamParser {
         this.contentBuffer = '';
         this.ended = false;
         this.contentWrapper = '';
+        this.wrapperEventCount = 0;
         this.resolveLooseGroupTag = typeof resolveLooseGroupTag === 'function' ? resolveLooseGroupTag : null;
         this.resolveLoosePrivateTag = typeof resolveLoosePrivateTag === 'function' ? resolveLoosePrivateTag : null;
     }
@@ -496,39 +491,48 @@ export class DialogueStreamParser {
 
         if (!this.inContent) {
             this.preBuffer += text;
-            this.preBuffer = stripThinkingBlocks(this.preBuffer);
+            const { text: visible, pendingThinking } = splitProtocolThinking(this.preBuffer, this);
             // Detect <content ...> opening
-            const m = this.preBuffer.match(/<content\b[^>]*>/i);
+            const m = visible.match(/<content\b[^>]*>/i);
             if (m) {
-                const start = this.preBuffer.toLowerCase().indexOf(m[0].toLowerCase());
+                const start = visible.toLowerCase().indexOf(m[0].toLowerCase());
                 const after = start + m[0].length;
                 this.inContent = true;
                 this.contentWrapper = 'content';
-                this.contentBuffer += this.preBuffer.slice(after);
+                this.contentBuffer += visible.slice(after) + pendingThinking;
                 this.preBuffer = '';
             } else {
-                const miStart = findMiPhoneStart(this.preBuffer);
+                const miStart = findMiPhoneStart(visible);
                 if (miStart) {
                     const after = miStart.index + miStart.length;
                     this.inContent = true;
                     this.contentWrapper = 'miphone';
-                    this.contentBuffer += this.preBuffer.slice(after);
+                    this.contentBuffer += visible.slice(after) + pendingThinking;
                     this.preBuffer = '';
-                } else if (hasImplicitContentSignal(this.preBuffer)) {
+                } else if (hasImplicitContentSignal(visible)) {
                     // Fallback: some models may omit <content> wrapper but still output tags we can parse.
                     this.inContent = true;
                     this.contentWrapper = 'implicit';
-                    this.contentBuffer += this.preBuffer;
+                    this.contentBuffer += visible + pendingThinking;
                     this.preBuffer = '';
                 } else {
+                    this.preBuffer = visible + pendingThinking;
                     // keep bounded to avoid memory growth before content
-                    if (this.preBuffer.length > 80_000) this.preBuffer = this.preBuffer.slice(-40_000);
+                    // An unfinished thinking opener must survive until its close.
+                    if (!pendingThinking && this.preBuffer.length > 80_000) this.preBuffer = this.preBuffer.slice(-40_000);
                     return events;
                 }
             }
         } else {
             this.contentBuffer += text;
         }
+
+        const filtered = splitProtocolThinking(this.contentBuffer, {
+            allowOrphanClose: false,
+            resolveLooseGroupTag: this.resolveLooseGroupTag,
+            resolveLoosePrivateTag: this.resolveLoosePrivateTag,
+        });
+        this.contentBuffer = filtered.text;
 
         // If content ended, only parse within it
         let endIdx = -1;
@@ -671,11 +675,15 @@ export class DialogueStreamParser {
         }
 
         // Commit remaining unconsumed content
+        // Count across pushes: a closing chunk may contain no new event even
+        // though this shell already emitted messages in an earlier chunk.
+        this.wrapperEventCount += events.length;
         if (endIdx !== -1) {
-            const tail = afterEndIdx >= 0 ? this.contentBuffer.slice(afterEndIdx) : '';
-            if (this.contentWrapper === 'content') {
+            const tail = (afterEndIdx >= 0 ? this.contentBuffer.slice(afterEndIdx) : '') + filtered.pendingThinking;
+            if (this.contentWrapper === 'content' || this.wrapperEventCount === 0) {
                 this.inContent = false;
                 this.contentWrapper = '';
+                this.wrapperEventCount = 0;
                 this.contentBuffer = '';
                 if (String(tail || '').trim()) {
                     events.push(...this.push(tail));
@@ -686,8 +694,8 @@ export class DialogueStreamParser {
             }
         } else {
             // keep leftover for future chunks
-            this.contentBuffer = work;
-            if (this.contentBuffer.length > 160_000) this.contentBuffer = this.contentBuffer.slice(-80_000);
+            this.contentBuffer = work + filtered.pendingThinking;
+            if (!filtered.pendingThinking && this.contentBuffer.length > 160_000) this.contentBuffer = this.contentBuffer.slice(-80_000);
         }
 
         return events;

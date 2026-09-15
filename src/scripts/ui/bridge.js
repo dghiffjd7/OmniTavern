@@ -3372,6 +3372,8 @@ class AppBridge {
       worldId: String(this.currentWorldId || '').trim() || worldIds[0] || '',
       worldIds,
       activePresets,
+      presetRegexOverrides: activePresets.openai
+        ? this.presets?.getInUsePresetRegexOverrides?.('openai', { sessionId: sid, uiMode }) || [] : [],
       macroVars: buildMacroVariableContext({
         baseVars,
         globalVars,
@@ -3694,7 +3696,7 @@ class AppBridge {
    * @param {Object} context - 上下文（角色设定、历史消息等）
    * @returns {Promise<string>|AsyncGenerator<string>} 回复内容或流
    */
-  async generate(userMessage, context = {}) {
+  async generate(userMessage, context = {}, requestOverrides = {}) {
     const requestContext = captureRequestContext(context?.meta?.requestContext || {
       scopeId: this.scopeId,
       sessionId: context?.session?.id || this.activeSessionId,
@@ -3724,6 +3726,10 @@ class AppBridge {
     const generationToken = previewOnly ? 0 : (Number(this.activeGenerationToken) || 0) + 1;
     if (!previewOnly) this.activeGenerationToken = generationToken;
     const abortController = new AbortController();
+    const abortFromCaller = () => abortController.abort();
+    if (requestOverrides.signal?.aborted) abortFromCaller();
+    else requestOverrides.signal?.addEventListener('abort', abortFromCaller, { once: true });
+    const saveHistory = requestOverrides.saveHistory !== false;
     if (!previewOnly) {
       this.abortController = abortController;
       this.abortReason = '';
@@ -3731,7 +3737,11 @@ class AppBridge {
     const nativeRequestId = `http_${Date.now().toString(36)}_${Math.random().toString(16).slice(2, 10)}`;
     if (!previewOnly) this.activeNativeRequestId = nativeRequestId;
     let streaming = false;
+    let presetRequestSession = null;
     const releaseGenerationLock = () => {
+      presetRequestSession?.dispose();
+      presetRequestSession = null;
+      requestOverrides.signal?.removeEventListener('abort', abortFromCaller);
       if (previewOnly) {
         if (this.previewBuildPromise === previewBuildPromise) this.previewBuildPromise = null;
         const release = releasePreviewBuild;
@@ -4054,15 +4064,19 @@ class AppBridge {
         };
       }
       const presetContext = this.getRequestPresetContext(nextContext);
+      const creativePresetSnapshot = presetContext.uiMode === 'rp'
+        ? this.presets?.getResolvedActive?.('openai', presetContext) : null;
       const requestRuntime = await this.resolveRequestRuntimeConfig(presetContext);
-      const config = requestRuntime?.config || this.config.get();
+      const config = { ...(requestRuntime?.config || this.config.get()), ...(requestOverrides.config || {}) };
       const requestCalibration = this.getTokenCalibration(config?.provider, config?.model);
       const requestTokenMode = {
         mode: 'rough',
         coefficient: requestCalibration.coefficient,
       };
       this.activeTokenEstimateMode = requestTokenMode;
-      const requestClient = requestRuntime?.client || (canInitClient(config) ? new LLMClient(config) : null);
+      const requestClient = requestOverrides.config
+        ? new LLMClient(config)
+        : (requestRuntime?.client || (canInitClient(config) ? new LLMClient(config) : null));
       if (!previewOnly && !requestClient) {
         throw new Error('请先配置 API 信息');
       }
@@ -4166,7 +4180,7 @@ class AppBridge {
         }
       }
       messages = this.normalizeOutgoingProviderMessages(messages, config);
-      const genOptions = { ...this.getGenerationOptions(presetContext, config), requestContext };
+      const genOptions = { ...this.getGenerationOptions(presetContext, config), ...(requestOverrides.generationOptions || {}), requestContext };
       const withRuntimeParamConstraints = options => ({
         ...options,
         ...(config?.webSearchEnabled === true ? { requestParamConstraints: {
@@ -4618,7 +4632,7 @@ class AppBridge {
         ...(configuredProviderDirectives || {}),
         ...(phonePrefillPlan.requestOptions || {}),
       };
-      const requestOptions = withRuntimeParamConstraints({
+      let requestOptions = withRuntimeParamConstraints({
         ...(genOptions || {}),
         ...(providerDirectives || {}),
         ...(providerToolRequestSchema.requestOptions || {}),
@@ -4894,7 +4908,7 @@ class AppBridge {
           });
         };
       }
-      const generationClient = createWebSearchGenerationClient({
+      let generationClient = createWebSearchGenerationClient({
         client: requestClient,
         plan: webSearchPlan,
         toolRuntime: this.webSearchToolRuntime,
@@ -4902,6 +4916,17 @@ class AppBridge {
         model: config?.model,
         sessionId,
       });
+      const creativeRequest = await this.scriptRuntime?.prepareCreativeRequest?.({
+        messages, options: requestOptions, config, presetContext, context: nextContext,
+        presetSnapshot: creativePresetSnapshot, preview: previewOnly, client: generationClient,
+        purpose: requestOverrides.purpose || 'reply',
+      });
+      if (creativeRequest) {
+        messages = creativeRequest.messages;
+        requestOptions = creativeRequest.options;
+        generationClient = creativeRequest.client;
+        presetRequestSession = creativeRequest.session;
+      }
       const preparedRequest = phoneProviderFcRoute.eligible
         ? null
         : (generationClient?.prepareChatRequest?.(messages, { ...requestOptions, stream: Boolean(config?.stream) }) || null);
@@ -5433,7 +5458,7 @@ class AppBridge {
           const structuredRaw = String(phoneStructuredAttempt.raw || '');
           completeGenerationDiagnostics({ stream: structuredCallStream });
           try {
-            await this.saveToHistory(originalInput, structuredRaw);
+            if (saveHistory) await this.saveToHistory(originalInput, structuredRaw);
           } catch (error) {
             if (phoneStructuredHalfOpenLeaseHeld) {
               chatStructuredRouteEvidenceStore.releaseHalfOpenRequest(nativeRequestId);
@@ -5584,6 +5609,7 @@ class AppBridge {
         startProviderCall(legacyMode, true);
         streaming = true;
         const inner = this.generateStream(messages, requestOptions, originalInput, {
+          saveHistory,
           responsePrefix,
           client: generationClient,
           config,
@@ -5631,7 +5657,7 @@ class AppBridge {
         completeGenerationDiagnostics({ stream: false });
 
         // 保存到历史记录
-        await this.saveToHistory(originalInput, finalResponse);
+        if (saveHistory) await this.saveToHistory(originalInput, finalResponse);
         emitPhoneStructuredRouteStatus('complete', { message: '' });
         return finalResponse;
       }
@@ -5796,7 +5822,7 @@ class AppBridge {
       }
 
       // 流式完成后保存到历史记录
-      await this.saveToHistory(originalUserMessage || '', fullResponse);
+      if (streamMeta.saveHistory !== false) await this.saveToHistory(originalUserMessage || '', fullResponse);
     } catch (error) {
       // User-initiated cancellation (e.g. message retract) should not be converted into a timeout error.
       if (shouldTreatBridgeStreamErrorAsCancellation(error, {
@@ -5832,7 +5858,7 @@ class AppBridge {
       if (isRecoverableNativeStreamTailError(normalized, fullResponse)) {
         logger.warn('流式收尾解码失败，但已收到正文；保留已生成内容', normalized?.message);
         finishProviderCall('succeeded');
-        await this.saveToHistory(originalUserMessage || '', fullResponse);
+        if (streamMeta.saveHistory !== false) await this.saveToHistory(originalUserMessage || '', fullResponse);
         return;
       }
       finishProviderCall('failed');

@@ -8238,5 +8238,16 @@
   "续写文本": "Continuation text",
   "格式修改建议": "Proposed format changes",
   "这里显示实际使用的任务提示词，可直接修改；恢复默认后再保存即可使用内建任务。": "Edit the actual task prompt here. Restore the default and save to use the built-in task again.",
-  "希望如何检查和修复回复格式？": "How should this agent inspect and repair reply formatting?"
+  "希望如何检查和修复回复格式？": "How should this agent inspect and repair reply formatting?",
+  "编辑片段": "Edit selection",
+  "当前回复 · 所选文字": "Current reply · Selected text",
+  "我的消息 · 所选文字": "My message · Selected text",
+  "修改文字": "Edit text",
+  "对照原文": "View original",
+  "仅替换所选文字": "Only the selected text will change",
+  "编辑所选文字": "Edit selected text",
+  "消息、回复分支或存档已变化，请重新选择文字": "The message, reply version or archive has changed. Select the text again.",
+  "所选文字无法准确对应原文，请缩小选区或使用小铅笔编辑": "The selected text cannot be matched to the original. Select less text or use the pencil to edit the original.",
+  "片段编辑不能新增或修改功能标签，请使用小铅笔编辑原文": "Selection editing cannot add or change functional tags. Use the pencil to edit the original.",
+  "修改后的原文过长，请缩短片段": "The edited message is too long. Shorten the selection."
 }

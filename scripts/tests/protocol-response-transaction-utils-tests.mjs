@@ -5,6 +5,78 @@ import {
   runProtocolResponseTransaction,
 } from '../../src/scripts/ui/chat/protocol-response-transaction-utils.js';
 import { DialogueStreamParser } from '../../src/scripts/ui/chat/dialogue-stream-parser.js';
+import { buildProtocolRetryCandidates } from '../../src/scripts/ui/chat/protocol-parse-utils.js';
+import { buildProtocolPrivateChatBatch } from '../../src/scripts/ui/chat/protocol-batch-utils.js';
+import { applyChatModeAssistantRegex } from '../../src/scripts/ui/chat/assistant-message-builder-utils.js';
+
+{
+  const phoneReply = content => [
+    'MiPhone_start', 'msg_start', '<我和小雨的私聊>',
+    `小雨--${content}--13:40`, '</我和小雨的私聊>', 'msg_end', 'MiPhone_end',
+  ].join('\n');
+  const actual = phoneReply('实际回复');
+  const example = phoneReply('思考中的格式示例');
+  const cases = [
+    ['standard thinking', `<thinking>${example}</thinking>\n${actual}`, 'raw'],
+    ['think alias', `<think>${example}</think>\n${actual}`, 'raw'],
+    ['prefilled thinking', `${example}\n</thinking>\n${actual}`, 'raw'],
+    ['empty shell', `MiPhone_start\nMiPhone_end\n${actual}`, 'raw'],
+    ['normalized fallback after an empty shell', `<content>说明\nMiPhone_start\nMiPhone_end\n${actual}`, 'mi_phone'],
+  ];
+  for (const [label, rawText, expectedSource] of cases) {
+    const captured = [];
+    const regexInputs = [];
+    const seenRaw = [];
+    const result = await runProtocolResponseTransaction({
+      rawText,
+      buildRetryCandidates: original => {
+        seenRaw.push(original);
+        return buildProtocolRetryCandidates(original);
+      },
+      createParser: () => new DialogueStreamParser(),
+      preflightEvent: event => ({ ok: event.type === 'private_chat' && event.otherName === '小雨' && event.messages.length > 0 }),
+      processEvent: async event => {
+        const batch = await buildProtocolPrivateChatBatch(event, {
+          resolveTargetSessionId: () => 'fixture-only',
+          buildAssistantMessageFromText: text => {
+            const parts = applyChatModeAssistantRegex(text, {
+              applyStoredRegex: source => {
+                regexInputs.push(source);
+                return source.replace('实际回复', '正则处理后的回复');
+              },
+            });
+            captured.push(parts.stored);
+            return { role: 'assistant', content: parts.display };
+          },
+        });
+        return { consumed: batch.items.length > 0, didAnything: batch.items.length > 0 };
+      },
+    });
+    assert.equal(result.handled, true, label);
+    assert.equal(result.candidateSource, expectedSource, label);
+    assert.deepEqual(captured, ['正则处理后的回复'], label);
+    assert.deepEqual(regexInputs, ['实际回复'], label);
+    assert.deepEqual(seenRaw, [rawText], label);
+  }
+  console.log('ok - protocol capture skips empty shells and thinking examples before running bubble regex once');
+
+  for (const rawText of [
+    `<think>${example}`,
+    `MiPhone_start\nMiPhone_end\n${actual.replace(/MiPhone_end$/, '')}<我和小雨的私聊>未完成`,
+  ]) {
+    const calls = [];
+    const result = await runProtocolResponseTransaction({
+      rawText,
+      buildRetryCandidates: buildProtocolRetryCandidates,
+      createParser: () => new DialogueStreamParser(),
+      beginTransaction: () => calls.push('begin'),
+      processEvent: () => calls.push('process'),
+    });
+    assert.equal(result.handled, false);
+    assert.deepEqual(calls, []);
+  }
+  console.log('ok - thinking-only and incomplete replies cannot dispatch through retry extraction');
+}
 
 {
   async function* stream() {

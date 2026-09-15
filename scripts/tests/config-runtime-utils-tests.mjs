@@ -377,6 +377,109 @@ test('ConfigManager treats profile backup quota as non-fatal after Tauri KV save
   }
 });
 
+test('profile listing during creation preserves the active editor and its populated choices', async () => {
+  const previous = { storage: globalThis.localStorage, tauri: globalThis.__TAURI__, document: globalThis.document, window: globalThis.window, prompt: globalThis.prompt };
+  let release;
+  const pendingRead = new Promise(resolve => { release = resolve; });
+  const calls = [];
+  const local = new Map();
+  globalThis.localStorage = { getItem: key => local.get(key) ?? null, setItem: (key, value) => local.set(key, value) };
+  globalThis.window = {};
+  globalThis.prompt = () => '111';
+  try {
+    const [{ ConfigManager }, { ConfigPanel }] = await Promise.all([
+      import('../../src/scripts/storage/config.js'),
+      import('../../src/scripts/ui/config-panel.js'),
+    ]);
+    const manager = new ConfigManager();
+    const original = { ...manager.getDefault(), id: 'original', name: '默认', updatedAt: 1 };
+    manager.profileStore = { activeProfileId: original.id, profiles: { [original.id]: original }, savedAt: 1 };
+    manager.keyringStore = { keysByProfile: {} };
+    manager.storesEnsured = true;
+    manager.config = original;
+    manager.isLoaded = true;
+    const oldDiskSnapshot = structuredClone(manager.profileStore);
+    const originalStore = manager.profileStore;
+    globalThis.__TAURI__ = { core: { invoke: async (command, args) => {
+      calls.push([command, args.name]);
+      await pendingRead;
+      return oldDiskSnapshot;
+    } } };
+    // Model the same overlapping read as the status chip, with storage delayed
+    // until after the user has finished creating their new profile.
+    const listing = manager.readProfileSnapshot();
+    assert.equal(manager.profileStore, originalStore);
+    assert.equal(manager.config, original);
+    manager.persistProfiles = async () => {
+      local.set(manager.profileStoreKey, JSON.stringify(manager.profileStore));
+    };
+    const options = [];
+    const select = { id: 'config-profile', value: '', options, appendChild: option => options.push(option) };
+    Object.defineProperty(select, 'innerHTML', { set: () => { options.length = 0; select.value = ''; } });
+    globalThis.document = { createElement: () => ({}) };
+    const panel = Object.create(ConfigPanel.prototype);
+    panel.configManager = manager;
+    panel.element = { querySelector: selector => selector === '#config-profile' ? select : null };
+    panel.refreshCustomSelect = () => {};
+    panel.populateForm = () => panel.refreshProfileOptions();
+    panel.syncActiveProfileRuntime = async () => {};
+    panel.emitProfileChanged = () => {};
+    await panel.createProfile();
+    const createdId = manager.getActiveProfileId();
+    const createdRuntime = manager.get();
+    assert.equal(manager.getActiveProfile().name, '111');
+    assert.equal(select.value, createdId);
+    assert.deepEqual(options.map(option => option.textContent), ['111', '默认']);
+    release();
+    const snapshot = await listing;
+    assert.equal(snapshot.activeId, createdId);
+    assert.equal(snapshot.profiles[0].name, '111');
+    assert.equal(manager.getActiveProfileId(), createdId);
+    assert.equal(manager.get(), createdRuntime);
+    assert.equal(select.value, createdId);
+    assert.equal(options.length, 2);
+    snapshot.profiles[0].name = 'changed snapshot';
+    assert.equal(manager.getActiveProfile().name, '111');
+    assert.deepEqual(calls, [['load_kv', 'llm_profiles_v1']]);
+  } finally {
+    release();
+    for (const [key, value] of Object.entries({ localStorage: previous.storage, __TAURI__: previous.tauri, document: previous.document, window: previous.window, prompt: previous.prompt })) {
+      if (value === undefined) delete globalThis[key]; else globalThis[key] = value;
+    }
+  }
+});
+
+test('profile snapshots see external changes and scoped backups without replacing cached config or loading credentials', async () => {
+  const previousStorage = globalThis.localStorage;
+  const previousTauri = globalThis.__TAURI__;
+  const reads = [];
+  const local = new Map();
+  globalThis.localStorage = { getItem: key => local.get(key) ?? null };
+  const saved = { activeProfileId: 'external', savedAt: 20, profiles: { external: { id: 'external', name: '外部更新', updatedAt: 20 } } };
+  let fromKv = saved;
+  globalThis.__TAURI__ = { core: { invoke: async (command, args) => { reads.push([command, args.name]); return fromKv; } } };
+  try {
+    const { ConfigManager } = await import('../../src/scripts/storage/config.js');
+    const manager = new ConfigManager({ scope: 'image' });
+    manager.profileStore = { activeProfileId: 'old', profiles: { old: { id: 'old', name: '编辑中的设置档' } } };
+    manager.config = { model: 'unsaved-model' };
+    const beforeStore = manager.profileStore;
+    const beforeConfig = manager.config;
+    assert.equal((await manager.readProfileSnapshot()).profiles[0].name, '外部更新');
+    fromKv = { _tooLarge: true };
+    local.set('llm_profiles_image_v1', JSON.stringify(saved));
+    assert.equal((await manager.readProfileSnapshot()).activeId, 'external');
+    local.clear();
+    assert.equal((await manager.readProfileSnapshot()).activeId, 'old');
+    assert.equal(manager.profileStore, beforeStore);
+    assert.equal(manager.config, beforeConfig);
+    assert.deepEqual(reads, Array.from({ length: 3 }, () => ['load_kv', 'llm_profiles_image_v1']));
+  } finally {
+    if (previousStorage === undefined) delete globalThis.localStorage; else globalThis.localStorage = previousStorage;
+    if (previousTauri === undefined) delete globalThis.__TAURI__; else globalThis.__TAURI__ = previousTauri;
+  }
+});
+
 let failed = 0;
 for (const t of tests) {
   try {

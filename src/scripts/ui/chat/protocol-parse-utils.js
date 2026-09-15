@@ -1,19 +1,7 @@
 import { stripAutoImagePromptTags } from './auto-image-prompt-utils.js';
+import { sanitizeThinkingForProtocolParse } from './protocol-thinking-utils.js';
 
-export const sanitizeThinkingForProtocolParse = (text) => {
-  const raw = String(text ?? '');
-  // More tolerant fallback: if model echoed "<content>" inside (possibly unclosed) thinking,
-  // we drop everything before the last </thinking> or </think> then parse the remaining tail once.
-  const lower = raw.toLowerCase();
-  const closeThinking = '</thinking>';
-  const closeThink = '</think>';
-  const i1 = lower.lastIndexOf(closeThinking);
-  const i2 = lower.lastIndexOf(closeThink);
-  const idx = Math.max(i1, i2);
-  if (idx === -1) return raw;
-  const cut = idx + (idx === i1 ? closeThinking.length : closeThink.length);
-  return raw.slice(cut);
-};
+export { sanitizeThinkingForProtocolParse };
 
 export const normalizeMiPhoneMarkers = (text) => {
   const raw = String(text ?? '');
@@ -26,14 +14,18 @@ export const normalizeMiPhoneMarkers = (text) => {
 export const extractMiPhoneBlock = (text) => {
   const raw = String(text ?? '');
   const startRe = /<\s*MiPhone_start\s*>|MiPhone_start/i;
-  const endRe = /<\s*MiPhone_end\s*>|MiPhone_end/i;
+  const endRe = /<\s*MiPhone_end\s*>|MiPhone_end/gi;
   const start = startRe.exec(raw);
   if (!start) return '';
   const afterStart = raw.slice(start.index + start[0].length);
-  const end = endRe.exec(afterStart);
-  if (!end) return raw.slice(start.index);
-  const endIdx = start.index + start[0].length + end.index + end[0].length;
-  return raw.slice(start.index, endIdx);
+  let end;
+  let endIdx = -1;
+  while ((end = endRe.exec(afterStart))) {
+    endIdx = start.index + start[0].length + end.index + end[0].length;
+  }
+  // Keep following shells available: only the parser can tell whether an
+  // earlier shell contains a usable event. It still stops at the first valid one.
+  return endIdx === -1 ? raw.slice(start.index) : raw.slice(start.index, endIdx);
 };
 
 export const buildProtocolRetryCandidates = (text) => {

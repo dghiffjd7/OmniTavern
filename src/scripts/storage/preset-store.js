@@ -1134,6 +1134,9 @@ export class PresetStore {
         this.state = null;
         this.isLoaded = false;
         this.persistedItemSignatures = new Map();
+        // TavernHelper's in_use edits are session-local working data. They are
+        // deliberately outside state, so export/persist cannot save them.
+        this.inUsePresets = new Map();
         this.ready = this.load();
     }
 
@@ -1739,11 +1742,49 @@ export class PresetStore {
         const t = normalizeType(type);
         const resolved = this.getResolvedActiveId(t, context);
         const presetId = String(resolved?.presetId || '').trim();
-        const preset = presetId ? clone(this.state?.presets?.[t]?.[presetId] || null) : null;
+        const draft = this.resolveInUsePreset(t, context);
+        const preset = presetId ? clone(draft?.preset || this.state?.presets?.[t]?.[presetId] || null) : null;
         return {
             ...resolved,
             preset: t === 'sysprompt' && preset ? localizeSyspromptDefaults(preset) : preset,
         };
+    }
+
+    resolveInUsePreset(type, context = {}) {
+        const t = normalizeType(type);
+        const key = JSON.stringify([t, String(context.sessionId || '')]);
+        const draft = this.inUsePresets?.get(key);
+        if (!draft) return null;
+        const id = this.getResolvedActiveId(t, context)?.presetId;
+        // Switching presets or explicitly saving through the normal editor
+        // makes the saved preset authoritative again.
+        if (draft.presetId !== id || draft.base !== this.state?.presets?.[t]?.[id]) {
+            this.inUsePresets.delete(key);
+            return null;
+        }
+        return draft;
+    }
+
+    setInUsePreset(type, context, presetId, preset, regexes = []) {
+        const t = normalizeType(type);
+        const sid = String(context?.sessionId || '');
+        if (!sid || this.getResolvedActiveId(t, context)?.presetId !== presetId) {
+            throw new Error('预设已切换，请重新应用设置');
+        }
+        this.inUsePresets ||= new Map();
+        this.inUsePresets.set(JSON.stringify([t, sid]), {
+            presetId, base: this.state.presets[t][presetId],
+            preset: clone(preset), regexes: clone(regexes),
+        });
+    }
+
+    getInUsePresetRegexOverrides(type, context = {}) {
+        const draft = this.resolveInUsePreset(type, context);
+        return draft ? clone(draft.regexes) : null;
+    }
+
+    clearInUsePreset(type, sessionId) {
+        this.inUsePresets?.delete(JSON.stringify([normalizeType(type), String(sessionId || '')]));
     }
 
     async setActive(type, id) {

@@ -511,6 +511,8 @@ import { bindInputSuggestionComposer } from './chat/input-suggestion-composer.js
 import { createAgentConfigStore, BODY_SELECTOR_ID } from '../storage/agent-config-store.js';
 import { createScopedAgentFeatures } from '../agent/scoped-agent-features.js';
 import { createAgentToolsAppRuntime } from './agent-tools-app-runtime.js';
+import { createBubbleSelectionEditRuntime, canEditBubbleText } from './chat/bubble-selection-edit-runtime.js';
+import { bindBubbleTextSelection } from './chat/bubble-text-selection.js';
 import { allowsAgentInvocation, createInputRequestBudget } from '../agent/agent-invocation.js';
 import { createAgentReferenceAppRuntime } from './chat/agent-reference-app-runtime.js';
 import { createCustomAgentAppRuntime } from './chat/custom-agent-app-runtime.js';
@@ -933,7 +935,6 @@ const {
   logger,
   documentLike: document,
   windowLike: window,
-  getRuntimeReady: () => appRuntimeReady,
 });
 
 markBootPhase('module-evaluated');
@@ -3840,9 +3841,7 @@ const initApp = async () => {
     listModelProfiles: async ({ scope } = {}) => {
       const mgr = scope === 'image' ? imageConfigManager : (scope === 'chat' ? chatConfigManager : null);
       if (!mgr) return null;
-      await mgr.reload();
-      const profiles = await mgr.getProfiles();
-      const activeId = String(mgr.getActiveProfileId?.() || '').trim();
+      const { profiles, activeId } = await mgr.readProfileSnapshot();
       return {
         activeId,
         profiles: (Array.isArray(profiles) ? profiles : []).map(p => ({
@@ -4701,8 +4700,8 @@ const initApp = async () => {
           }
         },
         listAgentModelProfiles: async () => {
-          await chatConfigManager.reload();
-          return (chatConfigManager.getProfiles?.() || []).map(profile => ({
+          const { profiles } = await chatConfigManager.readProfileSnapshot();
+          return profiles.map(profile => ({
             id: String(profile?.id || '').trim(),
             name: String(profile?.name || profile?.id || '').trim(),
             provider: String(profile?.provider || '').trim(),
@@ -27329,6 +27328,36 @@ const initApp = async () => {
   });
   const { textEditRuntime, actions: agentConfigurationActions } = agentToolsRuntime;
   patchDebugUiRegistry(registry => { Object.assign(registry.actions, agentConfigurationActions); registry.stores.agentConfigStore = agentConfigStore; registry.stores.textEditRuntime = textEditRuntime; registry.stores.agentToolsRuntime = agentToolsRuntime; });
+  const bubbleSelectionEdits = createBubbleSelectionEditRuntime({
+    getContext: getAgentExecutionContext,
+    findMessage: (mid, sid) => chatStore.findMessage(mid, sid),
+    loadOriginal: (message, context) => resolveCreativeFormatRepairRawOriginal(message, context.sessionId),
+    getSourceTurn: (message, context) => resolveChatFormatRepairTarget(message, context.sessionId),
+    getEnvelope: sid => ({ ...chatStore.getLastRawResponseEnvelope(sid), archiveId: chatStore.getCurrentArchiveId(sid) || '' }),
+    getBoundaries: context => resolveResolvedPreset(window.appBridge, 'reasoning', {
+      sessionId: context.sessionId, uiMode: context.place === 'writing' ? 'rp' : 'chat',
+    }) || {},
+    renderContent: (candidate, context) => decorateMessagesForDisplay(
+      chatStore.getMessages(context.sessionId).map(message => message.id === candidate.id ? candidate : message),
+      { sessionId: context.sessionId },
+    ).find(message => message.id === candidate.id)?.content,
+    commit: change => chatStore.updateMessageTextSelection(change),
+    onSaved: (message, context) => {
+      if (isSessionActive(context.sessionId)) {
+        const decorated = decorateMessagesForDisplay(chatStore.getMessages(context.sessionId), {
+          sessionId: context.sessionId,
+        }).find(item => item.id === message.id);
+        ui.updateMessage(message.id, decorated || message);
+      }
+      refreshChatAndContacts();
+    },
+  });
+  const bubbleTextSelection = bindBubbleTextSelection({
+    ui, runtime: bubbleSelectionEdits,
+    canEdit: message => Boolean(message?.id && (!message.sessionId || message.sessionId === chatStore.getCurrent())
+      && canEditBubbleText(chatStore.findMessage(message.id, chatStore.getCurrent()))),
+  });
+  window.addEventListener('pagehide', () => bubbleTextSelection.dispose(), { once: true });
   // 生图房子：等待整组图片任务与回填结束；无提示 → skipped；部分失败 → failed(partial)
   const runHopscotchAutoImage = createHopscotchImageExecutor({
     findMessage: (mid, sid) => chatStore.findMessage(mid, sid),
@@ -34539,6 +34568,7 @@ const initApp = async () => {
     () => isBackLayerVisible(momentSummaryPanel.overlay) || isBackLayerVisible(momentSummaryPanel.panel),
   ];
   const closeTopAppLayer = ({ dryRun = false } = {}) => {
+    if (bubbleTextSelection.closeEditor?.({ dryRun })) return true;
     if (ui.hasVisibleCodeViewer?.()) {
       return dryRun ? true : ui.closeCodeViewer?.() === true;
     }

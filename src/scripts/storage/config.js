@@ -684,6 +684,34 @@ export class ConfigManager {
         return profiles;
     }
 
+    // Listing profiles must not reset the editor's stores/config while it is
+    // creating or saving a profile. Read a fresh snapshot without loading keys,
+    // migrating data, or publishing partial state to this ConfigManager.
+    async readProfileSnapshot() {
+        let stored = null;
+        let local = null;
+        try {
+            const raw = await safeInvoke('load_kv', { name: this.profileStoreKey });
+            if (!raw?._tooLarge) stored = normalizeProfileStore(raw);
+        } catch (error) {
+            logger.debug('profile snapshot load_kv failed, trying local backup', error);
+        }
+        try {
+            const raw = localStorage.getItem(this.profileStoreKey);
+            if (raw) local = normalizeProfileStore(JSON.parse(raw));
+        } catch (error) {
+            logger.debug('profile snapshot local backup unavailable', error);
+        }
+        const snapshot = mergeProfileStores(stored, local) || this.profileStore;
+        const profiles = Object.values(snapshot?.profiles || {}).map(profile => normalizeProfile(profile));
+        profiles.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+        const preferredId = String(snapshot?.activeProfileId || '').trim();
+        const activeId = profiles.some(profile => profile.id === preferredId)
+            ? preferredId
+            : String(profiles[0]?.id || '');
+        return { activeId, profiles };
+    }
+
     getActiveProfileId() {
         return this.profileStore?.activeProfileId || null;
     }
