@@ -354,8 +354,8 @@ export const createHopscotchBoardPanel = ({
           if (sharedConfig?.hasDraft() && !await confirmSharedDiscard()) return;
           openHouse(id, false, kind);
         },
-        buildPromptPreview: house.kind === 'body' && !member && !turn && buildPromptPreview
-          ? () => buildPromptPreview({ sessionId: previewSessionId, place: previewPlace }) : null,
+        buildPromptPreview: !turn && (agentId || house.kind === 'body') && buildPromptPreview
+          ? promptDraft => buildPromptPreview({ sessionId:previewSessionId, place:previewPlace, agentId, house, member, draft:promptDraft }) : null,
         content: place === 'writing' || variableCard ? boardContent : null, configure, readOnly: Boolean(turn) || busy() || saving, onClose: () => { void requestDetailClose(); },
       });
       showDetail();

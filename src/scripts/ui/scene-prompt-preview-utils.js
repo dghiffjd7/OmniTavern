@@ -5,6 +5,7 @@ export const createScenePromptPreviewRequestBuilder = ({ handleSend, logger } = 
   previewUiMode = '', previewScenario = '', previewChatFormat = true,
   previewInjectMemory = true, previewInjectImage = true, previewInjectMomentCreate = true,
   includeHistory = false, rawBlocks = false, forceLegacyText = false,
+  agentPromptDraft = null,
 } = {}) => {
   try {
     const request = await handleSend(null, {
@@ -12,10 +13,12 @@ export const createScenePromptPreviewRequestBuilder = ({ handleSend, logger } = 
       previewChatFormat, previewInjectMemory, previewInjectImage, previewInjectMomentCreate,
       previewSuppressHistory: !includeHistory, previewRawBlocks: Boolean(rawBlocks),
       previewForceLegacyText: Boolean(forceLegacyText), skipScripts: true,
+      ...(agentPromptDraft ? { agentPromptDraft } : {}),
     });
     return request && Array.isArray(request.messages) ? request : null;
   } catch (err) {
     logger?.warn?.('build scene preview request failed', err);
+    if (agentPromptDraft) throw err;
     return null;
   }
 };

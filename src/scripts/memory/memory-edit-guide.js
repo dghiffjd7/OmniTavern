@@ -4,14 +4,20 @@ import { formatMemoryPromptText } from './memory-prompt-locale.js';
 
 export { formatMemoryPromptText } from './memory-prompt-locale.js';
 
-const prompt = (key, fallback) => formatMemoryPromptText(`memory.edit.${key}`, fallback);
-
 export const buildMemoryEditGuide = ({
   requiredHints = [],
   updateMode = 'full',
   tableOrder = [],
   tableById = new Map(),
+  promptFields = {},
+  onField = null,
 } = {}) => {
+  const prompt = (key, fallback) => {
+    const id = `guide:${key}`, defaultValue = formatMemoryPromptText(`memory.edit.${key}`, fallback);
+    const value = typeof promptFields[id] === 'string' ? promptFields[id] : defaultValue;
+    onField?.({ id, defaultValue, value });
+    return value;
+  };
   const lines = ['<memory_edit_rules>'];
   if (requiredHints.length) {
     lines.push(prompt('required_header', '【系统必填】'));

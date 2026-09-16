@@ -177,6 +177,8 @@ import {
   parseMemoryPromptPositions,
 } from '../memory/memory-prompt-utils.js';
 import { buildMemoryEditGuide } from '../memory/memory-edit-guide.js';
+import { applyMemoryPromptFields, mergeMemoryPromptDraft } from '../memory/memory-prompt-editor.js';
+import { applyAgentPreviewPresetDraft, applyAgentPreviewMemorySettings, recordAgentPreviewPromptSource } from '../agent/agent-prompt-preview-draft.js';
 import {
   formatMemoryPromptText,
   getMemoryPromptListSeparator,
@@ -1068,10 +1070,11 @@ class AppBridge {
   }
 
   async buildMemoryPromptPlan(context = {}) {
+    const globalSettings = appSettings.get();
+    context = applyAgentPreviewMemorySettings(context, globalSettings);
     const memoryMode = String(context?.meta?.memoryStorageMode || '').trim().toLowerCase();
     const autoExtract = Boolean(context?.meta?.memoryAutoExtract);
     const updateMode = normalizeMemoryUpdateMode(context?.meta?.memoryUpdateMode, 'full');
-    const globalSettings = appSettings.get();
     const configuredMaxRows = Math.trunc(Number(globalSettings.memoryMaxRows));
     const configuredMaxTokens = Math.trunc(Number(globalSettings.memoryMaxTokens));
     const memoryBudget = {
@@ -1126,6 +1129,11 @@ class AppBridge {
       record = null;
     }
     if (!record) return disabledPlan('missing_template');
+    if (context?.meta?.previewOnly === true && context.meta.agentPromptDraft?.agentId === 'memory_table_agent') {
+      const draft = context.meta.agentPromptDraft;
+      if (draft?.templateId && draft.templateId !== record.id) throw new Error('记忆模板已切换，请重新打开');
+      record = mergeMemoryPromptDraft(record, draft);
+    }
 
     const toTemplate = this.memoryTemplateStore.toTemplateDefinition?.bind(this.memoryTemplateStore);
     const baseSchema = record?.schema && typeof record.schema === 'object' ? record.schema : {};
@@ -1185,7 +1193,7 @@ class AppBridge {
     const guideInjectDepthRaw = Math.trunc(Number(context?.meta?.memoryGuideDepth));
     const guideInjectDepth = Number.isFinite(guideInjectDepthRaw) ? Math.max(0, guideInjectDepthRaw) : 0;
 
-    const tables = Array.isArray(template?.tables) ? template.tables : [];
+    const tables = applyMemoryPromptFields(Array.isArray(template?.tables) ? template.tables : [], injection.promptFields);
     const tableByIdAll = new Map();
     const tableById = new Map();
     const tableOrder = [];
@@ -1280,6 +1288,7 @@ class AppBridge {
               'memory.edit.missing_fields',
               '系统检测：{table} 必填字段为空（{fields}）。请在 <tableEdit> 中使用 {action} 补全。',
               { table: tableLabel, fields: fieldNames.join(', '), action },
+              injection.promptFields,
             ));
           }
         }
@@ -1298,6 +1307,7 @@ class AppBridge {
           'memory.edit.summary_required',
           '本轮必须新增{table}（摘要栏位使用“【摘要】...”格式；仅使用 insert）。',
           { table: summaryLabel },
+          injection.promptFields,
         ));
       }
       const outlineTable = tableById.get(outlineTableId);
@@ -1307,6 +1317,7 @@ class AppBridge {
           'memory.edit.outline_check',
           '请检查{table}各分节；仅对本轮发生变化的分节执行 update/insert，禁止逐轮追加。',
           { table: outlineLabel },
+          injection.promptFields,
         ));
       }
       return hints;
@@ -1317,6 +1328,7 @@ class AppBridge {
       updateMode,
       tableOrder,
       tableById,
+      promptFields: injection.promptFields,
     }) : '';
 
     const emptyTemplate = renderStTemplate(templateRaw, { ...macroVars, tableData: '' });
@@ -1330,7 +1342,8 @@ class AppBridge {
       const wrapped = wrapperRaw
         ? renderStTemplate(wrapperRaw, { ...macroVars, tableData: renderedTemplate })
         : renderedTemplate;
-      const processed = this.processTextMacros(wrapped, { ...macroVars, sessionId });
+      const processed = this.processTextMacros(wrapped, { ...macroVars, sessionId,
+        ...(context?.meta?.previewOnly ? { macroVariableState: context.meta.macroVariableState || new Map() } : {}) });
       return String(processed || '').trim();
     };
     const buildPromptText = (tableData) => {
@@ -3823,6 +3836,7 @@ class AppBridge {
         ...(context?.meta || {}),
       };
       delete sanitizedContextMeta.onPhoneStructuredPreview;
+      if (previewOnly && sanitizedContextMeta.agentPromptDraft) sanitizedContextMeta.agentPromptSources = [];
       let nextContext = {
         ...(context || {}),
         meta: {
@@ -5234,6 +5248,15 @@ class AppBridge {
         }
         this.lastRequest.previewOnly = true;
         this.lastRequest.source = 'prompt_preview';
+        if (nextContext?.meta?.agentPromptDraft) this.lastRequest.agentPromptContext = {
+          sources: nextContext.meta.agentPromptSources || [],
+          memory: nextContext.meta.agentPromptDraft.agentId === 'memory_table_agent' && this.lastMemoryPlan ? {
+            enabled:this.lastMemoryPlan.enabled, reason:this.lastMemoryPlan.reason,
+            templateId:this.lastMemoryPlan.templateId, templateName:this.lastMemoryPlan.templateName,
+            dataPromptText:this.lastMemoryPlan.dataPromptText, guidePromptText:this.lastMemoryPlan.guidePromptText,
+            tableData:this.lastMemoryPlan.tableData,
+          } : null,
+        };
         return this.lastRequest;
       }
 
@@ -5708,14 +5731,14 @@ class AppBridge {
     if (!this.initialized) {
       await this.init();
     }
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    if (!options.previewOnly && typeof navigator !== 'undefined' && !navigator.onLine) {
       throw new Error('当前离线，请连接网络后再试');
     }
     const msgs = Array.isArray(messages) ? messages : [];
     if (!msgs.length) throw new Error('messages 不能为空');
 
     // Use the same generation options mapping as normal chat, but allow caller overrides.
-    const { presetContext = null, runtimeConfigOverride = null, ...requestOverrides } = options || {};
+    const { presetContext = null, runtimeConfigOverride = null, previewOnly = false, ...requestOverrides } = options || {};
     const resolvedPresetContext = presetContext || {
       sessionId: String(this.activeSessionId || '').trim(),
       uiMode: String(this.activeSessionId || '').trim().startsWith('rp:') ? 'rp' : 'chat',
@@ -5741,6 +5764,11 @@ class AppBridge {
       requestContext,
     };
     const normalizedMsgs = this.normalizeOutgoingProviderMessages(msgs, config);
+    if (previewOnly) {
+      const prepared = requestClient.prepareChatRequest?.(normalizedMsgs, { ...genOptions, stream:false });
+      return { messages:normalizedMsgs, params:genOptions, model:config.model, provider:config.provider, previewOnly:true,
+        ...(prepared?.body ? { wireRequest:{ body:prepared.body, parameterReport:prepared.parameterReport || [] } } : {}) };
+    }
     return requestClient.chat(normalizedMsgs, genOptions);
   }
 
@@ -6013,7 +6041,7 @@ class AppBridge {
       }
     };
     const syspResolved = this.presets.getResolvedActive('sysprompt', presetContext) || null;
-    const syspActive = resolveAgentPreset('resolveAgentSyspromptPresetSync', syspResolved);
+    const syspActive = applyAgentPreviewPresetDraft(resolveAgentPreset('resolveAgentSyspromptPresetSync', syspResolved), context, syspResolved?.presetId);
     const sysp = useSysprompt ? syspActive : null;
     const ctxp = useContext ? (this.presets.getResolvedActive('context', presetContext)?.preset || null) : null;
     const openaiResolved = this.presets.getResolvedActive('openai', presetContext) || null;
@@ -6790,7 +6818,7 @@ class AppBridge {
     const autoImagePromptPresetEnabled = useSysprompt && sysp?.auto_image_prompt_enabled !== false;
     const autoImagePromptRulesRaw = typeof sysp?.auto_image_prompt_rules === 'string' ? sysp.auto_image_prompt_rules : '';
     // 请求预览不受频率闸门影响：预览应稳定展示启用中的生图提示词
-    const autoImagePromptInjectGuard = (autoImagePromptSettingEnabled && !context?.meta?.previewOnly)
+    const autoImagePromptInjectGuard = (autoImagePromptSettingEnabled && (!context?.meta?.previewOnly || context?.meta?.agentPromptDraft))
       ? shouldAllowAutoImagePromptByRateLimit({
         messages: this.chatStore?.getMessages?.(sessionId) || [],
         settings: settingsSnapshot,
@@ -7015,6 +7043,7 @@ const stringifyMessageContent = (content) => {
 	        const pos = Number.isFinite(Number(position)) ? Math.trunc(Number(position)) : 0;
 	        const trimmed = trimEdgeBlankLines(content);
 	        if (!trimmed || pos === -1) return;
+	        recordAgentPreviewPromptSource(context, ({ chat_guide:isGroupChat ? 'group' : 'dialogue', moment_create:'moment', moment_comment:'moment-comment', moment_publish_comment:'moment-publish-comment', auto_image_prompt:'auto-image-prompt', summary:'summary' })[source], trimmed);
 	        if (pos === 1) {
 	          historyItems.push({
               content: trimmed,
@@ -7756,6 +7785,8 @@ const stringifyMessageContent = (content) => {
           })),
           ...worldPromptBuiltinBlocks,
         ].filter(block => block.id && String(block.content || '').trim());
+        for (const block of phoneFormatPromptBlocks) recordAgentPreviewPromptSource(context, block.id.replaceAll('_','-'), block.content);
+        if (shouldEmbedMomentCreateInPhoneFormat) recordAgentPreviewPromptSource(context, 'moment', momentCreateRules);
         const phoneFormatPromptContent = joinPromptBlocks(
           phoneFormatPromptBlocks.map(block => block.content),
         );

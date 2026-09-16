@@ -233,11 +233,11 @@ const resolveSummaryTablePromptOrderKey = (row, fallback = 0) => {
   return resolveMemoryRowOrderKey(row, row?.table_id || row?.tableId || '', fallback);
 };
 
-export const formatMemoryRowText = (rowData, columns, tableId = '') => {
+export const formatMemoryRowText = (rowData, columns, tableId = '', outlineLabels = null) => {
   const id = String(tableId || '').trim();
   if (isOutlineTableId(id) && String(rowData?.section || '').trim()) {
     const content = normalizePromptCellText(rowData?.outline ?? rowData?.content);
-    const sectionLabel = getOutlineSectionLabel(rowData.section);
+    const sectionLabel = outlineLabels?.[rowData.section] ?? getOutlineSectionLabel(rowData.section);
     return joinPromptLabel(sectionLabel, content || emptyPromptValue());
   }
   if (SUMMARY_TABLE_IDS.has(id)) {
@@ -289,7 +289,7 @@ export const buildMemoryTablePlan = ({
       if (!nextTableOrder.includes(tableId)) nextTableOrder.push(tableId);
     }
     const table = nextTableById.get(tableId);
-    const rowText = formatMemoryRowText(row?.row_data || {}, table?.columns || [], tableId);
+    const rowText = formatMemoryRowText(row?.row_data || {}, table?.columns || [], tableId, table?.promptOutlineLabels);
     items.push({
       id: String(row?.id || ''),
       tableId,

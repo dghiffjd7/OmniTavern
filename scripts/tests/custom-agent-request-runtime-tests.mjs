@@ -38,6 +38,14 @@ assert.equal(await runtime.request({ request, model, config, context, onTrace: v
 assert.equal(executed.length, 1); assert.equal(executed[0].name, 'worldbook.read');
 assert.equal(executed[0].ctx.sessionId, context.sessionId); assert.equal(executed[0].ctx.operationIntentPolicy.mode, 'read_only');
 assert.equal(requests.length, 3, 'one lookup, READY lookup, one final answer');
+const preview = await runtime.preview({ request, model, config, context });
+assert.deepEqual(preview.messages, requests[0].messages, 'preview must show the first actual tool lookup request');
+assert.deepEqual(preview.params.tools, requests[0].options.tools);
+assert.deepEqual(preview.stages[0].messages, request.messages, 'final stage distinguishes known input from future tool observations');
+assert.equal(preview.stages[0].params.requestParamConstraints.tools, 'none');
+assert.equal(requests.length, 3, 'building a preview must not call the model');
+assert.equal(executed.length, 1, 'building a preview must not execute tools');
+assert(!JSON.stringify(preview).includes(model.apiKey));
 assert.deepEqual(requests[0].options.requestParamConstraints.protectedParams.includes('tools'), true);
 assert.equal(requests[2].options.requestParamConstraints.tools, 'none');
 assert.equal(requests[2].messages[0].content, request.messages[0].content);

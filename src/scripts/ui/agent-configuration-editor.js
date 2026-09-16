@@ -8,6 +8,9 @@ import { createAgentReferenceEditor, createAgentToolCapabilitiesEditor } from '.
 import { createAgentRunCards } from './agent-run-cards.js';
 import { bindAgentEditorMotion } from './agent-editor-motion.js';
 import { getBuiltinAgentTask, resolveBuiltinAgentTask } from '../agent/agent-builtin-defaults.js';
+import { getAgentPromptFields } from './chat/agent-prompt-fields.js';
+import { readConfiguredPromptField, patchConfiguredPromptField } from './agent-prompt-field-save.js';
+import { normalizePresetBlockText } from './preset-preview-utils.js';
 
 const e = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -154,6 +157,7 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
     runCards = createAgentRunCards({ host: node.querySelector('[data-ac-runs]'), button, onStatus: setStatus, state: runState });
     renderRuns();
     void refreshCurrentModel().catch(() => {});
+    preview?.invalidate();
   };
   const setStatus = message => { status = message; const el = node.querySelector('.ac-status'); if (el) el.textContent = message; };
   const focusField = name => { const field = node.querySelector(`[name="${name}"]`); (field?.tagName === 'SELECT' ? field.parentElement.querySelector('button') : field)?.focus({ preventScroll: true }); };
@@ -165,6 +169,7 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
     const tokens = node.querySelector('[data-ac-token-summary]'); if (tokens) tokens.textContent = `${config.maxTokens} Tokens`;
     const run = node.querySelector('[data-ac="run"]'); if (run) run.textContent = t(runLabel());
     if (hasDraft() && !busy) setStatus(t('尚未保存'));
+    node.dispatchEvent(new doc.defaultView.Event('agent-prompt-draft-changed', { bubbles: true }));
   };
   const renderRuns = () => {
     const host = node.querySelector('[data-ac-runs]'); if (!host) return;
@@ -215,6 +220,24 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
       }
       status = t('已保存'); reload(); return true;
     } finally { setBusy(false); }
+  };
+  const savePromptField = async ({field,value,baseValue}) => {
+    if(busy || !alive)return {ok:false,message:t('正在保存上一处修改，请稍候')};
+    if(normalizePresetBlockText(readConfiguredPromptField(saved.config,field.id,config))!==baseValue)return {ok:false,message:t('配置已变化，请重新打开')};
+    setBusy(true);
+    try {
+      const accepted=patchConfiguredPromptField(saved.config,config,field.id,value);
+      const request={id,scope,context,revision:saved.revision,config:accepted};
+      const result=await actions.saveAgentConfiguration(request);
+      if(!result.ok)return {...result,message:result.message || t('配置已变化，请重新打开')};
+      if(alive && scope===request.scope && JSON.stringify(context)===JSON.stringify(request.context)) {
+        saved=actions.getAgentConfiguration({id,scope,context});
+        initial=JSON.stringify([saved.config,saved.bodyRule]);
+        updateMarker();
+        setStatus(t(hasDraft()?'尚未保存':'已保存'));
+      }
+      return {ok:true,value};
+    } finally {if(alive)setBusy(false);}
   };
   node.addEventListener('toggle', event => {
     if (!event.target.matches?.('[data-ac-section="target"]') || !event.target.open) return;
@@ -320,8 +343,10 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
   return { node, hasDraft,
     attach: host => {
       const previewState = preview?.snapshot(); preview?.dispose(); host.replaceWith(node);
-      preview = mountAgentRequestPreview({ host: node.closest('.agent-center-floating-layer'), buildRequest: () => actions.buildAgentConfigurationPreview({ ...options(), ...(selection ? { selection, messageId: targetView?.messageId } : {}) }), savedState: previewState });
+      preview = mountAgentRequestPreview({ host: node.closest('.agent-center-floating-layer'), buildRequest: () => actions.buildAgentConfigurationPreview({ ...options(), ...(selection ? { selection, messageId: targetView?.messageId } : {}) }), savedState: previewState,
+        getFields:root=>getAgentPromptFields(root).map(field=>({...field,baseValue:readConfiguredPromptField(saved.config,field.id,config)})),saveField:savePromptField });
     },
+    closePreview: () => preview?.close() || false,
     dispose: () => { alive = false; sourceRequest++; modelRequest++; preview?.dispose(); referenceEditor?.dispose(); toolsEditor?.dispose(); runCards?.dispose(); motion?.dispose(); doc.defaultView.removeEventListener('agent-text-edit-changed', renderRuns); doc.defaultView.removeEventListener('agent-input-changed', renderRuns); node.remove(); },
   };
 };

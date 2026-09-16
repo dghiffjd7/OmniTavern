@@ -19,6 +19,14 @@ const emitMemoryRuntimeTrace = (recordTraceEvent, event) => {
   }
 };
 
+export const resolveMemoryUpdateRuntimeConfig = async ({ appBridge, appSettings, memoryUpdateConfigManager }) => {
+  const settings = appSettings.get();
+  if (String(settings.memoryUpdateApiMode || 'chat').toLowerCase() !== 'profile') return loadBridgeConfig(appBridge);
+  await memoryUpdateConfigManager.load();
+  const profileId = String(settings.memoryUpdateProfileId || memoryUpdateConfigManager.getActiveProfileId() || '');
+  return profileId ? memoryUpdateConfigManager.getRuntimeConfigByProfileId(profileId) : null;
+};
+
 export const createMemoryUpdateRuntime = ({
   agentTaskRuntime = null,
   appBridge,
@@ -50,17 +58,7 @@ export const createMemoryUpdateRuntime = ({
     return 'succeeded';
   };
 
-  const resolveMemoryUpdateConfig = async () => {
-    const settings = appSettings.get();
-    const mode = String(settings.memoryUpdateApiMode || 'chat').toLowerCase();
-    if (mode !== 'profile') {
-      return loadBridgeConfig(appBridge);
-    }
-    await memoryUpdateConfigManager.load();
-    const profileId = String(settings.memoryUpdateProfileId || memoryUpdateConfigManager.getActiveProfileId() || '');
-    if (!profileId) return null;
-    return memoryUpdateConfigManager.getRuntimeConfigByProfileId(profileId);
-  };
+  const resolveMemoryUpdateConfig = () => resolveMemoryUpdateRuntimeConfig({ appBridge, appSettings, memoryUpdateConfigManager });
 
   const abortMemoryUpdate = (sessionId) => {
     const queue = memoryUpdateQueues.get(sessionId);

@@ -1540,7 +1540,7 @@ export const createMomentCommentLifecycleRuntime = ({
   recordLifecycleEvent = null,
   recordTraceEvent = null,
 } = {}) => {
-  const record = (event) => {
+  const emitRecord = (event) => {
     if (typeof recordLifecycleEvent === 'function') {
       try {
         recordLifecycleEvent(event);
@@ -1560,6 +1560,8 @@ export const createMomentCommentLifecycleRuntime = ({
     });
 
   return async (momentId, commentText, meta = null) => {
+    const previewOnly = meta?.previewOnly === true;
+    const record = previewOnly ? () => {} : emitRecord;
     const id = String(momentId || '').trim();
     const mode = String(meta?.mode || meta?.source || meta?.kind || '').trim().toLowerCase();
     const isPublishedMomentComment =
@@ -1579,7 +1581,7 @@ export const createMomentCommentLifecycleRuntime = ({
       return { ok: false, reason: 'missing-input' };
     }
 
-    if (!getIsConfigured()) {
+    if (!previewOnly && !getIsConfigured()) {
       record(buildMomentCommentSkippedTraceEvent({
         momentId: id,
         reason: 'not-configured',
@@ -1588,7 +1590,7 @@ export const createMomentCommentLifecycleRuntime = ({
       return { ok: false, reason: 'not-configured' };
     }
 
-    if (!isOnline()) {
+    if (!previewOnly && !isOnline()) {
       record(buildMomentCommentSkippedTraceEvent({
         momentId: id,
         reason: 'offline',
@@ -1603,13 +1605,13 @@ export const createMomentCommentLifecycleRuntime = ({
         momentId: id,
         reason: 'moment-not-found',
       }));
-      showMissingMoment();
+      if (!previewOnly) showMissingMoment();
       return { ok: false, reason: 'moment-not-found' };
     }
 
     const engagementCount = Math.max(1, Number(getContactCount()) || 1);
     try {
-      bumpMomentEngagement(id, engagementCount);
+      if (!previewOnly) bumpMomentEngagement(id, engagementCount);
     } catch {}
 
     const authorName = String(moment.author || '').trim() || getMomentPromptLine('moment_comment.label.publisher');
@@ -1795,6 +1797,9 @@ export const createMomentCommentLifecycleRuntime = ({
         memoryGuidePosition: memoryRuntimeConfig.memoryGuidePosition,
         memoryGuideDepth: memoryRuntimeConfig.memoryGuideDepth,
       });
+      if (previewOnly) return { ok:true, input:isPublishedMomentComment
+        ? (momentPromptContent || getMomentPromptLine('moment_comment.image_only')) : userComment,
+        context:{ ...context, meta:{ ...context.meta, previewOnly:true, skipScripts:true, macroVariableState:new Map(), agentPromptDraft:meta.agentPromptDraft } } };
       momentCommentTraceStarted = true;
       record(buildMomentCommentStartTraceEvent({
         sessionId: originSessionId,
@@ -1908,6 +1913,7 @@ export const createMomentCommentLifecycleRuntime = ({
         target,
       };
     } catch (err) {
+      if (previewOnly) throw err;
       record(buildMomentCommentFinishTraceEvent({
         sessionId: originSessionId,
         momentId: id,

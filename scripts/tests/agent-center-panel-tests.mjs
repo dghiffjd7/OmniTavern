@@ -209,8 +209,8 @@ const agentCenterPanelSource = await readFile(
   assert.match(floatingHtml, /data-agent-prompt-preview="reply_check"/);
   assert.match(floatingHtml, /data-reply-check-preview-target/);
   assert.match(floatingHtml, /生图标签/);
-  assert.match(floatingHtml, /预览提示词/);
-  assert.match(floatingHtml, /完整请求预览/);
+  assert.match(floatingHtml, /展开请求预览/);
+  assert.match(floatingHtml, /提示词区块/);
   assert.match(floatingHtml, /检查提示词/);
   assert.match(floatingHtml, /固定检查指令/);
   assert.match(floatingHtml, /自动触发/);
@@ -443,27 +443,12 @@ const agentCenterPanelSource = await readFile(
 }
 
 {
-  let payload = null;
-  const panel = new AgentCenterPanel({
-    getActions: () => ({
-      showPromptPreview: options => {
-        payload = options;
-        return true;
-      },
-    }),
-  });
-  panel.handleReplyCheckPreviewTargetChange('image_prompt');
-  assert.equal(panel.replyCheckPreviewTarget, 'image_prompt');
-  panel.handleReplyCheckPreviewTargetChange('unknown');
-  assert.equal(panel.replyCheckPreviewTarget, 'auto');
-  panel.handleReplyCheckPreviewTargetChange('group_chat');
-  await panel.handleAgentPromptPreview('reply_check');
-  assert.deepEqual(payload, {
-    source: 'agent_center',
-    agentId: 'reply_check',
-    formatTarget: 'group_chat',
-  });
-  console.log('ok - agent center prompt preview button delegates agent id to preview action');
+  let opened = 0;
+  const panel = new AgentCenterPanel({ getActions:() => ({ showPromptPreview:() => { throw new Error('legacy modal must not open'); } }) });
+  panel.floatingPromptPreview = { open:() => { opened++; } };
+  await panel.handleAgentPromptPreview('group_agent');
+  assert.equal(opened,1);
+  console.log('ok - agent prompt preview opens the local workspace without leaving the card');
 }
 
 {

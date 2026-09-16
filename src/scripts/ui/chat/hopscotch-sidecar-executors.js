@@ -9,6 +9,11 @@ const abort = () => { throw Object.assign(new Error('Task target changed'), { na
 const textOf = response => typeof response === 'string' ? response : String(response?.content ?? response?.text ?? '');
 const UPDATE_CONTRACT = /<\s*\/?\s*(?:UpdateVariable|variableupdate|json_patch)\b|\b_\.(?:set|add|assign|remove|insert)\s*\(|\b(?:JSONPatch|JSON\s*Patch)\b/i;
 
+export const buildHopscotchImagePromptMessages = ({ imageSettings = {}, imageInstruction = buildAutoImagePromptInstruction({ uiMode:'rp', ...imageSettings }), userInput = '', body = '', renderMacros = value => value } = {}) => [
+  { role:'system', content:renderMacros(imageInstruction) + '\n' + t('为给定正文生成图片提示。只输出 <{tag}> 标签；无需配图时输出 <{tag}>none</{tag}>。', { tag:AUTO_IMAGE_PROMPT_TAG }) },
+  { role:'user', content:`${userInput}\n\n${body}` },
+];
+
 // 每轮一份依赖快照；只负责正文之外的请求和变量落地，不操作 UI 或重新进入发送链。
 export const createHopscotchSidecarExecutors = ({
   sessionId, userInput = '', board, getTurnContext, runtimeConfig,
@@ -68,10 +73,7 @@ export const createHopscotchSidecarExecutors = ({
       if (!body) return { status: 'skipped', reason: 'body_message_missing' };
       const eligibility = imageEligibility({ sessionId, messageId: body.messageId });
       if (!eligibility.ok) return { status: 'skipped', reason: eligibility.reason || 'cadence' };
-      const result = await request(house, [
-        { role: 'system', content: renderMacros(imageInstruction) + '\n' + t('为给定正文生成图片提示。只输出 <{tag}> 标签；无需配图时输出 <{tag}>none</{tag}>。', { tag: AUTO_IMAGE_PROMPT_TAG }) },
-        { role: 'user', content: `${userInput}\n\n${body.source}` },
-      ], signal);
+      const result = await request(house, buildHopscotchImagePromptMessages({ imageInstruction, userInput, body:body.source, renderMacros }), signal);
       if (!body.canCommit()) abort();
       const prompts = extractAutoImagePrompts(result.text, { max: imageSettings.maxCount || 10, maxLength: imageSettings.maxLength || 2000 });
       if (!prompts.length) {

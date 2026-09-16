@@ -11,7 +11,7 @@ import { getLocalizedPromptText } from '../i18n/prompt-locale.js';
 import { appChoice, appConfirm, appPromptText } from './app-confirm.js';
 import { bindBackdropActivation } from './backdrop-activation-utils.js';
 import { captureAgentEditorDrafts, restoreAgentEditorDrafts } from './agent-editor-draft-utils.js';
-import { mountAgentRequestPreview } from './chat/agent-request-preview.js';
+import { mountAgentCenterPromptWorkspace, renderAgentPromptBoundary, captureAgentPromptDraft, markAgentPromptDraftSaved } from './agent-center-prompt-workspace.js';
 import { bindCustomSelectButton, closeCustomSelectMenu } from './custom-select.js';
 import { buildDebugTextFilename } from './debug-panel-utils.js';
 import { exportDebugTextFile } from './debug-panel-export-utils.js';
@@ -3259,6 +3259,7 @@ export class AgentCenterPanel {
         globalThis.window?.addEventListener?.('memory-storage-mode-changed', this.boundMemoryStorageModeChanged);
         this.boundAgentFeatureSettingsChanged = (event) => this.handleAgentFeatureSettingsChanged(event);
         globalThis.window?.addEventListener?.('agent-feature-settings-changed', this.boundAgentFeatureSettingsChanged);
+        globalThis.window?.addEventListener?.('session-changed', this.boundAgentFeatureSettingsChanged);
         globalThis.window?.addEventListener?.('agent-text-edit-changed', this.boundAgentFeatureSettingsChanged);
     }
 
@@ -3430,6 +3431,8 @@ export class AgentCenterPanel {
         const boardPanel = this.getHopscotchPanel();
         if (!force && boardPanel?.requestClose(() => this.hide({ force: true })) === false) return false;
         boardPanel?.close();
+        this.floatingPromptPreview?.dispose(); this.floatingPromptPreview = null;
+        this.commonAgentEditors?.forEach(editor => editor.dispose()); this.commonAgentEditors?.clear();
         closeCustomSelectMenu();
         clearTimeout(this.globalPromptLivePreviewTimer);
         this.globalPromptLivePreviewTimer = null;
@@ -3449,6 +3452,8 @@ export class AgentCenterPanel {
     }
 
     closeTopLayer() {
+        if (this.floatingPromptPreview?.close()) return true;
+        for (const editor of this.commonAgentEditors?.values() || []) if (editor.closePreview?.()) return true;
         if (this.floatingAgentId) {
             this.closeFloatingAgentCard();
             return true;
@@ -3462,7 +3467,9 @@ export class AgentCenterPanel {
         target?.removeEventListener?.('config-profile-changed', this.boundConfigProfileChanged);
         target?.removeEventListener?.('memory-storage-mode-changed', this.boundMemoryStorageModeChanged);
         target?.removeEventListener?.('agent-feature-settings-changed', this.boundAgentFeatureSettingsChanged);
+        target?.removeEventListener?.('session-changed', this.boundAgentFeatureSettingsChanged);
         target?.removeEventListener?.('agent-text-edit-changed', this.boundAgentFeatureSettingsChanged);
+        this.floatingPromptPreview?.dispose(); this.floatingPromptPreview = null;
         this.commonAgentEditors?.forEach(editor => editor.dispose()); this.commonAgentEditors?.clear();
         this.boundConfigProfileChanged = null;
         this.boundMemoryStorageModeChanged = null;
@@ -3842,7 +3849,7 @@ export class AgentCenterPanel {
                         <button type="button" class="agent-center-card-action" data-agent-prompt-open-position>去调整</button>
                     </div>
                 ` : ''}
-                <textarea class="agent-center-agent-textarea" data-agent-prompt-rules>${escapeHtml(prompt.rules || '')}</textarea>
+                <textarea class="agent-center-agent-textarea" data-agent-prompt-rules data-i18n-skip="true" aria-label="${escapeHtml(ref.label || promptId)}" spellcheck="false">${escapeHtml(prompt.rules || '')}</textarea>
             </div>
         `;
     }
@@ -3874,6 +3881,7 @@ export class AgentCenterPanel {
             template: typeof cfg.template === 'string' ? cfg.template : '{{tableData}}',
             wrapper: typeof cfg.wrapper === 'string' ? cfg.wrapper : '<memories>\n{{tableData}}\n</memories>',
             position: trim(cfg.position, 'before_latest_user'),
+            fields: Array.isArray(cfg.fields) ? cfg.fields : [],
         };
     }
 
@@ -3909,6 +3917,7 @@ export class AgentCenterPanel {
                         `).join('')}
                     </div>
                 </div>
+                <details class="agent-memory-prompt-block agent-memory-assembly"><summary>${escapeHtml(t('上下文与模板'))}<span>${escapeHtml(t('注入位置'))}</span></summary>
                 <div class="agent-center-agent-field-grid">
                     <div class="agent-center-agent-field">
                         <label>记忆数据提示词位置</label>
@@ -3945,7 +3954,14 @@ export class AgentCenterPanel {
                         <textarea class="agent-center-agent-textarea is-compact" data-memory-prompt-wrapper>${escapeHtml(prompt.wrapper || '')}</textarea>
                     </div>
                 </div>
-                <div class="agent-center-card-actions">
+                </details>
+                <div class="agent-memory-prompt-blocks">
+                    ${[...new Set(prompt.fields.map(field => field.group))].map(group => `
+                        <details class="agent-memory-prompt-block"><summary>${escapeHtml(group)}<span>${escapeHtml(t('提示词区块'))}</span></summary>
+                        ${prompt.fields.filter(field => field.group === group).map(field => `<label class="agent-center-agent-field"><span>${escapeHtml(field.label)}</span><textarea class="agent-center-agent-textarea is-compact" name="memory-prompt-${escapeHtml(field.id)}" data-memory-prompt-field="${escapeHtml(field.id)}" data-i18n-skip="true" aria-label="${escapeHtml(group + ' · ' + field.label)}" spellcheck="false" maxlength="20000">${escapeHtml(field.value)}</textarea></label>`).join('')}
+                        </details>`).join('')}
+                </div>
+                <div class="agent-center-card-actions agent-memory-save">
                     <button type="button" class="agent-center-card-action is-primary" data-memory-agent-save="memory_table_agent">保存记忆设置</button>
                 </div>
             </div>
@@ -4020,14 +4036,28 @@ export class AgentCenterPanel {
 
     renderAgentPromptPreviewAction(agent = {}) {
         if (!agent?.implemented) return '';
-        return `
-            <div class="agent-center-agent-section">
-                <div class="agent-center-agent-section-title has-help" data-help="根据该 Agent 的当前触发场景构建完整提示词和请求参数；只预览，不发送。">完整请求预览</div>
-                <div class="agent-center-card-actions" style="margin-top:0;">
-                    <button type="button" class="agent-center-card-action is-primary" data-agent-prompt-preview="${escapeHtml(agent.id || '')}">预览提示词</button>
-                </div>
-            </div>
-        `;
+        const moments = agent.id === 'moment_agent' ? (this.getActions?.()?.listAgentPromptMomentTargets?.() || []) : [];
+        return `<div class="agent-center-agent-section agent-prompt-intro">
+            <div class="agent-center-agent-editor-row"><span class="agent-center-agent-section-title">${escapeHtml(t('提示词区块'))}</span><button type="button" class="agent-center-card-action" data-agent-prompt-preview="${escapeHtml(agent.id || '')}">${escapeHtml(t('展开请求预览'))}${ICONS.chevron}</button></div>
+            ${renderAgentPromptBoundary(escapeHtml)}
+            ${agent.id === 'moment_agent' ? `<label class="agent-center-agent-field"><span>${escapeHtml(t('预览任务'))}</span><select class="agent-center-agent-input" data-agent-preview-task>${this.renderSelectOptions([{value:'moment',label:t('随聊天发布动态')},{value:'moment-comment',label:t('回复动态评论')},{value:'moment-publish-comment',label:t('发布后评论')}], 'moment')}</select></label><label class="agent-center-agent-field"><span>${escapeHtml(t('目标动态'))}</span><select class="agent-center-agent-input" data-agent-preview-moment><option value="">${escapeHtml(t('选择动态以预览独立评论请求'))}</option>${moments.map(item => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.label)}</option>`).join('')}</select></label>` : ''}
+        </div>`;
+    }
+
+    promptWorkspaceKey(agentId = '') {
+        return JSON.stringify([agentId, this.view?.agentFormatGuide?.sessionId, this.view?.agentFormatGuide?.scopeId,
+            this.view?.agentProfileView?.sysprompt?.presetId, this.view?.agentProfileView?.openai?.presetId,
+            this.view?.memoryAgentPromptConfig?.templateId, this.view?.memoryAgentPromptConfig?.sessionId,
+            this.view?.memoryAgentPromptConfig?.scopeId, this.floatingAgentConfigScope]);
+    }
+
+    mountCatalogPromptWorkspace(host, agentId, options = {}) {
+        if (!host || isConfigurableAgent(agentId)) return null;
+        return mountAgentCenterPromptWorkspace({ host, agentId, actions:this.getActions?.() || {}, ...options,
+            onOpenSource: source => source === 'preset'
+                ? openDefaultAgentResourceTarget({ panel:'presetPanel', section:'sysprompt' })
+                : this.getActions?.()?.openAgentPromptSessionSettings?.(),
+        });
     }
 
     renderAgentFeatureSettings(agent = {}) {
@@ -4191,7 +4221,7 @@ export class AgentCenterPanel {
         `;
     }
 
-    renderFloatingAgentBack(agent = {}, { configuration = this.renderAgentConfiguration(agent), subtitle = t(isConfigurableAgent(agent.id) ? '配置 · 保存后生效' : '配置 · 修改后即时生效'), toolbarExtra = '' } = {}) {
+    renderFloatingAgentBack(agent = {}, { configuration = this.renderAgentConfiguration(agent), subtitle = t(isConfigurableAgent(agent.id) || agent.promptRefs?.length || agent.id === 'memory_table_agent' ? '配置 · 保存后生效' : '配置 · 修改后即时生效'), toolbarExtra = '' } = {}) {
         return `
             <div class="agent-center-agent-title-row">
                 <div class="agent-center-agent-title-main">
@@ -4241,7 +4271,7 @@ export class AgentCenterPanel {
                 host.querySelector('[data-hop-agent-config]')?.setAttribute('disabled', '');
                 host.querySelectorAll('[data-action="remove"], [data-action="toggle-enabled"], [data-action="variable-settings"], [data-action="variable-preview-tools"], [data-request-action]').forEach(button => { button.disabled = true; });
             },
-            closePreview: () => entry.preview?.close() || false,
+            closePreview: () => entry.preview?.close() || [...(this.commonAgentEditors?.values() || [])].some(editor => entry.host.contains(editor.node) && editor.closePreview?.()),
             dispose: () => { entry.preview?.dispose(); for (const [key, editor] of this.commonAgentEditors || []) if (entry.host.contains(editor.node)) { editor.dispose(); this.commonAgentEditors.delete(key); } if (this.sharedAgentConfig === entry) this.sharedAgentConfig = null; },
         };
     }
@@ -4252,6 +4282,12 @@ export class AgentCenterPanel {
         const linkedAgent = entry.agentId && this.getAgentCardById(entry.agentId);
         if (!linkedAgent && !entry.card) return;
         const agent = { ...(linkedAgent || entry.card), workflowState: entry.workflowState };
+        const workspaceKey = this.promptWorkspaceKey(entry.agentId);
+        if (entry.workspaceKey === workspaceKey && entry.host.querySelector('.agent-center-floating-layer')) {
+            entry.host.querySelectorAll('[data-memory-storage-mode]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.memoryStorageMode === deriveMemoryStorageMode(appSettings.get()))));
+            return;
+        }
+        entry.workspaceKey = workspaceKey;
         const snapshot = captureAgentEditorDrafts(entry.host);
         const previewState = entry.preview?.snapshot();
         entry.preview?.dispose(); entry.preview = null;
@@ -4268,11 +4304,11 @@ export class AgentCenterPanel {
             toolbarExtra: entry.readOnly ? '' : entry.toolbarExtra,
             frontExtra: entry.frontExtra + fusedLinks,
             configuration: `<fieldset data-hop-agent-config class="hop-card-fields" ${entry.readOnly ? 'disabled' : ''}>${configuration}</fieldset><p class="hop-error" role="alert">${escapeHtml(this.lastError)}</p>`,
-            subtitle: entry.readOnly ? t('本轮') : agent.contextual ? t('当前角色') : linkedAgent ? t(isConfigurableAgent(agent.id) ? '配置 · 保存后生效' : '配置 · 修改后即时生效') : t('配置'),
+            subtitle: entry.readOnly ? t('本轮') : agent.contextual ? t('当前角色') : linkedAgent ? t(isConfigurableAgent(agent.id) || agent.promptRefs?.length || agent.id === 'memory_table_agent' ? '配置 · 保存后生效' : '配置 · 修改后即时生效') : t('配置'),
         });
         entry.entering = false;
         if (entry.content) entry.host.querySelector('.agent-center-floating-face-back').append(entry.content);
-        if (entry.buildPromptPreview && !entry.readOnly) entry.preview = mountAgentRequestPreview({ host: entry.host, buildRequest: entry.buildPromptPreview, savedState: previewState });
+        if (!entry.readOnly && (linkedAgent || entry.buildPromptPreview) && !isConfigurableAgent(entry.agentId)) entry.preview = this.mountCatalogPromptWorkspace(entry.host, entry.agentId || agent.id, { buildRequest:entry.buildPromptPreview, savedState:previewState });
         this.bindAgentCardEvents(entry.host, {
             onFlip: () => {
                 entry.flipped = !entry.flipped;
@@ -4758,6 +4794,7 @@ export class AgentCenterPanel {
 
     closeFloatingAgentCard({ force = false } = {}) {
         if (!force && !this.requestAgentCardClose(() => this.closeFloatingAgentCard({ force: true }))) return false;
+        this.floatingPromptPreview?.dispose(); this.floatingPromptPreview = null;
         this.commonAgentEditors?.forEach(editor => editor.dispose()); this.commonAgentEditors?.clear();
         this.floatingAgentId = '';
         this.floatingAgentMessageId = ''; this.floatingAgentConfigScope = ''; this.floatingAgentContext = null;
@@ -4857,66 +4894,85 @@ export class AgentCenterPanel {
         const id = trim(promptId);
         const editor = button?.closest?.('[data-agent-prompt-editor]');
         if (!id || !editor) return;
-        const agentId = trim(editor.dataset.agentId);
-        const profileType = trim(editor.dataset.agentPromptProfileType, 'sysprompt');
-        const presetId = trim(editor.dataset.agentPromptPresetId);
-        const config = {
-            enabled: editor.querySelector('[data-agent-prompt-enabled]')?.checked !== false,
-            rules: editor.querySelector('[data-agent-prompt-rules]')?.value ?? '',
-        };
-        const positionEl = editor.querySelector('[data-agent-prompt-position]');
-        const depthEl = editor.querySelector('[data-agent-prompt-depth]');
-        const roleEl = editor.querySelector('[data-agent-prompt-role]');
-        if (positionEl) config.position = Math.trunc(Number(positionEl.value));
-        if (depthEl) config.depth = Math.max(0, Math.trunc(Number(depthEl.value) || 0));
-        if (roleEl) config.role = Math.trunc(Number(roleEl.value));
-        const result = await this.callAction('setAgentPromptConfig', {
-            profileType,
-            presetId,
-            agentId,
-            promptId: id,
-            config,
-        }, null);
-        if (!result) {
-            this.lastError = '当前环境不能保存提示词';
-            this.render();
-            return;
-        }
-        await this.refresh();
+        const workspace=editor.closest('.hop-request-workspace');
+        if(workspace?.dataset.promptMutation==='true')return;
+        if(workspace)workspace.dataset.promptMutation='true';
+        const snapshot=captureAgentPromptDraft(editor);
+        try {
+            const agentId = trim(editor.dataset.agentId);
+            const profileType = trim(editor.dataset.agentPromptProfileType, 'sysprompt');
+            const presetId = trim(editor.dataset.agentPromptPresetId);
+            const config = {
+                enabled: editor.querySelector('[data-agent-prompt-enabled]')?.checked !== false,
+                rules: editor.querySelector('[data-agent-prompt-rules]')?.value ?? '',
+            };
+            const positionEl = editor.querySelector('[data-agent-prompt-position]');
+            const depthEl = editor.querySelector('[data-agent-prompt-depth]');
+            const roleEl = editor.querySelector('[data-agent-prompt-role]');
+            if (positionEl) config.position = Math.trunc(Number(positionEl.value));
+            if (depthEl) config.depth = Math.max(0, Math.trunc(Number(depthEl.value) || 0));
+            if (roleEl) config.role = Math.trunc(Number(roleEl.value));
+            const result = await this.callAction('setAgentPromptConfig', {
+                profileType,
+                presetId,
+                agentId,
+                promptId: id,
+                config,
+            }, null);
+            if (!result) {
+                this.lastError = '当前环境不能保存提示词';
+                this.render();
+                return;
+            }
+            markAgentPromptDraftSaved(editor,snapshot);
+            this.notifySuccess?.(t('已保存'));
+            await this.refresh();
+        } finally {if(workspace)delete workspace.dataset.promptMutation;}
     }
 
     async handleMemoryAgentSave(button = null) {
         const editor = button?.closest?.('[data-memory-agent-editor]');
         if (!editor) return;
-        const config = {
-            dataPosition: editor.querySelector('[data-memory-data-position]')?.value || '',
-            dataDepth: Math.max(0, Math.trunc(Number(editor.querySelector('[data-memory-data-depth]')?.value) || 0)),
-            guidePosition: editor.querySelector('[data-memory-guide-position]')?.value || '',
-            guideDepth: Math.max(0, Math.trunc(Number(editor.querySelector('[data-memory-guide-depth]')?.value) || 0)),
+        const workspace=editor.closest('.hop-request-workspace');
+        if(workspace?.dataset.promptMutation==='true')return;
+        if(workspace)workspace.dataset.promptMutation='true';
+        const snapshot=captureAgentPromptDraft(editor);
+        // Both writes use the same snapshot even if typing continues in flight.
+        const promptConfig = {
+            template:editor.querySelector('[data-memory-prompt-template]')?.value ?? '',
+            wrapper:editor.querySelector('[data-memory-prompt-wrapper]')?.value ?? '',
+            position:editor.querySelector('[data-memory-prompt-position]')?.value || 'before_latest_user',
+            promptFields:Object.fromEntries([...editor.querySelectorAll('[data-memory-prompt-field]')].map(field=>[field.dataset.memoryPromptField,field.value])),
         };
-        const result = await this.callAction('setMemoryAgentSettings', {
-            presetId: trim(editor.dataset.memoryAgentPresetId),
-            config,
-        }, null);
-        if (!result) {
-            this.lastError = '当前环境不能保存记忆表格 Agent 设置';
-            this.render();
-            return;
-        }
-        const promptResult = await this.callAction('setMemoryAgentPromptConfig', {
-            templateId: trim(editor.dataset.memoryAgentTemplateId),
-            config: {
-                template: editor.querySelector('[data-memory-prompt-template]')?.value ?? '',
-                wrapper: editor.querySelector('[data-memory-prompt-wrapper]')?.value ?? '',
-                position: editor.querySelector('[data-memory-prompt-position]')?.value || 'before_latest_user',
-            },
-        }, true);
-        if (!promptResult) {
-            this.lastError = '当前环境不能保存记忆提示词模板';
-            this.render();
-            return;
-        }
-        await this.refresh();
+        try {
+            const config = {
+                dataPosition: editor.querySelector('[data-memory-data-position]')?.value || '',
+                dataDepth: Math.max(0, Math.trunc(Number(editor.querySelector('[data-memory-data-depth]')?.value) || 0)),
+                guidePosition: editor.querySelector('[data-memory-guide-position]')?.value || '',
+                guideDepth: Math.max(0, Math.trunc(Number(editor.querySelector('[data-memory-guide-depth]')?.value) || 0)),
+            };
+            const result = await this.callAction('setMemoryAgentSettings', {
+                presetId: trim(editor.dataset.memoryAgentPresetId),
+                config,
+            }, null);
+            if (!result) {
+                this.lastError = '当前环境不能保存记忆表格 Agent 设置';
+                this.render();
+                return;
+            }
+            const promptResult = await this.callAction('setMemoryAgentPromptConfig', {
+                templateId: trim(editor.dataset.memoryAgentTemplateId),
+                config: promptConfig,
+            }, true);
+            if (!promptResult) {
+                this.lastError = '当前环境不能保存记忆提示词模板';
+                this.render();
+                return;
+            }
+            markAgentPromptDraftSaved(editor,snapshot);
+            this.notifySuccess?.(t('已保存'));
+            await this.refresh();
+        } finally {if(workspace)delete workspace.dataset.promptMutation;}
     }
 
     handleMemoryStorageMode(mode = 'table') {
@@ -4934,17 +4990,8 @@ export class AgentCenterPanel {
     }
 
     async handleAgentPromptPreview(agentId = '') {
-        const id = trim(agentId);
-        const payload = {
-            source: 'agent_center',
-            agentId: id,
-        };
-        if (id === 'reply_check') payload.formatTarget = this.replyCheckPreviewTarget || 'auto';
-        const result = await this.callAction('showPromptPreview', payload, null);
-        if (result === false || result === null) {
-            this.lastError = '暂时无法构建本次 Prompt 预览。';
-            this.render();
-        }
+        if (this.sharedAgentConfig?.agentId === agentId) return this.sharedAgentConfig.preview?.open();
+        return this.floatingPromptPreview?.open();
     }
 
     async handleAgentFeatureToggle(action = '', featureId = '', button = null) {
@@ -6744,22 +6791,28 @@ export class AgentCenterPanel {
     bindAgentCardEvents(root = this.contentElement, { onFlip = () => this.toggleFloatingAgentCard(), onClose = () => this.closeFloatingAgentCard(), onPromptPreview = id => this.handleAgentPromptPreview(id) } = {}) {
         if (!root) return;
         this.mountCommonAgentEditors(root);
-        root.querySelectorAll('[data-add-text-agent]').forEach(button => { button.onclick = async () => {
+        this.boundAgentControls ||= new WeakMap();
+        const controls = selector => [...root.querySelectorAll(selector)].filter(node => {
+            const selectors = this.boundAgentControls.get(node) || new Set();
+            if (selectors.has(selector)) return false;
+            selectors.add(selector); this.boundAgentControls.set(node, selectors); return true;
+        });
+        controls('[data-add-text-agent]').forEach(button => { button.onclick = async () => {
             const actions = this.getActions?.() || {};
             const result = await actions.createTextEditAgent?.({ scope: this.getHopscotchPanel()?.getConfigScope?.() || 'local' });
             if (!result?.ok) { this.lastError = t(result?.message || '创建失败'); this.render(); return; }
             this.getHopscotchPanel()?.addTextAgent?.(result.config);
             await this.refresh(); this.openFloatingAgentCard(result.id); this.toggleFloatingAgentCard();
         }; });
-        root.querySelectorAll('[data-text-edit-run]').forEach(button => { button.onclick = () => this.getActions().openTextEditRun(button.dataset.textEditRun); });
-        root.querySelectorAll('[data-text-agent-result]').forEach(button => { button.onclick = () => {
+        controls('[data-text-edit-run]').forEach(button => { button.onclick = () => this.getActions().openTextEditRun(button.dataset.textEditRun); });
+        controls('[data-text-agent-result]').forEach(button => { button.onclick = () => {
             const actions = this.getActions(), job = (actions.listTextEditRuns?.() || []).find(item => item.id === button.dataset.textAgentResult);
             if (!job || job.outputMode !== 'note') return;
             this.openFloatingAgentCard(job.agentId, { messageId: job.messageId, context: job.context });
             this.toggleFloatingAgentCard();
         }; });
-        root.querySelectorAll('[data-text-edit-cancel]').forEach(button => { button.onclick = () => this.getActions().cancelTextEditRun(button.dataset.textEditCancel); });
-        root.querySelectorAll('[data-agent-card-open]').forEach((card) => {
+        controls('[data-text-edit-cancel]').forEach(button => { button.onclick = () => this.getActions().cancelTextEditRun(button.dataset.textEditCancel); });
+        controls('[data-agent-card-open]').forEach((card) => {
             const open = () => this.openFloatingAgentCard(card.dataset.agentCardOpen || '');
             card.addEventListener('click', (event) => {
                 const interactive = event.target?.closest?.(AGENT_CARD_INTERACTIVE_SELECTOR);
@@ -6773,7 +6826,7 @@ export class AgentCenterPanel {
                 open();
             });
         });
-        root.querySelectorAll('[data-agent-card-action]').forEach((button) => {
+        controls('[data-agent-card-action]').forEach((button) => {
             button.addEventListener('click', (event) => {
                 event.stopPropagation();
                 this.handleAgentCardToggle(
@@ -6783,36 +6836,36 @@ export class AgentCenterPanel {
                 );
             });
         });
-        root.querySelectorAll('[data-agent-resource-open]').forEach((button) => {
+        controls('[data-agent-resource-open]').forEach((button) => {
             button.addEventListener('click', () => this.handleResourceOpen(button.dataset.agentResourceOpen || ''));
         });
-        root.querySelectorAll('[data-agent-prompt-save]').forEach((button) => {
+        controls('[data-agent-prompt-save]').forEach((button) => {
             button.addEventListener('click', () => this.handleAgentPromptSave(
                 button.dataset.agentPromptSave || '',
                 button,
             ));
         });
-        root.querySelectorAll('[data-agent-prompt-open-position]').forEach((button) => {
+        controls('[data-agent-prompt-open-position]').forEach((button) => {
             button.addEventListener('click', () => {
                 void openDefaultAgentResourceTarget({ panel: 'presetPanel', section: 'sysprompt' });
             });
         });
-        root.querySelectorAll('[data-memory-agent-save]').forEach((button) => {
+        controls('[data-memory-agent-save]').forEach((button) => {
             button.addEventListener('click', () => this.handleMemoryAgentSave(button));
         });
-        root.querySelectorAll('[data-agent-format-guide-save]').forEach(button => {
+        controls('[data-agent-format-guide-save]').forEach(button => {
             button.addEventListener('click', () => this.handleFormatGuideSave(button));
         });
-        root.querySelectorAll('[data-memory-storage-mode]').forEach((button) => {
+        controls('[data-memory-storage-mode]').forEach((button) => {
             button.addEventListener('click', () => this.handleMemoryStorageMode(button.dataset.memoryStorageMode || 'table'));
         });
-        root.querySelectorAll('[data-agent-prompt-preview]').forEach((button) => {
+        controls('[data-agent-prompt-preview]').forEach((button) => {
             button.addEventListener('click', () => onPromptPreview(button.dataset.agentPromptPreview || ''));
         });
-        root.querySelectorAll('[data-reply-check-preview-target]').forEach((select) => {
+        controls('[data-reply-check-preview-target]').forEach((select) => {
             select.addEventListener('change', () => this.handleReplyCheckPreviewTargetChange(select.value || 'auto'));
         });
-        root.querySelectorAll('[data-agent-feature-action]').forEach((button) => {
+        controls('[data-agent-feature-action]').forEach((button) => {
             button.addEventListener('click', (event) => {
                 event.stopPropagation();
                 this.handleAgentFeatureToggle(
@@ -6822,7 +6875,7 @@ export class AgentCenterPanel {
                 );
             });
         });
-        root.querySelectorAll('[data-agent-feature-model-override]').forEach((input) => {
+        controls('[data-agent-feature-model-override]').forEach((input) => {
             input.addEventListener('change', async () => {
                 const id = input.dataset.agentFeatureModelOverride || '';
                 const agent = this.getAgentCardById(id);
@@ -6840,7 +6893,7 @@ export class AgentCenterPanel {
             });
             input.addEventListener('click', event => event.stopPropagation());
         });
-        root.querySelectorAll('[data-agent-model-pick]').forEach((btn) => {
+        controls('[data-agent-model-pick]').forEach((btn) => {
             btn.addEventListener('click', async (event) => {
                 event.stopPropagation();
                 const id = btn.dataset.agentModelPick || '';
@@ -6873,9 +6926,9 @@ export class AgentCenterPanel {
                 renderOptions();
             });
         });
-        root.querySelectorAll('[data-agent-feature-model-select]').forEach((select) => {
+        controls('[data-agent-feature-model-select]').forEach((select) => {
             const id = select.dataset.agentFeatureModelSelect || '';
-            const button = Array.from(root.querySelectorAll('[data-agent-feature-model-button]'))
+            const button = Array.from(controls('[data-agent-feature-model-button]'))
                 .find(item => item?.dataset?.agentFeatureModelButton === id);
             bindCustomSelectButton({
                 buttonEl: button,
@@ -6888,16 +6941,16 @@ export class AgentCenterPanel {
                 select,
             ));
         });
-        root.querySelectorAll('[data-agent-feature-model-manage]').forEach((button) => {
+        controls('[data-agent-feature-model-manage]').forEach((button) => {
             button.addEventListener('click', () => this.handleAgentFeatureModelManage(button.dataset.agentFeatureModelManage || ''));
         });
-        root.querySelectorAll('[data-agent-feature-trigger]').forEach((button) => {
+        controls('[data-agent-feature-trigger]').forEach((button) => {
             button.addEventListener('click', () => this.handleAgentFeatureTriggerMode(button.dataset.agentFeatureTrigger || ''));
         });
-        root.querySelectorAll('[data-agent-float-flip]').forEach((button) => {
+        controls('[data-agent-float-flip]').forEach((button) => {
             button.addEventListener('click', onFlip);
         });
-        root.querySelectorAll('[data-agent-float-close]').forEach((button) => {
+        controls('[data-agent-float-close]').forEach((button) => {
             button.addEventListener('click', onClose);
         });
         root.querySelector('[data-agent-float-layer]')?.addEventListener('click', (event) => {
@@ -6910,6 +6963,10 @@ export class AgentCenterPanel {
         this.renderTabs();
         if (!this.contentElement) return;
         const editorDrafts = captureAgentEditorDrafts(this.contentElement);
+        const workspaceKey = this.promptWorkspaceKey(this.floatingAgentId);
+        const retainedLayer = this.floatingAgentId && this.floatingWorkspaceKey === workspaceKey ? this.contentElement.querySelector(':scope > [data-agent-float-layer]') : null;
+        if (!retainedLayer) { this.floatingPromptPreview?.dispose(); this.floatingPromptPreview = null; }
+        this.floatingWorkspaceKey = workspaceKey;
         const globalPromptsActive = this.activeTab === 'global_prompts';
         this.contentElement.classList?.toggle?.('is-global-prompts', globalPromptsActive);
         const error = this.lastError
@@ -6930,7 +6987,11 @@ export class AgentCenterPanel {
                             : this.activeTab === 'activity'
                                 ? this.renderActivity()
                                 : this.renderSafety();
-        this.contentElement.innerHTML = `${error}${body}${this.renderFloatingAgentCard()}`;
+        if (retainedLayer) {
+            retainedLayer.querySelectorAll('[data-memory-storage-mode]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.memoryStorageMode === deriveMemoryStorageMode(appSettings.get()))));
+            for (const node of [...this.contentElement.childNodes]) if (node !== retainedLayer) node.remove();
+            retainedLayer.insertAdjacentHTML('beforebegin', `${error}${body}`);
+        } else this.contentElement.innerHTML = `${error}${body}${this.renderFloatingAgentCard()}`;
         const library = this.contentElement.querySelector('[data-agent-library]');
         library?.addEventListener('toggle', () => { if (library.isConnected) this.agentLibraryOpen = library.open; });
         const boardPanel = this.getHopscotchPanel();
@@ -7007,7 +7068,10 @@ export class AgentCenterPanel {
         }
         if (['agents', 'prompts', 'diagnostics'].includes(this.activeTab)) {
             this.bindAgentCardEvents();
-            restoreAgentEditorDrafts(this.contentElement, editorDrafts);
+            if (!retainedLayer) restoreAgentEditorDrafts(this.contentElement, editorDrafts);
+            if (!this.floatingPromptPreview && this.floatingAgentId && !isConfigurableAgent(this.floatingAgentId)) {
+                this.floatingPromptPreview = this.mountCatalogPromptWorkspace(this.contentElement.querySelector('[data-agent-float-layer]'), this.floatingAgentId);
+            }
         }
         this.refreshSharedAgentConfig();
         if (this.activeTab === 'safety') {

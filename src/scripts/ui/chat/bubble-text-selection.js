@@ -13,9 +13,9 @@ export const bindBubbleTextSelection = ({ ui, runtime, canEdit = () => true, doc
   if (!root) return { dispose() {} };
   const editor = createTextFragmentEditor({ documentRef }), bindings = [];
   const bar = documentRef.createElement('button'); bar.type = 'button'; bar.className = 'bubble-selection-edit'; bar.hidden = true;
-  bar.innerHTML = `${createRpMessageIconMarkup('edit', { size:15 })}<span></span>`;
+  bar.innerHTML = createRpMessageIconMarkup('edit', { size:18 });
   const style = documentRef.createElement('style');
-  style.textContent = `.bubble-selection-edit{position:fixed;z-index:22000;min-height:44px;padding:8px 13px;align-items:center;gap:7px;border:1px solid var(--app-border-default);border-radius:var(--app-radius-md);box-shadow:var(--app-shadow-md);font:13px var(--app-font-family,inherit);background:var(--app-surface-card);color:var(--app-text-primary);cursor:pointer}.bubble-selection-edit:not([hidden]){display:inline-flex}.bubble-selection-edit:focus-visible{outline:2px solid var(--app-accent-primary);outline-offset:3px}`;
+  style.textContent = `.bubble-selection-edit{position:fixed;z-index:22000;box-sizing:border-box;width:44px;height:44px;padding:10px;align-items:center;justify-content:center;border:1px solid var(--app-border-default);border-radius:var(--app-radius-md);box-shadow:var(--app-shadow-md);background:var(--app-surface-card);color:var(--app-text-primary);cursor:pointer}.bubble-selection-edit:not([hidden]){display:inline-flex}.bubble-selection-edit:focus-visible{outline:2px solid var(--app-accent-primary);outline-offset:3px}`;
   documentRef.head.append(style); documentRef.body.append(bar);
   const listen = (target, type, fn, options) => { target?.addEventListener(type, fn, options); bindings.push(() => target?.removeEventListener(type, fn, options)); };
   let chosen = null, dragging = false, gesture = null, suppressClick = false, timer = 0, generation = 0, opening = false;
@@ -48,7 +48,7 @@ export const bindBubbleTextSelection = ({ ui, runtime, canEdit = () => true, doc
     const width = viewport?.width || win.innerWidth, height = viewport?.height || win.innerHeight;
     const bounds = root.getBoundingClientRect();
     if (rect.bottom < Math.max(top, bounds.top) || rect.top > Math.min(top + height, bounds.bottom)) { bar.hidden = true; return; }
-    bar.querySelector('span').textContent = t('编辑所选文字'); bar.hidden = false;
+    const label = t('编辑所选文字'); bar.title = label; bar.setAttribute('aria-label', label); bar.hidden = false;
     bar.style.left = Math.max(left + 8, Math.min(left + width - bar.offsetWidth - 8, rect.left)) + 'px';
     bar.style.top = Math.max(top + 8, Math.min(top + height - bar.offsetHeight - 8, rect.bottom + 8)) + 'px';
   };

@@ -7,7 +7,7 @@ import { createAgentToolbox } from './agent-toolbox.js';
 
 // Agent 配置、输入候选、回复修改与工具箱的装配及生命周期；app.js 提供模型和持久化能力。
 export const createAgentToolsAppRuntime = ({ ui, store, getContext, getMessages, findMessage, getRaw, getProfiles, getEvidence,
-  captureModel, request, commitReply, notifyReply, getDisplaySource, getReasoningBoundaries, getCurrentModelLabel, resolveReference, listReferenceSources, listAvailableTools, buildFormatPreview, runFormat, budget,
+  captureModel, request, previewRequest, commitReply, notifyReply, getDisplaySource, getReasoningBoundaries, getCurrentModelLabel, resolveReference, listReferenceSources, listAvailableTools, buildFormatPreview, runFormat, budget,
   openAgent, openCenter, openFormatResult, toolboxContainer, toolboxAnchor, onToolboxOpen, storage, documentRef = document } = {}) => {
   const win = documentRef.defaultView;
   const resolveTarget = getDisplaySource ? createRenderedAgentTargetResolver({ getDisplaySource, getReasoningBoundaries, documentRef }) : undefined;
@@ -26,7 +26,7 @@ export const createAgentToolsAppRuntime = ({ ui, store, getContext, getMessages,
     review: options => ui.openFormatPatchReview(options), onChange: changed('agent-input-changed'), budget,
   });
   const actions = createAgentConfigurationService({ store,getContext,getMessages,getRaw,getProfiles,getEvidence,
-    runtime:textEditRuntime, runFormat, buildFormatPreview, resolveTarget, getCurrentModelLabel, resolveReference, listReferenceSources, listAvailableTools,
+    runtime:textEditRuntime, runFormat, buildFormatPreview, previewRequest, resolveTarget, getCurrentModelLabel, resolveReference, listReferenceSources, listAvailableTools,
     getInput: () => ({before:ui.inputEl.value.slice(0,ui.inputEl.selectionStart),after:ui.inputEl.value.slice(ui.inputEl.selectionEnd)}),
     getInputRuntime: () => inputAgents, buildInputPreview: config => inputAgents.preview(config),
   });

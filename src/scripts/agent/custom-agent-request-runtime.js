@@ -39,6 +39,46 @@ export const createCustomAgentRequestRuntime = ({ createClient, listTools = () =
     }));
   };
 
+  const buildLookup = async ({ params, model, context, config, maxTokens }) => {
+    if (config.tools?.enabled !== true || !Array.isArray(config.tools.ids) || !config.tools.ids.length) return null;
+    const allowedNames = [...new Set(config.tools.ids.map(trim).filter(Boolean))].slice(0, LIMITS.selectedTools);
+    const registered = await listTools({ context, model });
+    const definitions = allowedNames.map(name => (registered || []).find(tool => tool.name === name));
+    if (definitions.some(tool => !eligibleTool(tool))) throw new Error('选中的工具已不可用，请检查 Agent 工具设置');
+    if (definitions.some(networkTool) && await readNetworkAllowed({ context, model }) !== true)
+      throw new Error('当前模型配置的联网已关闭，请调整工具选择或模型配置');
+    const mappings = definitions.map((tool, index) => ({ tool, alias: `ac_${index}_${tool.name.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 48)}` }));
+    const plan = buildProviderFcRequestPlan({ config: model,
+      tools: [...mappings.map(({ tool, alias }) => ({ type: 'function', function: {
+        name: alias, description: tool.description || tool.title || tool.name, parameters: tool.schema || { type: 'object' },
+      } })), { type: 'function', function: { name: FINISH_LOOKUP, description: 'Finish reference lookup when existing information is sufficient. No APP action is executed.',
+        parameters: { type: 'object', properties: {}, additionalProperties: false } } }],
+      toolChoiceMode: 'forced_terminal', temperature: params.temperature });
+    if (!plan.ok) throw new Error(`当前模型连接暂不支持此工具调用方式：${plan.reason}`);
+    const lookupOptions = { ...sanitizeProviderFcInheritedRequestOptions({ provider: model.provider, options: params }),
+      ...plan.generationOptions, ...plan.requestOptions, maxTokens,
+      requestParamConstraints: { maxOutputTokens: maxTokens, protectedParams: TOOL_PARAMS } };
+    return { mappings, lookupOptions };
+  };
+  const finalOptions = (params, maxTokens) => ({ ...params, maxTokens, requestParamConstraints:{ ...(params.requestParamConstraints || {}), tools:'none', maxOutputTokens:maxTokens } });
+  const lookupMessages = (messages, observations = []) => [...messages, { role:'system', content:LOOKUP_STAGE_INSTRUCTION }, ...observations];
+  const preview = async ({ request:payload = {}, model = {}, config = {}, context = {} } = {}) => {
+    const messages = (payload.messages || []).map(message => ({ ...message })), params = payload.params || {};
+    const maxTokens = bounded(params.maxTokens ?? params.max_tokens, 4096, 1, 32000);
+    const lookup = await buildLookup({ params, model, context, config, maxTokens });
+    const client = createClient(model);
+    const describe = (messages, params, sections) => {
+      const prepared = client.prepareChatRequest?.(messages, { ...params, stream:typeof client.streamChat === 'function' });
+      return { ...payload, messages, params, sections, model:model.model, provider:model.provider,
+        ...(prepared?.body ? { wireRequest:{ body:prepared.body, parameterReport:prepared.parameterReport || [] } } : {}) };
+    };
+    const answer = describe(messages, finalOptions(params, maxTokens), payload.sections);
+    if (!lookup) return answer;
+    return { ...describe(lookupMessages(messages), lookup.lookupOptions, [...(payload.sections || messages.map(message => ({role:message.role}))), {source:'工具查询协议',origin:'运行时组装 · 只读'}]),
+      previewLabel:'首次参考查询请求', previewNote:'此 Agent 会先查找参考，再生成结果。工具返回内容只会在实际执行后追加。',
+      stages:[{...answer,previewLabel:'生成结果',previewNote:'此处展示已有输入；实际执行时会追加工具查询结果。'}] };
+  };
+
   const request = async ({ request: payload = {}, model = {}, config = {}, context = {}, signal,
     onTrace, canContinue = () => true } = {}) => {
     const controller = new AbortController();
@@ -132,31 +172,15 @@ export const createCustomAgentRequestRuntime = ({ createClient, listTools = () =
       };
 
       const observations = [];
-      if (config.tools?.enabled === true && Array.isArray(config.tools.ids) && config.tools.ids.length) {
-        const allowedNames = [...new Set(config.tools.ids.map(trim).filter(Boolean))].slice(0, LIMITS.selectedTools);
-        const registered = await awaitGuarded(Promise.resolve(listTools({ context, model })));
-        check();
-        const definitions = allowedNames.map(name => (registered || []).find(tool => tool.name === name));
-        if (definitions.some(tool => !eligibleTool(tool))) throw new Error('选中的工具已不可用，请检查 Agent 工具设置');
-        if (definitions.some(networkTool) && await awaitGuarded(Promise.resolve(readNetworkAllowed({ context, model }))) !== true)
-          throw new Error('当前模型配置的联网已关闭，请调整工具选择或模型配置');
-        check();
-        const mappings = definitions.map((tool, index) => ({ tool, alias: `ac_${index}_${tool.name.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 48)}` }));
-        const plan = buildProviderFcRequestPlan({ config: model,
-          tools: [...mappings.map(({ tool, alias }) => ({ type: 'function', function: {
-            name: alias, description: tool.description || tool.title || tool.name, parameters: tool.schema || { type: 'object' },
-          } })), { type: 'function', function: { name: FINISH_LOOKUP, description: 'Finish reference lookup when existing information is sufficient. No APP action is executed.',
-            parameters: { type: 'object', properties: {}, additionalProperties: false } } }],
-          toolChoiceMode: 'forced_terminal', temperature: params.temperature });
-        if (!plan.ok) throw new Error(`当前模型连接暂不支持此工具调用方式：${plan.reason}`);
-        const lookupOptions = { ...sanitizeProviderFcInheritedRequestOptions({ provider: model.provider, options: params }),
-          ...plan.generationOptions, ...plan.requestOptions, maxTokens,
-          requestParamConstraints: { maxOutputTokens: maxTokens, protectedParams: TOOL_PARAMS } };
+      const lookup = await awaitGuarded(buildLookup({ params, model, context, config, maxTokens }));
+      check();
+      if (lookup) {
+        const { mappings, lookupOptions } = lookup;
         const rounds = bounded(config.tools.maxRounds, 4, 1, 8), signatures = new Set();
         let callCount = 0, stop = false;
         for (let round = 0; round < rounds && !stop; round++) {
           const phase = await runModel({ kind: 'model', label: `查找参考 · ${round + 1}`, useTools: true, options: lookupOptions,
-            messages: [...originalMessages, { role: 'system', content: LOOKUP_STAGE_INSTRUCTION }, ...observations] });
+            messages: lookupMessages(originalMessages, observations) });
           if (!phase.calls.length) break;
           for (const call of phase.calls.slice(0, LIMITS.callsPerRound)) {
             check();
@@ -211,7 +235,7 @@ export const createCustomAgentRequestRuntime = ({ createClient, listTools = () =
       }
       check();
       const final = await runModel({ kind: 'answer', label: '生成结果', messages: [...originalMessages, ...observations],
-        options: { ...params, maxTokens, requestParamConstraints: { ...(params.requestParamConstraints || {}), tools: 'none', maxOutputTokens: maxTokens } } });
+        options: finalOptions(params, maxTokens) });
       check();
       return final.output;
     } finally {
@@ -222,5 +246,5 @@ export const createCustomAgentRequestRuntime = ({ createClient, listTools = () =
       publish();
     }
   };
-  return { request, listAvailableTools: catalog };
+  return { request, preview, listAvailableTools: catalog };
 };

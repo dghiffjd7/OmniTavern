@@ -1,3 +1,7 @@
+import { createAgentCenterPromptPreview } from './agent-center-prompt-preview.js';
+import { buildAgentSidecarPromptPreview } from './chat/agent-sidecar-prompt-preview.js';
+import { resolveMemoryUpdateRuntimeConfig } from './chat/memory-update-runtime.js';
+import { normalizeMemoryAgentPromptConfig, mergeMemoryPromptDraft } from '../memory/memory-prompt-editor.js';
 import { createLiveTranscriptCommitter } from './realtime/openai-live-transcript.js';
 import { ImagePromptEditor } from './image-prompt/image-prompt-editor.js';
 import { IMAGE_PROMPT_TEXT_KEYS, fillImagePromptScene, restoreImagePromptFromAsset } from './image-prompt/image-prompt-utils.js';
@@ -4393,16 +4397,6 @@ const initApp = async () => {
     const fallback = await memoryTemplateStore.getTemplates({ id: 'default-v1' });
     return Array.isArray(fallback) && fallback.length ? fallback[0] : null;
   };
-  const normalizeMemoryAgentPromptConfig = (record = null) => {
-    const injection = record?.injection && typeof record.injection === 'object' ? record.injection : {};
-    return {
-      templateId: String(record?.id || '').trim(),
-      templateName: String(record?.name || '默认记忆模板').trim() || '默认记忆模板',
-      template: typeof injection.template === 'string' ? injection.template : '{{tableData}}',
-      wrapper: typeof injection.wrapper === 'string' ? injection.wrapper : '<memories>\n{{tableData}}\n</memories>',
-      position: String(injection.position || 'before_latest_user').trim() || 'before_latest_user',
-    };
-  };
   try {
     registerDebugRuntimeContextCore(window.appBridge, {
       panels: {
@@ -4575,22 +4569,23 @@ const initApp = async () => {
           options?.id,
           options?.triggerMode,
         ),
+        buildAgentPromptPreview: options => buildAgentCenterPromptPreview(options),
+        listAgentPromptMomentTargets: () => momentsStore.list().slice(0, 60).map(moment => ({ id:moment.id, label:`${moment.author || ''} · ${String(moment.content || '').slice(0, 70)}` })),
+        openAgentPromptSessionSettings: () => {
+          const sid = chatStore.getCurrent();
+          return contactsStore.getContact(sid)?.isGroup ? groupSettingsPanel.show(sid) : contactSettingsPanel.show();
+        },
         getMemoryStorageMode: (place = 'chat') => getMemoryStorageMode(place),
         getMemoryAgentPromptConfig: async () => {
           const record = await getAgentCenterDefaultMemoryTemplateRecord();
-          return normalizeMemoryAgentPromptConfig(record);
+          return normalizeMemoryAgentPromptConfig(record, { scopeId:activePersonaScopeKey, sessionId: chatStore.getCurrent(), uiMode, isGroup: Boolean(contactsStore.getContact(chatStore.getCurrent())?.isGroup) });
         },
         setMemoryAgentPromptConfig: async (options = {}) => {
           if (!memoryTemplateStore?.updateTemplateInjection) return false;
           const record = await getAgentCenterDefaultMemoryTemplateRecord(options?.templateId);
-          if (!record?.id) return false;
-          const current = normalizeMemoryAgentPromptConfig(record);
+          if (!record?.id || (options?.templateId && options.templateId !== record.id)) return false;
           const config = options?.config && typeof options.config === 'object' ? options.config : {};
-          const nextInjection = {
-            template: String(config.template ?? current.template).trim() || '{{tableData}}',
-            wrapper: String(config.wrapper ?? current.wrapper).trim(),
-            position: String(config.position ?? current.position).trim() || 'before_latest_user',
-          };
+          const nextInjection = mergeMemoryPromptDraft(record, config).injection;
           await memoryTemplateStore.updateTemplateInjection(record.id, nextInjection);
           window.dispatchEvent(new CustomEvent('memory-templates-updated', { detail: { templateId: record.id } }));
           return true;
@@ -27300,7 +27295,7 @@ const initApp = async () => {
     onToolboxOpen: () => { setActionPanelOpen(false); setStickerPanelOpen(false); },
     getContext: getAgentExecutionContext,
     getMessages: sid => chatStore.getMessages(sid), findMessage: (mid, sid) => chatStore.findMessage(mid, sid), getRaw: getTextAgentRaw,
-    captureModel: customAgentRequests.captureModel, request: customAgentRequests.request,
+    captureModel: customAgentRequests.captureModel, request: customAgentRequests.request, previewRequest: customAgentRequests.preview,
     resolveReference: agentReferenceRuntime.resolveReference, listReferenceSources: agentReferenceRuntime.listSources,
     listAvailableTools: customAgentRequests.listAvailableTools,
     commitReply: async ({ job, message, text, sourceSnapshot, canCommit }) => {
@@ -27452,16 +27447,47 @@ const initApp = async () => {
     }),
     logger,
   });
+  const buildAgentCenterPromptPreview = createAgentCenterPromptPreview({
+    getContext: () => ({ sessionId:chatStore.getCurrent(), uiMode:uiMode === 'rp' ? 'rp' : 'chat',
+      key:JSON.stringify([activePersonaScopeKey,chatStore.getCurrent(),chatStore.getCurrentArchiveId(chatStore.getCurrent())]) }),
+    resolveRoute: ({ agentId, house, member, context }) => {
+      if (house?.kind === 'image_generation' && !member) return { previewNote:t('图片生成直接使用正文中的图片提示词调用生图接口，没有独立的聊天模型提示词。') };
+      const plan = hopscotchTurnRuntime.resolveExecutionPlan(context.sessionId, { place:context.uiMode === 'rp' ? 'writing' : 'chat' });
+      const independent = (kind) => plan.custom && !plan.fused?.includes(kind)
+        ? plan.board?.rows.flatMap(row => row.houses).find(item => item.kind === kind && item.enabled !== false) : null;
+      if (agentId === 'memory_table_agent') {
+        const separate = house ? house.kind === 'memory_table' && !member : plan.custom ? Boolean(independent('memory_table')) : isMemoryAutoExtractSeparate(context.uiMode === 'rp' ? 'writing' : 'chat');
+        return { requestKind:separate ? 'memory_update' : 'body', label:separate ? t('独立写表请求') : t('随主回复注入 · 记忆表格') };
+      }
+      if (agentId === 'image_director') {
+        const sidecar = house?.kind === 'image_prompt' && !member ? house : !house ? independent('image_prompt') : null;
+        return { requestKind:sidecar ? 'image_prompt' : 'body', house:sidecar, label:sidecar ? t('独立图片提示词请求') : t('随主回复注入 · 生图指导') };
+      }
+      return { requestKind:'body', label:t('当前聊天请求') };
+    },
+    buildScene: options => buildScenePromptPreviewRequest(options),
+    buildMoment: async (draft) => {
+      const moment = momentsStore.get(draft.momentId);
+      if (!moment) return { messages:[], previewNote:t('请选择目标动态，再预览评论请求。') };
+      const published = draft.task === 'moment-publish-comment';
+      const comment = [...(moment.comments || [])].reverse().find(item => String(item.author || '') === getActiveUserName());
+      if (!published && !comment?.content) return { messages:[], previewNote:t('这条动态还没有用户评论，暂时无法组装回复评论的请求。') };
+      if (published && String(moment.author || '') !== getActiveUserName()) return { messages:[], previewNote:t('发布后评论由用户发布动态触发，请选择用户发布的动态。') };
+      const prepared = await momentCommentRuntime(moment.id, comment?.content || '', { previewOnly:true, agentPromptDraft:draft,
+        mode:published ? 'published_moment' : 'comment', userCommentId:comment?.id,
+        ...(!published && comment?.replyTo ? { replyTo:comment.replyTo } : {}) });
+      if (!prepared?.context) return { messages:[], previewNote:t('目标动态缺少生成评论所需的上下文。') };
+      const request = await window.appBridge.generate(prepared.input, prepared.context);
+      return { ...request, previewLabel:t(published ? '发布后评论请求' : '动态评论回复请求'), previewNote:t('使用所选动态及其当前评论组装。') };
+    },
+  });
   hopscotchBoardPanel = createHopscotchBoardPanel({
     embedded: true,
     onOpen: () => agentCenterPanel.show({ tab: 'agents' }),
     mountAgentCard: (host, options) => agentCenterPanel.mountHopscotchAgentCard(host, options),
-    buildPromptPreview: async ({ sessionId, place }) => {
+    buildPromptPreview: async ({ sessionId, agentId, draft, house, member }) => {
       if (sessionId !== chatStore.getCurrent?.()) return null;
-      const request = await buildScenePromptPreviewRequest({
-        previewUiMode: place === 'writing' ? 'rp' : 'chat', includeHistory: true,
-      });
-      return sessionId === chatStore.getCurrent?.() ? request : null;
+      return buildAgentCenterPromptPreview({ agentId:agentId || 'body', draft, house, member });
     },
     closeRelatedLayer: () => variablePanel.hasVisibleLayer() && variablePanel.closeTopLayer(),
     openVariableSettings: ({ sessionId, onClose }) => { if (sessionId === chatStore.getCurrent?.()) variablePanel.show({ onClose }); },
@@ -29020,6 +29046,7 @@ const initApp = async () => {
       previewInjectMomentCreate,
       previewSuppressHistory,
       previewRawBlocks,
+      agentPromptDraft,
       previewForceLegacyText,
       suppressAssistantDom,
       assistantStreamFactory,
@@ -30109,7 +30136,7 @@ const initApp = async () => {
       sessionAsyncWorkRuntime,
       syncTurnCheckpointForMessage,
     });
-    currentMemoryUpdateRuntime = memoryUpdateRuntime;
+    if (!previewOnly) currentMemoryUpdateRuntime = memoryUpdateRuntime;
     const applyChatModeAssistantRegex = (text, { depth } = {}) => applyChatModeAssistantRegexCore(text, {
       depth,
       promptUserName,
@@ -30499,11 +30526,12 @@ const initApp = async () => {
         appBridge: {
           generate: (input, context) => {
             const nextContext = context && typeof context === 'object' ? context : {};
-            return window.appBridge.generate(input, {
+            const previewContext = {
               ...nextContext,
               meta: {
                 ...(nextContext.meta || {}),
                 previewOnly: true,
+                agentPromptDraft,
                 previewRawBlocks: Boolean(previewRawBlocks),
                 previewForceLegacyText: Boolean(previewForceLegacyText),
                 macroVariableState: previewMacroVariableState,
@@ -30513,6 +30541,22 @@ const initApp = async () => {
                 ...(previewInjectImage === false ? { previewSuppressAutoImagePrompt: true } : {}),
                 ...(previewInjectMomentCreate === false ? { previewSuppressMomentCreate: true } : {}),
               },
+            };
+            if (!agentPromptDraft) return window.appBridge.generate(input, previewContext);
+            return buildAgentSidecarPromptPreview({ input, context:previewContext, bridge:window.appBridge,
+              getMemoryHistory:buildMemoryUpdateHistoryText,
+              getMemoryConfig:() => resolveMemoryUpdateRuntimeConfig({ appBridge:window.appBridge, appSettings, memoryUpdateConfigManager }),
+              getBody:sid => { const messages = chatStore.getMessages(sid) || []; const body = [...messages].reverse().find(item => item.role === 'assistant'); return String(body?.rawOriginal || body?.rawSource || body?.content || ''); },
+              getImageSettings:draft => ({ modelHint:imagePromptModelHintCache, style:appSettings.get().autoImagePromptStyle, decisionMode:appSettings.get().autoImagePromptDecisionMode,
+                template:draft.prompts?.['auto-image-prompt']?.rules ?? resolveEnabledPreset(window.appBridge, 'sysprompt', requestPresetContext)?.auto_image_prompt_rules }),
+              getSidecarConfig:async house => {
+                const config = house?.config?.modelMode === 'profile'
+                  ? await chatConfigManager.getRuntimeConfigByProfileId(house.config.modelProfileId)
+                  : (await window.appBridge.resolveRequestRuntimeConfig(requestPresetContext))?.config;
+                if (!config) throw new Error(t('指定的模型配置不存在'));
+                return { ...config, ...(house?.config?.modelOverride ? { model:house.config.modelOverride } : {}) };
+              },
+              renderMacros:(value,ctx) => window.appBridge.processTextMacros(value, { ...ctx, user:userName, char:context.character?.name || context.session?.name || '', macroVariableState:previewMacroVariableState }),
             });
           },
         },

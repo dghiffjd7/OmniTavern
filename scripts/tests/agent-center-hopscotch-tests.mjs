@@ -47,7 +47,7 @@ for (const [, rule] of css.matchAll(/\.hop-gap\s*\{([^}]+)\}/g)) {
 assert.match(css, /button:where\(:not\(\.hop-cell\):not\(\.hop-plus\):not\(\.world-app-select-btn\)\)/, '通用按钮样式不覆盖房子、加号和 APP 下拉组件');
 assert.match(css, /body\[data-reduced-motion='on'\][\s\S]*?transition: none/);
 assert.match(css, /@media\s*\(hover:\s*hover\)\s*and\s*\(pointer:\s*fine\)/, '仅支持悬停的精确指针设备默认隐藏加号');
-assert.match(css, /\.hop-plus:hover,\s*\.hop-plus:focus-visible\s*\{\s*opacity:\s*1/, '悬停和键盘聚焦都能显示加号');
+assert.match(css, /\.hop-plus:hover,\s*\.hop-plus:focus-visible(?:,[^{]+)?\s*\{\s*opacity:\s*1/, '悬停和键盘聚焦都能显示加号');
 assert.match(css, /@media\s*\(any-pointer:\s*coarse\)/, '混合触摸设备仍保留可发现的新增入口');
 assert.match(css, /\.hop-court\s*\{[^}]*flex-direction:\s*column;/, '起点在上，执行顺序从上往下');
 assert.doesNotMatch(css, /flex-direction:\s*column-reverse/);
@@ -73,6 +73,6 @@ assert.match(app, /getHopscotchPanel: \(\) => hopscotchBoardPanel/);
 assert.match(app, /embedded: true/);
 assert.match(app, /getPlace: \(\) => uiMode === 'rp' \? 'writing' : 'chat'/);
 assert.match(app, /if \(sessionId !== chatStore.getCurrent\?\.\(\)\) return null/, '正文预览在构建前检查卡片会话');
-assert.match(app, /return sessionId === chatStore.getCurrent\?\.\(\) \? request : null/, '构建期间切会话时丢弃旧预览结果');
+assert.match(await readFile(new URL('../../src/scripts/ui/agent-center-prompt-preview.js', import.meta.url), 'utf8'), /getContext\(\).key !== context.key/, '构建期间切会话时丢弃旧预览结果');
 assert.match(app, /closeRelatedLayer: \(\) => variablePanel.hasVisibleLayer\(\) && variablePanel.closeTopLayer\(\)/, '仅可见变量子层优先返回，不干扰隐藏面板');
 console.log('ok - AC owns the board entry and inter-row add buttons stay centered');

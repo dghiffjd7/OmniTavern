@@ -1,12 +1,12 @@
 import { BODY_SELECTOR_ID, createTextAgentId, createInputAgentId, normalizeAgentConfiguration } from '../storage/agent-config-store.js';
 import { allowsAgentInvocation, isInputAgent } from './agent-invocation.js';
 import { resolveAgentTextTargetAsync, suggestAgentBodyRules } from './agent-text-target.js';
-import { buildTextEditRequest, buildAgentNoteRequest, buildAgentReferenceContext, buildConfigurableInputMessages } from './agent-request-builder.js';
-import { shouldAddInputSuggestionContract } from './agent-builtin-defaults.js';
+import { buildTextEditRequest, buildAgentNoteRequest, buildAgentReferenceContext } from './agent-request-builder.js';
+import { buildInputAgentRequest } from './input-agent-runtime.js';
 
 export const createAgentConfigurationService = ({ store, getContext, getMessages, getRaw, getEvidence = () => [], getProfiles,
   getInput = () => ({ before: '', after: '' }), getInputRuntime = () => null, buildInputPreview = null,
-  buildFormatPreview, runtime, runFormat, resolveReference = null, listReferenceSources = async () => [], listAvailableTools = async () => [], resolveTarget = resolveAgentTextTargetAsync, getCurrentModelLabel = () => '', onChanged = () => {} } = {}) => {
+  buildFormatPreview, previewRequest = null, runtime, runFormat, resolveReference = null, listReferenceSources = async () => [], listAvailableTools = async () => [], resolveTarget = resolveAgentTextTargetAsync, getCurrentModelLabel = () => '', onChanged = () => {} } = {}) => {
   const context = options => options?.context || getContext();
   const checkContext = c => { const current = getContext(); return current.place === c.place && current.scopeId === c.scopeId && (!c.sessionId || current.sessionId === c.sessionId) && (c.archiveId === undefined || c.archiveId === current.archiveId); };
   const read = (options = {}) => {
@@ -21,6 +21,23 @@ export const createAgentConfigurationService = ({ store, getContext, getMessages
       : [...messages].reverse().find(m => m.role === 'assistant' && (!m.type || m.type === 'text') && !m.error && !m.pending && !['pending', 'sending'].includes(m.status) && !m.meta?.generatedMedia);
     const raw = message ? await getRaw(message, c.sessionId) : '';
     return { message, raw, messages: message ? messages.slice(0, messages.findIndex(m => m.id === message.id)) : [] };
+  };
+  const buildPrompt = async options => {
+      const c = context(options), saved = read(options), config = options.config || saved.config;
+      if (isInputAgent(config) && buildInputPreview) return buildInputPreview(config, c);
+      if (config.kind === 'input_suggestion') {
+        const reference = resolveReference ? await resolveReference({ config: config.context, context: c }) : buildAgentReferenceContext(getMessages(c.sessionId), config.context);
+        const input = getInput(), before = String(input.before || ''), after = String(input.after || '');
+        return { ...buildInputAgentRequest(config, { text:before + after, start:before.length, end:before.length }, reference),
+          previewNote: reference.truncated ? '参考上下文已截断；光标前后保留 2400 / 600 字符' : '光标前后保留 2400 / 600 字符' };
+      }
+      if (config.kind === 'format_review') return buildFormatPreview({ ...options, context: c, config });
+      const { raw, messages, message } = await source(options);
+      const target = await resolveTarget(raw, config.target, { bodyRule: options.bodyRule || saved.bodyRule, selection: options.selection, message, context: c, readOnly: config.outputMode === 'note' });
+      if (!target.ok) return { messages: [], previewNote: target.message };
+      const referenceContext = resolveReference ? await resolveReference({ config: config.context, context: c, targetMessageId: message?.id })
+        : buildAgentReferenceContext(getMessages(c.sessionId),config.context,{targetMessageId:message?.id});
+      return (config.outputMode === 'note' ? buildAgentNoteRequest : buildTextEditRequest)({ config, target, referenceContext });
   };
   const actions = {
     getAgentConfiguration: read,
@@ -106,24 +123,12 @@ export const createAgentConfigurationService = ({ store, getContext, getMessages
         suggestions: suggestAgentBodyRules(raw, getEvidence(context(options).sessionId)) };
     },
     buildAgentConfigurationPreview: async options => {
-      const c = context(options), saved = read(options), config = options.config || saved.config;
-      if (config.kind === 'input_agent' && buildInputPreview) return buildInputPreview(config, c);
-      if (config.kind === 'input_suggestion') {
-        const reference = resolveReference ? await resolveReference({ config: config.context, context: c }) : buildAgentReferenceContext(getMessages(c.sessionId), config.context);
-        const messages = buildConfigurableInputMessages({ ...getInput(), settings: config, referenceContext: reference });
-        const blocks = config.blocks.filter(b => b.enabled !== false && b.text.trim());
-        const sources = ['任务要求', ...blocks.map(b => b.name || '自定义区块'),
-          ...(shouldAddInputSuggestionContract(config) ? ['返回格式'] : []), ...(reference.text ? ['参考上下文'] : []), '光标前后文本'];
-        return { messages, sections: sources.map(source => ({ source })), params: { maxTokens: config.maxTokens, temperature: 0.3, tools: [], toolChoice: 'none' },
-          previewNote: reference.truncated ? '参考上下文已截断；光标前后保留 2400 / 600 字符' : '光标前后保留 2400 / 600 字符' };
-      }
-      if (config.kind === 'format_review') return buildFormatPreview({ ...options, context: c, config });
-      const { raw, messages, message } = await source(options);
-      const target = await resolveTarget(raw, config.target, { bodyRule: options.bodyRule || saved.bodyRule, selection: options.selection, message, context: c, readOnly: config.outputMode === 'note' });
-      if (!target.ok) return { messages: [], previewNote: target.message };
-      const referenceContext = resolveReference ? await resolveReference({ config: config.context, context: c, targetMessageId: message?.id })
-        : buildAgentReferenceContext(getMessages(c.sessionId),config.context,{targetMessageId:message?.id});
-      return (config.outputMode === 'note' ? buildAgentNoteRequest : buildTextEditRequest)({ config, target, referenceContext });
+      const c = context(options), config = options.config || read(options).config;
+      if (!checkContext(c)) throw new Error('当前角色或存档已变化，请重新打开');
+      let request = await buildPrompt(options);
+      if (previewRequest && request?.messages?.length && config.kind !== 'format_review') request = await previewRequest({ request,config,context:c });
+      if (!checkContext(c)) throw new Error('当前角色或存档已变化，请重新打开');
+      return request;
     },
     listTextEditRuns: () => runtime.list(),
     listInputAgentRuns: () => getInputRuntime()?.list() || [],

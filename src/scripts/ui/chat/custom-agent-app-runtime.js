@@ -43,6 +43,14 @@ export const createCustomAgentAppRuntime = ({ createClient, getProfileConfig, re
     },
   });
   return { captureModel,
+    preview: async ({ request, config, context }) => {
+      if (!active(context)) throw new Error('当前会话已变化，请重新运行');
+      if (config.modelMode === 'none') return { ...request, previewNote:'尚未选择模型，以下展示提示词组装。' };
+      const model = await captureModel(config, context);
+      const result = await runtime.preview({ request, config, context, model });
+      if (!active(context)) throw new Error('当前会话已变化，请重新运行');
+      return result;
+    },
     listAvailableTools: async ({ config, context }) => {
       const model = await captureModel(config, context);
       return (await runtime.listAvailableTools({ model, context })).map(tool => ({ ...tool, label: tool.title, category: tool.group }));
