@@ -512,6 +512,8 @@ import { createScopedHopscotchBoardStore } from '../storage/hopscotch-board-stor
 import { createHopscotchBoardPanel } from './chat/hopscotch-board-panel.js';
 import { createFormatGuideSettingsRuntime, resolveFormatReviewAvailability } from './chat/format-review-settings-utils.js';
 import { createFormatReviewExecutor, createCreativeFormatReviewRuntime } from './chat/format-review-runtime.js';
+import { buildFormatRepairRequest } from '../agent/format-repair-request.js';
+import { validateFormatRepairWriteScope } from '../agent/format-repair-selection.js';
 import { bindInputSuggestionComposer } from './chat/input-suggestion-composer.js';
 import { createAgentConfigStore, BODY_SELECTOR_ID } from '../storage/agent-config-store.js';
 import { createScopedAgentFeatures } from '../agent/scoped-agent-features.js';
@@ -17415,9 +17417,11 @@ const initApp = async () => {
   };
   const buildChatFormatGuardianPromptPreviewRequest = async ({
     formatTarget = CHAT_FORMAT_GUARDIAN_TARGETS.auto, config: agentDraft = null, context: agentContext = null,
+    messageId = '', targetSnapshot = null,
   } = {}) => {
     const sessionId = String(agentContext?.sessionId || chatStore.getCurrent() || '').trim();
-    const message = getLatestAssistantMessageForPromptPreview(sessionId);
+    const requestedMessageId = targetSnapshot?.messageId || messageId;
+    const message = requestedMessageId ? chatStore.findMessage(requestedMessageId, sessionId) : getLatestAssistantMessageForPromptPreview(sessionId);
     if (!message) {
       window.toastr?.warning?.('当前会话暂无可预览的 AI 回复');
       return null;
@@ -17431,6 +17435,8 @@ const initApp = async () => {
       );
       return null;
     }
+    if (targetSnapshot?.formatTarget && (targetSnapshot.formatTarget.sourceText !== repairTarget.sourceText
+      || targetSnapshot.formatTarget.turnId !== repairTarget.turnId)) throw new Error('原文已变化，请重新选择');
     const text = String(repairTarget.sourceText ?? '');
     const sourceMessageId = String(message?.id || '').trim();
     const baseRevision = createFormatPatchRevisionToken();
@@ -17473,7 +17479,7 @@ const initApp = async () => {
     const routedFormatTarget = requestedFormatTarget === CHAT_FORMAT_GUARDIAN_TARGETS.auto
       ? resolveFormatTargetForSession(sessionId)
       : requestedFormatTarget;
-    const formatProfile = resolveChatFormatGuardianFormatProfile({
+    let formatProfile = resolveChatFormatGuardianFormatProfile({
       target: routedFormatTarget,
       uiMode: targetUiMode,
       surface,
@@ -17482,7 +17488,11 @@ const initApp = async () => {
       parserResult,
       enabledFormats: promptContext.enabledFormats,
     });
-    const prompt = buildChatFormatGuardianModelPrompt({
+    const selectedRange = targetSnapshot?.formatSelection;
+    const prompt = agentDraft ? await buildFormatRepairRequest({ config: agentDraft, repairTarget, message,
+      range: selectedRange?.fragment ? { start: selectedRange.start, end: selectedRange.end } : null,
+      baseOptions: buildManualChatFormatGuardianOptions(sessionId, agentDraft), baseRevision,
+    }) : buildChatFormatGuardianModelPrompt({
       assistantText: text,
       formatReminderText: selectChatFormatReminderTextForProfile(promptContext, formatProfile),
       customFormatGuide: agentDraft?.formatGuide ?? getSessionFormatGuide(sessionId),
@@ -17500,6 +17510,7 @@ const initApp = async () => {
         sessionId: repairTarget.targetSessionId || sessionId,
       },
     });
+    if (prompt.formatProfile) formatProfile = prompt.formatProfile;
     const featureState = agentDraft || agentFeatureSettingsStore.getSettings(sessionId)?.features?.[AGENT_FEATURE_IDS.replyCheck] || {};
     const requestOptions = {
       temperature: 0,
@@ -17564,13 +17575,13 @@ const initApp = async () => {
         enabledFormatIds: prompt.enabledFormatIds,
         formatSpecSourceIds: [
           ...prompt.enabledFormatIds,
-          ...(getSessionFormatGuide(sessionId) ? ['customFormatGuide'] : []),
+          ...((agentDraft?.formatGuide ?? getSessionFormatGuide(sessionId)) ? ['customFormatGuide'] : []),
         ],
         requestedFormatTarget,
         formatTarget: formatProfile.target,
         baseRevision,
         sourceStats: {
-          lineCount: text.split(/\r\n|\r|\n/).length,
+          lineCount: (prompt.selection?.text ?? text).split(/\r\n|\r|\n/).length,
         },
         sourceTextKind: input.source,
         hasRawOriginal: input.hasRawOriginal,
@@ -27320,10 +27331,10 @@ const initApp = async () => {
     getReasoningBoundaries: context => resolveResolvedPreset(window.appBridge, 'reasoning', { sessionId: context.sessionId, uiMode: context.place === 'writing' ? 'rp' : 'chat' }),
     getCurrentModelLabel: async context => String((await window.appBridge.resolveRequestRuntimeConfig?.({ sessionId: context.sessionId, uiMode: context.place === 'writing' ? 'rp' : 'chat' }))?.config?.model || ''),
     buildFormatPreview: buildChatFormatGuardianPromptPreviewRequest, runFormat: runHopscotchFormatReview,
+    buildFormatOptions: (sid, config) => buildManualChatFormatGuardianOptions(sid, config),
     getFormatTarget: (message, context) => resolveChatFormatRepairTarget(message, context.sessionId),
     openAgent: (id, options = {}) => agentCenterPanel.show({ tab: 'agents', agentId: id, configure: true, ...options }),
     openCenter: () => agentCenterPanel.show({ tab: 'agents' }),
-    openFormatResult: () => agentCenterPanel.show({ tab: 'activity' }),
   });
   const { textEditRuntime, actions: agentConfigurationActions } = agentToolsRuntime;
   patchDebugUiRegistry(registry => { Object.assign(registry.actions, agentConfigurationActions); registry.stores.agentConfigStore = agentConfigStore; registry.stores.textEditRuntime = textEditRuntime; registry.stores.agentToolsRuntime = agentToolsRuntime; });
@@ -27565,7 +27576,7 @@ const initApp = async () => {
     for (const entry of (Array.isArray(plan?.executeEntries) ? plan.executeEntries : [])) {
       if (resultByIdentity[entry.identity]) continue;
       const target = resolveFormatFunctionEffectTarget(entry, capturedMessages, fallbackSessionId);
-      const blockText = String(entry?.after?.raw || '');
+      const blockText = String(entry?.executionText ?? entry?.after?.raw ?? '');
       if (!target || !blockText) {
         resultByIdentity[entry.identity] = { status: 'failed' };
         continue;
@@ -32821,10 +32832,16 @@ const initApp = async () => {
           return false;
         }
       }
+      if (payload?.formatSelection) {
+        if (!payload.canCommit?.() || !validateFormatRepairWriteScope(sourceSnapshot, next, payload.formatSelection).ok) {
+          window.toastr?.warning?.(t('原文或选区已变化，请重新选择')); return false;
+        }
+      }
       const functionPayloadValidation = isFormatRepairWrite || payload?.source === 'agent_text_edit'
         ? validateFormatRepairFunctionPayloads({
           originalText: sourceSnapshot,
           candidateText: next,
+          allowedTableRanges: payload?.formatSelection?.tableRanges || [],
         })
         : { ok: true };
       if (!functionPayloadValidation.ok) {

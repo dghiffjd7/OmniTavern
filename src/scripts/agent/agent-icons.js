@@ -15,6 +15,7 @@ export const isAgentNoteConfig = config => config?.kind === 'input_agent' || Str
 export const getAgentIconName = config => normalizeAgentIcon(config?.icon) || (config?.id === 'text_completion' || config?.kind === 'input_suggestion' ? 'suggest'
   : config?.id === 'reply_check' || config?.kind === 'format_review' ? 'check' : isAgentNoteConfig(config) ? 'book' : 'pen');
 const controls = {
+  plus: '<path d="M12 5v14M5 12h14"/>',
   toolbox: '<rect x="3" y="7" width="18" height="13" rx="3"/><path d="M8 7V4h8v3M3 12h18M10 12v3h4v-3"/>',
   settings: '<path d="m9 3-.6 2.4-2 .9L4 5.6 2.5 8l1.8 1.7-.2 2.3L2.5 14 4 16.5l2.3-.4L8 17.4l.5 2.6h3l.8-2.4 2-.9 2.4.7 1.5-2.4-1.8-1.7.2-2.3 1.6-2L16.7 6l-2.3.4L12.7 5l-.5-2H9Z" transform="translate(1 1)"/><circle cx="11.5" cy="12" r="3"/>',
   more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',

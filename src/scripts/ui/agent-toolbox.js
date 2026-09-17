@@ -3,19 +3,21 @@ import { allowsAgentInvocation, isInputAgent } from '../agent/agent-invocation.j
 import { agentIconMarkup, getAgentIconName } from '../agent/agent-icons.js';
 import { agentToolContextKey, isAgentToolReply } from '../agent/agent-tool-targets.js';
 import { createMessageClipboardUiRuntime } from './chat/message-clipboard-ui-utils.js';
+import { createFormatRepairPicker } from './chat/format-repair-picker.js';
+import { resolveFormatRepairProfile } from '../agent/format-repair-profiles.js';
 import { createAgentToolboxView, toolboxEscape as e, toolboxButton as button, toolboxNamedIcon, toolboxManagementMarkup } from './agent-toolbox-view.js';
 import { normalizeToolboxPreferences, reconcileToolboxPreferences, getToolboxItems, setToolboxItemVisible,
   isAgentToolToggle, toolboxVisibleCount } from './agent-toolbox-model.js';
 
-const labels = { running:'处理中', ready:'待查看', reviewing:'正在查看', applied:'已应用', ignored:'已收起', failed:'失败', expired:'已过期', cancelled:'已取消', unchanged:'无需修改', succeeded:'已完成', skipped:'未执行' };
-const pendingStates = new Set(['running', 'ready', 'reviewing']);
+const labels = { running:'处理中', ready:'待查看', reviewing:'正在查看', applying:'正在应用', applied:'已应用', ignored:'已收起', failed:'失败', expired:'已过期', cancelled:'已取消', unchanged:'无需修改', succeeded:'已完成', skipped:'未执行' };
+const pendingStates = new Set(['running', 'ready', 'reviewing', 'applying']);
 const isNote = job => job?.outputMode === 'note' || job?.kind === 'note';
 const sameContext = (a, b) => agentToolContextKey(a) === agentToolContextKey(b);
 const sourceHint = (config, snapshot) => snapshot?.targetMode === 'full' || config.target?.mode === 'full' ? '完整回复' : ['tags', 'regex'].includes(config.target?.mode) ? '指定部分' : '正文';
 
 export const createAgentToolbox = ({ input, actions, getContext, getMessages, getInputSnapshot, openAgent, openCenter,
-  openFormatResult = openCenter, triggerContainer, anchorEl, targetEventRoot, beforeOpen = () => {}, documentRef = document, storage = globalThis.localStorage } = {}) => {
-  const doc = documentRef, win = doc.defaultView, bindings = [], nodes = new Map(), formatJobs = new Map(), toggling = new Set(), invoking = new Set();
+  triggerContainer, anchorEl, targetEventRoot, beforeOpen = () => {}, documentRef = document, storage = globalThis.localStorage } = {}) => {
+  const doc = documentRef, win = doc.defaultView, bindings = [], nodes = new Map(), toggling = new Set(), invoking = new Set();
   const clipboard = createMessageClipboardUiRuntime({ documentLike: doc, navigatorLike: win.navigator, execCopyCommand: command => doc.execCommand(command) });
   let prefs;
   try { prefs = normalizeToolboxPreferences(JSON.parse(storage?.getItem('agent_toolbox_ui_v2') || storage?.getItem('agent_toolbox_ui_v1') || '{}')); }
@@ -27,19 +29,24 @@ export const createAgentToolbox = ({ input, actions, getContext, getMessages, ge
   let catalog = [], items = [], context = null, selectedId = '', selectedRunId = '', mode = 'shelf', prepared = null, preparing = false;
   let target = null, inputTarget = null, selectionSnapshot = null, controller = null, picking = false, recording = false, ordering = false;
   let shortcutError = '';
+  let repairProfileId = '', rawRange = null, rawSource = '';
   let frame = 0, targetFrame = 0, epoch = 0, disposed = false, cardStamp = '', resultStamp = '', returnFocus = null, resume = null;
   const replies = () => {
     const messages = getMessages(getContext().sessionId) || [], result = [];
     for (let i = messages.length - 1; i >= 0 && result.length < 20; i--) if (isAgentToolReply(messages[i])) result.push(messages[i]);
     return result;
   };
-  const runs = () => [...(actions.listInputAgentRuns?.() || []), ...(actions.listTextEditRuns?.() || []), ...formatJobs.values()]
+  const runs = () => [...(actions.listInputAgentRuns?.() || []), ...(actions.listTextEditRuns?.() || []), ...(actions.listFormatRepairRuns?.() || [])]
     .filter(job => sameContext(job.context, getContext()));
-  const currentConfig = () => catalog.find(config => config.id === selectedId);
+  const currentConfig = () => { const config = catalog.find(config => config.id === selectedId);
+    return config?.kind === 'format_review' && repairProfileId ? resolveFormatRepairProfile(config, repairProfileId) : config; };
   const jobFor = (id, jobs = runs()) => jobs.find(job => job.id === selectedRunId && job.agentId === id)
-    || jobs.filter(job => job.agentId === id && pendingStates.has(job.status)).at(-1)
+    || jobs.filter(job => job.agentId === id && (!job.repairProfileId || job.repairProfileId === repairProfileId) && pendingStates.has(job.status)).at(-1)
     || jobs.filter(job => job.agentId === id && (isInputAgent(catalog.find(config => config.id === id))
-      ? job.revision === inputTarget?.revision : job.messageId === target?.messageId)).at(-1);
+      ? job.revision === inputTarget?.revision : job.messageId === target?.messageId && (!job.repairProfileId || job.repairProfileId === repairProfileId))).at(-1);
+  const formatPicker = createFormatRepairPicker({ root: targetEventRoot, getMessages, getContext, documentRef: doc,
+    onChoose: messageId => { target = { messageId }; selectedRunId = ''; selectionSnapshot = null; rawRange = null; rawSource = ''; void prepare(); } });
+  const stopFormatPick = () => { if (formatPicker.active) { formatPicker.stop(); controller?.cancel?.(); } };
   const readCatalog = () => {
     catalog = (actions.listAgentConfigurations({ context: getContext() }) || []).map(record => record.config).filter(Boolean);
     const next = reconcileToolboxPreferences(prefs, catalog, getContext());
@@ -71,16 +78,21 @@ export const createAgentToolbox = ({ input, actions, getContext, getMessages, ge
     if (restore) { mode = 'task'; mountCard(); render(); }
   };
   const close = () => {
-    epoch++; cancelPick(); panel.hidden = true; trigger.setAttribute('aria-expanded', 'false'); recording = false; ordering = false;
+    epoch++; cancelPick(); stopFormatPick(); panel.hidden = true; trigger.setAttribute('aria-expanded', 'false'); recording = false; ordering = false;
     panel.classList.remove('is-entering');
   };
   const focusShelf = id => (nodes.get(id) || panel.querySelector('[data-key=manage]'))?.focus({ preventScroll: true });
+  const hideCard = () => {
+    epoch++; stopFormatPick(); mode = 'shelf'; recording = false; ordering = false; preparing = false; notice.hidden = true;
+    render();
+  };
   const back = ({ dryRun = false } = {}) => {
     if (panel.hidden) return false;
+    if (formatPicker.rawOpen) return false;
     if (dryRun) return true;
     if (picking) { cancelPick(true); return true; }
     if (recording || ordering) { recording = false; ordering = false; render(); return true; }
-    if (mode !== 'shelf') { epoch++; mode = 'shelf'; recording = false; preparing = false; render(); focusShelf(selectedId); }
+    if (mode !== 'shelf') { hideCard(); focusShelf(selectedId); }
     else { close(); (returnFocus?.isConnected && returnFocus.getClientRects().length ? returnFocus : entryAnchor).focus({ preventScroll: true }); }
     return true;
   };
@@ -88,36 +100,58 @@ export const createAgentToolbox = ({ input, actions, getContext, getMessages, ge
     cardStamp = ''; resultStamp = '';
     const config = currentConfig();
     if (mode === 'task' && config) {
-      card.innerHTML = `<div class="at-card-head">${button('back', '返回', { icon: 'back' })}<div class="at-card-heading">${toolboxNamedIcon(config)}<strong data-i18n-skip>${e(config.title)}</strong></div>${button(`config:${config.id}`, '配置', { icon: 'settings' })}</div>
+      card.innerHTML = `<div class="at-card-head"><div class="at-card-heading">${toolboxNamedIcon(config)}<strong data-i18n-skip>${e(config.kind === 'format_review' ? config.repairProfileName || config.title : config.title)}</strong></div>${button(`config:${config.id}`, '配置', { icon: 'settings' })}</div>
         <div class="at-scope"></div><div class="at-target"></div><p class="at-status" data-target-status role="status"></p><div class="at-run-actions"></div><div class="at-result" hidden></div>`;
     }
   };
+  const renderRepairProfiles = () => {
+    const config = currentConfig(), profiles = config?.repairProfiles?.items || [];
+    const stamp = JSON.stringify(['profiles', profiles.map(item => [item.id, item.name]), config?.enabled]);
+    if (cardStamp === stamp) return; cardStamp = stamp;
+    card.innerHTML = `<div class="at-card-head"><div class="at-card-heading">${toolboxNamedIcon(config)}<strong>${e(t('格式修复'))}</strong></div>${button('new-repair', '新建方案', { icon: 'plus' })}</div>
+      <div class="at-repair-profiles">${profiles.map(item => `<div class="at-repair-profile"><button type="button" data-key="repair:${e(item.id)}"><span data-i18n-skip>${e(item.name)}</span><span aria-hidden="true">›</span></button>${button(`repair-config:${item.id}`, '配置方案', { icon: 'settings' })}</div>`).join('') || `<p class="at-status">${e(t('保存一个修复方案，即可在这里使用。'))}</p>${button('new-repair', '新建方案', { primary: true })}`}</div>`;
+  };
+  const renderRepairTarget = config => {
+    const frozen = prepared?.snapshot, selection = frozen?.formatSelection, job = jobFor(config.id), locked = pendingStates.has(job?.status);
+    const label = selection?.fragment ? '已选原文片段' : target?.messageId ? '完整回复' : '选择一条回复';
+    const source = selection?.text || frozen?.formatTarget?.sourceText || '';
+    const stamp = JSON.stringify([preparing, prepared?.ok, prepared?.message, target?.messageId, label, source, locked, selection?.count]);
+    if (stamp !== cardStamp) {
+      cardStamp = stamp;
+      card.querySelector('.at-scope').innerHTML = `<strong>${e(t(label))}</strong><span class="at-count">${selection?.ok ? e(selection.checkType === 'tableEdit' ? `tableEdit · ${selection.count}` : t('{count} 字', { count: Array.from(source).length })) : ''}</span>${button('repair-profiles', '更换方案', { disabled: locked })}`;
+      card.querySelector('.at-target').innerHTML = `${source ? `<p class="at-target-excerpt" data-i18n-skip>${e(source.slice(0, 160))}${source.length > 160 ? '…' : ''}</p>` : `<p class="at-status">${e(t('点选气泡检查完整回复，或选择其中的文字。'))}</p>`}
+        ${frozen?.formatTarget?.sourceMessageIds?.length > 1 && !selection?.fragment ? `<p class="at-status">${e(t('同一轮的 {count} 个气泡将一起检查', { count: frozen.formatTarget.sourceMessageIds.length }))}</p>` : ''}
+        <div class="at-target-actions">${button('repair-raw', '查看原文 / 选取', { disabled: locked || !source || preparing })}${selection?.fragment ? button('repair-whole', '完整回复', { disabled: locked }) : ''}${button('repair-cancel', '取消选择', { disabled: locked })}</div>`;
+    }
+    const why = preparing ? '正在提取处理范围…' : !config.enabled ? '此 Agent 已关闭，可在配置中开启' : !allowsAgentInvocation(config, 'manual') ? '此 Agent 仅自动执行，可在配置中调整调用方式'
+      : config.modelMode === 'none' ? '此方案尚未选择可用模型' : target?.messageId && !prepared?.ok ? prepared?.message || '请重新选择回复' : '';
+    card.querySelector('[data-target-status]').textContent = t(why);
+    const markup = locked ? '' : button('execute', '检查格式', { primary: true, disabled: Boolean(why) || !prepared?.ok || invoking.has(config.id) });
+    const host = card.querySelector('.at-run-actions'); if (host.innerHTML !== markup) host.innerHTML = markup;
+  };
   const renderTarget = config => {
+    if (config.kind === 'format_review') { renderRepairTarget(config); return; }
     const job = jobFor(config.id), frozen = prepared?.snapshot, locked = pendingStates.has(job?.status);
-    const inputTool = isInputAgent(config), format = config.kind === 'format_review', selected = !format && (frozen?.selected || selectionSnapshot?.selected);
+    const inputTool = isInputAgent(config), selected = frozen?.selected || selectionSnapshot?.selected;
     const preview = inputTool ? inputTarget?.text || '' : frozen?.target?.text || '';
     const previewText = inputTool && inputTarget?.end > inputTarget?.start ? preview.slice(inputTarget.start, inputTarget.end) : preview;
     const scopeLabel = inputTool ? inputTarget?.end > inputTarget?.start ? '已选草稿文字' : '当前草稿'
-      : format ? '整轮原始回复' : selected ? '已选文字' : sourceHint(config, frozen);
-    const total = format ? frozen?.formatTarget?.sourceMessageIds?.length || 1 : 0;
-    const stamp = JSON.stringify([preparing, prepared?.ok, prepared?.message, target?.messageId, preview, previewText, scopeLabel, total, locked, Boolean(selectionSnapshot)]);
+      : selected ? '已选文字' : sourceHint(config, frozen);
+    const stamp = JSON.stringify([preparing, prepared?.ok, prepared?.message, target?.messageId, preview, previewText, scopeLabel, locked, Boolean(selectionSnapshot)]);
     if (stamp !== cardStamp) {
       cardStamp = stamp;
-      card.querySelector('.at-scope').innerHTML = `<strong>${e(t(scopeLabel))}</strong><span class="at-count">${total ? e(t('共 {count} 条消息', { count: total })) : previewText ? e(t('{count} 字', { count: Array.from(previewText).length })) : ''}</span>${button('refresh-target', inputTool ? '更新草稿' : '更新处理对象', { icon: 'refresh', disabled: locked || preparing })}`;
+      card.querySelector('.at-scope').innerHTML = `<strong>${e(t(scopeLabel))}</strong><span class="at-count">${previewText ? e(t('{count} 字', { count: Array.from(previewText).length })) : ''}</span>${button('refresh-target', inputTool ? '更新草稿' : '更新处理对象', { icon: 'refresh', disabled: locked || preparing })}`;
       const availableReplies = replies(), currentMessage = availableReplies.find(message => message.id === target?.messageId);
       const picker = !inputTool ? `<select data-key="target" ${locked ? 'disabled' : ''} aria-label="${e(t('处理对象'))}">${!currentMessage ? `<option value="${e(target?.messageId || '')}">${e(t('暂无可处理的回复'))}</option>` : ''}${availableReplies.map((message, index) => `<option value="${e(message.id)}" ${message.id === target?.messageId ? 'selected' : ''}>${e(t(index ? '历史回复' : '最近回复'))} · ${e(String(message.content || '').replace(/<[^>]*>/g, '').slice(0, 36))}</option>`).join('')}</select>` : '';
-      const turnIds = format && frozen?.formatTarget?.sourceMessageIds;
-      const excerpt = turnIds?.length ? (getMessages(context.sessionId) || []).filter(message => turnIds.includes(message.id))
-        .map(message => String(message.content || '').replace(/<[^>]*>/g, '')).join('\n') : previewText;
+      const excerpt = previewText;
       const targetHost = card.querySelector('.at-target'), opened = targetHost.querySelector('details')?.open;
       targetHost.innerHTML = `${picker}${preparing ? `<p class="at-status">${e(t('正在提取处理范围…'))}</p>` : previewText ? `<p class="at-target-excerpt" data-i18n-skip>${e(excerpt.slice(0, 160))}${excerpt.length > 160 ? '…' : ''}</p><details${opened ? ' open' : ''}><summary>${e(t('查看处理内容'))}</summary><pre class="at-target-summary" data-i18n-skip tabindex="0">${e(previewText.slice(0, 6000))}${previewText.length > 6000 ? '\n…' : ''}</pre></details>` : ''}
-        ${format && selectionSnapshot ? `<p class="at-status">${e(t('选区用于定位回复，格式检查会处理整轮。'))}</p>` : ''}
-        <div class="at-target-actions">${!inputTool && !format ? button('pick', '选择文字', { disabled: locked || !controller }) : ''}${selected || selectionSnapshot && !format ? button('clear-selection', '使用配置范围', { disabled: locked }) : ''}</div>`;
+        <div class="at-target-actions">${!inputTool ? button('pick', '选择文字', { disabled: locked || !controller }) : ''}${selected ? button('clear-selection', '使用配置范围', { disabled: locked }) : ''}</div>`;
     }
     const why = preparing ? '正在提取处理范围…' : invoking.has(config.id) && !locked ? '处理中' : !config.enabled ? '此 Agent 已关闭，可在配置中开启' : !allowsAgentInvocation(config, 'manual') ? '此 Agent 仅自动执行，可在配置中调整调用方式' : !prepared?.ok && !inputTool ? prepared?.message || '暂无可处理的回复' : inputTool && !inputTarget?.text?.trim() ? '请先在输入框填写内容' : '';
     card.querySelector('[data-target-status]').textContent = t(why);
     const canRun = !why && !locked, runHost = card.querySelector('.at-run-actions');
-    const runMarkup = locked ? '' : button('execute', format ? '检查格式' : '运行一次', { primary: true, disabled: !canRun });
+    const runMarkup = locked ? '' : button('execute', '运行一次', { primary: true, disabled: !canRun });
     if (runHost.innerHTML !== runMarkup) runHost.innerHTML = runMarkup;
   };
   const renderResult = (config, job) => {
@@ -125,11 +159,11 @@ export const createAgentToolbox = ({ input, actions, getContext, getMessages, ge
     const stamp = JSON.stringify([job?.id, job?.status, job?.text, job?.message, Boolean(job?.trace?.steps?.length)]);
     if (stamp === resultStamp) return;
     resultStamp = stamp; host.hidden = !job; if (!job) return;
-    const inputJob = job.id.startsWith('input-run'), formatJob = formatJobs.has(job.id), resultText = job.text || job.message || '';
+    const inputJob = job.id.startsWith('input-run'), resultText = job.text || job.message || '';
     host.innerHTML = `<div class="at-status" role="status">${e(t(labels[job.status] || '待查看'))}${job.messageId && job.messageId !== target?.messageId ? ` · ${e(t('来自先前选择的回复'))}` : ''}</div>${resultText ? `<pre data-i18n-skip tabindex="0">${e(resultText)}</pre>` : ''}<div class="at-result-actions">
       ${job.status === 'running' ? button(`cancel:${job.id}`, '取消') : ''}
+      ${job.status === 'failed' && job.id.startsWith('format-tool-run-') ? button(`ignore:${job.id}`, '收起结果') : ''}
       ${job.status === 'ready' ? isNote(job) ? button(`copy:${job.id}`, '复制结果') + button(`ignore:${job.id}`, '收起结果') : inputJob ? button(`apply:${job.id}`, job.kind === 'rewrite' ? '查看修改' : '采纳') + button(`ignore:${job.id}`, '收起结果') : button(`review:${job.id}`, '查看修改') + button(`ignore:${job.id}`, '收起结果') : ''}
-      ${formatJob && job.status === 'succeeded' ? button('format-result', '查看结果') : ''}
       ${job.trace?.steps?.length ? button(`process:${job.id}`, '执行过程') : ''}</div>`;
   };
   const renderManagement = () => {
@@ -151,7 +185,7 @@ export const createAgentToolbox = ({ input, actions, getContext, getMessages, ge
   };
   const render = () => {
     if (disposed) return;
-    const jobs = runs(), ready = jobs.filter(job => job.status === 'ready' || formatJobs.has(job.id) && job.unread).length;
+    const jobs = runs(), ready = jobs.filter(job => job.status === 'ready' || job.unread).length;
     const badge = trigger.querySelector('small'); badge.hidden = !ready; badge.textContent = String(ready);
     trigger.hidden = !['chat', 'writing'].includes(getContext().place) || !getContext().sessionId;
     view.badge.hidden = !ready || trigger.hidden;
@@ -170,7 +204,7 @@ export const createAgentToolbox = ({ input, actions, getContext, getMessages, ge
       const toggle = isAgentToolToggle(config), state = job?.status || (config.enabled ? 'enabled' : 'disabled');
       node.dataset.status = state; node.dataset.enabled = String(config.enabled); node.disabled = toggling.has(config.id);
       node.toggleAttribute('aria-pressed', toggle); if (toggle) node.setAttribute('aria-pressed', String(config.enabled));
-      node.toggleAttribute('aria-expanded', !toggle); if (!toggle) node.setAttribute('aria-expanded', String(mode === 'task' && selectedId === config.id));
+      node.toggleAttribute('aria-expanded', !toggle); if (!toggle) node.setAttribute('aria-expanded', String(['task', 'profiles'].includes(mode) && selectedId === config.id));
       const text = `${config.title} · ${t(job ? labels[job.status] || '待查看' : toggle ? config.enabled ? '点击关闭' : '点击开启' : '查看工具')}`;
       node.setAttribute('aria-label', text); node.querySelector('.at-tooltip').textContent = text;
       node.querySelector('.at-tool-state').textContent = job?.status === 'running' ? '…' : job?.status === 'ready' || job?.unread ? '1' : toggle ? config.enabled ? '✓' : '−' : '';
@@ -180,20 +214,23 @@ export const createAgentToolbox = ({ input, actions, getContext, getMessages, ge
     panel.querySelector('[data-key=more]').setAttribute('aria-expanded', String(mode === 'more'));
     panel.querySelector('[data-key=manage]').setAttribute('aria-expanded', String(mode === 'manage'));
     const activeJobs = jobs.filter(job => pendingStates.has(job.status) || job.unread);
-    inbox.hidden = picking || !activeJobs.length || mode === 'runs';
-    const inboxMarkup = button('runs', ready ? t('{count} 个结果待查看', { count: ready }) : t('{count} 个任务处理中', { count: activeJobs.length }));
-    if (inbox.innerHTML !== inboxMarkup) inbox.innerHTML = inboxMarkup;
+    inbox.hidden = picking || (!activeJobs.length && mode !== 'runs');
+    const inboxLabel = ready ? t('{count} 个结果待查看', { count: ready }) : activeJobs.length ? t('{count} 个任务处理中', { count: activeJobs.length }) : t('任务与结果');
+    const inboxButton = inbox.querySelector('[data-key=runs]');
+    if (inboxButton.textContent !== inboxLabel) inboxButton.textContent = inboxLabel;
+    inboxButton.setAttribute('aria-expanded', String(mode === 'runs'));
     card.dataset.mode = mode;
     card.hidden = mode === 'shelf' || picking;
     if (!card.hidden) {
       if (mode === 'manage') renderManagement();
+      else if (mode === 'profiles') renderRepairProfiles();
       else if (mode === 'runs') {
         const stamp = JSON.stringify([mode, activeJobs.map(job => [job.id, job.status, job.title])]);
-        if (cardStamp !== stamp) { cardStamp = stamp; card.innerHTML = `<div class="at-card-head">${button('back', '返回', { icon: 'back' })}<div class="at-card-heading"><strong>${e(t('任务与结果'))}</strong></div></div><div class="at-overflow">${activeJobs.map(job => `<button type="button" data-key="result:${e(job.id)}"><span class="at-result-entry" data-i18n-skip>${e(job.title || catalog.find(config => config.id === job.agentId)?.title || '')}</span><small>${e(t(labels[job.status] || '待查看'))}</small></button>`).join('') || `<p class="at-status">${e(t('暂无待查看的结果'))}</p>`}</div>`; }
+        if (cardStamp !== stamp) { cardStamp = stamp; card.innerHTML = `<div class="at-card-head"><div class="at-card-heading"><strong>${e(t('任务与结果'))}</strong></div></div><div class="at-overflow">${activeJobs.map(job => `<button type="button" data-key="result:${e(job.id)}"><span class="at-result-entry" data-i18n-skip>${e(job.title || catalog.find(config => config.id === job.agentId)?.title || '')}</span><small>${e(t(labels[job.status] || '待查看'))}</small></button>`).join('') || `<p class="at-status">${e(t('暂无待查看的结果'))}</p>`}</div>`; }
       }
       else if (mode === 'more') {
         const stamp = JSON.stringify([mode, count, items, jobs.map(job => [job.id, job.status])]);
-        if (cardStamp !== stamp) { cardStamp = stamp; card.innerHTML = `<div class="at-card-head">${button('back', '返回', { icon: 'back' })}<div class="at-card-heading"><strong>${e(t('更多工具'))}</strong></div></div><div class="at-overflow">${items.slice(count).map(config => `<button type="button" data-key="tool:${e(config.id)}">${toolboxNamedIcon(config)}<span data-i18n-skip>${e(config.title)}</span><small>${e(t(config.enabled ? '已开启' : '已关闭'))}</small></button>`).join('')}</div>`; }
+        if (cardStamp !== stamp) { cardStamp = stamp; card.innerHTML = `<div class="at-card-head"><div class="at-card-heading"><strong>${e(t('更多工具'))}</strong></div></div><div class="at-overflow">${items.slice(count).map(config => `<button type="button" data-key="tool:${e(config.id)}">${toolboxNamedIcon(config)}<span data-i18n-skip>${e(config.title)}</span><small>${e(t(config.enabled ? '已开启' : '已关闭'))}</small></button>`).join('')}</div>`; }
       } else {
         const config = currentConfig();
         if (!config) { mode = 'shelf'; card.hidden = true; } else { if (!card.querySelector('.at-target')) mountCard(); renderTarget(config); renderResult(config, jobFor(config.id, jobs)); }
@@ -212,22 +249,30 @@ export const createAgentToolbox = ({ input, actions, getContext, getMessages, ge
   const refreshStatus = () => { win.cancelAnimationFrame(frame); frame = win.requestAnimationFrame(render); };
   const prepare = async () => {
     const config = currentConfig(); if (!config || mode !== 'task') return;
+    if (config.kind === 'format_review' && !target?.messageId) { prepared = null; preparing = false; render(); return; }
     const version = ++epoch; prepared = null; preparing = true; render();
     try {
       const result = isInputAgent(config) ? { ok: true } : await actions.prepareAgentToolTarget({ id: config.id, context: { ...context }, messageId: target?.messageId,
-        selectionSnapshot: selectionSnapshot || undefined });
+        selectionSnapshot: selectionSnapshot || undefined, repairProfileId, rawRange, rawSource });
       if (disposed || version !== epoch || !sameContext(context, getContext())) return;
       prepared = result; if (result?.ok && result.snapshot) target = { messageId: result.snapshot.messageId };
+      if (config.kind === 'format_review') formatPicker.select(result?.snapshot?.formatTarget?.sourceMessageIds || []);
     } catch (error) { if (version === epoch) prepared = { ok: false, message: String(error.message || error) }; }
     finally { if (version === epoch) { preparing = false; render(); } }
   };
   const showTool = (id, runId = '') => {
     const config = catalog.find(item => item.id === id); if (!config) return;
+    stopFormatPick();
+    if (config.kind === 'format_review' && !runId) { selectedId = id; selectedRunId = ''; mode = 'profiles'; cardStamp = ''; preparing = false; epoch++; notice.hidden = true; render(); return; }
     selectedId = id; selectedRunId = ''; mode = 'task'; ordering = false; recording = false; notice.hidden = true; mountCard();
     const active = runs().find(job => job.id === runId) || runs().filter(job => job.agentId === id && pendingStates.has(job.status)).at(-1);
-    if (active) { selectedRunId = active.id; if (active.messageId) { target = { messageId: active.messageId }; if (selectionSnapshot?.messageId !== active.messageId) selectionSnapshot = null; } }
+    if (active) { selectedRunId = active.id; if (active.repairProfileId) repairProfileId = active.repairProfileId; if (active.messageId) { target = { messageId: active.messageId }; if (selectionSnapshot?.messageId !== active.messageId) selectionSnapshot = null; } mountCard(); }
     if (!isInputAgent(config) && !target?.messageId) target = { messageId: replies()[0]?.id || '' };
     void prepare();
+  };
+  const chooseRepairProfile = id => {
+    repairProfileId = id; selectedRunId = ''; mode = 'task'; prepared = null; cardStamp = ''; notice.hidden = true;
+    formatPicker.start(); controller?.start?.({ format: true }); mountCard(); void prepare();
   };
   const open = (options = {}) => {
     context = { ...getContext() }; inputTarget = getInputSnapshot(); returnFocus = options.returnFocus || entryAnchor;
@@ -236,10 +281,13 @@ export const createAgentToolbox = ({ input, actions, getContext, getMessages, ge
     resume = null;
     target = options.messageId ? { messageId: options.messageId } : continuing?.target || null;
     selectionSnapshot = options.selectionSnapshot || continuing?.selectionSnapshot || null;
+    repairProfileId = continuing?.repairProfileId || ''; rawRange = continuing?.rawRange || null; rawSource = continuing?.rawSource || '';
     if (selectionSnapshot) target = { messageId: selectionSnapshot.messageId };
     mode = continuing?.mode === 'manage' ? 'manage' : 'shelf'; ordering = false; recording = false; selectedId = ''; selectedRunId = ''; prepared = null; preparing = false; notice.hidden = true;
     panel.hidden = false; shelf.hidden = false; trigger.setAttribute('aria-expanded', 'true'); panel.classList.add('is-entering');
-    if (continuing?.mode === 'task' && catalog.some(config => config.id === continuing.id)) showTool(continuing.id); else render();
+    if (['task', 'profiles'].includes(continuing?.mode) && catalog.some(config => config.id === continuing.id)) {
+      showTool(continuing.id); if (continuing.mode === 'task' && repairProfileId && currentConfig()?.kind === 'format_review') chooseRepairProfile(repairProfileId);
+    } else render();
     const configControl = mode === 'manage' && [...card.querySelectorAll('.at-config')].find(node => node.dataset.key === `config:${continuing.id}` && node.getClientRects().length);
     if (configControl) configControl.focus({ preventScroll: true });
     else if (options.keyboard || triggerContainer?.contains(doc.activeElement)) focusShelf(items[0]?.id);
@@ -270,13 +318,9 @@ export const createAgentToolbox = ({ input, actions, getContext, getMessages, ge
       if (isInputAgent(config)) result = await actions.runConfiguredInputAgent({ id: config.id, context: frozen, inputTarget: savedInput });
       else if (config.kind === 'text_edit') result = await actions.runTextEditAgent({ id: config.id, context: frozen, messageId: snapshot.messageId, targetSnapshot: snapshot });
       else {
-        const abort = new AbortController(), id = `tool-format:${Date.now()}:${formatJobs.size}`;
-        const job = { id, agentId: config.id, title: config.title, context: frozen, messageId: snapshot.messageId, status: 'running', controller: abort };
-        formatJobs.set(id, job); selectedRunId = id; render();
-        try { result = await actions.runConfiguredFormatReview({ id: config.id, context: frozen, messageId: snapshot.messageId, targetSnapshot: snapshot, signal: abort.signal });
-          job.status = abort.signal.aborted ? 'cancelled' : result.status; job.message = result.error || ''; job.unread = job.status === 'succeeded'; }
-        catch (error) { job.status = 'failed'; job.message = String(error.message || error); throw error; }
-        while (formatJobs.size > 20) { const old = [...formatJobs.values()].find(item => item.status !== 'running'); if (!old) break; formatJobs.delete(old.id); }
+        stopFormatPick();
+        result = await actions.runConfiguredFormatReview({ id: config.id, context: frozen, repairProfileId,
+          messageId: snapshot.messageId, targetSnapshot: snapshot });
       }
       if (sameContext(frozen, getContext())) {
         if (result?.artifact?.runId) selectedRunId = result.artifact.runId;
@@ -294,19 +338,23 @@ export const createAgentToolbox = ({ input, actions, getContext, getMessages, ge
   const useSelection = async options => {
     const frozen = { ...getContext() }, selection = await actions.captureAgentToolSelection({ ...options, context: frozen });
     if (!sameContext(frozen, getContext()) || disposed) return;
-    const resumeId = picking ? selectedId : '';
+    const resumeId = picking || formatPicker.active ? selectedId : '';
     if (!selection.ok) { cancelPick(true); if (panel.hidden) open(); tell(selection.message || '选中文字无法对应原文'); return; }
     cancelPick();
     if (!resumeId) open({ selectionSnapshot: selection.snapshot, messageId: options.messageId, returnFocus: options.returnFocus });
-    else { selectionSnapshot = selection.snapshot; target = { messageId: selection.snapshot.messageId }; shelf.hidden = false; showTool(resumeId); }
+    else { selectionSnapshot = selection.snapshot; target = { messageId: selection.snapshot.messageId }; rawRange = null; rawSource = ''; shelf.hidden = false;
+      if (currentConfig()?.kind === 'format_review') chooseRepairProfile(repairProfileId); else showTool(resumeId); }
   };
-  const configure = id => {
-    resume = { id, mode, context: { ...context }, target, selectionSnapshot };
-    close(); openAgent(id, { messageId: target?.messageId, context: { ...context } });
+  const configure = (id, options = {}) => {
+    resume = { id, mode, context: { ...context }, target, selectionSnapshot, repairProfileId, rawRange, rawSource };
+    const snapshot = prepared?.snapshot;
+    close(); openAgent(id, { messageId: target?.messageId, context: { ...context },
+      ...(id === 'reply_check' ? { repairProfileId, targetSnapshot: snapshot } : {}), ...options });
   };
   const listen = (node, type, callback, options) => { node?.addEventListener(type, callback, options); bindings.push(() => node?.removeEventListener(type, callback, options)); };
   listen(trigger, 'click', event => { event.preventDefault(); event.stopPropagation(); panel.hidden ? open({ keyboard: event.detail === 0 }) : close(); });
-  listen(doc, 'pointerdown', event => { if (!picking && !panel.hidden && !panel.contains(event.target) && !trigger.contains(event.target)) close(); });
+  listen(doc, 'pointerdown', event => { if (!picking && !formatPicker.active && !formatPicker.rawOpen && !panel.hidden && !panel.contains(event.target) && !trigger.contains(event.target)) close(); });
+  listen(input, 'focus', () => { if (formatPicker.active) close(); });
   listen(panel, 'change', event => {
     if (event.target.dataset.key !== 'target') return;
     target = { messageId: event.target.value }; selectionSnapshot = null; selectedRunId = ''; void prepare();
@@ -315,12 +363,32 @@ export const createAgentToolbox = ({ input, actions, getContext, getMessages, ge
     const control = event.target.closest('[data-key]'), key = control?.dataset.key; if (!key || control.disabled) return;
     try {
       if (key === 'close') close();
-      else if (key === 'back') back();
       else if (key === 'dismiss-notice') { notice.hidden = true; place(); }
       else if (key === 'dismiss-legend') { prefs.legendDismissed = true; savePrefs(); render(); }
-      else if (key === 'manage' || key === 'more' || key === 'runs') { epoch++; preparing = false; ordering = false; recording = false; mode = key; cardStamp = ''; render(); card.querySelector('button')?.focus({ preventScroll: true }); }
+      else if (key === 'manage' || key === 'more' || key === 'runs') {
+        stopFormatPick();
+        if (mode === key) hideCard();
+        else { epoch++; preparing = false; ordering = false; recording = false; mode = key; cardStamp = ''; render(); }
+        if (control.isConnected && control.getClientRects().length) control.focus({ preventScroll: true });
+        else focusShelf(selectedId);
+      }
       else if (key === 'center') { close(); openCenter(); }
       else if (key === 'execute') await invoke();
+      else if (key === 'new-repair') configure('reply_check', { newRepairProfile: true, repairProfileId: '' });
+      else if (key === 'repair-profiles' || key === 'repair-cancel') showTool('reply_check');
+      else if (key === 'repair-whole') { selectionSnapshot = null; rawRange = null; rawSource = ''; selectedRunId = ''; void prepare(); }
+      else if (key === 'repair-raw') {
+        const snapshot = prepared?.snapshot, frozenContext = { ...context }, profile = repairProfileId;
+        if (!snapshot?.formatTarget?.ok) return;
+        const source = snapshot.formatTarget.sourceText;
+        const selected = await formatPicker.showRaw({ source, range: snapshot.formatSelection?.fragment ? snapshot.formatSelection : null,
+          checkType: currentConfig().repairCheckType, title: currentConfig().repairProfileName });
+        if (selected && sameContext(frozenContext, getContext()) && profile === repairProfileId && !panel.hidden) {
+          selectionSnapshot = null; rawSource = source; rawRange = selected.whole ? null : selected; selectedRunId = ''; void prepare();
+        }
+      }
+      else if (key.startsWith('repair-config:')) configure('reply_check', { repairProfileId: key.slice(14) });
+      else if (key.startsWith('repair:')) chooseRepairProfile(key.slice(7));
       else if (key === 'pick') startPick();
       else if (key === 'cancel-pick') cancelPick(true);
       else if (key === 'refresh-target' || key === 'clear-selection') {
@@ -329,12 +397,18 @@ export const createAgentToolbox = ({ input, actions, getContext, getMessages, ge
         else { selectionSnapshot = null; target = { messageId: target?.messageId || replies()[0]?.id || '' }; }
         selectedRunId = ''; void prepare();
       }
-      else if (key === 'format-result') { const job = jobFor(selectedId); if (job) job.unread = false; close(); openFormatResult(target?.messageId); refreshStatus(); }
       else if (key === 'shortcut') { recording = true; shortcutError = ''; cardStamp = ''; render(); card.querySelector('[data-key=shortcut]')?.focus({ preventScroll: true }); }
       else if (key === 'cancel-shortcut') { recording = false; render(); card.querySelector('[data-key=shortcut]')?.focus({ preventScroll: true }); }
       else if (key === 'clear-shortcut') { prefs.shortcut = null; savePrefs(); cardStamp = ''; render(); }
       else if (key === 'sort') { ordering = !ordering; recording = false; render(); }
-      else if (key.startsWith('tool:')) { const config = catalog.find(item => item.id === key.slice(5)); if (config) isAgentToolToggle(config) ? await toggle(config) : showTool(config.id); }
+      else if (key.startsWith('tool:')) {
+        const config = catalog.find(item => item.id === key.slice(5));
+        if (config) {
+          if (isAgentToolToggle(config)) await toggle(config);
+          else if (['task', 'profiles'].includes(mode) && selectedId === config.id) { hideCard(); focusShelf(config.id); }
+          else showTool(config.id);
+        }
+      }
       else if (key.startsWith('config:')) configure(key.slice(7));
       else if (key.startsWith('result:')) { const job = runs().find(item => item.id === key.slice(7)); if (job) showTool(job.agentId, job.id); }
       else if (key.startsWith('visible:')) { const id = key.slice(8); prefs = setToolboxItemVisible(prefs, id, !items.some(config => config.id === id), context); savePrefs(); readCatalog(); render(); }
@@ -344,11 +418,11 @@ export const createAgentToolbox = ({ input, actions, getContext, getMessages, ge
       }
       else {
         const id = key.slice(key.indexOf(':') + 1), job = runs().find(item => item.id === id); if (!job) return;
-        const inputJob = id.startsWith('input-run');
-        if (key.startsWith('cancel:')) { if (formatJobs.has(id)) { job.controller.abort(); job.status = 'cancelled'; } else if (inputJob) actions.cancelInputAgentRun(id); else actions.cancelTextEditRun(id); render(); }
-        else if (key.startsWith('ignore:')) { inputJob ? actions.ignoreInputAgentRun(id) : actions.ignoreTextEditRun(id); render(); }
+        const inputJob = id.startsWith('input-run'), formatJob = id.startsWith('format-tool-run-');
+        if (key.startsWith('cancel:')) { if (formatJob) actions.cancelFormatRepairRun(id); else if (inputJob) actions.cancelInputAgentRun(id); else actions.cancelTextEditRun(id); render(); }
+        else if (key.startsWith('ignore:')) { formatJob ? actions.ignoreFormatRepairRun(id) : inputJob ? actions.ignoreInputAgentRun(id) : actions.ignoreTextEditRun(id); render(); }
         else if (key.startsWith('apply:')) { close(); await actions.applyInputAgentRun(id); refreshStatus(); }
-        else if (key.startsWith('review:')) { close(); await actions.openTextEditRun(id); refreshStatus(); }
+        else if (key.startsWith('review:')) { close(); await (formatJob ? actions.openFormatRepairRun(id) : actions.openTextEditRun(id)); refreshStatus(); }
         else if (key.startsWith('copy:')) { const frozen = { ...context }, copied = await clipboard.copyToClipboard(job.text); if (sameContext(frozen, getContext())) tell(copied ? '已复制' : '复制失败'); }
         else if (key.startsWith('process:')) configure(job.agentId);
       }
@@ -356,7 +430,7 @@ export const createAgentToolbox = ({ input, actions, getContext, getMessages, ge
   });
   listen(doc, 'keydown', event => {
     if (event.isComposing || event.keyCode === 229) return;
-    if (event.key === 'Escape' && !panel.hidden) { event.preventDefault(); event.stopPropagation(); back(); return; }
+    if (event.key === 'Escape' && !panel.hidden && !formatPicker.rawOpen) { event.preventDefault(); event.stopPropagation(); back(); return; }
     if (recording) {
       if (event.key === 'Tab') return;
       event.preventDefault(); event.stopImmediatePropagation();
@@ -382,14 +456,16 @@ export const createAgentToolbox = ({ input, actions, getContext, getMessages, ge
   listen(panel, 'animationend', event => { if (event.target === panel) panel.classList.contains('is-entering') && panel.classList.remove('is-entering'); });
   listen(panel, 'toggle', place, true);
   listen(win, 'resize', refreshStatus); listen(win.visualViewport, 'resize', refreshStatus); listen(win.visualViewport, 'scroll', place);
-  for (const name of ['agent-input-changed', 'agent-text-edit-changed']) listen(win, name, refreshStatus);
+  for (const name of ['agent-input-changed', 'agent-text-edit-changed', 'agent-format-repair-changed']) listen(win, name, refreshStatus);
   listen(win, 'agent-feature-settings-changed', () => {
     readCatalog();
-    for (const job of formatJobs.values()) if (job.status === 'running' && !catalog.some(config => config.id === job.agentId && config.enabled)) { job.controller.abort(); job.status = 'cancelled'; }
-    if (!panel.hidden && mode === 'task') { mountCard(); void prepare(); } else refreshStatus();
+    if (!panel.hidden && mode === 'task') {
+      if (currentConfig()?.kind === 'format_review' && !currentConfig().repairProfiles.items.some(item => item.id === repairProfileId)) showTool('reply_check');
+      else { mountCard(); void prepare(); }
+    } else refreshStatus();
   });
   listen(win, 'session-changed', () => { close(); resume = null; selectionSnapshot = null; readCatalog();
-    for (const job of formatJobs.values()) if (job.status === 'running' && !sameContext(job.context, getContext())) { job.controller.abort(); job.status = 'cancelled'; } refreshStatus(); });
+    refreshStatus(); });
   const observer = new win.MutationObserver(() => { close(); resume = null; refresh(); });
   observer.observe(doc.body, { attributes: true, attributeFilter: ['data-ui-mode'] });
   const targetObserver = new win.MutationObserver(() => {
@@ -407,6 +483,7 @@ export const createAgentToolbox = ({ input, actions, getContext, getMessages, ge
     captureSelectionIdentity: messageId => actions.captureAgentToolSelectionIdentity?.({ messageId }),
     setSelectionController: value => { controller = value; },
     hasSelectionTools: () => catalog.some(config => !isInputAgent(config) && config.enabled),
-    dispose: () => { close(); disposed = true; win.cancelAnimationFrame(frame); win.cancelAnimationFrame(targetFrame); bindings.forEach(remove => remove()); observer.disconnect(); targetObserver.disconnect(); for (const job of formatJobs.values()) job.controller.abort(); view.dispose(); },
+    isFormatPicking: () => formatPicker.active,
+    dispose: () => { close(); disposed = true; formatPicker.dispose(); win.cancelAnimationFrame(frame); win.cancelAnimationFrame(targetFrame); bindings.forEach(remove => remove()); observer.disconnect(); targetObserver.disconnect(); view.dispose(); },
   };
 };

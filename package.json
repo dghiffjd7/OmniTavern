@@ -81,8 +81,8 @@
     "test:responses": "node scripts/tests/responses-config-provider-tests.mjs",
     "test:request-params": "node scripts/tests/request-params-tests.mjs",
     "test:opencode": "node scripts/tests/opencode-provider-tests.mjs && node scripts/tests/opencode-request-headers-tests.mjs",
-    "test:agent-toolbox": "node scripts/tests/agent-toolbox-tests.mjs",
-    "test:agent-config": "node scripts/tests/agent-toolbox-tests.mjs && node scripts/tests/agent-builtin-defaults-tests.mjs && node scripts/tests/agent-configuration-tests.mjs && node scripts/tests/agent-invocation-input-tests.mjs && node scripts/tests/agent-rendered-target-tests.mjs && node scripts/tests/agent-reference-context-tests.mjs && node scripts/tests/agent-reference-sources-tests.mjs && node scripts/tests/agent-reference-app-runtime-tests.mjs && node scripts/tests/agent-builtin-reference-tests.mjs && node scripts/tests/custom-agent-request-runtime-tests.mjs && node scripts/tests/custom-agent-app-runtime-tests.mjs"
+    "test:agent-toolbox": "node scripts/tests/agent-toolbox-tests.mjs && node scripts/tests/format-repair-tools-tests.mjs",
+    "test:agent-config": "npm run test:agent-toolbox && node scripts/tests/agent-builtin-defaults-tests.mjs && node scripts/tests/agent-configuration-tests.mjs && node scripts/tests/agent-invocation-input-tests.mjs && node scripts/tests/agent-rendered-target-tests.mjs && node scripts/tests/agent-reference-context-tests.mjs && node scripts/tests/agent-reference-sources-tests.mjs && node scripts/tests/agent-reference-app-runtime-tests.mjs && node scripts/tests/agent-builtin-reference-tests.mjs && node scripts/tests/custom-agent-request-runtime-tests.mjs && node scripts/tests/custom-agent-app-runtime-tests.mjs"
   },
   "dependencies": {
     "@aws-crypto/sha256-js": "^5.2.0",

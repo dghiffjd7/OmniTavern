@@ -74,7 +74,10 @@ export const bindBubbleTextSelection = ({ ui, runtime, canEdit = () => true, too
     else range = documentRef.caretRangeFromPoint?.(point.clientX, point.clientY);
     return range && bubbleAt(range.startContainer) === bubble ? range : null;
   };
-  listen(root, 'pointerdown', event => { if (event.pointerType === 'mouse') suppressClick = false; chosen = null; dragging = true; hideBar(); }, true);
+  listen(root, 'pointerdown', event => {
+    if (event.pointerType === 'mouse') suppressClick = false; chosen = null; dragging = true; hideBar();
+    if (toolbox?.isFormatPicking?.()) { hideMenu(); event.stopPropagation(); }
+  }, true);
   listen(documentRef, 'pointerup', () => { dragging = false; scheduleRefresh(); });
   listen(documentRef, 'pointercancel', () => { dragging = false; hideBar(); });
   listen(documentRef, 'selectionchange', scheduleRefresh);
@@ -129,7 +132,7 @@ export const bindBubbleTextSelection = ({ ui, runtime, canEdit = () => true, too
     suppressClick = false; event.preventDefault(); event.stopImmediatePropagation();
   }, true);
   listen(root, 'contextmenu', event => {
-    if (gesture?.selecting) { event.preventDefault(); event.stopImmediatePropagation(); ui.clearLongPress(); }
+    if (gesture?.selecting || toolbox?.isFormatPicking?.()) { event.preventDefault(); event.stopImmediatePropagation(); ui.clearLongPress(); }
   }, true);
   listen(bar, 'pointerdown', event => event.preventDefault());
   listen(bar, 'click', async () => {
@@ -156,7 +159,7 @@ export const bindBubbleTextSelection = ({ ui, runtime, canEdit = () => true, too
     finally { opening = false; }
   });
   toolbox?.setSelectionController({
-    start: () => { picking = true; selection().removeAllRanges(); chosen = null; hideBar(); },
+    start: () => { picking = true; selection().removeAllRanges(); chosen = null; hideBar(); hideMenu(); },
     cancel: () => { picking = false; hideBar(); },
   });
   const observer = new win.MutationObserver(() => { if (chosen && !chosen.bubble.isConnected) { chosen = null; hideBar(); } });

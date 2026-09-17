@@ -477,6 +477,7 @@ export const buildChatFormatGuardianModelPrompt = ({
   formatTarget = CHAT_FORMAT_GUARDIAN_TARGETS.privateChat,
   baseRevision = 'format-run:unbound',
   repairTarget = null,
+  repairSelection = null,
   timeMode = getChatTimeMode(),
 } = {}) => {
   const rawAssistantText = String(assistantText ?? '');
@@ -531,7 +532,9 @@ export const buildChatFormatGuardianModelPrompt = ({
     customGuide ? getPromptLine('format_guardian.system.custom') : '',
     getPromptLine('format_guardian.system.truncated'),
     getPromptLine('format_guardian.system.parser'),
-    hasFunctionFormat ? getPromptLine('format_guardian.system.function_payload') : '',
+    hasFunctionFormat ? repairSelection?.tableRanges?.length
+      ? 'Only the selected tableEdit blocks may have their command syntax repaired. Preserve existing readable operations and all table values. All other functional payloads, including image_prompt and UpdateVariable, must remain byte-for-byte unchanged. Do not add new content or delete functional blocks.'
+      : getPromptLine('format_guardian.system.function_payload') : '',
     getPromptLine('format_guardian.system.json_only'),
     getPromptLine('format_guardian.system.json_quotes'),
     getPromptLine('format_guardian.system.no_full_text'),
@@ -568,6 +571,7 @@ export const buildChatFormatGuardianModelPrompt = ({
       `sourceLineCount: ${countFormatPatchSourceLines(rawAssistantText)}`,
     ].join('\n'),
     targetSummary ? `# Repair Target\n${JSON.stringify(targetSummary, null, 2)}` : '',
+    repairSelection ? `# Writable Scope\nOnly edit the selected source below. Text outside the allowed ranges is read-only. Preserve unchanged prefixes and suffixes when a line crosses a range boundary.\n${JSON.stringify({ fragment: repairSelection.fragment, ranges: repairSelection.ranges.map(range => ({ start: range.start - repairSelection.start, end: range.end - repairSelection.start })), checkType: repairSelection.checkType })}` : '',
     formatSummary ? `# Required Format Examples\n${formatSummary}` : '',
     directRepairExample ? `# Correct Structure Example\n${directRepairExample}` : '',
     reminder ? `# Required Additional Format Rules\n${reminder}` : '',

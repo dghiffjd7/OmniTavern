@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import { evaluateInApp, createWsClient, findAppPageTarget } from '../dev/cdp-client.mjs';
 
-const setup = async ({ settingsOnly = false } = {}) => {
+const setup = async ({ settingsOnly = false, fixtureOnly = false } = {}) => {
   window.__toolboxEntrySmoke?.dispose();
   window.appBridge.debugUiRegistry.stores.agentToolsRuntime.toolbox.close();
   const { createAgentToolbox } = await import('/scripts/ui/agent-toolbox.js');
@@ -84,6 +84,7 @@ const setup = async ({ settingsOnly = false } = {}) => {
   };
   window.__toolboxEntrySmoke = fixture;
   scriptRoot?.style.setProperty('display', 'none', 'important');
+  if (fixtureOnly) { toolbox.open(); await pause(180); return { fixtureReady: true }; }
   check(inline.contains(toolbox.trigger), 'entry stays inside +');
   plus.click(); toolbox.trigger.click(); await pause(180);
   check(!toolbox.panel.hidden && !page.classList.contains('action-panel-open'), 'open shelf closes +');
@@ -99,14 +100,14 @@ const setup = async ({ settingsOnly = false } = {}) => {
   check(toggle.getAttribute('aria-pressed') === 'true', 'same icon re-enables');
   check([...document.querySelectorAll('#toast-container.toast-top-right .toast-message')].some(node => node.textContent.includes('已开启当前会话的输入建议')), 'input on uses the same notification');
   click('tool:reply_check'); await pause();
-  check(!calls.length && toolbox.panel.querySelector('[data-key=target]').value === 'latest', 'format opens latest target without requesting');
-  check(toolbox.panel.querySelector('.at-scope').textContent.includes('2'), 'format card labels the full two-message turn');
-  const targetSelect = toolbox.panel.querySelector('[data-key=target]');
-  targetSelect.value='older'; targetSelect.dispatchEvent(new Event('change',{bubbles:true})); await pause();
+  check(!calls.length && toolbox.panel.querySelector('.at-card').dataset.mode === 'profiles', 'format opens saved profiles without requesting');
+  click('repair:default'); bubble.click(); await pause();
+  check(toolbox.panel.querySelector('.at-target').textContent.includes('2'), 'format card labels the full two-message turn');
+  toolbox.close(); toolbox.open({ messageId: 'older' }); click('tool:reply_check'); click('repair:default'); await pause();
   check(toolbox.panel.querySelector('[data-key=execute]').disabled, 'historical turn remains visibly unavailable');
   click('config:reply_check'); check(configured === 'reply_check' && toolbox.panel.hidden && !calls.length, 'config works without a valid target');
   toolbox.open(); await pause(); check(!toolbox.panel.querySelector('.at-card').hidden, 'return preserves selected tool');
-  check(toolbox.panel.querySelector('.at-card').dataset.mode === 'task' && toolbox.panel.querySelector('[data-key=target]').value === 'older', 'task configuration preserves its chosen reply');
+  check(toolbox.panel.querySelector('.at-card').dataset.mode === 'task' && toolbox.panel.querySelector('[data-key=execute]').disabled, 'task configuration preserves its chosen unavailable reply');
   toolbox.close(); toolbox.open(); click('manage');
   for (const id of ['reply_check', 'text_completion']) {
     const loads = rawLoads;
@@ -117,7 +118,7 @@ const setup = async ({ settingsOnly = false } = {}) => {
     check(rawLoads === loads && !calls.length, 'returning from management does not prepare or invoke a task');
   }
   toolbox.close(); toolbox.open(); check(toolbox.panel.querySelector('.at-card').hidden, 'configuration return is consumed once');
-  click('tool:reply_check'); await pause(); click('config:reply_check');
+  click('tool:reply_check'); click('repair:default'); await pause(); click('config:reply_check');
   toolbox.open({ messageId: 'latest' }); toolbox.close(); toolbox.open();
   check(toolbox.panel.querySelector('.at-card').hidden, 'explicit new target discards an old configuration return');
   if (settingsOnly) return { unifiedNotifications:true, managementReturn:true, taskReturn:true, noStaleReturn:true };
@@ -166,15 +167,42 @@ let socket, sequence = 0;
 await new Promise((resolve,reject)=>{socket=createWsClient(page.webSocketDebuggerUrl,{onOpen:resolve,onError:reject,onMessage:raw=>{const data=JSON.parse(raw),job=pending.get(data.id);if(!job)return;pending.delete(data.id);data.error?job.reject(Error(JSON.stringify(data.error))):job.resolve(data.result);}});});
 const command = (method,params={}) => new Promise((resolve,reject)=>{const id=++sequence;pending.set(id,{resolve,reject});socket.send(JSON.stringify({id,method,params}));});
 const pause = ms => new Promise(resolve=>setTimeout(resolve,ms));
+const click = async key => {
+  const point = await evaluateInApp(`(()=>{const b=[...window.__toolboxEntrySmoke.toolbox.panel.querySelectorAll('[data-key]')].find(n=>n.dataset.key===${JSON.stringify(key)});b.scrollIntoView({block:'nearest'});const r=b.getBoundingClientRect();return{x:r.left+r.width/2,y:r.top+r.height/2};})()`);
+  await command('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',buttons:1,clickCount:1,...point});
+  await command('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',buttons:0,clickCount:1,...point});
+};
 try {
-  const settingsOnly = process.argv.includes('--settings-only');
-  console.log(await evaluateInApp(`(${setup.toString()})(${JSON.stringify({ settingsOnly })})`));
-  if (settingsOnly) {
-    const click = async key => {
-      const point = await evaluateInApp(`(()=>{const b=[...window.__toolboxEntrySmoke.toolbox.panel.querySelectorAll('[data-key]')].find(n=>n.dataset.key===${JSON.stringify(key)});b.scrollIntoView({block:'nearest'});const r=b.getBoundingClientRect();return{x:r.left+r.width/2,y:r.top+r.height/2};})()`);
-      await command('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',buttons:1,clickCount:1,...point});
-      await command('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',buttons:0,clickCount:1,...point});
+  const settingsOnly = process.argv.includes('--settings-only'), cardsOnly = process.argv.includes('--cards-only');
+  console.log(await evaluateInApp(`(${setup.toString()})(${JSON.stringify({ settingsOnly, fixtureOnly: cardsOnly })})`));
+  if (cardsOnly) {
+    const cardState = async (mode, hidden = false) => {
+      const state = await evaluateInApp(`(()=>{const f=window.__toolboxEntrySmoke,c=f.toolbox.panel.querySelector('.at-card');return{mode:c.dataset.mode,hidden:c.hidden,back:!!c.querySelector('[data-key=back]'),requests:f.calls.length,panelHidden:f.toolbox.panel.hidden};})()`);
+      assert.equal(state.mode,mode); assert.equal(state.hidden,hidden); assert.equal(state.back,false);
+      assert.equal(state.requests,0); assert.equal(state.panelHidden,false);
     };
+    await click('tool:reply_check'); await cardState('profiles');
+    const image = await command('Page.captureScreenshot',{format:'png'}); writeFileSync('scripts/dev/tmp/toolbox-card-toggle.png',Buffer.from(image.data,'base64'));
+    await click('tool:reply_check'); await cardState('shelf',true);
+    await click('tool:reply_check'); await click('tool:text-edit:smoke'); await cardState('task');
+    assert(await evaluateInApp(`!!window.__toolboxEntrySmoke.toolbox.panel.querySelector('[data-key="config:text-edit:smoke"]')`),'different icon switches directly to its card');
+    await click('tool:text-edit:smoke'); await cardState('shelf',true);
+    await click('manage'); await cardState('manage'); await click('shortcut');
+    await click('manage'); await cardState('shelf',true);
+    await click('manage');
+    assert(await evaluateInApp(`window.__toolboxEntrySmoke.toolbox.panel.querySelector('[data-key=shortcut]').getAttribute('aria-pressed')==='false'`),'closing settings cancels shortcut recording');
+    await click('manage');
+    await evaluateInApp('window.__toolboxEntrySmoke.extraTools()');
+    await click('more'); await cardState('more'); await click('more'); await cardState('shelf',true);
+    await evaluateInApp(`(async()=>{const f=window.__toolboxEntrySmoke;f.jobs.push({id:'text-edit-run-toggle',agentId:'text-edit:smoke',messageId:'latest',context:f.context,status:'running',title:'正文优化'});f.toolbox.refresh();await f.pause();f.inboxButton=f.toolbox.panel.querySelector('[data-key=runs]');})()`);
+    await click('tool:text-edit:smoke'); await click('tool:text-edit:smoke');
+    assert(await evaluateInApp(`window.__toolboxEntrySmoke.jobs[0].status==='running'`),'collapsing a task does not cancel it');
+    await click('runs'); await cardState('runs'); await click('runs'); await cardState('shelf',true);
+    await click('runs');
+    await evaluateInApp(`(async()=>{const f=window.__toolboxEntrySmoke;f.jobs.length=0;f.toolbox.refresh();await f.pause();f.check(f.inboxButton===f.toolbox.panel.querySelector('[data-key=runs]'),'inbox updates preserve the toggle button');})()`);
+    await click('runs'); await cardState('shelf',true);
+    console.log('native cards: same-icon collapse, direct switching, settings/more/results toggles, no back buttons, and running task retention passed');
+  } else if (settingsOnly) {
     const key = async (key, code, modifiers = 0, windowsVirtualKeyCode = 0) => {
       await command('Input.dispatchKeyEvent',{type:'rawKeyDown',key,code,modifiers,windowsVirtualKeyCode});
       await command('Input.dispatchKeyEvent',{type:'keyUp',key,code,modifiers,windowsVirtualKeyCode});

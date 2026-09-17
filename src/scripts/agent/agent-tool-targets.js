@@ -1,5 +1,6 @@
 // Target preparation is read-only. A card and its execution share one frozen
 // source/range; asynchronous loading must never silently select a newer reply.
+import { createFormatRepairSelection } from './format-repair-selection.js';
 export const agentToolContextKey = context => JSON.stringify(['place', 'scopeId', 'sessionId', 'archiveId'].map(key => String(context?.[key] || '')));
 const messageState = message => [message?.id, message?.role, message?.type,
   message?.content, message?.rawInput, message?.rawSource, message?.raw, message?.status, message?.pending,
@@ -61,21 +62,36 @@ export const createAgentToolTargets = ({ getContext, getMessages, getRaw, read, 
       ? await validate(options.selectionSnapshot) ? { ok: true, snapshot: options.selectionSnapshot, message: messageFor(options.selectionSnapshot.messageId, options.selectionSnapshot.context) } : stale()
       : await capture(options);
     if (!captured.ok) return captured;
-    const { snapshot, message } = captured, saved = read({ id: options.id, context: snapshot.context });
+    const { snapshot, message } = captured, saved = read({ id: options.id, context: snapshot.context, repairProfileId: options.repairProfileId });
     if (!saved.config) return { ok: false, message: '此 Agent 已移除' };
-    let target, formatTarget;
+    let target, formatTarget, formatSelection;
     if (saved.config.kind === 'format_review') {
       formatTarget = await getFormatTarget?.(message, snapshot.context);
       if (!formatTarget?.ok) return { ok: false, message: '只能检查最新一轮有完整原文的回复，请选择最新回复', reason: formatTarget?.reason };
-      target = { ok: true, text: formatTarget.sourceText, source: formatTarget.sourceText };
+      let range = options.rawRange || null;
+      if (range && options.rawSource !== formatTarget.sourceText) return stale();
+      if (!range && snapshot.selected) {
+        // The selection is already bound to a message/branch. Map against the
+        // authoritative complete response again, preserving the existing
+        // renderer's exclusions and refusing duplicate or rewritten text.
+        const mapped = await resolveTarget(formatTarget.sourceText, { mode: 'rendered' }, {
+          renderedSelection: snapshot.target.text, message, context: snapshot.context,
+        });
+        if (!mapped.ok) return { ...mapped, snapshot: { ...snapshot, formatTarget } };
+        range = { start: mapped.start, end: mapped.end };
+      }
+      formatSelection = createFormatRepairSelection(formatTarget.sourceText, { range, checkType: saved.config.repairCheckType });
+      target = { ...formatSelection, source: formatTarget.sourceText };
     } else target = snapshot.selected ? snapshot.target : await resolveTarget(snapshot.source, saved.config.target, {
       bodyRule: saved.bodyRule, message, context: snapshot.context, readOnly: saved.config.outputMode === 'note',
     });
     if (!isCurrent(snapshot)) return stale();
-    if (!target.ok) return target;
-    return { ok: true, snapshot: { ...snapshot, target, formatTarget, agentId: options.id, configRevision: saved.revision,
+    const prepared = { ...snapshot, target, formatTarget, formatSelection, agentId: options.id, configRevision: saved.revision,
+      ...(saved.config.kind === 'format_review' ? { repairProfileId: saved.config.repairProfileId, repairProfileName: saved.config.repairProfileName } : {}),
       targetMode: saved.config.target?.mode === 'body' ? saved.bodyRule?.mode : saved.config.target?.mode,
-      configUpdatedAt: saved.config.updatedAt, bodyRevision: saved.bodyRevision } };
+      configUpdatedAt: saved.config.updatedAt, bodyRevision: saved.bodyRevision };
+    if (!target.ok) return { ...target, snapshot: prepared };
+    return { ok: true, snapshot: prepared };
   };
   return { captureIdentity, captureSelection, prepare, validate, isCurrent };
 };

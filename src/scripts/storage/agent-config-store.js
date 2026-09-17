@@ -2,6 +2,7 @@
 import { getAgentInvocationMode } from '../agent/agent-invocation.js';
 import { normalizeAgentReferenceConfig } from '../agent/agent-reference-context.js';
 import { normalizeAgentIcon } from '../agent/agent-icons.js';
+import { normalizeFormatRepairProfiles, mergeFormatRepairProfiles, diffFormatRepairProfiles, resolveFormatRepairProfile, formatRepairProfileTooLong } from '../agent/format-repair-profiles.js';
 export const AGENT_CONFIG_KEY = 'agent_config_library_v1';
 export const CONFIGURABLE_AGENT_IDS = ['text_completion', 'reply_check'];
 const clone = value => value == null ? value : JSON.parse(JSON.stringify(value));
@@ -49,6 +50,7 @@ export const normalizeAgentConfiguration = (value = {}, id = value.id) => ({
   inputConsent: value.inputConsent === true,
   maxTokens: integer(value.maxTokens, id === 'text_completion' ? 96 : String(id).startsWith('input-agent:') ? 1200 : 6000, 16, 16000),
   updatedAt: Number(value.updatedAt) || 0,
+  ...(id === 'reply_check' ? { repairProfiles: normalizeFormatRepairProfiles(value.repairProfiles, value), repairCheckType: value.repairCheckType === 'tableEdit' ? 'tableEdit' : 'custom' } : {}),
 });
 const normalizeState = raw => {
   const scopes = {};
@@ -81,9 +83,22 @@ export const createAgentConfigStore = ({ storage = globalThis.localStorage, load
     let entry = local?.follow ? shared : local || shared;
     const source = entry ? (entry === local ? 'local' : 'global') : legacy ? 'legacy' : 'default';
     const config = entry?.deleted ? null : entry?.config || (legacy || (CONFIGURABLE_AGENT_IDS.includes(id) ? {} : null));
+    let normalized = config ? clone(normalizeAgentConfiguration(config, id)) : null;
+    let repairProfileSources, repairGlobalProfileIds;
+    if (id === 'reply_check' && normalized) {
+      const globalConfig = shared?.config || getLegacy(id, c, { includeLocal: false }) || {};
+      const globalLibrary = normalizeFormatRepairProfiles(globalConfig.repairProfiles, globalConfig);
+      repairGlobalProfileIds = globalLibrary.items.map(item => item.id);
+      const localLibrary = normalized.repairProfiles;
+      normalized.repairProfiles = local && local === entry ? mergeFormatRepairProfiles(globalLibrary, localLibrary) : localLibrary;
+      repairProfileSources = Object.fromEntries(normalized.repairProfiles.items.map(item => [item.id,
+        local && local === entry && (!localLibrary.partial || localLibrary.items.some(row => row.id === item.id)) ? 'local'
+          : local && local === entry ? shared?.config ? 'global' : 'legacy' : source]));
+      normalized = resolveFormatRepairProfile(normalized);
+    }
     return { id, context: c, scope: scope === 'global' ? 'global' : 'local', source,
       revision: JSON.stringify([local || null, shared || null, legacy]),
-      inherited: scope !== 'global' && source !== 'local', config: config ? clone(normalizeAgentConfiguration(config, id)) : null };
+      inherited: scope !== 'global' && source !== 'local', config: normalized, ...(repairProfileSources ? { repairProfileSources, repairGlobalProfileIds } : {}) };
   };
   const list = (context, scope = 'effective') => {
     const global = state.scopes[agentConfigScopeKey(context, 'global')] || {};
@@ -138,7 +153,16 @@ export const createAgentConfigStore = ({ storage = globalThis.localStorage, load
     hydrate, read, list,
     save: options => commit(options, timestamp => {
       const config = normalizeAgentConfiguration(options.config, options.id);
-      if (config.prompt.length > 16000 || config.formatGuide.length > 6000 || config.blocks.some(b => b.text.length > 16000)) return { error: 'prompt_too_long' };
+      if (formatRepairProfileTooLong(config)) return { error: 'prompt_too_long' };
+      if (options.id === 'reply_check') {
+        if (config.repairProfiles.items.length > 100) return { error: 'profile_limit' };
+        // Legacy callers update the automatic profile's visible fields. Profile
+        // editors supply the entire library and keep that projection consistent.
+        const automatic = config.repairProfiles.items.find(item => item.id === config.repairProfiles.automaticId);
+        if (automatic) automatic.config = normalizeFormatRepairProfiles(null, config).items[0].config;
+        if (options.scope !== 'global') config.repairProfiles = diffFormatRepairProfiles(config.repairProfiles,
+          read('reply_check', options.context, 'global').config.repairProfiles);
+      }
       return { updatedAt: timestamp, config: { ...config, updatedAt: timestamp } };
     }),
     reset: options => commit(options, timestamp => options.scope === 'global' ? null : { follow: true, updatedAt: timestamp }),

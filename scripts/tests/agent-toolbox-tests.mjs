@@ -97,7 +97,9 @@ loadGate = null; message = { ...message, meta: { activeSwipe: 0 } };
 message.rawOriginal = '<p>repeat</p><p>repeat</p>';
 assert.equal((await actions.captureAgentToolSelection({ messageId: 'm', selectedText: 'repeat' })).ok, false, 'ambiguous repeated source never guesses');
 message.rawOriginal = raw;
-const turn = await actions.prepareAgentToolTarget({ id: 'reply_check', messageId: 'm', selectionSnapshot: selected.snapshot });
+const unmapped = await actions.prepareAgentToolTarget({ id: 'reply_check', messageId: 'm', selectionSnapshot: selected.snapshot });
+assert(!unmapped.ok, 'an unmapped format selection must not silently become the whole reply');
+const turn = await actions.prepareAgentToolTarget({ id: 'reply_check', messageId: 'm' });
 assert(turn.ok); assert.equal(turn.snapshot.target.text, formatSource.sourceText); assert.equal(turn.snapshot.formatTarget.sourceMessageIds.length, 2, 'format target remains the whole turn');
 
 let formatRequests = 0;

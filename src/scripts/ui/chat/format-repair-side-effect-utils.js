@@ -1,4 +1,5 @@
 import { splitDanglingBlockTail } from '../../utils/dangling-block-utils.js';
+import { parseTableEditActions } from '../../memory/memory-edit-parser.js';
 
 export const FORMAT_FUNCTION_BLOCK_KINDS = Object.freeze({
   imagePrompt: 'image_prompt',
@@ -116,9 +117,27 @@ const isStructureOnlyPayloadMatch = (before, after) => {
   return after.payload.startsWith(before.payload) && /^(?:\r\n|\r|\n)$/.test(suffix);
 };
 
+const canonical = value => JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item)
+  ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item);
+// The table parser can already have accepted part of a malformed block. Only
+// newly readable operations may execute; existing operations stay in order.
+export const diffRepairedTableActions = (before, after) => {
+  const previous = parseTableEditActions(before), next = parseTableEditActions(after);
+  let cursor = 0; const added = [];
+  for (const action of next) {
+    if (cursor < previous.length && canonical(action) === canonical(previous[cursor])) {
+      if (added.length) return { ok: false, added: [], previous, next };
+      cursor++;
+    }
+    else added.push(action);
+  }
+  return { ok: cursor === previous.length && next.length > 0, added, previous, next };
+};
+
 export const validateFormatRepairFunctionPayloads = ({
   originalText = '',
   candidateText = '',
+  allowedTableRanges = [],
 } = {}) => {
   const beforeBlocks = extractFormatFunctionBlocks(originalText);
   const afterBlocks = extractFormatFunctionBlocks(candidateText);
@@ -152,7 +171,14 @@ export const validateFormatRepairFunctionPayloads = ({
       }
       return;
     }
-    if (before && after && !isStructureOnlyPayloadMatch(before, after)) {
+    const selectedTable = before?.kind === FORMAT_FUNCTION_BLOCK_KINDS.tableEdit && after?.kind === before.kind
+      && allowedTableRanges.some(range => Number.isInteger(range.start) && Number.isInteger(range.end)
+        && before.start >= range.start && before.end <= range.end);
+    if (selectedTable && before.payload !== after.payload && !diffRepairedTableActions(before.payload, after.payload).ok) {
+      violations.push({ code: 'table_operations_changed', identity, kind: after.kind,
+        message: '修改改变了已能解析的表格指令，或仍没有有效指令；请重新检查格式' });
+    }
+    if (before && after && !isStructureOnlyPayloadMatch(before, after) && !selectedTable) {
       violations.push({
         code: 'function_payload_modified',
         identity,
@@ -186,12 +212,22 @@ export const buildFormatFunctionSideEffectPlan = ({
     const after = afterByIdentity.get(identity) || null;
     let action = 'skip';
     let reason = 'not_executable';
+    let executionText;
+    const changedTable = before && after?.valid && before.kind === FORMAT_FUNCTION_BLOCK_KINDS.tableEdit
+      && !isStructureOnlyPayloadMatch(before, after);
+    const tableDelta = changedTable ? diffRepairedTableActions(before.payload, after.payload) : null;
     if (before && after && before.raw === after.raw) {
       action = 'reuse';
       reason = 'unchanged';
     } else if (before && after && isStructureOnlyPayloadMatch(before, after) && before.valid && after.valid) {
       action = 'reuse';
       reason = 'structure_only_change';
+    } else if (tableDelta?.ok && !tableDelta.added.length) {
+      action = 'reuse';
+      reason = 'same_table_operations';
+    } else if (tableDelta?.ok) {
+      action = 'execute'; reason = 'newly_readable_table_operations';
+      executionText = `<tableEdit>\n${JSON.stringify(tableDelta.added)}\n</tableEdit>`;
     } else if (after?.valid) {
       action = 'execute';
       reason = before?.valid ? 'changed_valid_block' : 'newly_valid_block';
@@ -205,6 +241,7 @@ export const buildFormatFunctionSideEffectPlan = ({
       reason,
       before,
       after,
+      ...(executionText !== undefined ? { executionText } : {}),
     });
   });
 
@@ -222,7 +259,7 @@ export const buildFormatFunctionSideEffectPlan = ({
 export const buildFormatFunctionExecutionText = (plan = null, kind = '') => (
   (Array.isArray(plan?.executeEntries) ? plan.executeEntries : [])
     .filter(entry => !kind || entry.kind === kind)
-    .map(entry => String(entry?.after?.raw || ''))
+    .map(entry => String(entry?.executionText ?? entry?.after?.raw ?? ''))
     .filter(Boolean)
     .join('\n\n')
 );

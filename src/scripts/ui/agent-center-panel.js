@@ -3413,6 +3413,7 @@ export class AgentCenterPanel {
             this.floatingAgentMessageId = trim(opts.messageId);
             this.floatingAgentConfigScope = opts.scope || 'local';
             this.floatingAgentContext = opts.context || null;
+            this.floatingRepairOptions = { repairProfileId: opts.repairProfileId || '', newRepairProfile: opts.newRepairProfile === true, targetSnapshot: opts.targetSnapshot || null };
             this.floatingAgentId = agentId;
             this.floatingAgentFlipped = opts.configure === true;
             this.floatingAgentEntryPending = true;
@@ -3726,10 +3727,11 @@ export class AgentCenterPanel {
             const messageId = shared ? '' : this.floatingAgentMessageId || '';
             const record = actions.getAgentConfiguration({ id, scope, ...(!shared && this.floatingAgentContext ? { context: this.floatingAgentContext } : {}) });
             if (!record.config) continue;
-            const key = JSON.stringify([id, record.context, scope || 'local', messageId]);
+            const repairOptions = id === 'reply_check' && !shared ? this.floatingRepairOptions || {} : {};
+            const key = JSON.stringify([id, record.context, scope || 'local', messageId, repairOptions.repairProfileId || '', repairOptions.newRepairProfile === true]);
             let editor = this.commonAgentEditors.get(key);
             if (!editor) {
-                editor = createAgentConfigurationEditor({ actions, id, scope, context: record.context, messageId, documentRef: root.ownerDocument,
+                editor = createAgentConfigurationEditor({ actions, id, scope, context: record.context, messageId, ...repairOptions, documentRef: root.ownerDocument,
                     onDeleted: () => { this.closeFloatingAgentCard({ force: true }); this.sharedAgentConfig?.onClose?.(); void this.refresh(); } });
                 this.commonAgentEditors.set(key, editor);
             }
@@ -4773,6 +4775,7 @@ export class AgentCenterPanel {
 
     openFloatingAgentCard(agentId = '', { messageId = '', scope = '', context = null } = {}) {
         const id = trim(agentId);
+        this.floatingRepairOptions = null;
         this.floatingAgentConfigScope = scope;
         this.floatingAgentContext = context;
         if (!id || !this.getAgentCardById(id)) return;
@@ -4799,6 +4802,7 @@ export class AgentCenterPanel {
         this.commonAgentEditors?.forEach(editor => editor.dispose()); this.commonAgentEditors?.clear();
         this.floatingAgentId = '';
         this.floatingAgentMessageId = ''; this.floatingAgentConfigScope = ''; this.floatingAgentContext = null;
+        this.floatingRepairOptions = null;
         this.floatingAgentFlipped = false;
         this.floatingAgentEntryPending = false;
         this.render();

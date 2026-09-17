@@ -4,6 +4,7 @@ import {
   updateFormatPatchReviewSelection,
 } from './format-patch-review-utils.js';
 import { bindBackdropActivation } from '../backdrop-activation-utils.js';
+import { t } from '../../i18n/index.js';
 
 const FORMAT_SOURCE_LABELS = Object.freeze({
   private_chat: '私聊场景',
@@ -65,13 +66,15 @@ const clearChildren = (element) => {
 
 const setButtonStyle = (button, { primary = false, danger = false } = {}) => {
   button.style.cssText = `
-    border: 1px solid ${primary ? '#3b82f6' : (danger ? '#ef4444' : 'var(--app-border-default)')};
-    background: ${primary ? '#3b82f6' : 'var(--app-surface-card)'};
-    color: ${primary ? 'var(--app-text-inverse)' : (danger ? '#dc2626' : 'var(--app-text-primary)')};
+    border: 1px solid ${primary ? 'var(--app-accent-primary)' : (danger ? 'var(--app-danger-text)' : 'var(--app-border-default)')};
+    background: ${primary ? 'var(--app-accent-primary)' : 'var(--app-surface-card)'};
+    color: ${primary ? 'var(--app-text-inverse)' : (danger ? 'var(--app-danger-text)' : 'var(--app-text-primary)')};
     border-radius: 10px;
     padding: 7px 11px;
     font-size: 13px;
     cursor: pointer;
+    min-height:44px;
+    min-width:44px;
   `;
 };
 
@@ -99,6 +102,8 @@ export const createCodeViewerUiRuntime = ({
     overlay.style.padding = maximized ? CODE_VIEWER_MAXIMIZED_PADDING : CODE_VIEWER_OVERLAY_PADDING;
     overlay.style.background = maximized ? 'var(--app-surface-card)' : 'rgba(0,0,0,0.38)';
     if (panel) {
+      panel.style.height = '100%';
+      panel.style.maxHeight = '100%';
       panel.style.maxWidth = maximized ? 'none' : '920px';
       panel.style.margin = maximized ? '0px' : '0px auto';
       panel.style.borderRadius = maximized ? '0px' : '14px';
@@ -163,6 +168,9 @@ export const createCodeViewerUiRuntime = ({
     if (existingOverlay) return existingOverlay;
     const overlay = documentLike.createElement('div');
     overlay.id = 'code-viewer-modal';
+    const reviewStyle = documentLike.createElement('style');
+    reviewStyle.textContent = '.format-review-columns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.format-review-columns>div{min-width:0}.format-review-column-label{padding:8px 14px;font:12px/1.6 var(--app-font-family,inherit);color:var(--app-text-muted);background:var(--app-surface-subtle)}@media(max-width:600px){.format-review-columns{grid-template-columns:minmax(0,1fr)}}';
+    overlay.appendChild(reviewStyle);
     overlay.style.cssText = `
       position: fixed;
       inset: 0;
@@ -296,13 +304,13 @@ export const createCodeViewerUiRuntime = ({
       display:none;
       overflow:auto;
       padding:12px 0;
-      background:#0b1220;
-      color:#e2e8f0;
-      font:12px/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      background:var(--app-surface-subtle);
+      color:var(--app-text-primary);
+      font:14px/1.7 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     `;
     const reviewSummary = documentLike.createElement('div');
     reviewSummary.dataset.role = 'review-summary';
-    reviewSummary.style.cssText = 'padding:0 14px 10px; color:#cbd5e1; white-space:pre-wrap;';
+    reviewSummary.style.cssText = 'padding:0 14px 10px; color:var(--app-text-secondary); white-space:pre-wrap;';
     const reviewHunks = documentLike.createElement('div');
     reviewHunks.dataset.role = 'review-hunks';
     reviewBody.appendChild(reviewSummary);
@@ -374,7 +382,7 @@ export const createCodeViewerUiRuntime = ({
         hunk.dataset.patchIndex = String(patchIndex);
         hunk.style.cssText = `
           margin:0 10px 12px;
-          border:1px solid ${accepted ? 'rgba(59,130,246,.5)' : 'rgba(148,163,184,.25)'};
+          border:1px solid ${accepted ? 'var(--app-border-default)' : 'var(--app-border-subtle)'};
           border-radius:10px;
           overflow:hidden;
           opacity:${accepted ? '1' : '.66'};
@@ -385,10 +393,10 @@ export const createCodeViewerUiRuntime = ({
           align-items:center;
           gap:8px;
           padding:7px 9px;
-          background:rgba(30,41,59,.92);
+          background:var(--app-surface-card);
         `;
         const hunkTitle = documentLike.createElement('span');
-        hunkTitle.style.cssText = 'flex:1; color:#cbd5e1;';
+        hunkTitle.style.cssText = 'flex:1; color:var(--app-text-secondary);';
         hunkTitle.textContent = `第 ${patch.startLine}-${patch.endLine} 行${patch.reason ? ` · ${patch.reason}` : ''}`;
         const rejectBtn = documentLike.createElement('button');
         rejectBtn.type = 'button';
@@ -411,34 +419,39 @@ export const createCodeViewerUiRuntime = ({
           renderReview();
         });
         hunkHeader.appendChild(hunkTitle);
-        hunkHeader.appendChild(rejectBtn);
-        hunkHeader.appendChild(acceptBtn);
+        if (!state.wholeChange) { hunkHeader.appendChild(rejectBtn); hunkHeader.appendChild(acceptBtn); }
         hunk.appendChild(hunkHeader);
+        const columns = documentLike.createElement('div'), beforeColumn = documentLike.createElement('div'), afterColumn = documentLike.createElement('div');
+        columns.className = state.wholeChange ? 'format-review-columns' : '';
+        if (state.wholeChange) for (const [column, label] of [[beforeColumn, '原文'], [afterColumn, '修改后']]) {
+          const heading = documentLike.createElement('div'); heading.className = 'format-review-column-label'; heading.textContent = label; column.appendChild(heading);
+        }
+        columns.appendChild(beforeColumn); columns.appendChild(afterColumn); hunk.appendChild(columns);
         (Array.isArray(patch.originalLines) ? patch.originalLines : []).forEach((line, lineIndex) => {
           const row = documentLike.createElement('div');
-          row.style.cssText = 'display:flex; background:rgba(239,68,68,.16); color:#fecaca;';
+          row.style.cssText = 'display:flex; background:var(--app-danger-soft,rgba(239,68,68,.1)); color:var(--app-text-primary);';
           const number = documentLike.createElement('span');
-          number.style.cssText = 'flex:0 0 46px; padding:1px 8px; text-align:right; color:#f87171; user-select:none;';
+          number.style.cssText = 'flex:0 0 46px; padding:1px 8px; text-align:right; color:var(--app-danger-text); user-select:none;';
           number.textContent = String(Number(patch.startLine || 1) + lineIndex);
           const content = documentLike.createElement('span');
           content.style.cssText = 'flex:1; min-width:0; padding:1px 10px; white-space:pre-wrap; overflow-wrap:anywhere; text-decoration:line-through;';
           content.textContent = `- ${String(line ?? '')}`;
           row.appendChild(number);
           row.appendChild(content);
-          hunk.appendChild(row);
+          beforeColumn.appendChild(row);
         });
         (Array.isArray(patch.replacementLines) ? patch.replacementLines : []).forEach((line, lineIndex) => {
           const row = documentLike.createElement('div');
-          row.style.cssText = 'display:flex; background:rgba(16,185,129,.17); color:#bbf7d0;';
+          row.style.cssText = 'display:flex; background:var(--app-success-soft,rgba(16,185,129,.1)); color:var(--app-text-primary);';
           const number = documentLike.createElement('span');
-          number.style.cssText = 'flex:0 0 46px; padding:1px 8px; text-align:right; color:#34d399; user-select:none;';
+          number.style.cssText = 'flex:0 0 46px; padding:1px 8px; text-align:right; color:var(--app-success-text); user-select:none;';
           number.textContent = String(Number(patch.startLine || 1) + lineIndex);
           const content = documentLike.createElement('span');
           content.style.cssText = 'flex:1; min-width:0; padding:1px 10px; white-space:pre-wrap; overflow-wrap:anywhere;';
           content.textContent = `+ ${String(line ?? '')}`;
           row.appendChild(number);
           row.appendChild(content);
-          hunk.appendChild(row);
+          afterColumn.appendChild(row);
         });
         refs.reviewHunks.appendChild(hunk);
       });
@@ -449,7 +462,8 @@ export const createCodeViewerUiRuntime = ({
         acceptedPatchIndexes: state.selection,
       });
       state.currentCandidate = candidate;
-      refs.applyReviewBtn.textContent = `应用已接受修改（${candidate.acceptedIndexes.length} 处）`;
+      refs.applyReviewBtn.textContent = state.wholeChange ? t('应用修改（{count} 处）', { count: candidate.acceptedIndexes.length })
+        : t('应用已接受修改（{value} 处）', { value: candidate.acceptedIndexes.length });
       refs.applyReviewBtn.disabled = true;
       refs.reviewStatus.textContent = candidate.ok
         ? '正在复查已接受的修改…'
@@ -611,6 +625,7 @@ export const createCodeViewerUiRuntime = ({
       formatSources = [],
       warning = '',
       validateCandidate = null,
+      wholeChange = false,
     } = {}) {
       const overlay = ensureViewer(existingOverlay);
       if (overlay.__chatappMode === 'review') finishReview(overlay, false);
@@ -630,6 +645,7 @@ export const createCodeViewerUiRuntime = ({
         linePatches: patches,
         selection: createFormatPatchReviewSelection(patches),
         validateCandidate,
+        wholeChange,
         validation: null,
         validationId: 0,
         finished: false,
@@ -642,6 +658,10 @@ export const createCodeViewerUiRuntime = ({
       if (refs.editBody) refs.editBody.style.display = 'none';
       if (refs.reviewBody) refs.reviewBody.style.display = 'block';
       if (refs.reviewFooter) refs.reviewFooter.style.display = 'flex';
+      if (refs.acceptAllBtn) refs.acceptAllBtn.style.display = wholeChange ? 'none' : '';
+      if (wholeChange && refs.panel) {
+        refs.panel.style.height = 'auto'; refs.panel.style.maxHeight = '84dvh'; refs.panel.style.margin = '6vh auto 0';
+      }
       if (refs.reviewSummary) {
         const sources = (Array.isArray(formatSources) ? formatSources : [])
           .map(resolveFormatSourceLabel)

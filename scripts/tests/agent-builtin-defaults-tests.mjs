@@ -56,7 +56,7 @@ assert.equal(migrated.messages[0].content.split(legacyConfig.prompt).length - 1,
 // removing patch validation, scene rules or the original read-only payload.
 const customTask = 'Inspect the required headings and repair missing closing tags.';
 const replacement = buildChatFormatGuardianModelPrompt({ ...formatOptions, agentConfig: { prompt: customTask, taskPromptMode: 'replace' } });
-assert.ok(replacement.messages[0].content.startsWith(customTask));
+assert.ok(replacement.messages[0].content.includes(customTask), 'custom task follows the shared timestamp policy');
 assert.doesNotMatch(replacement.messages[0].content, /你是聊天回复格式修复 Agent/);
 assert.match(replacement.messages[0].content, /format_patch\.v1/);
 assert.match(replacement.messages[0].content, /禁止输出 correctedText/);

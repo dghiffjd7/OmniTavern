@@ -1153,7 +1153,7 @@ export const runChatFormatGuardianBackgroundChat = async (backgroundChat, messag
   }
 };
 
-const selectChatFormatReminderTextForProfile = (modelOptions = {}, profile = {}) => {
+export const selectChatFormatReminderTextForProfile = (modelOptions = {}, profile = {}) => {
   const sections = Array.isArray(modelOptions?.formatReminderSections)
     ? modelOptions.formatReminderSections
     : [];

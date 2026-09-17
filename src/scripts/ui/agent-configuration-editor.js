@@ -1,5 +1,6 @@
 import { t } from '../i18n/index.js';
-import { appConfirm } from './app-confirm.js';
+import { appConfirm, appChoice } from './app-confirm.js';
+import { createFormatRepairProfileDraft, createFormatRepairProfileId } from '../agent/format-repair-profiles.js';
 import { mountAgentRequestPreview } from './chat/agent-request-preview.js';
 import { createCustomSelectWrapper, bindCustomSelectButton, refreshCustomSelectButton } from './custom-select.js';
 import { mapAgentRawSelection } from '../agent/agent-text-target.js';
@@ -22,6 +23,7 @@ const installStyle = doc => {
   const style = doc.createElement('style'); style.id = 'agent-configuration-style';
   style.textContent = `
   .agent-config-editor {display:grid;gap:18px;padding:4px 0 18px;min-width:0}
+  .agent-config-editor .ac-repair-library{display:grid;gap:12px;padding:14px;border:1px solid var(--app-border-default);border-radius:16px;background:var(--app-surface-subtle)}.agent-config-editor .ac-repair-library .ac-row{align-items:end}.agent-config-editor .ac-repair-library .ac-row>label{flex:1}.agent-config-editor .ac-repair-actions{display:flex;gap:8px;flex-wrap:wrap}.agent-config-editor .ac-repair-actions button{min-height:44px}.agent-config-editor .ac-repair-name[aria-invalid=true]{border-color:var(--app-danger-text,var(--danger-color))}
   .agent-config-editor label,.agent-config-editor .ac-field {display:grid;gap:8px;min-width:0}
   .agent-config-editor input:not([type=checkbox]),.agent-config-editor textarea,.agent-config-editor select{box-sizing:border-box;width:100%;min-width:0;border:1px solid var(--border-color,rgba(128,128,128,.22));border-radius:12px;padding:10px 12px;background:var(--input-bg,rgba(128,128,128,.06));color:inherit;font:inherit;outline:none}
   .agent-config-editor textarea{resize:vertical;min-height:100px;line-height:1.7}
@@ -56,22 +58,26 @@ const installStyle = doc => {
 };
 
 // Own the draft DOM so periodic AC refreshes never erase unsaved prompt blocks.
-export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', context, messageId = '', documentRef = document, onDeleted = () => {} }) => {
+export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', context, messageId = '', repairProfileId = '', newRepairProfile = false, targetSnapshot = null, documentRef = document, onDeleted = () => {} }) => {
   const doc = documentRef; installStyle(doc);
   const node = doc.createElement('div'); node.className = 'agent-config-editor'; node.dataset.agentCommonEditor = id;
-  let saved = actions.getAgentConfiguration({ id, scope, context }), config = clone(saved.config), bodyRule = clone(saved.bodyRule);
+  let saved = actions.getAgentConfiguration({ id, scope, context, ...(repairProfileId ? { repairProfileId } : {}) }), config = clone(saved.config), bodyRule = clone(saved.bodyRule);
+  repairProfileId = config.repairProfileId || '';
   context = saved.context; scope = saved.scope;
   let initial = '', preview = null, targetView = null, busy = false, alive = true, status = '', sourceRequest = 0, modelRequest = 0, selection = null, skipTargetToggle = false;
   let referenceEditor = null, toolsEditor = null, runCards = null, motion = null;
   const stamp = () => JSON.stringify([config, bodyRule]);
   initial = stamp();
+  if (id === 'reply_check' && (newRepairProfile || !repairProfileId)) {
+    config = createFormatRepairProfileDraft(config); repairProfileId = config.repairProfileId;
+  }
   const hasDraft = () => stamp() !== initial;
   const builtin = id === 'text_completion' || id === 'reply_check';
   const taskValue = () => builtin ? resolveBuiltinAgentTask(config, id) : config.prompt;
   const defaultTask = () => getBuiltinAgentTask(id);
   const usesDefaultTask = () => builtin && taskValue().trim() === defaultTask().trim();
   const runLabel = () => !isInputAgent(config) && id !== 'reply_check' ? (hasDraft() ? '保存并试运行' : '试运行') : (hasDraft() ? '保存并运行' : '运行一次');
-  const options = () => ({ id, scope, context, ...(messageId ? { messageId } : {}), config: clone(config), bodyRule: clone(bodyRule), revision: saved.revision, bodyRevision: saved.bodyRevision });
+  const options = () => ({ id, scope, context, ...(messageId ? { messageId } : {}), ...(id === 'reply_check' ? { repairProfileId, targetSnapshot } : {}), config: clone(config), bodyRule: clone(bodyRule), revision: saved.revision, bodyRevision: saved.bodyRevision });
   const matchesRequest = request => JSON.stringify([context, scope, config, bodyRule]) === JSON.stringify([request.context, request.scope, request.config, request.bodyRule]);
   const button = (action, label, attrs = '') => `<button type="button" class="agent-center-card-action" data-ac="${action}" ${attrs}>${e(t(label))}</button>`;
   const label = (title, help = '') => `<span class="ac-label${help ? ' has-help' : ''}"${help ? ` data-help-mode="tap" data-help="${e(t(help, { tag: '<tableEdit>' }))}" tabindex="0"` : ''}>${e(t(title))}</span>`;
@@ -83,7 +89,7 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
       ['光标前文本', '2400', '取光标前最近的文字，帮助衔接当前输入。'],
       ['光标后文本', '600', '取光标后的文字，帮助续写与后文衔接。'],
     ] : [
-      ['完整原始回复', '', '使用待检查回复的完整原文，并附行号定位格式修改。'],
+      ['待检查的原文', '', '使用本次选择的原文，并附行号定位格式修改。'],
       ['当前格式规则', '', '按当前场景和已启用功能加入格式范例，并加入下方填写的格式要求。'],
       ['本地解析结果', '', '附上解析结果、会话信息与回复版本，供模型检查并定位修改。'],
     ];
@@ -120,7 +126,9 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
     const model = config.modelMode === 'profile' ? config.modelProfileId : config.modelMode;
     const currentModel = saved.currentModelLabel ? `${t('跟随当前模型')} · ${saved.currentModelLabel}` : t('跟随当前模型');
     const enableSwitch = `<div class="ac-switch">${label('启用', '暂停或启用此 Agent，保留调用方式与配置。')}<button type="button" class="agent-center-switch${config.enabled ? ' is-on' : ''}" data-ac="toggle-enabled" role="switch" aria-label="${e(t('启用'))}" aria-checked="${config.enabled}"><span class="agent-center-switch-track"><span class="agent-center-switch-thumb"></span></span></button></div>`;
-    node.innerHTML = `<div>${select('scope', '配置范围', [['local', localLabel], ['global', globalLabel]], scope)}<span class="ac-source">${e(t(saved.inherited ? (saved.source === 'legacy' ? '继承旧版设置' : '跟随全局配置') : scope === 'global' ? globalLabel : '当前范围的独立配置'))}</span></div>
+    const repairItems = config.repairProfiles?.items || [];
+    const repairLibrary = format ? `<section class="ac-repair-library"><div class="ac-row">${select('repairProfilePicker', '修复方案', [...repairItems.map(item => [item.id, item.name]), ...(!repairItems.some(item => item.id === repairProfileId) ? [[repairProfileId, '新方案']] : [])], repairProfileId)}${button('repair-new', '新建')}</div>${text('repairProfileName', '方案名称', config.repairProfileName || '')}<div class="ac-repair-actions">${button('repair-copy', '另存为')}${repairItems.some(item => item.id === repairProfileId) ? button('repair-delete', '删除方案') : ''}${scope !== 'global' && saved.repairProfileSources?.[repairProfileId] === 'local' && saved.repairGlobalProfileIds?.includes(repairProfileId) ? button('repair-restore', '恢复全局方案') : ''}</div>${config.repairCheckType === 'tableEdit' ? `<span class="ac-source">${e(t('检查所选回复中的 tableEdit，其他内容保持不变。'))}</span>` : ''}</section>` : '';
+    node.innerHTML = `<div>${select('scope', '配置范围', [['local', localLabel], ['global', globalLabel]], scope)}<span class="ac-source">${e(t(saved.inherited ? (saved.source === 'legacy' ? '继承旧版设置' : '跟随全局配置') : scope === 'global' ? globalLabel : '当前范围的独立配置'))}</span></div>${repairLibrary}
       ${!builtinInput && !format ? `<div class="ac-identity">${text('title', '名称', config.title)}${enableSwitch}</div>` : enableSwitch}
       ${!builtin ? `<div class="ac-field">${label('快捷图标', '用于 Agent Center 与聊天工具箱。')}<div class="ac-icons" role="group" aria-label="${e(t('快捷图标'))}">${Object.entries(AGENT_ICONS).map(([name, data]) => `<button type="button" data-ac="icon:${name}" aria-label="${e(t(data.label))}" title="${e(t(data.label))}" aria-pressed="${getAgentIconName(config) === name}">${agentIconMarkup(name)}</button>`).join('')}</div></div>` : ''}
       <div class="ac-task"><div class="ac-task-meta">${label('任务要求', builtin ? '这里显示实际使用的任务提示词，可直接修改；恢复默认后再保存即可使用内建任务。' : input ? '描述需要完成的输入辅助任务，以及语气、长度和保留的内容。' : config.outputMode === 'note' ? '描述希望检查、查找或分析的内容，以及结果的呈现方式。' : '描述要改进的内容与保留的事实。模型只提交修改建议。')}<div class="ac-task-tools">${builtin ? `<span class="ac-task-origin" data-ac-task-origin>${e(t(usesDefaultTask() ? '内建默认' : '已自定义'))}</span><button type="button" class="agent-center-icon-button" data-ac="task-default" aria-label="${e(t('恢复默认任务'))}" title="${e(t('恢复默认任务'))}" ${usesDefaultTask() ? 'disabled' : ''}><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M3 10a9 9 0 1 1 2 8M3 4v6h6"/></svg></button>` : `<span class="ac-task-count" data-ac-prompt-count aria-hidden="true">${e(t('{count} 字', { count: Array.from(config.prompt).length }))}</span>`}</div></div><textarea name="prompt" aria-label="${e(t('任务要求'))}" rows="7" data-i18n-skip="true" placeholder="${e(t(input ? '希望这个 Agent 如何帮助你输入？' : format ? '希望如何检查和修复回复格式？' : '希望这个 Agent 怎样处理正文？'))}">${e(taskValue())}</textarea></div>
@@ -132,6 +140,7 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
       <div class="ac-field">${select('model', '模型', [['none', '请选择模型'], ...(!input ? [['follow_current', currentModel]] : []), ...saved.profiles.map(p => [p.id, p.name])], model, input ? '' : '跟随当前模型使用这次聊天选择的连接与模型，也可为此 Agent 单独指定。')}${config.modelMode === 'profile' ? `<details data-ac-section="model"><summary>${e(t('指定模型名称'))}</summary>${text('modelOverride', '模型名称', config.modelOverride, '留空使用所选 API 配置中的模型，可填写同一连接下的其他模型名称。')}</details>` : ''}</div>
       ${builtinSettings()}
       <div class="ac-field">${label('调用方式', '自动按设定时机执行；手动从工具箱调用。')}<div class="ac-modes" role="radiogroup" aria-label="${e(t('调用方式'))}">${[['auto','自动'],['manual','手动'],['both','自动＋手动']].map(([value,title]) => `<label><input type="radio" name="invocationMode" value="${value}" ${getAgentInvocationMode(config) === value ? 'checked' : ''}>${e(t(title))}</label>`).join('')}</div>${getAgentInvocationMode(config) !== 'manual' ? `<div class="ac-trigger">${label('自动时机', input ? '输入停顿后处理当前草稿；继续输入时更新任务。' : '按照回复流程的编排顺序，处理已完成的回复。')}<span>${e(t(input ? '输入停顿' : '回复完成后'))}</span></div>` : ''}</div>
+      ${format && getAgentInvocationMode(config) !== 'manual' ? select('repairAutomatic', '自动执行方案', [['', '暂停自动执行'], ...repairItems.filter(item => item.config.repairCheckType !== 'tableEdit').map(item => [item.id, item.name])], config.repairProfiles.automaticId || '', '自动检查使用这里绑定的回复格式方案；表格指令方案从工具箱选取后执行。') : ''}
       <div data-ac-reference-editor></div>
       ${!builtinInput && !format ? '<div data-ac-tool-editor></div>' : ''}
       <details data-ac-section="blocks"><summary>${e(t('自定义提示词区块'))}${config.blocks.length ? ` <span class="ac-source">${config.blocks.length}</span>` : ''}</summary>${config.blocks.map((b, i) => `<div class="ac-block"><div class="ac-block-heading"><input name="blocks.${i}.name" aria-label="${e(t('区块名称'))}" value="${e(b.name)}"><label class="ac-block-enabled" title="${e(t('启用'))}"><input name="blocks.${i}.enabled" type="checkbox" aria-label="${e(t('启用'))}" ${b.enabled ? 'checked' : ''}></label></div>${select(`blocks.${i}.role`, '角色', [['system', 'System'], ['user', 'User']], b.role)}<textarea name="blocks.${i}.text" aria-label="${e(t('区块内容'))}">${e(b.text)}</textarea><div class="ac-block-actions">${['up', 'down', 'copy', 'remove'].map(action => `<button class="agent-center-icon-button" type="button" data-ac="block-${action}" data-index="${i}" title="${e(t(({up:'上移',down:'下移',copy:'复制',remove:'移除'})[action]))}" aria-label="${e(t(({up:'上移',down:'下移',copy:'复制',remove:'移除'})[action]))}">${icon(action)}</button>`).join('')}</div></div>`).join('')}${button('block-add', '添加区块')}</details>
@@ -177,14 +186,19 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
   const renderRuns = () => {
     const host = node.querySelector('[data-ac-runs]'); if (!host) return;
     const input = isInputAgent(config);
-    const jobs = input ? actions.listInputAgentRuns?.() || [] : actions.listTextEditRuns();
+    const jobs = input ? actions.listInputAgentRuns?.() || [] : id === 'reply_check' ? actions.listFormatRepairRuns?.() || [] : actions.listTextEditRuns();
     const relevant = jobs.filter(j => j.agentId === id && (j.sessionId || j.context.sessionId) === context.sessionId && j.context.scopeId === context.scopeId).slice(-5).reverse();
     runCards?.update(relevant, { isInput: input });
     const quick = node.querySelector('[data-ac-quick-result]'), latest = relevant.find(j => j.status === 'running' || j.status === 'ready');
     if (quick) quick.innerHTML = latest?.status === 'running' ? button(`${input ? 'input-cancel' : 'cancel'}:${latest.id}`, '取消') : latest?.status === 'ready' && (input ? latest.kind !== 'note' : latest.outputMode !== 'note') ? button(`${input ? 'input-apply' : 'review'}:${latest.id}`, input && latest.kind === 'suggestion' ? '采纳' : '查看修改') : '';
     setBusy(busy);
   };
-  const reload = () => { saved = actions.getAgentConfiguration({ id, scope, context }); config = saved.config ? clone(saved.config) : { ...config, enabled: false }; bodyRule = clone(saved.bodyRule); initial = stamp(); selection = null; render(); };
+  const reload = () => {
+    saved = actions.getAgentConfiguration({ id, scope, context, ...(repairProfileId ? { repairProfileId } : {}) });
+    config = saved.config ? clone(saved.config) : { ...config, enabled: false };
+    if (id === 'reply_check' && !config.repairProfileId) config = createFormatRepairProfileDraft(config);
+    repairProfileId = config.repairProfileId || ''; bodyRule = clone(saved.bodyRule); initial = stamp(); selection = null; render();
+  };
   const showTarget = async () => {
     const version = ++sourceRequest, request = options();
     const pendingHost = node.querySelector('[data-ac-target]'); if (pendingHost) { pendingHost.setAttribute('aria-busy', 'true'); pendingHost.innerHTML = `<div class="ac-target-empty">${e(t('正在提取正文…'))}</div>`; }
@@ -207,6 +221,7 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
   };
   const setBusy = value => { busy = value; node.querySelectorAll('.ac-footer button').forEach(control => { control.disabled = value && !/^(input-cancel|cancel):/.test(control.dataset.ac); }); };
   const save = async () => {
+    if (id === 'reply_check' && !config.repairProfileName?.trim()) { setStatus(t('请填写方案名称')); focusField('repairProfileName'); return false; }
     if (busy) return false; setBusy(true); setStatus(t('正在保存…'));
     try {
       const request = options(), draftAtSave = stamp();
@@ -216,7 +231,7 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
       if (!alive) return false;
       if (!result.ok) { setStatus(t(result.message || ({config_changed:'配置已变化，请重新打开', save_failed:'保存失败', prompt_too_long:'提示词过长', context_changed:'当前角色已变化，请重新打开'})[result.reason] || '保存失败')); return false; }
       if (stamp() !== draftAtSave) {
-        saved = actions.getAgentConfiguration({ id, scope, context });
+        saved = actions.getAgentConfiguration({ id, scope, context, repairProfileId });
         initial = JSON.stringify([saved.config, saved.bodyRule]);
         updateMarker(); setStatus(t('尚未保存'));
         return false;
@@ -226,15 +241,17 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
   };
   const savePromptField = async ({field,value,baseValue}) => {
     if(busy || !alive)return {ok:false,message:t('正在保存上一处修改，请稍候')};
+    if(id==='reply_check' && !saved.config.repairProfiles.items.some(item=>item.id===repairProfileId)) return {ok:false,message:t('请先保存新方案，再单独应用提示词修改')};
     if(normalizePresetBlockText(readConfiguredPromptField(saved.config,field.id,config))!==baseValue)return {ok:false,message:t('配置已变化，请重新打开')};
     setBusy(true);
     try {
       const accepted=patchConfiguredPromptField(saved.config,config,field.id,value);
-      const request={id,scope,context,revision:saved.revision,config:accepted};
+      const request={id,scope,context,revision:saved.revision,config:accepted,...(id==='reply_check'?{repairProfileId}: {})};
+      if (id==='reply_check') request.config.repairProfileName = config.repairProfileName;
       const result=await actions.saveAgentConfiguration(request);
       if(!result.ok)return {...result,message:result.message || t('配置已变化，请重新打开')};
       if(alive && scope===request.scope && JSON.stringify(context)===JSON.stringify(request.context)) {
-        saved=actions.getAgentConfiguration({id,scope,context});
+        saved=actions.getAgentConfiguration({id,scope,context,repairProfileId});
         initial=JSON.stringify([saved.config,saved.bodyRule]);
         updateMarker();
         setStatus(t(hasDraft()?'尚未保存':'已保存'));
@@ -249,7 +266,7 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
   }, true);
   node.addEventListener('input', event => {
     const field = event.target, name = field.name;
-    if (!name || ['scope','model','invocationMode','inputOutput','outputMode','agent-config-draft','raw-selection'].includes(name)) return;
+    if (!name || ['scope','model','invocationMode','inputOutput','outputMode','agent-config-draft','raw-selection','repairProfilePicker','repairAutomatic'].includes(name)) return;
     const parts = name.split('.'); let obj = parts[0] === 'body' ? bodyRule : config;
     if (parts[0] === 'body') parts.shift();
     while (parts.length > 1) obj = obj[parts.shift()];
@@ -259,9 +276,15 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
   });
   node.addEventListener('change', async event => {
     const field = event.target;
-    if (field.name === 'scope') {
+    if (field.name === 'repairProfilePicker') {
+      const next = field.value; field.value = repairProfileId;
+      if (!await leaveRepairDraft()) { focusField('repairProfilePicker'); return; }
+      repairProfileId = next; status = ''; reload(); focusField('repairProfilePicker');
+    } else if (field.name === 'repairAutomatic') {
+      config.repairProfiles.automaticId = field.value; updateMarker();
+    } else if (field.name === 'scope') {
       if (hasDraft() && !await appConfirm({ title: t('未保存的修改'), message: t('切换配置范围将丢弃当前草稿。'), confirmText: t('切换') })) { field.value = scope; render(); focusField('scope'); return; }
-      scope = field.value; reload(); focusField('scope');
+      scope = field.value; repairProfileId = ''; reload(); focusField('scope');
     } else if (field.name === 'model') {
       config.modelMode = ['none', 'follow_current'].includes(field.value) ? field.value : 'profile';
       config.modelProfileId = config.modelMode === 'profile' ? field.value : ''; render(); focusField('model');
@@ -272,12 +295,32 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
     else if (field.name === 'inputOutput') { config.inputOutput = field.value; updateMarker(); }
     else if (field.name === 'outputMode') { config.outputMode = field.value; render(); focusField('outputMode'); motion?.pulse(node.querySelector('[name="outputMode"]')?.closest('label')); }
   });
+  const leaveRepairDraft = async () => {
+    if (!hasDraft()) return true;
+    const decision = await appChoice({ title: t('修改尚未保存'), message: t('可以保存后继续，或放弃本次编辑。'),
+      actions: [{ id: 'cancel', label: t('继续编辑') }, { id: 'discard', label: t('放弃修改') }, { id: 'save', label: t('保存并继续'), primary: true }] });
+    return decision === 'discard' || decision === 'save' && await save();
+  };
   node.addEventListener('click', async event => {
     const control = event.target.closest('[data-ac]'); if (!control) return;
     const action = control.dataset.ac;
     if (busy && !/^(input-cancel|cancel|input-ignore|ignore):/.test(action)) return;
     try {
       if (action === 'save') await save();
+      else if (action === 'repair-new') {
+        if (!await leaveRepairDraft()) return;
+        const template = await appChoice({ title: t('新建修复方案'), actions: [{ id: 'blank', label: t('空白方案') }, { id: 'tableEdit', label: t('表格指令') }, { id: 'structure', label: t('回复结构') }] });
+        if (!template || !alive) return;
+        config = createFormatRepairProfileDraft(saved.config, template); repairProfileId = config.repairProfileId; render(); focusField('repairProfileName');
+      } else if (action === 'repair-copy') {
+        config = { ...config, repairProfileId: createFormatRepairProfileId(), repairProfileName: `${config.repairProfileName || t('方案')} ${t('副本')}` };
+        repairProfileId = config.repairProfileId; render(); focusField('repairProfileName');
+      } else if (action === 'repair-delete' || action === 'repair-restore') {
+        const restore = action === 'repair-restore';
+        if (!await appConfirm({ title: t(restore ? '恢复全局方案' : '删除方案'), message: t(restore ? '恢复此方案的全局配置，其他方案保持不变。' : '删除后，绑定此方案的自动执行将暂停。已有结果仍可查看。'), confirmText: t(restore ? '恢复' : '删除'), danger: !restore })) return;
+        const result = await actions.changeFormatRepairProfile({ ...options(), action: restore ? 'restore' : 'delete' });
+        if (result.ok) { if (!restore) repairProfileId = ''; reload(); } else setStatus(t(result.message || '配置已变化，请重新打开'));
+      }
       else if (action.startsWith('icon:')) { config.icon = action.slice(5); node.querySelectorAll('.ac-icons button').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.ac === action))); updateMarker(); }
       else if (action === 'task-default' && builtin) { config.prompt = ''; config.taskPromptMode = 'append'; status = hasDraft() ? t('尚未保存') : ''; render(); focusField('prompt'); }
       else if (action === 'toggle-enabled') { config.enabled = !config.enabled; render(); node.querySelector('[data-ac="toggle-enabled"]')?.focus({preventScroll:true}); }
@@ -328,6 +371,14 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
         if (hasDraft() && !await save()) return;
         setBusy(true); setStatus(t('处理中'));
         try {
+          if (id === 'reply_check' && targetSnapshot) {
+            const selection = targetSnapshot.formatSelection;
+            const refreshed = await actions.prepareAgentToolTarget({ ...options(), messageId: targetSnapshot.messageId,
+              rawRange: selection?.fragment ? { start: selection.start, end: selection.end } : null,
+              rawSource: targetSnapshot.formatTarget?.sourceText });
+            if (!refreshed.ok) { setStatus(t(refreshed.message || '请重新选择回复')); return; }
+            targetSnapshot = refreshed.snapshot;
+          }
           const result = await (isInputAgent(config) ? actions.runConfiguredInputAgent(options()) : id === 'reply_check' ? actions.runConfiguredFormatReview(options()) : actions.testTextEditAgent({ ...options(), ...(selected?.text ? { selection: selected, messageId: mid } : {}) }));
           if (!alive) return;
           setStatus(t(result.status === 'succeeded' ? '处理完成' : result.reason || '处理失败')); renderRuns();
@@ -335,13 +386,14 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
       } else if (action.startsWith('input-apply:')) await actions.applyInputAgentRun(action.slice(12));
       else if (action.startsWith('input-ignore:')) actions.ignoreInputAgentRun(action.slice(13));
       else if (action.startsWith('input-cancel:')) actions.cancelInputAgentRun(action.slice(13));
-      else if (action.startsWith('review:')) await actions.openTextEditRun(action.slice(7));
-      else if (action.startsWith('ignore:')) actions.ignoreTextEditRun(action.slice(7));
-      else if (action.startsWith('cancel:')) actions.cancelTextEditRun(action.slice(7));
+      else if (action.startsWith('review:')) await (id === 'reply_check' ? actions.openFormatRepairRun : actions.openTextEditRun)(action.slice(7));
+      else if (action.startsWith('ignore:')) (id === 'reply_check' ? actions.ignoreFormatRepairRun : actions.ignoreTextEditRun)(action.slice(7));
+      else if (action.startsWith('cancel:')) (id === 'reply_check' ? actions.cancelFormatRepairRun : actions.cancelTextEditRun)(action.slice(7));
     } catch (error) { setStatus(t(error.message || '操作失败')); }
   });
   doc.defaultView.addEventListener('agent-text-edit-changed', renderRuns);
   doc.defaultView.addEventListener('agent-input-changed', renderRuns);
+  doc.defaultView.addEventListener('agent-format-repair-changed', renderRuns);
   render();
   motion = bindAgentEditorMotion(node);
   return { node, hasDraft,
@@ -351,6 +403,6 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
         getFields:root=>getAgentPromptFields(root).map(field=>({...field,baseValue:readConfiguredPromptField(saved.config,field.id,config)})),saveField:savePromptField });
     },
     closePreview: () => preview?.close() || false,
-    dispose: () => { alive = false; sourceRequest++; modelRequest++; preview?.dispose(); referenceEditor?.dispose(); toolsEditor?.dispose(); runCards?.dispose(); motion?.dispose(); doc.defaultView.removeEventListener('agent-text-edit-changed', renderRuns); doc.defaultView.removeEventListener('agent-input-changed', renderRuns); node.remove(); },
+    dispose: () => { alive = false; sourceRequest++; modelRequest++; preview?.dispose(); referenceEditor?.dispose(); toolsEditor?.dispose(); runCards?.dispose(); motion?.dispose(); doc.defaultView.removeEventListener('agent-text-edit-changed', renderRuns); doc.defaultView.removeEventListener('agent-input-changed', renderRuns); doc.defaultView.removeEventListener('agent-format-repair-changed', renderRuns); node.remove(); },
   };
 };
