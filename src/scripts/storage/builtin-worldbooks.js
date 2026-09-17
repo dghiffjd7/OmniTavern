@@ -3,6 +3,8 @@
  * These are used to keep prompt structure consistent with the legacy phone-flow design.
  */
 
+import { withoutPhonePromptTime } from '../utils/phone-format-time-prompt.js';
+
 const splitKeywords = (text) => {
     return String(text || '')
         .split(',')
@@ -77,7 +79,8 @@ export const getBuiltinPhoneFormatPromptSeed = (source = BUILTIN_PHONE_FORMAT_WO
     BUILTIN_PHONE_FORMAT_CHAT_PROMPT_SPECS.forEach((spec) => {
         const entry = byKey.get(spec.entryId) || null;
         out[spec.enabledKey] = true;
-        out[spec.rulesKey] = String(entry?.content ?? '');
+        out[spec.rulesKey] = spec.rulesKey==='phone_format_chat_rules' || spec.rulesKey==='phone_format_moment_rules'
+            ? withoutPhonePromptTime(entry?.content) : String(entry?.content ?? '');
     });
     return out;
 };

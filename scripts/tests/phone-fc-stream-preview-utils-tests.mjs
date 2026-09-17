@@ -124,10 +124,12 @@ test('provider stream runtime reports the first expected tool argument delta exa
     toolName: 'emit_private_reply',
     onPreview: () => {},
     onFirstArgumentsDelta: event => observed.push(event),
+    onArgumentsDelta: event => delivered.push(event),
     now: () => tick,
   });
   const accumulator = (await import('../../src/scripts/agent/provider-tool-call-delta-adapter.js'))
     .createProviderToolCallDeltaAccumulator({ provider: 'openai', model: 'test-model', now: () => tick });
+  const delivered = [];
   await runtime.request([], {
     onProviderToolCallDelta: (data, meta) => {
       const next = accumulator.push(data, meta);
@@ -137,6 +139,7 @@ test('provider stream runtime reports the first expected tool argument delta exa
   assert.equal(observed.length, 1);
   assert.equal(observed[0].at, 1120);
   assert.equal(observed[0].toolName, 'emit_private_reply');
+  assert.equal(delivered.length, 2, 'arguments are measured before preview fields become visible');
 });
 
 test('disposable preview forces cancellation to discard and leaves no recoverable partial cache', () => {

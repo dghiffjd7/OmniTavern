@@ -3,10 +3,11 @@ import { allowsAgentInvocation, isInputAgent } from './agent-invocation.js';
 import { resolveAgentTextTargetAsync, suggestAgentBodyRules } from './agent-text-target.js';
 import { buildTextEditRequest, buildAgentNoteRequest, buildAgentReferenceContext } from './agent-request-builder.js';
 import { buildInputAgentRequest } from './input-agent-runtime.js';
+import { createAgentToolTargets } from './agent-tool-targets.js';
 
 export const createAgentConfigurationService = ({ store, getContext, getMessages, getRaw, getEvidence = () => [], getProfiles,
   getInput = () => ({ before: '', after: '' }), getInputRuntime = () => null, buildInputPreview = null,
-  buildFormatPreview, previewRequest = null, runtime, runFormat, resolveReference = null, listReferenceSources = async () => [], listAvailableTools = async () => [], resolveTarget = resolveAgentTextTargetAsync, getCurrentModelLabel = () => '', onChanged = () => {} } = {}) => {
+  buildFormatPreview, previewRequest = null, runtime, runFormat, getFormatTarget, resolveReference = null, listReferenceSources = async () => [], listAvailableTools = async () => [], resolveTarget = resolveAgentTextTargetAsync, getCurrentModelLabel = () => '', onChanged = () => {} } = {}) => {
   const context = options => options?.context || getContext();
   const checkContext = c => { const current = getContext(); return current.place === c.place && current.scopeId === c.scopeId && (!c.sessionId || current.sessionId === c.sessionId) && (c.archiveId === undefined || c.archiveId === current.archiveId); };
   const read = (options = {}) => {
@@ -15,6 +16,7 @@ export const createAgentConfigurationService = ({ store, getContext, getMessages
     return { ...result, context: { ...result.context, ...(c.archiveId !== undefined ? { archiveId: c.archiveId } : {}) }, bodyRule: body.config?.target || { mode: 'tags', start: '', end: '' }, bodyRevision: body.revision,
       profiles: getProfiles().map(p => ({ id: p.id, name: p.name || p.label || p.id, model: p.model || '' })) };
   };
+  const toolTargets = createAgentToolTargets({ getContext, getMessages, getRaw, read, resolveTarget, getFormatTarget });
   const source = async options => {
     const c = context(options), messages = getMessages(c.sessionId) || [];
     const message = options.messageId ? messages.find(m => m.id === options.messageId)
@@ -40,6 +42,10 @@ export const createAgentConfigurationService = ({ store, getContext, getMessages
       return (config.outputMode === 'note' ? buildAgentNoteRequest : buildTextEditRequest)({ config, target, referenceContext });
   };
   const actions = {
+    captureAgentToolSelectionIdentity: toolTargets.captureIdentity,
+    captureAgentToolSelection: toolTargets.captureSelection,
+    prepareAgentToolTarget: toolTargets.prepare,
+    isAgentToolTargetCurrent: toolTargets.isCurrent,
     getAgentConfiguration: read,
     getAgentCurrentModelLabel: options => getCurrentModelLabel(context(options)),
     listAgentReferenceSources: async options => {
@@ -147,6 +153,10 @@ export const createAgentConfigurationService = ({ store, getContext, getMessages
       if (!message) return { status: 'failed', reason: '暂无可处理的回复' };
       const saved = read(options);
       if (!allowsAgentInvocation(saved.config, 'manual')) return { status: 'skipped', reason: '此 Agent 尚未允许手动调用' };
+      if (options.targetSnapshot && (options.targetSnapshot.agentId !== options.id || options.targetSnapshot.messageId !== message.id
+        || options.targetSnapshot.configRevision !== saved.revision || options.targetSnapshot.bodyRevision !== saved.bodyRevision
+        || !await toolTargets.validate(options.targetSnapshot) || options.targetSnapshot.configRevision !== read(options).revision
+        || options.targetSnapshot.bodyRevision !== read(options).bodyRevision)) return { status: 'skipped', reason: '原文或配置已变化，请重新选择处理范围' };
       let selection = options.selection;
       if (options.selectedText) {
         const start = raw.indexOf(options.selectedText);
@@ -154,7 +164,7 @@ export const createAgentConfigurationService = ({ store, getContext, getMessages
         selection = { start, end: start + options.selectedText.length, text: options.selectedText };
       }
       return runtime.run({ agentId: options.id, sessionId: c.sessionId, messageId: message.id, selection, force: true,
-        configOverride: saved.config, bodyRuleOverride: saved.bodyRule });
+        configOverride: saved.config, bodyRuleOverride: saved.bodyRule, targetSnapshot: options.targetSnapshot });
     },
     testTextEditAgent: async options => {
       const c = context(options);
@@ -169,9 +179,13 @@ export const createAgentConfigurationService = ({ store, getContext, getMessages
       if (!checkContext(context(options))) return { status: 'failed', reason: '当前角色已变化，请重新打开' };
       const c = context(options), { message } = await source(options);
       if (!checkContext(c)) return { status: 'failed', reason: '当前角色已变化，请重新打开' };
-      const config = read(options).config;
+      const saved = read(options), config = saved.config;
       if (!allowsAgentInvocation(config, 'manual')) return { status: 'skipped', reason: '此 Agent 尚未允许手动调用' };
-      return message ? runFormat({ sessionId: c.sessionId, messageId: message.id, signal: options.signal, configOverride: config }) : { status: 'failed', reason: '暂无可处理的回复' };
+      if (options.targetSnapshot && (options.targetSnapshot.agentId !== options.id || options.targetSnapshot.messageId !== message?.id
+        || options.targetSnapshot.configRevision !== saved.revision || !await toolTargets.validate(options.targetSnapshot)
+        || options.targetSnapshot.configRevision !== read(options).revision)) return { status: 'skipped', reason: '原文或配置已变化，请重新选择处理范围' };
+      return message ? runFormat({ sessionId: c.sessionId, messageId: message.id, signal: options.signal, configOverride: config,
+        expectedTarget: options.targetSnapshot?.formatTarget }) : { status: 'failed', reason: '暂无可处理的回复' };
     },
     getAgentFormatGuide: () => {
       const c = getContext(), config = store.read('reply_check', c).config;

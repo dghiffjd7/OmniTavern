@@ -1940,12 +1940,7 @@ body[data-theme-mode='dark'] .chat-action-btn[data-action='image']::before {
 }
 
 body[data-theme-mode='dark'] .chat-action-btn[data-action='generate-image']::before {
-  display: none !important;
-}
-
-body[data-theme-mode='dark'] .chat-action-btn[data-action='generate-image']::after {
-  content: 'AI';
-  color: #93c5fd;
+  background-image: url('../external/action-generate-image.svg') !important;
 }
 
 body[data-theme-mode='dark'] .chat-action-btn[data-action='document']::before {

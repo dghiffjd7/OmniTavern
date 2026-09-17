@@ -51,6 +51,18 @@ import {
   assert.equal(usage.providerCalls.length, 1);
   assert.equal(usage.providerCalls[0].mode, 'provider_fc');
   assert.equal(usage.providerCalls[0].tokensPerSecond, 4.2);
+  const unavailable = normalizeAgentUsage({
+    completionTokens: 4337, outputSpeedStatus: 'insufficient_samples',
+    streamDeltaCount: 1, streamObservedDurationMs: 0, tokensPerSecond: null,
+    providerCalls: [{ stream: true, streamDeltaCount: 1, streamObservedDurationMs: 0,
+      outputSpeedStatus: 'insufficient_samples', tokensPerSecond: null }],
+  });
+  assert.equal(unavailable.outputSpeedStatus, 'insufficient_samples');
+  assert.equal(unavailable.streamDeltaCount, 1);
+  assert.equal(unavailable.streamObservedDurationMs, 0);
+  assert.equal(unavailable.tokensPerSecond, undefined);
+  assert.equal(unavailable.providerCalls[0].tokensPerSecond, null);
+  assert.equal(unavailable.providerCalls[0].outputSpeedStatus, 'insufficient_samples');
   console.log('ok - normalizeAgentUsage preserves response telemetry and separate provider calls');
 }
 

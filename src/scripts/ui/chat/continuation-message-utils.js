@@ -1,3 +1,5 @@
+import { preserveMessageDisplayTime } from '../../utils/chat-time-policy.js';
+
 const normalizeObject = (value) => (value && typeof value === 'object' ? value : null);
 
 const buildContinuationMeta = ({ existing = null, message = null, partial = false } = {}) => {
@@ -51,7 +53,7 @@ export const buildContinuationMessageUpdate = ({
     nextMeta.activeSwipe = swipeState.activeIndex;
   }
 
-  return {
+  const updated = {
     ...current,
     ...nextMessage,
     id: targetId,
@@ -72,6 +74,7 @@ export const buildContinuationMessageUpdate = ({
         : (typeof current.rawSource === 'string' ? current.rawSource : undefined),
     meta: nextMeta,
   };
+  return current.meta?.chatTime ? preserveMessageDisplayTime(updated, current) : updated;
 };
 
 export const commitContinuationMessageToStore = ({

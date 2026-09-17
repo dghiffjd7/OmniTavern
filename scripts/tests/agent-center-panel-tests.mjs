@@ -216,7 +216,7 @@ const agentCenterPanelSource = await readFile(
   assert.match(floatingHtml, /自动触发/);
   assert.match(floatingHtml, /value="profile:profile-a" selected/);
   assert.match(floatingHtml, /agent-center-model-override-label">模型覆盖/);
-  assert.match(floatingHtml, /agent-center-agent-badge">✓</);
+  assert.match(floatingHtml, /agent-center-agent-badge"><svg/, 'configurable agent uses the shared toolbox icon');
   assert.match(agentCenterPanelSource, /grid-template-columns: 104px minmax\(0, 1fr\)/);
   console.log('ok - agent center panel renders available agent feature cards');
 }

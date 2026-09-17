@@ -110,8 +110,8 @@ const parse = (raw) => {
   assert.equal(events[0].type, 'private_chat');
   assert.equal(events[0].otherName, '米娅');
   assert.deepEqual(events[0].messages, [
-    { speaker: '米娅', content: '晚安\n明天见。', time: '22:12' },
-    { speaker: '米娅', content: '路上小心。', time: '00:00' },
+    { speaker: '米娅', content: '晚安\n明天见。', time: '' },
+    { speaker: '米娅', content: '路上小心。', time: '' },
   ]);
   console.log('ok - private PhoneReplyIR round-trips through canonical MiPhone and the existing parser');
 }

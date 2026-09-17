@@ -1,3 +1,4 @@
+import { getChatTimeMode } from '../../utils/chat-time-policy.js';
 import {
   serializeBuiltinPhoneFormat,
   validateBuiltinPhoneFormat,
@@ -74,6 +75,7 @@ const addUnique = (errors, value) => {
 };
 
 export const buildPrivateReplyProviderToolDefinition = ({
+  timeMode = getChatTimeMode(),
   allowedItemTypes = DEFAULT_PRIVATE_ITEM_TYPES,
   allowedStickerKeywords = [],
 } = {}) => {
@@ -122,11 +124,11 @@ export const buildPrivateReplyProviderToolDefinition = ({
             },
           }
         : {}),
-      time: {
+      ...(timeMode==='ai'?{time: {
         type: 'string',
         pattern: '^(?:[01]?\\d|2[0-3]):[0-5]\\d$',
         description: 'Optional 24-hour display time such as 22:12.',
-      },
+      }}:{}),
     },
   });
   const itemSchema = itemTypes.length > 1
@@ -300,6 +302,7 @@ export const serializePhoneMessageItemContent = (item = {}) => {
 };
 
 export const serializePhoneReplyIr = (ir = {}, {
+  timeMode = getChatTimeMode(),
   userName = '我',
   expectedSessionId = '',
 } = {}) => {
@@ -310,6 +313,7 @@ export const serializePhoneReplyIr = (ir = {}, {
   if (!validation.ok) return { ...validation, raw: '' };
 
   const raw = serializeBuiltinPhoneFormat(PRIVATE_SURFACE, {
+    timeMode,
     userName: normalizeName(userName, '我'),
     targetName: normalizeName(ir.target?.name, '联系人名'),
     messages: ir.items.map(item => ({

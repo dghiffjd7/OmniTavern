@@ -39,6 +39,9 @@ const MOMENT_MEDIA_AI = [
 ].join('\n');
 
 export default Object.freeze({
+  'phone_time.local': 'Time format: use speaker--body for chat rows and author--body--views--likes for moment posts. Do not generate a time field. Put each message on its own line and use <br> for line breaks inside its body. The app records receipt time.',
+  'phone_time.ai': 'Time format: use speaker--body--HH:mm for chat rows and author--body--HH:mm--views--likes for moment posts. Use valid 24-hour times. Comments do not need time fields.',
+
   phone_format_intro_rules: `<线上格式>
 When the user asks to view content, output only the corresponding format and do not output story narration.
 The formats are defined below.`,
@@ -528,14 +531,14 @@ If this turn does not need an image, do not output an <image_prompt> tag at all.
   'format_guardian.no_events.repairable': 'Treat this as a repairable missing-tag issue. Preserve every speaker, line order, and body exactly; add only the tags, fields, and closing structure explicitly required by the examples or format rules below.',
   'format_guardian.no_events.private': 'For a private chat, prefer the minimal structure: MiPhone_start / msg_start / <{tag}> / original chat lines / </{tag}> / msg_end / MiPhone_end.',
   'format_guardian.no_events.current': 'Prefer the smallest valid structure required by the current target format.',
-  'format_guardian.no_events.time': 'When a chat line lacks a time field, prefer repairFallbackTime ({time}); use 00:00 only when no time is available.',
+  'format_guardian.no_events.time': 'Follow the current time format. The app records missing times; do not invent them.',
   'format_guardian.no_events.custom': 'The local parser found no chat protocol content, but a Custom Format Guide is present. Use that Guide as the repair target: preserve the body exactly and add the required structure, such as status blocks or structural tags. Set canRepair=true; return canRepair=false only when the body is empty.',
   'format_guardian.no_events.empty': 'The local parser found no complete protocol content to commit. If the raw response is empty, contains no usable chat or Moment content, or repair would require inventing body text, do not invent story content. Return status="cannot_repair", linePatches=[], and recommend regeneration in repairSummary.',
   'format_guardian.system.role': 'You are a chat-response format-repair agent.',
   'format_guardian.system.protocol': 'You must follow {version}: produce minimal line patches, never a full corrected response.',
   'format_guardian.system.task': 'Independently inspect one complete raw AI response and repair only its format using minimal line patches.',
   'format_guardian.system.scope': 'Repair formatting only. Do not evaluate plot, prose, character consistency, or user intent.',
-  'format_guardian.system.allowed': 'Allowed repairs: add, move, or close protocol tags; restore the msg wrapper; add missing time fields; remove an incomplete trailing line; or convert “speaker: body” to “speaker--body--HH:mm”.',
+  'format_guardian.system.allowed': 'Allowed repairs: add, move, or close protocol tags; restore the msg wrapper; remove an incomplete trailing line; or convert “speaker: body” to a chat row. Follow the current time format; do not invent missing times.',
   'format_guardian.system.forbidden': 'Do not change body semantics, invent plot content, or expand character dialogue.',
   'format_guardian.system.private': 'Private-chat tags follow the existing protocol: <{{user}}和联系人名的私聊>...</{{user}}和联系人名的私聊>. After macro substitution, {{user}} may appear as the user’s actual name.',
   'format_guardian.system.loose_rows': 'If the raw response has no outer tags but contains “speaker--body” or “speaker--body--HH:mm” lines, treat it as a repairable missing-tag issue and add the required tags instead of recommending regeneration.',
@@ -568,7 +571,7 @@ If this turn does not need an image, do not output an <image_prompt> tag at all.
     'Never return correctedText or a full corrected response.',
     'Use exact 1-based line ranges and exact originalLines. Never abbreviate replacementLines.',
   ].join('\n'),
-  'format_guardian.regenerate.hint_time': 'add a time to every chat message',
+  'format_guardian.regenerate.hint_time': 'follow the current chat time format without inventing missing times',
   'format_guardian.regenerate.hint_target': 'identify the private-chat target, group name, or Moment target',
   'format_guardian.regenerate.hint_speaker': 'identify each speaker using a contact or group-member name',
   'format_guardian.regenerate.hint_content': 'preserve the actual message body',

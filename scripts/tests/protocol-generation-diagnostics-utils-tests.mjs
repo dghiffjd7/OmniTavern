@@ -356,6 +356,9 @@ import {
       firstMeaningfulDeltaLatencyMs: 420,
       outputDurationMs: 1880,
       tokensPerSecond: 95.7,
+      outputSpeedStatus: 'measured',
+      streamDeltaCount: 12,
+      streamObservedDurationMs: 1700,
       promptTokens: 1200,
       completionTokens: 180,
       totalTokens: 1380,
@@ -371,6 +374,9 @@ import {
         provider: 'deepseek',
         model: 'deepseek-chat',
         latencyMs: 300,
+        outputSpeedStatus: 'insufficient_samples',
+        streamDeltaCount: 1,
+        streamObservedDurationMs: 0,
       }],
     },
     messages: [{ role: 'user', content: '不可记录的用户正文' }],
@@ -423,11 +429,17 @@ import {
   assert.equal(facts.finishReason, 'length');
   assert.equal(facts.firstMeaningfulDeltaLatencyMs, 420);
   assert.equal(facts.tokensPerSecond, 95.7);
+  assert.equal(facts.outputSpeedStatus, 'measured');
+  assert.equal(facts.streamDeltaCount, 12);
+  assert.equal(facts.streamObservedDurationMs, 1700);
   assert.equal(facts.systemFingerprint, 'fp-safe');
   assert.equal(facts.modelVersion, 'model-version-safe');
   assert.equal(facts.responseId, 'response-safe');
   assert.equal(facts.usagePersistenceTarget, 'assistant_message');
   assert.equal(facts.providerCalls[0].mode, 'provider_fc');
+  assert.equal(facts.providerCalls[0].outputSpeedStatus, 'insufficient_samples');
+  assert.equal(facts.providerCalls[0].streamDeltaCount, 1);
+  assert.equal(facts.providerCalls[0].streamObservedDurationMs, 0);
   const serialized = JSON.stringify(facts);
   assert.equal(serialized.includes('不可记录'), false);
   assert.equal(serialized.includes('messages'), false);

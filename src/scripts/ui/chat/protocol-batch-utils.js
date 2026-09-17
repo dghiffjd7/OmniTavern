@@ -1,3 +1,5 @@
+import { getChatTimeMode, initializeProtocolMessageTime } from '../../utils/chat-time-policy.js';
+
 export const buildProtocolGroupChatBatch = async (
   event,
   {
@@ -5,6 +7,8 @@ export const buildProtocolGroupChatBatch = async (
     buildSystemMessage = null,
     buildUserMessageFromAI = null,
     formatNowTime = null,
+    timeMode = getChatTimeMode(),
+    deferTimeDelivery = false,
     isSystemSpeaker = null,
     isUserSpeakerName = null,
     normalizeChatMessage = null,
@@ -33,6 +37,7 @@ export const buildProtocolGroupChatBatch = async (
         ? buildSystemMessage({ content, time: rawItem?.time, fallbackTime })
         : null;
       if (parsed) {
+        initializeProtocolMessageTime(parsed, { timeMode, modelTime: rawItem?.time, deferDelivery: deferTimeDelivery });
         items.push({ parsed, role: 'system', isSystem: true, isMe: false });
       }
       continue;
@@ -60,6 +65,7 @@ export const buildProtocolGroupChatBatch = async (
           depth: 0,
         })
       : buildUserMessageFromAI(content, rawItem?.time || fallbackTime);
+    initializeProtocolMessageTime(parsed, { timeMode, modelTime: rawItem?.time, deferDelivery: deferTimeDelivery });
     if (role === 'assistant' && item?.rawContent) {
       parsed.meta = {
         ...(parsed.meta || {}),
@@ -80,6 +86,8 @@ export const buildProtocolPrivateChatBatch = async (
     buildAssistantMessageFromText = null,
     buildUserMessageFromAI = null,
     formatNowTime = null,
+    timeMode = getChatTimeMode(),
+    deferTimeDelivery = false,
     isUserSpeakerName = null,
     normalizeDialogueMessage = null,
     resolveTargetSessionId = null,
@@ -111,6 +119,7 @@ export const buildProtocolPrivateChatBatch = async (
           time: time || fallbackTime,
           depth: 0,
         });
+    initializeProtocolMessageTime(parsed, { timeMode, modelTime: time, deferDelivery: deferTimeDelivery });
     if (!isMe && item?.rawContent) {
       parsed.meta = {
         ...(parsed.meta || {}),

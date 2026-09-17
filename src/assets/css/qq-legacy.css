@@ -27,6 +27,9 @@
   --qq-size-sticker-panel: 288px; /* 贴图面板高度 */
   --qq-size-sticker-preview: 64px; /* 输入框贴图预览高度 */
   --qq-size-action-panel: 108px; /* 快捷功能面板高度 */
+  --chat-action-size: 32px;
+  --chat-action-icon-size: 18px;
+  --chat-action-radius: 10px;
   --mode-switch-size: 26px; /* 社交/RP 开关尺寸 */
   --mode-switch-slot: 10px; /* 悬浮在底部导航上方的间距 */
 
@@ -2988,9 +2991,9 @@ body[data-ui-mode='rp'] .chat-reply-draft {
 }
 
 .chat-action-btn {
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
+  width: var(--chat-action-size);
+  height: var(--chat-action-size);
+  border-radius: var(--chat-action-radius);
   border: 1px solid rgba(15, 23, 42, 0.12);
   background: rgba(255, 255, 255, 0.92);
   display: inline-flex;
@@ -3000,7 +3003,7 @@ body[data-ui-mode='rp'] .chat-reply-draft {
   padding: 0;
   background-position: center;
   background-repeat: no-repeat;
-  background-size: 18px 18px;
+  background-size: var(--chat-action-icon-size) var(--chat-action-icon-size);
 }
 
 .chat-action-btn[data-action='image'] {
@@ -3008,15 +3011,7 @@ body[data-ui-mode='rp'] .chat-reply-draft {
 }
 
 .chat-action-btn[data-action='generate-image'] {
-  background-image: none;
-}
-
-.chat-action-btn[data-action='generate-image']::after {
-  content: 'AI';
-  color: var(--app-accent-strong, #2563eb);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.02em;
+  background-image: url('../external/action-generate-image.svg');
 }
 
 .chat-action-btn[data-action='document'] {

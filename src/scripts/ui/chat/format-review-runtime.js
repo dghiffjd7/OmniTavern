@@ -1,6 +1,7 @@
 import { t } from '../../i18n/index.js';
 import { allowsAgentInvocation } from '../../agent/agent-invocation.js';
 import { resolveFormatReviewAvailability } from './format-review-settings-utils.js';
+import { formatToolTargetKey } from '../../agent/agent-tool-targets.js';
 
 const trim = value => String(value ?? '').trim();
 
@@ -10,7 +11,7 @@ export const createFormatReviewExecutor = ({
   runPreview, onPreview, onRun, onQueued, onCompleted = () => {}, getConfig, getCurrentSessionId, logger = console,
 } = {}) => {
  const pending = new Map();
- const execute = async ({ sessionId = '', messageId = '', signal = null, automatic = false, configOverride = null } = {}) => {
+ const execute = async ({ sessionId = '', messageId = '', signal = null, automatic = false, configOverride = null, expectedTarget = null } = {}) => {
   const sid = trim(sessionId), mid = trim(messageId);
   if (signal?.aborted) return { status: 'cancelled', reason: 'user_cancelled' };
   if (getConfig && !allowsAgentInvocation(configOverride || getConfig(sid), automatic ? 'auto' : 'manual')) return { status: 'skipped', reason: '此 Agent 尚未允许当前调用方式' };
@@ -30,6 +31,7 @@ export const createFormatReviewExecutor = ({
   const repairTarget = await resolveTarget(message, sid);
   if (!canCommit()) return { status: 'cancelled', reason: 'target_changed' };
   if (!repairTarget?.ok) return { status: 'skipped', reason: repairTarget?.reason || 'target_unavailable' };
+  if (expectedTarget && formatToolTargetKey(expectedTarget) !== formatToolTargetKey(repairTarget)) return { status: 'skipped', reason: '原文或配置已变化，请重新选择处理范围' };
   const options = {
     ...base,
     ...(automatic ? { manualTrigger: false } : {}),

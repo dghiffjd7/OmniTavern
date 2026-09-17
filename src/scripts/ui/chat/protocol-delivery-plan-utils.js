@@ -1,3 +1,5 @@
+import { resolveProtocolDeliveryTimePatch } from '../../utils/chat-time-policy.js';
+
 const STORAGE_PREFIX = 'chatapp_protocol_delivery_plans_v1';
 const MAX_STORED_PLANS = 20;
 
@@ -326,6 +328,7 @@ export const deliverProtocolDeliveryItem = (
   {
     appendMessage = null,
     findMessage = null,
+    updateMessage = null,
     isUiMessagePresent = null,
     isSessionActive = null,
     addUiMessage = null,
@@ -366,7 +369,16 @@ export const deliverProtocolDeliveryItem = (
   }
 
   const active = Boolean(typeof isSessionActive === 'function' && isSessionActive(sessionId));
-  const deliveryMessage = existing || message;
+  let deliveryMessage = existing || message;
+  const timePatch = resolveProtocolDeliveryTimePatch(deliveryMessage);
+  if (timePatch) {
+    if (existing && typeof updateMessage === 'function') {
+      existing = updateMessage(messageId, timePatch, sessionId) || existing;
+      deliveryMessage = existing;
+    } else if (!existing) {
+      Object.assign(message, timePatch);
+    }
+  }
   let uiMessagePresent = false;
   if (active && messageId && typeof isUiMessagePresent === 'function') {
     try {

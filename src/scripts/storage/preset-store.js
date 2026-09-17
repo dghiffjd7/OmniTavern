@@ -11,6 +11,7 @@ import {
     getBuiltinPhoneFormatPromptSeed,
 } from './builtin-worldbooks.js';
 import { normalizeReasoningEffort } from '../api/model-capabilities.js';
+import { withoutPhonePromptTime } from '../utils/phone-format-time-prompt.js';
 import { logger } from '../utils/logger.js';
 import {
     normalizePhoneFormatPromptDepth,
@@ -308,6 +309,7 @@ const ensurePhoneFormatPromptFields = (preset, seed = DEFAULT_PHONE_FORMAT_PROMP
         p[spec.positionKey] = normalizePhoneFormatPromptPosition(p[spec.positionKey]);
         p[spec.depthKey] = normalizePhoneFormatPromptDepth(p[spec.depthKey]);
         p[spec.rulesKey] = sanitizePhoneFormatPromptText(p[spec.rulesKey], spec);
+        if(withoutPhonePromptTime(p[spec.rulesKey])===seed[spec.rulesKey])p[spec.rulesKey]=seed[spec.rulesKey];
     });
 };
 

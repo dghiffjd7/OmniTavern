@@ -1,3 +1,5 @@
+import { getChatTimeMode, initializeProtocolMessageTime } from '../../utils/chat-time-policy.js';
+
 /**
  * Dialogue-mode stream parser (simplified)
  * - Ignores standard <thinking>/<think> blocks outside message payloads
@@ -9,6 +11,7 @@
  */
 
 import { splitProtocolThinking } from './protocol-thinking-utils.js';
+import { parseProtocolChatRows, parseProtocolMomentHeader } from '../../utils/protocol-message-row.js';
 
 const normalizeNewlines = (s) => String(s ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
@@ -79,84 +82,7 @@ const findMiPhoneEnd = (s) => {
     return { index: m.index, length: m[0].length };
 };
 
-const GROUP_CHAT_BR_MARK = '\u000b';
-
-const splitSpeakerSegments = (line) => {
-    const raw = String(line ?? '');
-    if (!raw.includes('--')) return [];
-    const parts = raw.split('--').map(p => String(p || '').trim()).filter(Boolean);
-    if (parts.length < 2) return [];
-    if (parts.length === 2) return [{ speaker: parts[0], content: parts[1] }];
-    const segments = [];
-    let i = 0;
-    while (i < parts.length - 1) {
-        const speaker = String(parts[i] || '').trim();
-        if (!speaker) {
-            i += 1;
-            continue;
-        }
-        const remaining = parts.length - i;
-        if (remaining % 2 === 1) {
-            const content = parts.slice(i + 1).join('--').trim();
-            if (content) segments.push({ speaker, content });
-            break;
-        }
-        const content = String(parts[i + 1] || '').trim();
-        if (content) segments.push({ speaker, content });
-        i += 2;
-    }
-    return segments;
-};
-
-const splitMultiLineSegments = (text) => {
-    const raw = String(text ?? '').trim();
-    if (!raw.includes('--')) return [];
-    const lines = raw.split(/[\n\u000b]+/).map(l => l.trim()).filter(Boolean);
-    if (lines.length < 2) return [];
-    if (lines.some(line => !line.includes('--'))) return [];
-    const segments = [];
-    for (const line of lines) {
-        const segs = splitSpeakerSegments(line);
-        if (!segs.length) return [];
-        segments.push(...segs);
-    }
-    return segments;
-};
-
-const parsePrivateChatMessages = (innerText) => {
-    const text = normalizeNewlines(innerText);
-    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-    const messages = [];
-    const pushMessage = ({ speaker = '', content = '', time = '' } = {}) => {
-        const cleaned = String(content || '').trim().replace(/<br\s*\/?>/gi, '\n');
-        if (!cleaned) return;
-        messages.push({
-            speaker: String(speaker || '').trim(),
-            content: cleaned,
-            time: String(time || '').trim(),
-        });
-    };
-    for (const line of lines) {
-        if (/^[-•*]\s+/.test(line)) {
-            pushMessage({ content: line.replace(/^[-•*]\s+/, '').trim() });
-            continue;
-        }
-        const m = line.match(/^(.+?)--([\s\S]+?)--(\d{1,2}:\d{2})\s*$/);
-        if (m) {
-            pushMessage({ speaker: m[1], content: m[2], time: m[3] });
-            continue;
-        }
-        const normalized = line.replace(/<br\s*\/?>/gi, '\n');
-        const segments = splitSpeakerSegments(normalized);
-        if (segments.length) {
-            segments.forEach(seg => pushMessage({ speaker: seg?.speaker, content: seg?.content }));
-            continue;
-        }
-        // Fallback: treat as a single message line
-        pushMessage({ content: normalized });
-    }
-    return messages.filter(m => m && m.content);
-};
+const parsePrivateChatMessages = innerText => parseProtocolChatRows(innerText, {allowPlain:true});
 
 const isGroupChatTag = (tagName) => {
     const tn = String(tagName || '').trim();
@@ -186,126 +112,7 @@ const parseGroupChatBlock = (innerText) => {
         : [];
 
     const chatRaw = getBlock('聊天内容') || src;
-    // IMPORTANT:
-    // Some models put "<br>" inside a single group's message content. If we convert it to "\n" before parsing,
-    // it will break the "speaker--content--HH:MM" structure and cause speaker/avatar mismatches.
-    // Strategy:
-    // - Preserve "<br>" as an internal marker while extracting message segments.
-    // - Only convert it to "\n" AFTER we have parsed each message's speaker/content/time.
-    const normalized = normalizeNewlines(chatRaw);
-    const normalizedWithSystem = normalized.replace(/^\s*系统消息[:：]\s*(.*)$/gm, (match, content) => {
-        const cleaned = String(content || '').trim();
-        if (!cleaned) return match;
-        return `系统消息--${cleaned}`;
-    });
-    const textMarked = normalizedWithSystem
-        .replace(/&lt;br\s*\/?&gt;/gi, GROUP_CHAT_BR_MARK)
-        .replace(/<br\s*\/?>/gi, GROUP_CHAT_BR_MARK);
-
-    const messages = [];
-    const unmark = (s) => String(s ?? '').replaceAll(GROUP_CHAT_BR_MARK, '\n');
-
-    // First pass: extract repeated "speaker--content--HH:MM" segments even if the model uses <br> to separate them.
-    // We scan by the time terminator to avoid being confused by internal <br> markers.
-    {
-        const src2 = textMarked;
-        let idx = 0;
-        let tailStart = 0;
-        const timeRe = /--\s*(\d{1,2}:\d{2})\s*/g;
-        while (idx < src2.length) {
-            timeRe.lastIndex = idx;
-            const tm = timeRe.exec(src2);
-            if (!tm) break;
-            const segEnd = timeRe.lastIndex;
-            const segment = String(src2.slice(idx, segEnd) || '').trim();
-            idx = segEnd;
-            // Consume common separators between segments (newline, <br> marker, whitespace)
-            while (idx < src2.length && /[\s\u000b]/.test(src2[idx])) idx++;
-
-            // segment ends with "--HH:MM", split it into pre + time
-            const lastSep = segment.lastIndexOf('--');
-            if (lastSep === -1) continue;
-            const time = String(segment.slice(lastSep + 2) || '').trim();
-            const pre = String(segment.slice(0, lastSep) || '').trim();
-            const multiSegments = splitMultiLineSegments(pre);
-            if (multiSegments.length) {
-                multiSegments.forEach((seg, index) => {
-                    const speaker = String(seg?.speaker || '').trim();
-                    const content = unmark(String(seg?.content || '').trim()).trim();
-                    if (!speaker || !content) return;
-                    messages.push({ speaker, content, time: index === multiSegments.length - 1 ? time : '' });
-                });
-                continue;
-            }
-            const firstSep = pre.indexOf('--');
-            if (firstSep === -1) continue;
-            const speaker = String(pre.slice(0, firstSep) || '').trim();
-            const content = String(pre.slice(firstSep + 2) || '').trim();
-            if (!speaker || !content) continue;
-            messages.push({ speaker, content: unmark(content).trim(), time });
-        }
-        tailStart = idx;
-
-        if (messages.length && tailStart < src2.length) {
-            const tail = String(src2.slice(tailStart) || '').trim();
-            if (tail) {
-                const tailLines = tail.split(/[\n\u000b]+/).map(l => l.trim()).filter(Boolean);
-                for (const line of tailLines) {
-                    const hasTimeSuffix = /--\s*\d{1,2}:\d{2}\s*$/.test(line);
-                    if (!hasTimeSuffix) {
-                        const segments = splitSpeakerSegments(line);
-                        if (segments.length) {
-                            segments.forEach(seg => {
-                                const speaker = String(seg?.speaker || '').trim();
-                                const content = unmark(String(seg?.content || '').trim()).trim();
-                                if (!speaker || !content) return;
-                                messages.push({ speaker, content, time: '' });
-                            });
-                            continue;
-                        }
-                    }
-                    const parts = line.split('--').map(p => p.trim()).filter(Boolean);
-                    if (parts.length >= 2) {
-                        messages.push({ speaker: parts[0], content: unmark(parts.slice(1).join('--')).trim(), time: '' });
-                    }
-                }
-            }
-        }
-    }
-
-    // Fallback pass: line-based parsing for partial formats (e.g. missing time)
-    if (!messages.length) {
-        const lines = textMarked.split('\n').map(l => l.trim()).filter(Boolean);
-        for (const line of lines) {
-            const m = line.match(/^(.+?)--([\s\S]+?)--(\d{1,2}:\d{2})\s*$/);
-            if (m) {
-                messages.push({
-                    speaker: String(m[1] || '').trim(),
-                    content: unmark(String(m[2] || '').trim()).trim(),
-                    time: String(m[3] || '').trim(),
-                });
-                continue;
-            }
-            const hasTimeSuffix = /--\s*\d{1,2}:\d{2}\s*$/.test(line);
-            if (!hasTimeSuffix) {
-                const segments = splitSpeakerSegments(line);
-                if (segments.length) {
-                    segments.forEach(seg => {
-                        const speaker = String(seg?.speaker || '').trim();
-                        const content = unmark(String(seg?.content || '').trim()).trim();
-                        if (!speaker || !content) return;
-                        messages.push({ speaker, content, time: '' });
-                    });
-                    continue;
-                }
-            }
-            const parts = line.split('--').map(p => p.trim()).filter(Boolean);
-            if (parts.length >= 2) {
-                messages.push({ speaker: parts[0], content: unmark(parts.slice(1).join('--')).trim(), time: '' });
-                continue;
-            }
-        }
-    }
+    const messages = parseProtocolChatRows(normalizeNewlines(chatRaw).replace(/^\s*系统消息[:：]\s*(.+)$/gm, '系统消息--$1'));
 
     return { members, messages };
 };
@@ -342,7 +149,6 @@ const parseMomentBlock = (innerText) => {
     const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
     const moments = [];
     let current = null;
-    const isNumeric = (val) => /^-?\d+(?:\.\d+)?$/.test(String(val || '').trim());
     const looksLikeTime = (val) => /^\d{1,2}:\d{2}(?::\d{2})?$/.test(String(val || '').trim());
     const parseCommentParts = (parts) => {
         const author = parts[0] || '';
@@ -387,18 +193,11 @@ const parseMomentBlock = (innerText) => {
 
     for (const line of lines) {
         const parts = line.split('--').map(p => p.trim());
-        const isHeader = parts.length >= 5 && isNumeric(parts[3]) && isNumeric(parts[4]);
-        if (isHeader) {
+        const header = parseProtocolMomentHeader(line);
+        if (header) {
             // New moment header
             commit();
-            current = {
-                author: parts[0] || '',
-                content: parts[1] || '',
-                time: parts[2] || '',
-                views: Number(parts[3] || 0),
-                likes: Number(parts[4] || 0),
-                comments: [],
-            };
+            current = header;
             continue;
         }
         if (parts.length >= 2 && current) {
@@ -471,8 +270,11 @@ const findNextToken = (s) => {
 };
 
 export class DialogueStreamParser {
-    constructor({ userName = '我', resolveLooseGroupTag, resolveLoosePrivateTag } = {}) {
+    constructor({ userName = '我', resolveLooseGroupTag, resolveLoosePrivateTag, timeMode = getChatTimeMode(), sourceId = '' } = {}) {
         this.userName = userName;
+        this.timeMode = timeMode;
+        this.sourceId = sourceId || globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+        this.momentOrdinal = 0;
         this.preBuffer = '';
         this.inContent = false;
         this.contentBuffer = '';
@@ -567,7 +369,11 @@ export class DialogueStreamParser {
                 if (endAt === -1) break; // wait for more data
                 const inner = work.slice(startIdx + 'moment_start'.length, endAt);
                 const after = endAt + endMark.length;
-                const moments = parseMomentBlock(inner);
+                const moments = parseMomentBlock(inner).map(moment => {
+                    const sourceKey = `protocol:${this.sourceId}:moment:${this.momentOrdinal++}`;
+                    return { ...moment, signature: sourceKey, protocolTimeMode: this.timeMode,
+                        comments: moment.comments.map((comment, index) => ({ ...comment, id: `${sourceKey}:comment:${index}` })) };
+                });
                 if (moments.length) events.push({ type: 'moments', moments });
                 work = work.slice(after);
                 advanced = true;
@@ -583,7 +389,7 @@ export class DialogueStreamParser {
                 const after = endAt + endMark.length;
                 const { momentId, comments } = parseMomentReplyBlock(inner);
                 // moment_id is optional (some tasks already know the target momentId in context).
-                if (comments.length) events.push({ type: 'moment_reply', momentId, comments });
+                if (comments.length) events.push({ type: 'moment_reply', momentId, comments: comments.map(comment => initializeProtocolMessageTime(comment, { timeMode: this.timeMode, modelTime: comment.time })) });
                 work = work.slice(after);
                 advanced = true;
                 continue;

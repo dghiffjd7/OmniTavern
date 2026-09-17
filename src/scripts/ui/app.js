@@ -1,3 +1,4 @@
+import { getChatTimeMode, createRepairMessageTimeRestorer } from '../utils/chat-time-policy.js';
 import { createAgentCenterPromptPreview } from './agent-center-prompt-preview.js';
 import { buildAgentSidecarPromptPreview } from './chat/agent-sidecar-prompt-preview.js';
 import { resolveMemoryUpdateRuntimeConfig } from './chat/memory-update-runtime.js';
@@ -5239,7 +5240,7 @@ const initApp = async () => {
     onTouchedMoments: () => momentsPanel?.render({ preserveScroll: true }),
     generate: (text, payload) => window.appBridge.generate(text, payload),
     runGeneration: runMomentCommentGenerationWithDiagnostics,
-    createParser: () => new DialogueStreamParser({ userName: '我' }),
+    createParser: options => new DialogueStreamParser({ userName: '我', ...options }),
     normalizeChunk: normalizeAssistantStreamChunk,
     saveRawReply: async (raw, metadata) => {
       lastMomentRawReply = raw;
@@ -18964,6 +18965,7 @@ const initApp = async () => {
                   ? effects.appendMessage
                   : appendPersistedProtocolDeliveryMessage,
                 findMessage: (messageId, sid) => chatStore.findMessage(messageId, sid),
+                updateMessage: (id, patch, sid) => chatStore.updateMessage(id, patch, sid),
                 isUiMessagePresent: isProtocolUiMessagePresent,
                 isSessionActive,
                 addUiMessage: (message, addOptions) => {
@@ -19116,6 +19118,7 @@ const initApp = async () => {
       const result = await flushPersistedProtocolDeliveryPlans({
         ...getProtocolDeliveryPersistenceOptions(),
         appendMessage: appendPersistedProtocolDeliveryMessage,
+        updateMessage: (id, patch, sid) => chatStore.updateMessage(id, patch, sid),
         findMessage: (messageId, sid) => chatStore.findMessage(messageId, sid),
         isSessionActive,
         autoMarkReadIfActive,
@@ -27317,6 +27320,7 @@ const initApp = async () => {
     getReasoningBoundaries: context => resolveResolvedPreset(window.appBridge, 'reasoning', { sessionId: context.sessionId, uiMode: context.place === 'writing' ? 'rp' : 'chat' }),
     getCurrentModelLabel: async context => String((await window.appBridge.resolveRequestRuntimeConfig?.({ sessionId: context.sessionId, uiMode: context.place === 'writing' ? 'rp' : 'chat' }))?.config?.model || ''),
     buildFormatPreview: buildChatFormatGuardianPromptPreviewRequest, runFormat: runHopscotchFormatReview,
+    getFormatTarget: (message, context) => resolveChatFormatRepairTarget(message, context.sessionId),
     openAgent: (id, options = {}) => agentCenterPanel.show({ tab: 'agents', agentId: id, configure: true, ...options }),
     openCenter: () => agentCenterPanel.show({ tab: 'agents' }),
     openFormatResult: () => agentCenterPanel.show({ tab: 'activity' }),
@@ -27348,7 +27352,7 @@ const initApp = async () => {
     },
   });
   const bubbleTextSelection = bindBubbleTextSelection({
-    ui, runtime: bubbleSelectionEdits,
+    ui, runtime: bubbleSelectionEdits, toolbox: agentToolsRuntime.toolbox,
     canEdit: message => Boolean(message?.id && (!message.sessionId || message.sessionId === chatStore.getCurrent())
       && canEditBubbleText(chatStore.findMessage(message.id, chatStore.getCurrent()))),
   });
@@ -27737,7 +27741,16 @@ const initApp = async () => {
     }
     let didAnything = false;
     const eventResults = [];
-    if (dispatcher.beginMessageCapture?.() === false) {
+    const previousTimes = [];
+    const timeSourceIds = new Set([...(Array.isArray(sourceMessageIds) ? sourceMessageIds : []), sourceMessageId].filter(Boolean));
+    const timeSessionIds = new Set([...(Array.isArray(targetSessionIds) ? targetSessionIds : []), sourceSessionId,
+      ...events.map(event => dispatcher.preflightEvent?.(event)?.targetSessionId)].filter(Boolean));
+    for (const sid of timeSessionIds) {
+      for (const message of chatStore.getMessages(sid) || []) {
+        if (timeSourceIds.has(message.id)) previousTimes.push({ message, sessionId: sid });
+      }
+    }
+    if (dispatcher.beginMessageCapture?.({ previousTimes }) === false) {
       return { didAnything: false, reason: 'protocol_transaction_in_progress' };
     }
     let capturedMessages = [];
@@ -29151,9 +29164,11 @@ const initApp = async () => {
         onAssistantDelivered?.({ sessionId, generationId });
       } catch {}
     };
+    const chatTimeMode = getChatTimeMode();
     let formatRepairTurnId = '';
     const formatRepairTurnSourceMessages = [];
     let formatRepairMessageCapture = null;
+    let restoreFormatRepairMessageTime = null;
     let formatRepairMomentTransaction = null;
     let deferProtocolAfterReceiveEffects = false;
     let deferProtocolUiMessages = false;
@@ -29167,6 +29182,7 @@ const initApp = async () => {
     });
     const decorateFormatRepairTurnMessage = (message, targetSessionId = sessionId) => {
       if (!message || typeof message !== 'object' || !formatRepairTurnId) return message;
+      restoreFormatRepairMessageTime?.(message, targetSessionId);
       const tagged = tagMessageWithFormatRepairTurn(message, getFormatRepairTurnMeta());
       if (tagged !== message) {
         try {
@@ -29577,6 +29593,8 @@ const initApp = async () => {
     const createDialogueParser = () =>
       new DialogueStreamParser({
         userName,
+        timeMode: chatTimeMode,
+        sourceId: formatRepairTurnId,
         resolveLooseGroupTag: resolveLooseGroupTagName,
         resolveLoosePrivateTag: resolveLoosePrivateTagName,
       });
@@ -30271,6 +30289,9 @@ const initApp = async () => {
       } catch {}
 
       const groupResult = await appendProtocolGroupChatEventImmediate(ev, {
+        timeMode: chatTimeMode,
+        deferTimeDelivery: deferProtocolUiMessages,
+        prepareMessage: decorateFormatRepairTurnMessage,
         resolveTargetSessionId: resolveGroupChatTargetSessionId,
         normalizeChatMessage: item => normalizeProtocolChatMessage(item, { normalizeSpeaker: normalizeName }),
         isSystemSpeaker,
@@ -30288,7 +30309,7 @@ const initApp = async () => {
         buildUserMessageFromAI,
         isSessionActive,
         onAddUiMessage: parsed => {
-          if (!deferProtocolUiMessages) ui.addMessage(decorateFormatRepairTurnMessage(parsed));
+          if (!deferProtocolUiMessages) ui.addMessage(parsed);
         },
         appendMessage: (parsed, targetSessionId) => appendFormatRepairTurnMessage(parsed, targetSessionId),
         autoMarkReadIfActive: deferProtocolAfterReceiveEffects ? null : autoMarkReadIfActive,
@@ -30304,6 +30325,9 @@ const initApp = async () => {
       }
 
       const privateResult = await appendProtocolPrivateChatEventImmediate(ev, {
+        timeMode: chatTimeMode,
+        deferTimeDelivery: deferProtocolUiMessages,
+        prepareMessage: decorateFormatRepairTurnMessage,
         resolveTargetSessionId: otherName => resolvePrivateChatTargetSessionId(otherName || characterName),
         normalizeDialogueMessage,
         shouldDropUserEcho: (content, speaker) => userEchoGuard.shouldDrop(content, speaker),
@@ -30312,7 +30336,7 @@ const initApp = async () => {
         buildAssistantMessageFromText,
         isSessionActive,
         onAddUiMessage: parsed => {
-          if (!deferProtocolUiMessages) ui.addMessage(decorateFormatRepairTurnMessage(parsed));
+          if (!deferProtocolUiMessages) ui.addMessage(parsed);
         },
         appendMessage: (parsed, targetSessionId) => appendFormatRepairTurnMessage(parsed, targetSessionId),
         autoMarkReadIfActive: deferProtocolAfterReceiveEffects ? null : autoMarkReadIfActive,
@@ -30365,11 +30389,12 @@ const initApp = async () => {
         }
         return { ok: false, type: String(event?.type || '') };
       },
-      beginMessageCapture() {
+      beginMessageCapture({ previousTimes = [] } = {}) {
         if (formatRepairMomentTransaction?.begin?.() === false) {
           formatRepairMessageCapture = null;
           return false;
         }
+        restoreFormatRepairMessageTime = createRepairMessageTimeRestorer(previousTimes);
         formatRepairMessageCapture = [];
         return true;
       },
@@ -30378,6 +30403,7 @@ const initApp = async () => {
           ? formatRepairMessageCapture.slice()
           : [];
         formatRepairMessageCapture = null;
+        restoreFormatRepairMessageTime = null;
         return captured;
       },
       commitTransaction() {
@@ -30531,6 +30557,7 @@ const initApp = async () => {
               meta: {
                 ...(nextContext.meta || {}),
                 previewOnly: true,
+                chatTimeMode,
                 agentPromptDraft,
                 previewRawBlocks: Boolean(previewRawBlocks),
                 previewForceLegacyText: Boolean(previewForceLegacyText),
@@ -31109,6 +31136,7 @@ const initApp = async () => {
             for (const item of batch.items) {
               deliverProtocolDeliveryItem(item, {
                 alreadyPersisted: true,
+                updateMessage: (id, patch, sid) => chatStore.updateMessage(id, patch, sid),
                 findMessage: (messageId, targetSessionId) => chatStore.findMessage(messageId, targetSessionId),
                 isUiMessagePresent: isProtocolUiMessagePresent,
                 isSessionActive,
@@ -31256,6 +31284,7 @@ const initApp = async () => {
           consumePromptInjections,
           buildContext: (input) => {
             const context = llmContext(input);
+            if (context) context.meta = { ...(context.meta || {}), chatTimeMode };
             if (!structuredPreviewRuntime) return context;
             return {
               ...(context || {}),
@@ -32508,12 +32537,6 @@ const initApp = async () => {
           : '应用后格式复查仍未通过；创意原文仍可安全写回',
         parserReport,
       };
-    }
-    if (action === 'text-edit-agent' && message?.role === 'assistant') {
-      const selection = window.getSelection();
-      const selectedText = payload?.wrapper?.contains?.(selection?.anchorNode) && payload?.wrapper?.contains?.(selection?.focusNode) ? selection.toString() : '';
-      agentToolsRuntime.toolbox.open({ messageId: message.id, selectedText });
-      return;
     }
     if (action === 'check-format' && message?.role === 'assistant') {
       const current = ensureRenderedCancelledPartialPersisted(message) || chatStore.findMessage(message.id, sessionId) || message;
@@ -34613,6 +34636,7 @@ const initApp = async () => {
   ];
   const closeTopAppLayer = ({ dryRun = false } = {}) => {
     if (bubbleTextSelection.closeEditor?.({ dryRun })) return true;
+    if (agentToolsRuntime.toolbox.back({ dryRun })) return true;
     if (ui.hasVisibleCodeViewer?.()) {
       return dryRun ? true : ui.closeCodeViewer?.() === true;
     }

@@ -4,6 +4,7 @@ import { normalizeFormatPatchModelResult } from '../ui/chat/format-patch-transac
 import { validateFormatRepairFunctionPayloads, extractFormatFunctionBlocks } from '../ui/chat/format-repair-side-effect-utils.js';
 import { allowsAgentInvocation } from './agent-invocation.js';
 import { captureAgentReferenceMessages } from './agent-reference-context.js';
+import { agentToolContextKey, agentToolMessageIdentity, isAgentToolReply } from './agent-tool-targets.js';
 
 // Some models wrap otherwise valid JSON in one Markdown code fence. Accept
 // that presentation wrapper only; the revision, exact lines and patch limits
@@ -29,22 +30,24 @@ export const createTextEditRuntime = ({ getContext, getMessage, getMessages, get
   const contextKey = context => JSON.stringify(context);
   // Loading a disk-backed rawOriginal populates its cache on the message. Compare that
   // source separately after loading; cache hydration is not a user edit.
-  const identity = message => JSON.stringify([message?.id, message?.content, message?.rawSource,
-    message?.meta?.activeSwipe, message?.meta?.swipes?.length]);
+  const identity = agentToolMessageIdentity;
   const emit = () => onChange(list());
   const list = () => [...jobs.values()].map(j => ({ id: j.id, agentId: j.agentId, title: j.config.title, sessionId: j.sessionId,
     invocation: j.invocation, outputMode: j.config.outputMode || 'edit', text: j.text || '', trace: j.trace || null, reference: j.reference || null, status: j.status, message: j.message || '', createdAt: j.createdAt, messageId: j.messageId, context: j.context }));
   const stillCurrent = job => !job.controller.signal.aborted && contextKey(getContext(job.sessionId)) === contextKey(job.context)
     && getConfig(job.agentId, job.sessionId)?.enabled === true
+    && (job.expectedConfigVersion === undefined || getConfig(job.agentId, job.sessionId)?.updatedAt === job.expectedConfigVersion)
     && JSON.stringify(getConfig(job.agentId, job.sessionId)?.tools || null) === job.toolsRevision
     && contextKey(getContext()) === contextKey(job.context)
     && identity(getMessage(job.messageId, job.sessionId)) === job.identity;
   const setStatus = (job, status, message = '') => { job.status = status; job.message = message; emit(); };
-  const run = async ({ agentId, sessionId, messageId, selection, force = false, invocation = '', signal, configOverride, bodyRuleOverride } = {}) => {
+  const run = async ({ agentId, sessionId, messageId, selection, force = false, invocation = '', signal, configOverride, bodyRuleOverride, targetSnapshot } = {}) => {
     const config = force && configOverride || getConfig(agentId, sessionId), message = getMessage(messageId, sessionId);
-    if (!config || !message || message.role !== 'assistant' || (message.type && message.type !== 'text') || message.pending || ['pending', 'sending'].includes(message.status) || message.error || message.meta?.generatedMedia) return { status: 'skipped', reason: 'invalid_target' };
+    if (!config || !isAgentToolReply(message)) return { status: 'skipped', reason: 'invalid_target' };
     if (!(invocation === 'test' ? config.enabled === true : allowsAgentInvocation(config, force ? 'manual' : 'auto'))) return { status: 'skipped', reason: 'disabled' };
     const context = getContext(sessionId), signature = identity(message);
+    if (targetSnapshot && (targetSnapshot.messageId !== messageId || targetSnapshot.identity !== signature
+      || agentToolContextKey(targetSnapshot.context) !== agentToolContextKey(context))) return { status: 'skipped', reason: '原文或配置已变化，请重新选择处理范围' };
     const key = JSON.stringify([agentId, context, messageId, signature]);
     if ([...jobs.values()].some(j => j.key === key && ['running', 'ready', 'reviewing'].includes(j.status))) return { status: 'skipped', reason: 'already_running' };
     if (!force && seen.has(key)) return { status: 'skipped', reason: 'duplicate' };
@@ -60,7 +63,8 @@ export const createTextEditRuntime = ({ getContext, getMessage, getMessages, get
     const history = getMessages(sessionId) || [];
     const historySnapshot = captureAgentReferenceMessages(history, config.context, { targetMessageId: messageId });
     const job = { id: `text-edit-run-${now()}-${++sequence}`, agentId, sessionId, messageId, config: JSON.parse(JSON.stringify(config)),
-      context, toolsRevision: JSON.stringify(getConfig(agentId, sessionId)?.tools || null), invocation: invocation === 'test' ? 'test' : force ? 'manual' : 'auto', identity: signature, controller, status: 'running', createdAt: now(), key };
+      context, expectedConfigVersion: targetSnapshot?.configUpdatedAt,
+      toolsRevision: JSON.stringify(getConfig(agentId, sessionId)?.tools || null), invocation: invocation === 'test' ? 'test' : force ? 'manual' : 'auto', identity: signature, controller, status: 'running', createdAt: now(), key };
     jobs.set(job.id, job); emit();
     const cancel = () => controller.abort();
     signal?.addEventListener('abort', cancel, { once: true });
@@ -70,7 +74,8 @@ export const createTextEditRuntime = ({ getContext, getMessage, getMessages, get
       const model = await captureModel(job.config, sessionId);
       const source = await getRaw(message, sessionId);
       if (!stillCurrent(job)) throw aborted();
-      job.target = await resolveTarget(source, job.config.target, { bodyRule, selection, message, context, readOnly: job.config.outputMode === 'note' });
+      if (targetSnapshot && source !== targetSnapshot.source) throw aborted();
+      job.target = targetSnapshot?.target || await resolveTarget(source, job.config.target, { bodyRule, selection, message, context, readOnly: job.config.outputMode === 'note' });
       if (!job.target.ok) throw new Error(job.target.message);
       const referenceContext = resolveReference
         ? await resolveReference({ config: job.config.context, context, messages: historySnapshot, targetMessageId: messageId, signal: controller.signal })

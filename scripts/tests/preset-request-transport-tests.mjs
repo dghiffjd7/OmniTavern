@@ -3,6 +3,7 @@ import { createPresetRequestWorker } from '../../src/scripts/plugins/preset-requ
 import { PresetRequestTransport, makePresetRequestBody, applyPresetRequestBody,
   createPresetGenerationClient, isCreativePresetRequest } from '../../src/scripts/plugins/preset-request-transport.js';
 import { toScriptPreset, fromScriptPreset, mergeScriptPresetChanges } from '../../src/scripts/plugins/preset-script-api.js';
+import { createGenerationProviderCallDiagnosticsTracker } from '../../src/scripts/ui/chat/generation-provider-call-diagnostics-utils.js';
 
 const context = { sessionId: 'rp:test', openaiPresetId: 'test' };
 function harness(middleware) {
@@ -29,6 +30,43 @@ const spreset = {
 const input = [{ role: 'user', content: 'hello' }];
 const payload = (overrides = {}) => ({ body: makePresetRequestBody(input, {}, config, true), stream: true,
   sessionId: context.sessionId, presetId: context.openaiPresetId, preset, spreset, ...overrides });
+
+{
+  // A preset can wait for the whole upstream reply, then release several SSE
+  // deltas at once. Chunk count alone must not turn that replay into model TPS.
+  let tick = 1000;
+  const tracker = createGenerationProviderCallDiagnosticsTracker({ now: () => tick });
+  const callId = tracker.start({ stream: true });
+  const host = harness(base => async (...args) => {
+    const response = await base(...args);
+    const buffered = await response.text();
+    return new Response(buffered, { headers: response.headers });
+  });
+  const session = await host.prepare(payload({ spreset: null }));
+  const client = createPresetGenerationClient({ session, config, client: {
+    async *streamChat(_messages, options) {
+      tick = 2000; yield 'one';
+      tick = 3000; yield 'two';
+      tick = 4000;
+      options.onProviderUsage({ completionTokens: 4000 });
+    },
+  } });
+  let result = '';
+  for await (const chunk of client.streamChat(input, { onProviderUsage: usage => tracker.observeUsage(callId, usage) })) {
+    tracker.observeMeaningfulDelta(callId);
+    result += chunk;
+  }
+  tick += 18;
+  tracker.finish(callId);
+  const call = tracker.snapshot()[0];
+  assert.equal(result, 'onetwo');
+  assert.equal(call.streamDeltaCount, 2);
+  assert.equal(call.streamObservedDurationMs, 0);
+  assert.equal(call.outputSpeedStatus, 'insufficient_samples');
+  assert.equal(call.tokensPerSecond, null);
+  assert.equal(call.completionTokens, 4000);
+  assert.equal(host.jobs.size, 0);
+}
 
 assert.equal(isCreativePresetRequest({ presetContext: { uiMode: 'chat' } }), false);
 assert.equal(isCreativePresetRequest({ presetContext: { uiMode: 'rp' }, purpose: 'maintenance' }), false);

@@ -72,13 +72,13 @@ import {
   });
 
   assert.equal(result.ok, true);
-  assert.equal(result.status, 'needs_review');
+  assert.equal(result.status, 'ready');
   assert.equal(result.eventDrafts.length, 2);
   assert.equal(result.eventDrafts[0].type, CHAT_FORMAT_EVENT_TYPES.groupSystemEvent);
   assert.equal(result.eventDrafts[1].type, CHAT_FORMAT_EVENT_TYPES.groupMessage);
   assert.equal(result.eventDrafts[1].targetId, 'group:case');
   assert.equal(result.eventDrafts[1].speakerId, 'contact:snow');
-  assert.equal(result.warnings.includes('time is missing'), true);
+  assert.equal(result.warnings.includes('time is missing'), false);
   console.log('ok - chat format guardian extracts group message and system event drafts');
 }
 
@@ -317,8 +317,8 @@ import {
     userName: '雪乃',
   });
   assert.deepEqual(prompt.enabledFormatIds, ['phoneShell', 'momentPost']);
-  assert.match(prompt.messages[1].content, /雪乃--今天去了海边。--00:00--0--0/);
-  assert.match(prompt.messages[1].content, /发布者--动态正文--HH:mm--0--0/);
+  assert.match(prompt.messages[1].content, /雪乃--今天去了海边。--0--0/);
+  assert.match(prompt.messages[1].content, /发布者--动态正文--0--0/);
   assert.doesNotMatch(prompt.messages[1].content, /author::|content::/);
   console.log('ok - chat format guardian moment repair uses the parser-compatible shared contract');
 }
@@ -372,7 +372,7 @@ import {
   assert.match(user, /只补齐下方格式范例或格式规则明确要求的标签/);
   assert.match(user, /<阿兰和菲伦的私聊>/);
   assert.match(user, /MiPhone_start \/ msg_start/);
-  assert.match(user, /repairFallbackTime（22:12）/);
+  assert.match(user, /不要生成时间字段/);
   assert.match(user, /1 \| 菲伦--今晚别一个人走。/);
   console.log('ok - chat format guardian model prompt asks loose chat rows to be wrapped');
 }

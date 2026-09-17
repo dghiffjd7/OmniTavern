@@ -56,6 +56,7 @@ const defaults = {
   reasoningMaxAdditions: 1,
   personaBindContacts: true,
   promptCurrentTimeEnabled: false,
+  chatAiTimeEnabled: false,
   momentCommentSideEffectsEnabled: true,
   autoImagePromptEnabled: false,
   autoImagePromptWritingEnabled: true,
@@ -312,6 +313,7 @@ const migrateSettings = (settings = {}) => {
   });
   next.chatDefaultColorMode = inferChatColorMode(next, defaults.chatDefaultColorMode);
   next.traditionalModelOutputProtocolEnabled = next.traditionalModelOutputProtocolEnabled === true;
+  next.chatAiTimeEnabled = next.chatAiTimeEnabled === true;
   next.chatStructuredThinkingPreference = String(next.chatStructuredThinkingPreference || '').trim().toLowerCase() === 'stable_format'
     ? 'stable_format'
     : defaults.chatStructuredThinkingPreference;

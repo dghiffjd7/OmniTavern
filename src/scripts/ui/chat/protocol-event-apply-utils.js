@@ -1,3 +1,5 @@
+import { getChatTimeMode, initializeProtocolMessageTime } from '../../utils/chat-time-policy.js';
+
 export const applyProtocolMomentEvent = (
   event,
   {
@@ -57,6 +59,9 @@ export const appendProtocolGroupChatEventImmediate = async (
     buildUserMessageFromAI = null,
     emitPluginAfterReceive = null,
     formatNowTime = null,
+    timeMode = getChatTimeMode(),
+    deferTimeDelivery = false,
+    prepareMessage = null,
     isSessionActive = null,
     isSystemSpeaker = null,
     isUserSpeakerName = null,
@@ -90,6 +95,8 @@ export const appendProtocolGroupChatEventImmediate = async (
         ? buildSystemMessage({ content, time: item?.time, fallbackTime })
         : null;
       if (!parsed) continue;
+      initializeProtocolMessageTime(parsed, { timeMode, modelTime: item?.time, deferDelivery: deferTimeDelivery });
+      prepareMessage?.(parsed, targetSessionId);
       if (typeof isSessionActive === 'function' && isSessionActive(targetSessionId) && typeof onAddUiMessage === 'function') {
         onAddUiMessage(parsed);
       }
@@ -125,12 +132,14 @@ export const appendProtocolGroupChatEventImmediate = async (
           depth: 0,
         })
       : buildUserMessageFromAI(content, item?.time || fallbackTime);
+    initializeProtocolMessageTime(parsed, { timeMode, modelTime: item?.time, deferDelivery: deferTimeDelivery });
     if (role === 'assistant' && normalized?.rawContent) {
       parsed.meta = {
         ...(parsed.meta || {}),
         autoImagePromptRawContent: String(normalized.rawContent || ''),
       };
     }
+    prepareMessage?.(parsed, targetSessionId);
     if (typeof isSessionActive === 'function' && isSessionActive(targetSessionId) && typeof onAddUiMessage === 'function') {
       onAddUiMessage(parsed);
     }
@@ -154,6 +163,9 @@ export const appendProtocolPrivateChatEventImmediate = async (
     buildUserMessageFromAI = null,
     emitPluginAfterReceive = null,
     formatNowTime = null,
+    timeMode = getChatTimeMode(),
+    deferTimeDelivery = false,
+    prepareMessage = null,
     isSessionActive = null,
     isUserSpeakerName = null,
     normalizeDialogueMessage = null,
@@ -189,12 +201,14 @@ export const appendProtocolPrivateChatEventImmediate = async (
           time: time || fallbackTime,
           depth: 0,
         });
+    initializeProtocolMessageTime(parsed, { timeMode, modelTime: time, deferDelivery: deferTimeDelivery });
     if (!isMe && normalized?.rawContent) {
       parsed.meta = {
         ...(parsed.meta || {}),
         autoImagePromptRawContent: String(normalized.rawContent || ''),
       };
     }
+    prepareMessage?.(parsed, targetSessionId);
     if (typeof isSessionActive === 'function' && isSessionActive(targetSessionId) && typeof onAddUiMessage === 'function') {
       onAddUiMessage(parsed);
     }

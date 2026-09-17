@@ -4,6 +4,7 @@ const toTimestamp = (value) => {
 };
 
 const toTokenCount = (value) => {
+  if (value === null || value === undefined || value === '') return null;
   const next = Number(value);
   return Number.isFinite(next) && next >= 0 ? Math.trunc(next) : null;
 };
@@ -46,6 +47,32 @@ export const buildFirstTokenResponseDiagnostics = (current = null, {
 
 export const buildFirstMeaningfulDeltaResponseDiagnostics = buildFirstTokenResponseDiagnostics;
 
+// Below 100 ms, queued SSE events / worker messages can dominate the entire
+// observed window. This is a measurement floor, not a cap on a model's speed.
+const MIN_STREAM_SAMPLE_MS = 100;
+
+export const resolveResponseOutputSpeed = (diagnostics = {}) => {
+  const duration = toNonNegativeNumber(diagnostics.outputDurationMs);
+  const count = toTokenCount(diagnostics.streamDeltaCount);
+  const observed = toNonNegativeNumber(diagnostics.streamObservedDurationMs);
+  const tokens = toTokenCount(diagnostics.completionTokens);
+  let outputSpeedStatus = '';
+  if (diagnostics.outputSpeedStatus === 'multiple_calls') outputSpeedStatus = 'multiple_calls';
+  else if (diagnostics.stream !== true) outputSpeedStatus = 'non_stream';
+  else if ((count !== null && count < 2)
+    || (observed !== null && observed < MIN_STREAM_SAMPLE_MS)
+    || (duration !== null && duration < MIN_STREAM_SAMPLE_MS)) outputSpeedStatus = 'insufficient_samples';
+  else if (duration === null) outputSpeedStatus = 'missing_timing';
+  else if (tokens === null || tokens === 0) outputSpeedStatus = 'missing_usage';
+  else outputSpeedStatus = 'measured';
+  return {
+    outputSpeedStatus,
+    tokensPerSecond: outputSpeedStatus === 'measured'
+      ? Math.round((tokens * 1000 / duration) * 10) / 10
+      : null,
+  };
+};
+
 export const buildCompletedResponseDiagnostics = (current = null, {
   requestStartedAt = 0,
   completedAt = 0,
@@ -71,20 +98,28 @@ export const buildCompletedResponseDiagnostics = (current = null, {
     ? Math.max(0, latencyMs - firstTokenLatencyMs)
     : null;
   const completionTokens = toTokenCount(usage?.completionTokens);
-  const tokensPerSecond = completionTokens !== null && completionTokens > 0 && outputDurationMs > 0
-    ? Math.round((completionTokens / (outputDurationMs / 1000)) * 10) / 10
-    : null;
+  const streaming = stream === null ? Boolean(previous.stream) : Boolean(stream);
+  const streamDeltaCount = toTokenCount(previous.streamDeltaCount);
+  const lastDeltaAt = toTimestamp(previous.lastMeaningfulDeltaAt);
+  const streamObservedDurationMs = firstMeaningfulDeltaAt && lastDeltaAt
+    ? Math.max(0, lastDeltaAt - firstMeaningfulDeltaAt)
+    : toNonNegativeNumber(previous.streamObservedDurationMs);
+  const outputSpeed = resolveResponseOutputSpeed({
+    stream: streaming, outputDurationMs, completionTokens, streamDeltaCount, streamObservedDurationMs,
+  });
 
   return {
     ...previous,
-    stream: stream === null ? Boolean(previous.stream) : Boolean(stream),
+    stream: streaming,
     completedAt: endedAt,
     latencyMs,
     firstMeaningfulDeltaAt,
     firstMeaningfulDeltaLatencyMs: firstTokenLatencyMs,
     firstTokenLatencyMs,
     outputDurationMs,
-    tokensPerSecond,
+    streamDeltaCount,
+    streamObservedDurationMs,
+    ...outputSpeed,
     promptTokens: toTokenCount(usage?.promptTokens),
     completionTokens,
     totalTokens: toTokenCount(usage?.totalTokens),
@@ -125,7 +160,12 @@ export const mergeResponseDiagnosticsIntoUsage = (
       ?? src.firstMeaningfulDeltaLatencyMs,
     ),
     outputDurationMs: toTokenCount(diagnostics.outputDurationMs ?? src.outputDurationMs),
-    tokensPerSecond: toNonNegativeNumber(diagnostics.tokensPerSecond ?? src.tokensPerSecond),
+    // A deliberately unavailable speed must clear an earlier provisional value.
+    tokensPerSecond: toNonNegativeNumber(Object.hasOwn(diagnostics, 'tokensPerSecond')
+      ? diagnostics.tokensPerSecond : src.tokensPerSecond),
+    outputSpeedStatus: identityText(diagnostics.outputSpeedStatus, src.outputSpeedStatus),
+    streamDeltaCount: toTokenCount(diagnostics.streamDeltaCount ?? src.streamDeltaCount),
+    streamObservedDurationMs: toTokenCount(diagnostics.streamObservedDurationMs ?? src.streamObservedDurationMs),
     systemFingerprint: identityText(diagnostics.systemFingerprint, src.systemFingerprint),
     modelVersion: identityText(diagnostics.modelVersion, src.modelVersion),
     responseId: identityText(diagnostics.responseId, src.responseId),

@@ -181,6 +181,7 @@ export class GeneralSettingsPanel {
     this.creativeWideToggle = null;
     this.personaBindToggle = null;
     this.promptTimeToggle = null;
+    this.chatAiTimeToggle = null;
     this.momentCommentSideEffectsToggle = null;
     this.autoImagePromptToggle = null;
     this.autoImagePromptWritingToggle = null;
@@ -408,6 +409,7 @@ export class GeneralSettingsPanel {
     if (this.promptTimeToggle) {
       this.promptTimeToggle.checked = settings.promptCurrentTimeEnabled === true;
     }
+    if (this.chatAiTimeToggle) this.chatAiTimeToggle.checked = settings.chatAiTimeEnabled === true;
     if (this.momentCommentSideEffectsToggle) {
       this.momentCommentSideEffectsToggle.checked = settings.momentCommentSideEffectsEnabled !== false;
     }
@@ -2179,6 +2181,12 @@ export class GeneralSettingsPanel {
               icon: 'clock',
             })}
             ${this.renderSettingRow({
+              id: 'general-chat-ai-time',
+              title: '使用 AI 回复时间',
+              description: '默认关闭，聊天和动态使用实际接收时间。开启后恢复带时间字段的旧格式，并显示 AI 提供的时间；仅影响之后收到的消息。',
+              icon: 'clock',
+            })}
+            ${this.renderSettingRow({
               id: 'general-moment-comment-side-effects',
               title: '动态评论联动私聊 / 群聊',
               description: '允许动态评论任务在公开评论外，少量写入相关私聊或群聊。',
@@ -2571,6 +2579,7 @@ export class GeneralSettingsPanel {
     this.typingDotsToggle = this.element.querySelector('#general-typing-dots');
     this.richIframeScriptsToggle = this.element.querySelector('#general-rich-iframe-scripts');
     this.traditionalProtocolToggle = this.element.querySelector('#general-traditional-model-output-protocol');
+    this.chatAiTimeToggle = this.element.querySelector('#general-chat-ai-time');
     this.toastEnabledToggle = this.element.querySelector('#general-toast-enabled');
     this.replyNotificationSettingsCleanup = bindReplyNotificationSettings({
       root: this.element,
@@ -2985,6 +2994,11 @@ export class GeneralSettingsPanel {
       window.dispatchEvent(new CustomEvent('app-settings-changed', {
         detail: { key: 'traditionalModelOutputProtocolEnabled', value: enabled },
       }));
+    });
+    this.chatAiTimeToggle?.addEventListener('change', (e) => {
+      const value = e.target.checked === true;
+      appSettings.update({ chatAiTimeEnabled: value });
+      window.dispatchEvent(new CustomEvent('app-settings-changed', { detail: { key: 'chatAiTimeEnabled', value } }));
     });
     this.toastEnabledToggle?.addEventListener('change', (e) => {
       const enabled = Boolean(e?.target?.checked);

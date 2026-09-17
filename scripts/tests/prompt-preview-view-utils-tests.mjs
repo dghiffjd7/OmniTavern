@@ -433,6 +433,17 @@ const request = {
 }
 
 {
+  for (const stream of [true, false]) {
+    const view = buildPromptOverviewView({
+      stream,
+      responseDiagnostics: { latencyMs: 86394, firstTokenLatencyMs: 86376,
+        completionTokens: 4337, outputDurationMs: 18, tokensPerSecond: 240944.4 },
+    });
+    assert.match(view.plain, /output speed: —/);
+    assert.doesNotMatch(view.html, /240944/);
+    assert.match(view.html, stream ? /未观察到持续分段输出，无法测量/ : /非流式回复无法测量输出速度/);
+  }
+  console.log('ok - prompt view suppresses invalid legacy burst TPS without rewriting history');
   await initializeI18n({
     preference: 'en',
     documentLike: null,

@@ -1,24 +1,28 @@
 import { translateUiText as t } from '../../i18n/index.js';
 import { createRpMessageIconMarkup } from './rp-message-actions-ui-utils.js';
 import { createTextFragmentEditor } from './text-fragment-editor.js';
+import { agentIconMarkup } from '../../agent/agent-icons.js';
 
 const controls = 'a[href],button,input,textarea,select,summary,audio,video,canvas,iframe,[contenteditable="true"],.chat-reasoning,.chat-reply-preview,[data-i18n-skip-selection]';
 const elementOf = node => node?.nodeType === 1 ? node : node?.parentElement;
 
 // Delegated listeners survive pagination/rerenders. Touch scrolling stays native
 // until a held finger moves; stationary holds retain ChatUI's original menu.
-export const bindBubbleTextSelection = ({ ui, runtime, canEdit = () => true, documentRef = document,
+export const bindBubbleTextSelection = ({ ui, runtime, canEdit = () => true, toolbox = null, documentRef = document,
   onError = message => window.toastr?.info?.(t(message)) } = {}) => {
   const win = documentRef.defaultView, root = ui.scrollEl, selection = () => win.getSelection();
   if (!root) return { dispose() {} };
   const editor = createTextFragmentEditor({ documentRef }), bindings = [];
   const bar = documentRef.createElement('button'); bar.type = 'button'; bar.className = 'bubble-selection-edit'; bar.hidden = true;
   bar.innerHTML = createRpMessageIconMarkup('edit', { size:18 });
+  const tools = documentRef.createElement('button'); tools.type = 'button'; tools.className = 'bubble-selection-tools'; tools.hidden = true;
+  tools.innerHTML = agentIconMarkup('toolbox'); tools.title = t('使用 Agent 处理所选文字'); tools.setAttribute('aria-label', tools.title);
+  const hideBar = () => { bar.hidden = true; tools.hidden = true; };
   const style = documentRef.createElement('style');
-  style.textContent = `.bubble-selection-edit{position:fixed;z-index:22000;box-sizing:border-box;width:44px;height:44px;padding:10px;align-items:center;justify-content:center;border:1px solid var(--app-border-default);border-radius:var(--app-radius-md);box-shadow:var(--app-shadow-md);background:var(--app-surface-card);color:var(--app-text-primary);cursor:pointer}.bubble-selection-edit:not([hidden]){display:inline-flex}.bubble-selection-edit:focus-visible{outline:2px solid var(--app-accent-primary);outline-offset:3px}`;
-  documentRef.head.append(style); documentRef.body.append(bar);
+  style.textContent = `.bubble-selection-edit,.bubble-selection-tools{position:fixed;z-index:22000;box-sizing:border-box;width:44px;height:44px;padding:10px;align-items:center;justify-content:center;border:1px solid var(--app-border-default);border-radius:var(--app-radius-md);box-shadow:var(--app-shadow-md);background:var(--app-surface-card);color:var(--app-text-primary);cursor:pointer}.bubble-selection-edit:not([hidden]),.bubble-selection-tools:not([hidden]){display:inline-flex}.bubble-selection-edit:focus-visible,.bubble-selection-tools:focus-visible{outline:2px solid var(--app-accent-primary);outline-offset:3px}`;
+  documentRef.head.append(style); documentRef.body.append(bar, tools);
   const listen = (target, type, fn, options) => { target?.addEventListener(type, fn, options); bindings.push(() => target?.removeEventListener(type, fn, options)); };
-  let chosen = null, dragging = false, gesture = null, suppressClick = false, timer = 0, generation = 0, opening = false;
+  let chosen = null, dragging = false, gesture = null, suppressClick = false, timer = 0, generation = 0, opening = false, picking = false;
   const hideMenu = () => { ui.clearLongPress(); ui.contextMenu.style.display = 'none'; ui.hideReactionPicker?.(); };
   const eligible = bubble => {
     const wrapper = bubble?.closest('[data-msg-id][data-role]');
@@ -37,23 +41,32 @@ export const bindBubbleTextSelection = ({ ui, runtime, canEdit = () => true, doc
     const range = current.getRangeAt(0), bubble = bubbleAt(range.startContainer);
     if (!bubble || bubbleAt(range.endContainer) !== bubble || range.cloneContents().querySelector?.(controls)) return null;
     const text = current.toString(); if (!text.trim()) return null;
-    return { range:range.cloneRange(), bubble, text, messageId:bubble.closest('[data-msg-id]').dataset.msgId };
+    const messageId = bubble.closest('[data-msg-id]').dataset.msgId;
+    const unchanged = chosen?.messageId === messageId && chosen.text === text
+      && chosen.range.startContainer === range.startContainer && chosen.range.startOffset === range.startOffset
+      && chosen.range.endContainer === range.endContainer && chosen.range.endOffset === range.endOffset;
+    return { range:range.cloneRange(), bubble, text, messageId,
+      toolIdentity: unchanged ? chosen.toolIdentity : toolbox?.captureSelectionIdentity(messageId) };
   };
   const refresh = () => {
-    if (dragging || opening || editor.isOpen) { bar.hidden = true; return; }
+    if (dragging || opening || editor.isOpen) { hideBar(); return; }
     chosen = readSelection();
-    if (!chosen) { bar.hidden = true; return; }
+    if (!chosen) { hideBar(); return; }
     const rect = chosen.range.getBoundingClientRect(), viewport = win.visualViewport;
     const left = viewport?.offsetLeft || 0, top = viewport?.offsetTop || 0;
     const width = viewport?.width || win.innerWidth, height = viewport?.height || win.innerHeight;
     const bounds = root.getBoundingClientRect();
-    if (rect.bottom < Math.max(top, bounds.top) || rect.top > Math.min(top + height, bounds.bottom)) { bar.hidden = true; return; }
+    if (rect.bottom < Math.max(top, bounds.top) || rect.top > Math.min(top + height, bounds.bottom)) { hideBar(); return; }
     const label = t('编辑所选文字'); bar.title = label; bar.setAttribute('aria-label', label); bar.hidden = false;
-    bar.style.left = Math.max(left + 8, Math.min(left + width - bar.offsetWidth - 8, rect.left)) + 'px';
-    bar.style.top = Math.max(top + 8, Math.min(top + height - bar.offsetHeight - 8, rect.bottom + 8)) + 'px';
+    const assistant = chosen.bubble.closest('[data-role]')?.dataset.role === 'assistant';
+    tools.hidden = !assistant || !(picking || toolbox?.hasSelectionTools()); bar.hidden = picking;
+    const buttonsWidth = !bar.hidden && !tools.hidden ? 92 : 44;
+    bar.style.left = Math.max(left + 8, Math.min(left + width - buttonsWidth - 8, rect.left)) + 'px';
+    bar.style.top = Math.max(top + 8, Math.min(top + height - 44 - 8, rect.bottom + 8)) + 'px';
+    tools.style.left = `${parseFloat(bar.style.left) + (bar.hidden ? 0 : 48)}px`; tools.style.top = bar.style.top;
   };
   const scheduleRefresh = () => { clearTimeout(timer); timer = setTimeout(refresh, 120); };
-  const reset = () => { generation++; chosen = null; gesture = null; dragging = false; suppressClick = false; clearTimeout(timer); bar.hidden = true; ui.clearLongPress(); editor.close(); };
+  const reset = () => { generation++; chosen = null; gesture = null; dragging = false; suppressClick = false; picking = false; clearTimeout(timer); hideBar(); ui.clearLongPress(); editor.close(); };
   const caretAt = (point, bubble) => {
     const position = documentRef.caretPositionFromPoint?.(point.clientX, point.clientY);
     let range;
@@ -61,11 +74,11 @@ export const bindBubbleTextSelection = ({ ui, runtime, canEdit = () => true, doc
     else range = documentRef.caretRangeFromPoint?.(point.clientX, point.clientY);
     return range && bubbleAt(range.startContainer) === bubble ? range : null;
   };
-  listen(root, 'pointerdown', event => { if (event.pointerType === 'mouse') suppressClick = false; dragging = true; bar.hidden = true; }, true);
+  listen(root, 'pointerdown', event => { if (event.pointerType === 'mouse') suppressClick = false; chosen = null; dragging = true; hideBar(); }, true);
   listen(documentRef, 'pointerup', () => { dragging = false; scheduleRefresh(); });
-  listen(documentRef, 'pointercancel', () => { dragging = false; bar.hidden = true; });
+  listen(documentRef, 'pointercancel', () => { dragging = false; hideBar(); });
   listen(documentRef, 'selectionchange', scheduleRefresh);
-  listen(root, 'scroll', () => { bar.hidden = true; scheduleRefresh(); }, { passive:true });
+  listen(root, 'scroll', () => { hideBar(); scheduleRefresh(); }, { passive:true });
   listen(win, 'resize', scheduleRefresh); listen(win.visualViewport, 'resize', scheduleRefresh);
   listen(win, 'session-changed', reset); listen(win, 'pagehide', reset);
   listen(root, 'touchstart', event => {
@@ -86,7 +99,7 @@ export const bindBubbleTextSelection = ({ ui, runtime, canEdit = () => true, doc
     if (!event.cancelable) { current.scrolling = true; return; }
     event.preventDefault();
     if (!current.selecting && distance < 8) return;
-    hideMenu(); bar.hidden = true;
+    hideMenu(); hideBar();
     const end = caretAt(touch, current.bubble); if (!end) return;
     const reverse = current.anchor.compareBoundaryPoints(win.Range.START_TO_START, end) > 0;
     const start = reverse ? end : current.anchor, finish = reverse ? current.anchor : end;
@@ -109,7 +122,7 @@ export const bindBubbleTextSelection = ({ ui, runtime, canEdit = () => true, doc
   }, { capture:true, passive:false });
   listen(root, 'touchcancel', () => {
     if (gesture?.selecting) { selection().removeAllRanges(); chosen = null; }
-    gesture = null; dragging = false; bar.hidden = true; ui.clearLongPress();
+    gesture = null; dragging = false; hideBar(); ui.clearLongPress();
   }, { capture:true, passive:true });
   listen(root, 'click', event => {
     if (!suppressClick) return;
@@ -122,7 +135,7 @@ export const bindBubbleTextSelection = ({ ui, runtime, canEdit = () => true, doc
   listen(bar, 'click', async () => {
     if (opening || editor.isOpen || !chosen?.bubble.isConnected) return;
     const request = chosen, version = generation;
-    opening = true; bar.hidden = true; hideMenu();
+    opening = true; hideBar(); hideMenu();
     try {
       const draft = await runtime.open({ messageId:request.messageId, selectedText:request.text });
       if (version !== generation || !request.bubble.isConnected) return;
@@ -131,10 +144,25 @@ export const bindBubbleTextSelection = ({ ui, runtime, canEdit = () => true, doc
     } catch (error) { if (version === generation) onError(error.message); }
     finally { opening = false; }
   });
-  const observer = new win.MutationObserver(() => { if (chosen && !chosen.bubble.isConnected) { chosen = null; bar.hidden = true; } });
+  listen(tools, 'pointerdown', event => event.preventDefault());
+  listen(tools, 'click', async () => {
+    if (opening || !chosen?.bubble.isConnected) return;
+    const request = chosen, version = generation;
+    opening = true; hideBar(); hideMenu();
+    try {
+      await toolbox?.useSelection({ messageId: request.messageId, selectedText: request.text, expectedIdentity: request.toolIdentity });
+      if (version === generation) { selection().removeAllRanges(); chosen = null; }
+    } catch (error) { if (version === generation) onError(error.message); }
+    finally { opening = false; }
+  });
+  toolbox?.setSelectionController({
+    start: () => { picking = true; selection().removeAllRanges(); chosen = null; hideBar(); },
+    cancel: () => { picking = false; hideBar(); },
+  });
+  const observer = new win.MutationObserver(() => { if (chosen && !chosen.bubble.isConnected) { chosen = null; hideBar(); } });
   observer.observe(root, { childList:true, subtree:true });
   return {
     closeEditor({ dryRun = false } = {}) { if (!editor.isOpen) return false; if (!dryRun) editor.close(); return true; },
-    dispose() { reset(); observer.disconnect(); bindings.forEach(remove => remove()); bar.remove(); style.remove(); editor.dispose(); },
+    dispose() { reset(); toolbox?.setSelectionController(null); observer.disconnect(); bindings.forEach(remove => remove()); bar.remove(); tools.remove(); style.remove(); editor.dispose(); },
   };
 };

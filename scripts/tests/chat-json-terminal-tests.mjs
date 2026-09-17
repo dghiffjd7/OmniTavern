@@ -233,6 +233,7 @@ const envelope = payload => JSON.stringify({
 
 {
   let firstDeltaCount = 0;
+  let deliveryCount = 0;
   const chunks = [
     '  ',
     '{"version":"phone.reply.ir.v1",',
@@ -252,9 +253,11 @@ const envelope = payload => JSON.stringify({
     target: privateTarget,
     stream: true,
     onFirstProviderDelta: () => { firstDeltaCount += 1; },
+    onProviderDelta: () => { deliveryCount += 1; },
   });
   assert.equal(attempt.ok, true, attempt.reason);
   assert.equal(firstDeltaCount, 1);
+  assert.equal(deliveryCount, 2, 'all meaningful deltas are measured, blank chunks are ignored');
   assert.equal(attempt.diagnostics.firstMeaningfulDeltaObserved, true);
   assert.match(attempt.raw, /流式完成/u);
   console.log('ok - JSON streaming records the first non-empty text delta but commits only after the full object validates');

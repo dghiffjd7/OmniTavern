@@ -693,6 +693,7 @@ import {
       { speaker: '发布者', content: '回复', time: '10:01' },
     ],
     {
+      timeMode: 'ai',
       getActiveUserName: () => '我',
       normalizeName: (value) => String(value || '').trim(),
       normalizeLooseName: (value) => String(value || '').trim(),
@@ -702,7 +703,11 @@ import {
       formatNowTime: () => 'NOW',
     },
   );
-  assert.deepEqual(messages, [
+  for (const item of messages) assert.equal(item.message.meta.chatTime.source, 'ai');
+  assert.deepEqual(messages.map(item => {
+    const { chatTime, ...meta } = item.message.meta;
+    return { ...item, message: { ...item.message, meta } };
+  }), [
     {
       role: 'user',
       message: {

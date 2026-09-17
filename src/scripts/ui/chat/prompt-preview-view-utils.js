@@ -1,4 +1,5 @@
 import { renderRequestParamReport, requestParamStatusLabel } from '../request-param-report-view.js';
+import { resolveResponseOutputSpeed } from './request-response-diagnostics-utils.js';
 import {
   formatDateTime as formatLocalizedDateTime,
   formatNumber,
@@ -316,13 +317,23 @@ export const buildPromptOverviewView = (request = null, {
   const firstTokenLatencyMs = toFiniteNumber(
     diagnostics.firstMeaningfulDeltaLatencyMs ?? diagnostics.firstTokenLatencyMs,
   );
-  const tokensPerSecond = toFiniteNumber(diagnostics.tokensPerSecond);
+  const outputSpeed = resolveResponseOutputSpeed({ ...diagnostics, stream: diagnostics.stream ?? req.stream });
+  const tokensPerSecond = outputSpeed.tokensPerSecond;
   const firstTokenValue = firstTokenLatencyMs !== null
     ? formatDuration(firstTokenLatencyMs)
     : (req.stream ? '未记录' : '非流式');
   const tpsValue = tokensPerSecond !== null
     ? `${tokensPerSecond.toFixed(1)} tok/s`
     : '—';
+  const tpsNote = outputSpeed.outputSpeedStatus === 'insufficient_samples'
+    ? '未观察到持续分段输出，无法测量'
+    : outputSpeed.outputSpeedStatus === 'non_stream'
+      ? '非流式回复无法测量输出速度'
+      : outputSpeed.outputSpeedStatus === 'multiple_calls'
+        ? '多次请求不合并计算输出速度'
+        : outputSpeed.outputSpeedStatus === 'measured'
+          ? '输出 token ÷ 首段内容至结束时长'
+          : '缺少输出用量或计时，无法测量';
   const fingerprint = String(diagnostics.systemFingerprint || '').trim();
   const providerUnavailable = translateUiText('供应方未返回');
   const responseIdentities = [
@@ -344,7 +355,9 @@ export const buildPromptOverviewView = (request = null, {
       latencyMs: toFiniteNumber(call?.latencyMs),
       firstMeaningfulDeltaLatencyMs: toFiniteNumber(call?.firstMeaningfulDeltaLatencyMs),
       outputDurationMs: toFiniteNumber(call?.outputDurationMs),
-      tokensPerSecond: toFiniteNumber(call?.tokensPerSecond),
+      streamDeltaCount: toFiniteNumber(call?.streamDeltaCount),
+      streamObservedDurationMs: toFiniteNumber(call?.streamObservedDurationMs),
+      ...resolveResponseOutputSpeed(call || {}),
       promptTokens: toFiniteNumber(call?.promptTokens),
       completionTokens: toFiniteNumber(call?.completionTokens),
       totalTokens: toFiniteNumber(call?.totalTokens),
@@ -412,9 +425,9 @@ export const buildPromptOverviewView = (request = null, {
     `<span class="prompt-overview-role-chip" data-prompt-role="${escapeHtml(role)}">${escapeHtml(role)} ×${count}</span>`
   )).join('');
   const metrics = [
-    { label: '总响应耗时', value: formatDuration(diagnostics.latencyMs), note: '请求开始至 usage 返回' },
-    { label: '首字延迟', value: firstTokenValue, note: req.stream ? '首个 provider 流片段' : '仅流式请求可测' },
-    { label: '输出速度', value: tpsValue, note: '真实输出 token ÷ 首字后时长' },
+    { label: '总响应耗时', value: formatDuration(diagnostics.latencyMs), note: '请求开始至响应结束' },
+    { label: '首字延迟', value: firstTokenValue, note: req.stream ? '收到首段有效正文的时间' : '仅流式请求可测' },
+    { label: '输出速度', value: tpsValue, note: tpsNote },
     { label: '输出 Token', value: formatInt(diagnostics.completionTokens), note: '供应方 usage' },
     ...(diagnostics.webSearchRequests !== null && diagnostics.webSearchRequests !== undefined
       ? [{ label: '原生搜索次数', value: formatInt(diagnostics.webSearchRequests), note: webSearchEngine || '供应方 usage' }]
@@ -613,6 +626,7 @@ export const buildPromptOverviewView = (request = null, {
     `total latency: ${formatDuration(diagnostics.latencyMs)}`,
     `first token latency: ${firstTokenValue}`,
     `output speed: ${tpsValue}`,
+    `output speed status: ${outputSpeed.outputSpeedStatus}`,
     `completion tokens: ${formatInt(diagnostics.completionTokens)}`,
     `system fingerprint: ${fingerprint || providerUnavailable}`,
     diagnostics.modelVersion ? `model version: ${String(diagnostics.modelVersion)}` : '',

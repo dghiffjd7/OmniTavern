@@ -54,6 +54,9 @@ export const createGenerationProviderCallDiagnosticsTracker = ({ now = Date.now 
       firstTokenLatencyMs: null,
       firstMeaningfulDeltaAt: null,
       firstMeaningfulDeltaLatencyMs: null,
+      streamDeltaCount: 0,
+      lastMeaningfulDeltaAt: null,
+      streamObservedDurationMs: null,
       outputDurationMs: null,
       tokensPerSecond: null,
       promptTokens: null,
@@ -83,6 +86,19 @@ export const createGenerationProviderCallDiagnosticsTracker = ({ now = Date.now 
     });
     Object.assign(call, next);
     return Boolean(call.firstMeaningfulDeltaAt);
+  };
+
+  // Constant-size telemetry. Only the first delta asks the bridge to publish a
+  // snapshot; later deltas update two scalars without cloning or refreshing UI.
+  const observeMeaningfulDelta = (callId = activeCallId, { at = null } = {}) => {
+    const call = getCall(callId);
+    if (!call || call.outcome !== 'running' || !call.stream) return false;
+    const observedAt = timestamp(at, timestamp(now?.(), Date.now()));
+    if (observedAt < call.startedAt) return false;
+    const first = markFirstMeaningfulDelta(callId, { at: observedAt });
+    call.streamDeltaCount += 1;
+    call.lastMeaningfulDeltaAt = Math.max(call.lastMeaningfulDeltaAt || 0, observedAt);
+    return first;
   };
 
   const observeUsage = (callId = activeCallId, usage = null) => {
@@ -126,6 +142,7 @@ export const createGenerationProviderCallDiagnosticsTracker = ({ now = Date.now 
   return {
     start,
     markFirstMeaningfulDelta,
+    observeMeaningfulDelta,
     observeUsage,
     finish,
     getActiveCallId: () => activeCallId,

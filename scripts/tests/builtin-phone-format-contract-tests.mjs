@@ -90,7 +90,7 @@ const parse = (raw, userName = '我') => {
   assert.equal(events[0].moments[0].views, 67);
   assert.equal(events[0].moments[0].comments[0].author, '结衣');
   assert.doesNotMatch(raw, /author::|content::/);
-  console.log('ok - moment post serializer matches the parser five-field row contract');
+  console.log('ok - moment post serializer matches the parser optional-time row contract');
 }
 
 {
@@ -234,7 +234,7 @@ const parse = (raw, userName = '我') => {
   assert.ok(result.issues.includes('moment_post.invalid_row'));
 
   const snippet = getBuiltinPhoneFormatGuardianSnippet('momentPost');
-  assert.match(snippet.join('\n'), /发布者--动态正文--HH:mm--0--0/);
+  assert.match(snippet.join('\n'), /发布者--动态正文--0--0/);
   assert.doesNotMatch(snippet.join('\n'), /author::|content::/);
   console.log('ok - validator rejects the stale Guardian moment example and shared snippet is parser-compatible');
 }
@@ -351,7 +351,7 @@ const parse = (raw, userName = '我') => {
     new URL('../../src/scripts/ui/chat/chat-format-guardian-utils.js', import.meta.url),
     'utf8',
   );
-  assert.match(guardianSource, /getBuiltinPhoneFormatGuardianSnippet\(id\)/);
+  assert.match(guardianSource, /getBuiltinPhoneFormatGuardianSnippet\(id, \{ timeMode \}\)/);
   assert.doesNotMatch(guardianSource, /author:: 发布者|content:: 动态正文/);
 
   const panelSource = await readFile(

@@ -71,6 +71,9 @@ export const extractRenderedAgentBodyText = (displaySource, { documentRef = docu
 
 export const createRenderedAgentTargetResolver = ({ getDisplaySource, getReasoningBoundaries = () => ({}), documentRef = document } = {}) =>
   async (source, rule, options = {}) => {
+    if (typeof options.renderedSelection === 'string') return resolveRenderedAgentTarget(source, options.renderedSelection, {
+      excludedRanges: boundaryRanges(String(source), getReasoningBoundaries(options.context)),
+    });
     if (rule?.mode !== 'rendered' || options.selection) return resolveAgentTextTargetAsync(source, rule, options);
     const boundaries = getReasoningBoundaries(options.context);
     const display = await getDisplaySource(options.message, options.context);

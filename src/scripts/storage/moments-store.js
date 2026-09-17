@@ -1,3 +1,5 @@
+import { initializeProtocolMessageTime, preserveMessageDisplayTime } from '../utils/chat-time-policy.js';
+
 /**
  * Moments (动态) store - simplified
  * - Persists to disk (Tauri save_kv/load_kv) with localStorage fallback
@@ -323,6 +325,12 @@ export class MomentsStore {
         const existingBySig = sig ? list.find(x => String(x.signature || '').trim() === sig) : null;
         const id = String(moment.id || '').trim() || existingBySig?.id || genId('moment');
         const existingById = list.find(m => m && m.id === id) || null;
+        const existing = existingById || existingBySig;
+        if (moment.protocolTimeMode) {
+            moment = { ...moment };
+            if (existing) preserveMessageDisplayTime(moment, existing);
+            else initializeProtocolMessageTime(moment, { timeMode: moment.protocolTimeMode, modelTime: moment.time });
+        }
 
         // Patch-safe updates: only overwrite fields if provided, otherwise keep existing value.
         // (UI may call upsert with partial objects for backfill/migration.)
@@ -355,6 +363,12 @@ export class MomentsStore {
                 const rawId = String(c.id || '').trim();
                 const id = (rawId && !used.has(rawId)) ? rawId : genId('comment');
                 used.add(id);
+                const previous = existing?.comments?.find(item => item.id === id);
+                const nextComment = { ...c };
+                if (moment.protocolTimeMode) {
+                    if (previous) preserveMessageDisplayTime(nextComment, previous);
+                    else initializeProtocolMessageTime(nextComment, { timeMode: moment.protocolTimeMode, modelTime: c.time });
+                }
                 out.push({
                     id,
                     author: String(c.author || '').trim(),
@@ -366,7 +380,8 @@ export class MomentsStore {
                             : 'output',
                     replyTo: String(c.replyTo || '').trim(),
                     replyToAuthor: String(c.replyToAuthor || '').trim(),
-                    time: String(c.time || ''),
+                    time: String(nextComment.time || ''),
+                    ...(nextComment.meta?.chatTime ? { meta: { chatTime: nextComment.meta.chatTime } } : {}),
                     timestamp: Number.isFinite(Number(c.timestamp)) ? Number(c.timestamp) : Date.now(),
                 });
             });
@@ -383,7 +398,9 @@ export class MomentsStore {
             ? normalizeMentions(moment.mentions)
             : normalizeMentions(Array.isArray(existingById?.mentions) ? existingById.mentions : (Array.isArray(existingBySig?.mentions) ? existingBySig.mentions : []));
 
-        const timestamp = hasOwn(moment, 'timestamp')
+        const timestamp = moment.protocolTimeMode && existing
+            ? existing.timestamp
+            : hasOwn(moment, 'timestamp')
             ? (Number.isFinite(Number(moment.timestamp)) ? Number(moment.timestamp) : Date.now())
             : (Number.isFinite(Number(existingById?.timestamp)) ? Number(existingById.timestamp) : (Number.isFinite(Number(existingBySig?.timestamp)) ? Number(existingBySig.timestamp) : Date.now()));
 
@@ -403,6 +420,7 @@ export class MomentsStore {
             regexMode,
             content,
             time,
+            ...((moment.meta?.chatTime || existing?.meta?.chatTime) ? { meta: { chatTime: moment.meta?.chatTime || existing.meta.chatTime } } : {}),
             views,
             likes,
             userLiked,
@@ -463,6 +481,7 @@ export class MomentsStore {
                 replyTo: String(c.replyTo || '').trim(),
                 replyToAuthor: String(c.replyToAuthor || '').trim(),
                 time: String(c.time || ''),
+                ...(c.meta?.chatTime ? { meta: { chatTime: c.meta.chatTime } } : {}),
                 timestamp: Number.isFinite(Number(c.timestamp)) ? Number(c.timestamp) : Date.now(),
             });
         });

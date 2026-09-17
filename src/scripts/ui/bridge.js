@@ -19,6 +19,8 @@ import {
   mergeWebSources,
 } from '../api/web-search-runtime.js';
 import { resolveBuiltinPhoneFormatReminderPlan } from '../utils/builtin-phone-format-contract.js';
+import { getChatTimeMode } from '../utils/chat-time-policy.js';
+import { projectPhonePromptTime, withoutPhonePromptTime } from '../utils/phone-format-time-prompt.js';
 import {
   normalizePhoneFormatPromptDepth,
   normalizePhoneFormatPromptPosition,
@@ -2599,15 +2601,19 @@ class AppBridge {
     return localized ? getLocalizedPromptText(key, fallback) : fallback;
   }
 
-  replaceMomentMediaModePrompt(content, mode = 'placeholder') {
+  replaceMomentMediaModePrompt(content, mode = 'placeholder', { timeMode = getChatTimeMode() } = {}) {
     const raw = String(content || '');
     if (!raw.trim()) return raw;
-    const replacement = this.buildMomentMediaModePrompt(mode);
+    const replacement = projectPhonePromptTime(this.buildMomentMediaModePrompt(mode), { timeMode, surface: 'moment' });
     for (const candidateMode of ['placeholder', 'image_prompt', 'ai']) {
       const canonical = this.buildMomentMediaModePrompt(candidateMode, { localized: false });
       const active = this.buildMomentMediaModePrompt(candidateMode);
       if (canonical && raw.includes(canonical)) return raw.replace(canonical, replacement);
       if (active && active !== canonical && raw.includes(active)) return raw.replace(active, replacement);
+      for (const candidate of [canonical, active]) {
+        const untimed = withoutPhonePromptTime(candidate);
+        if (untimed && raw.includes(untimed)) return raw.replace(untimed, replacement);
+      }
     }
     const blockRe = /动态如果有配图[^\n\r]*(?:(?:\r?\n)(?!(?:但是角色发布的动态可以有路人参与评论|路人必须生成具体网名|每条动态|使用moment_start|请勿生成多个|<发布动态的目的与时机>|<\/QQ空间格式介绍>))[^\n\r]*){0,5}/;
     if (blockRe.test(raw)) return raw.replace(blockRe, replacement);
@@ -2636,17 +2642,20 @@ class AppBridge {
     return `${raw.replace(/\s+$/, '')}\n\n${replacement}`;
   }
 
-  applyAutoImageModeToPhoneFormat(content, autoImagePromptEnabled = false) {
+  applyAutoImageModeToPhoneFormat(content, autoImagePromptEnabled = false, { timeMode = getChatTimeMode() } = {}) {
     const raw = String(content || '');
     if (!raw) return raw;
     const localizedLegacy = getLocalizedPromptText('phone_image_rules.legacy', LEGACY_PHONE_IMAGE_MESSAGE_RULES);
     const localizedCurrent = getLocalizedPromptText('phone_image_rules.current', CURRENT_PHONE_IMAGE_MESSAGE_RULES);
-    if (autoImagePromptEnabled) {
-      if (raw.includes(localizedLegacy)) return raw.split(localizedLegacy).join(localizedCurrent);
-      return raw.split(LEGACY_PHONE_IMAGE_MESSAGE_RULES).join(CURRENT_PHONE_IMAGE_MESSAGE_RULES);
+    const candidates = autoImagePromptEnabled
+      ? [[localizedLegacy, localizedCurrent], [LEGACY_PHONE_IMAGE_MESSAGE_RULES, CURRENT_PHONE_IMAGE_MESSAGE_RULES]]
+      : [[localizedCurrent, localizedLegacy], [CURRENT_PHONE_IMAGE_MESSAGE_RULES, LEGACY_PHONE_IMAGE_MESSAGE_RULES]];
+    for (const [before, after] of candidates) {
+      for (const variant of [before, withoutPhonePromptTime(before)]) {
+        if (variant && raw.includes(variant)) return raw.split(variant).join(projectPhonePromptTime(after, { timeMode }));
+      }
     }
-    if (raw.includes(localizedCurrent)) return raw.split(localizedCurrent).join(localizedLegacy);
-    return raw.split(CURRENT_PHONE_IMAGE_MESSAGE_RULES).join(LEGACY_PHONE_IMAGE_MESSAGE_RULES);
+    return raw;
   }
 
   buildPhoneFormatPromptEntries(preset = null, options = {}) {
@@ -2667,17 +2676,27 @@ class AppBridge {
         ? source[spec.rulesKey]
         : String(seed?.[spec.rulesKey] ?? '');
       let content = String(raw ?? '');
+      const timeMode = options.timeMode ?? getChatTimeMode();
+      const officialTimeTemplate = withoutPhonePromptTime(content) === seed[spec.rulesKey]
+        || withoutPhonePromptTime(content) === getLocalizedPromptText(spec.rulesKey, seed[spec.rulesKey]);
       if (spec.rulesKey === 'phone_format_chat_rules') {
         content = this.applyAutoImageModeToPhoneFormat(
           content,
           options?.autoImagePromptEnabled === true,
+          { timeMode },
         );
       }
       if (spec.rulesKey === 'phone_format_moment_rules') {
-        content = this.replaceMomentMediaModePrompt(content, momentMediaMode);
+        content = this.replaceMomentMediaModePrompt(content, momentMediaMode, { timeMode });
+      }
+      if (officialTimeTemplate && ['phone_format_chat_rules', 'phone_format_moment_rules'].includes(spec.rulesKey)) {
+        content = projectPhonePromptTime(content, { timeMode, surface: spec.rulesKey === 'phone_format_moment_rules' ? 'moment' : 'chat' });
       }
       if (spec.rulesKey === 'phone_format_moment_rules' && momentCreateRules) {
         content = this.replaceMomentPurposeBlockWithDecisionPrompt(content, momentCreateRules);
+      }
+      if (['phone_format_chat_rules', 'phone_format_moment_rules'].includes(spec.rulesKey)) {
+        content += `\n${getLocalizedPromptText(timeMode === 'ai' ? 'phone_time.ai' : 'phone_time.local')}`;
       }
       if (!content.trim()) return;
       const order = Number.isFinite(Number(spec.order)) ? Number(spec.order) : index;
@@ -4241,6 +4260,7 @@ class AppBridge {
       });
       const phoneTransportPlan = this.lastPhoneFormatTransportPlan || {};
       const privateChatProviderFcTarget = {
+        timeMode: nextContext?.meta?.chatTimeMode ?? getChatTimeMode(),
         sessionId,
         targetName: String(nextContext?.session?.name || nextContext?.character?.name || '').trim(),
         speakerId: sessionId,
@@ -4261,6 +4281,7 @@ class AppBridge {
         ? nextContext.task.structuredTargets
         : {};
       const phoneBatchProviderFcTarget = {
+        timeMode: nextContext?.meta?.chatTimeMode ?? getChatTimeMode(),
         mode: String(phoneTransportPlan.surface || '').trim(),
         sessionId,
         targetName: String(
@@ -4743,7 +4764,7 @@ class AppBridge {
       };
       const markFirstProviderDelta = ({ at = Date.now() } = {}) => {
         if (!activeProviderCallId) return;
-        if (!providerCallTracker.markFirstMeaningfulDelta(activeProviderCallId, { at })) return;
+        if (!providerCallTracker.observeMeaningfulDelta(activeProviderCallId, { at })) return;
         if (this.lastRequest?.requestId === nativeRequestId) {
           this.lastRequest.responseDiagnostics = buildFirstTokenResponseDiagnostics(
             this.lastRequest.responseDiagnostics,
@@ -4774,6 +4795,9 @@ class AppBridge {
           'latencyMs',
           'outputDurationMs',
           'tokensPerSecond',
+          'streamDeltaCount',
+          'streamObservedDurationMs',
+          'outputSpeedStatus',
           'promptTokens',
           'completionTokens',
           'totalTokens',
@@ -4796,8 +4820,13 @@ class AppBridge {
       const completeGenerationDiagnostics = ({ completedAt = Date.now(), stream = false } = {}) => {
         if (this.lastRequest?.requestId !== nativeRequestId) return;
         const providerCalls = getProviderCalls();
+        const onlyCall = providerCalls.length === 1 ? providerCalls[0] : null;
         const next = buildCompletedResponseDiagnostics(
-          this.lastRequest.responseDiagnostics,
+          {
+            ...this.lastRequest.responseDiagnostics,
+            streamDeltaCount: onlyCall?.streamDeltaCount ?? null,
+            streamObservedDurationMs: onlyCall?.streamObservedDurationMs ?? null,
+          },
           {
             requestStartedAt: generationStartedAt,
             completedAt,
@@ -4808,6 +4837,7 @@ class AppBridge {
         if (providerCalls.length > 1) {
           next.outputDurationMs = null;
           next.tokensPerSecond = null;
+          next.outputSpeedStatus = 'multiple_calls';
         }
         this.lastRequest.responseDiagnostics = {
           ...next,
@@ -5320,7 +5350,7 @@ class AppBridge {
             signal: abortController.signal,
             requestOptions: requestPayloadOptions,
             onProviderUsage: requestOptions.onProviderUsage,
-            onFirstProviderDelta: markFirstProviderDelta,
+            onProviderDelta: markFirstProviderDelta,
           });
         } else {
           const sharedPhoneProviderFcAttemptOptions = {
@@ -5339,7 +5369,7 @@ class AppBridge {
             allowedStickerKeywords: privateChatProviderFcAllowedStickerKeywords,
             streamPreviewEnabled: phoneProviderFcStreamPreviewEnabled,
             onStructuredPreview: phoneStructuredPreviewCallback,
-            onFirstProviderDelta: markFirstProviderDelta,
+            onProviderDelta: markFirstProviderDelta,
             probationMode: phoneStructuredRouteDecision.layer !== 'verified_native_fc',
             preparedProviderRequestPlan: phoneProviderFcRequestPlan,
           };
@@ -6160,6 +6190,7 @@ class AppBridge {
       ? 'moment_comment'
       : (isGroupChat ? 'group_chat' : 'private_chat');
     const formatReminderPlan = resolveBuiltinPhoneFormatReminderPlan({
+      timeMode: context?.meta?.chatTimeMode ?? getChatTimeMode(settingsSnapshot),
       hasPreset: openAIFormatReminderState.hasPreset,
       isDefaultPreset: isDefaultOpenAIPreset,
       contractDisabled: explicitlyDisablePhoneFormat,
@@ -7448,6 +7479,7 @@ const stringifyMessageContent = (content) => {
           };
           if (!disablePhoneFormat) {
             const builtinEntries = this.buildPhoneFormatPromptEntries(syspActive, {
+              timeMode: context?.meta?.chatTimeMode ?? getChatTimeMode(settingsSnapshot),
               momentCreateRules: shouldEmbedMomentCreateInPhoneFormat && momentCreateEnabled ? momentCreateRules : '',
               momentMediaMode: settingsSnapshot.autoImagePromptMomentMediaMode,
               autoImagePromptEnabled: Boolean(autoImagePromptRules),

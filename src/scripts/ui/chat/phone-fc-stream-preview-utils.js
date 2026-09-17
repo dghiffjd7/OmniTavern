@@ -379,6 +379,7 @@ export const createPhoneFcToolPreviewCollector = ({
     pushDeltas(deltas = []) {
       let changed = false;
       let firstArgumentsObserved = false;
+      let argumentsObserved = false;
       for (const delta of (Array.isArray(deltas) ? deltas : [])) {
         if (!matches(delta)) continue;
         let fragment = String(delta?.argumentsDelta ?? '');
@@ -386,6 +387,7 @@ export const createPhoneFcToolPreviewCollector = ({
           fragment = String(delta.argumentsText);
         }
         if (!fragment) continue;
+        argumentsObserved = true;
         if (!firstArgumentsAt) {
           firstArgumentsAt = Number(now?.() || Date.now()) || Date.now();
           firstArgumentsObserved = true;
@@ -400,7 +402,7 @@ export const createPhoneFcToolPreviewCollector = ({
           firstPreviewAt = Number(now?.() || Date.now()) || Date.now();
         }
       }
-      return { ...lastState, changed, firstArgumentsObserved, firstArgumentsAt };
+      return { ...lastState, changed, argumentsObserved, firstArgumentsObserved, firstArgumentsAt };
     },
     getDiagnostics() {
       return {
@@ -424,6 +426,7 @@ export const createPhoneFcProviderStreamRuntime = ({
   toolName = '',
   onPreview = null,
   onFirstArgumentsDelta = null,
+  onArgumentsDelta = null,
   maxChars = 12000,
   now = Date.now,
 } = {}) => {
@@ -443,6 +446,9 @@ export const createPhoneFcProviderStreamRuntime = ({
     pushDeltas(deltas = []) {
       if (!streaming) return collector.getSnapshot();
       const state = collector.pushDeltas(deltas);
+      if (state.argumentsObserved) {
+        try { onArgumentsDelta?.({ at: Number(now?.() || Date.now()) || Date.now(), toolName: trim(toolName) }); } catch {}
+      }
       if (state.firstArgumentsObserved && !firstArgumentsReported) {
         firstArgumentsReported = true;
         try {

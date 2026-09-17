@@ -1,3 +1,5 @@
+import { getChatTimeMode, initializeProtocolMessageTime } from '../../utils/chat-time-policy.js';
+
 import {
   emitLifecycleTraceEvent,
   normalizeLifecycleTraceDetails,
@@ -1108,7 +1110,7 @@ export const buildMomentPrivateChatMessages = (
     userAvatar = '',
     assistantAvatar = '',
     getTargetContact = () => null,
-    formatNowTime = () => '',
+    timeMode = getChatTimeMode(),
   } = {},
 ) => {
   const list = Array.isArray(messages) ? messages : [];
@@ -1126,9 +1128,7 @@ export const buildMomentPrivateChatMessages = (
           userKey &&
           (speakerKey === userKey || normalizeLooseName(speakerKey) === normalizeLooseName(userKey)),
       );
-      const time =
-        String(payload?.time || '').trim() ||
-        String(formatNowTime?.() || '').trim();
+      const timed = initializeProtocolMessageTime({}, { timeMode, modelTime: payload?.time });
       if (isMe) {
         const parsed = parseSpecialMessage(content);
         return {
@@ -1139,20 +1139,22 @@ export const buildMomentPrivateChatMessages = (
             ...parsed,
             name: userDisplayName,
             avatar: userAvatar,
-            time,
-            meta: { ...(parsed.meta || {}), generatedByAssistant: true },
+            time: timed.time,
+            meta: { ...(parsed.meta || {}), ...timed.meta, generatedByAssistant: true },
           },
         };
       }
+      const parsed = parseSpecialMessage(content);
       return {
         role: 'assistant',
         message: {
           role: 'assistant',
           type: 'text',
-          ...parseSpecialMessage(content),
+          ...parsed,
           name: '助手',
           avatar: assistantAvatar || getTargetContact?.()?.avatar || '',
-          time,
+          time: timed.time,
+          meta: { ...(parsed.meta || {}), ...timed.meta },
         },
       };
     })
@@ -1169,7 +1171,7 @@ export const buildMomentGroupChatMessages = (
     userAvatar = '',
     resolveGroupSpeakerContact = () => null,
     resolveGroupSpeakerAvatar = () => '',
-    formatNowTime = () => '',
+    timeMode = getChatTimeMode(),
     targetSessionId = '',
   } = {},
 ) => {
@@ -1189,9 +1191,7 @@ export const buildMomentGroupChatMessages = (
           userKey &&
           (speakerKey === userKey || normalizeLooseName(speakerKey) === normalizeLooseName(userKey)),
       );
-      const time =
-        String(payload?.time || '').trim() ||
-        String(formatNowTime?.() || '').trim();
+      const timed = initializeProtocolMessageTime({}, { timeMode, modelTime: payload?.time });
       if (isMe) {
         const parsed = parseSpecialMessage(content);
         return {
@@ -1202,8 +1202,8 @@ export const buildMomentGroupChatMessages = (
             ...parsed,
             name: userDisplayName,
             avatar: userAvatar,
-            time,
-            meta: { ...(parsed.meta || {}), generatedByAssistant: true },
+            time: timed.time,
+            meta: { ...(parsed.meta || {}), ...timed.meta, generatedByAssistant: true },
           },
         };
       }
@@ -1217,7 +1217,8 @@ export const buildMomentGroupChatMessages = (
           ...parsed,
           name: speakerRaw || '成员',
           avatar: resolveGroupSpeakerAvatar?.(speakerRaw, sessionId, speakerContact) || '',
-          time,
+          time: timed.time,
+          meta: { ...(parsed.meta || {}), ...timed.meta },
           showName: true,
           speakerContactId: String(speakerContact?.id || '').trim(),
         },
@@ -1428,7 +1429,9 @@ export const runMomentCommentGeneration = async (
     logger = null,
   } = {},
 ) => {
-  const parser = createParser();
+  const parserOptions = { timeMode: context?.meta?.chatTimeMode ?? getChatTimeMode(),
+    sourceId: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}` };
+  const parser = createParser(parserOptions);
   let sawMomentReply = false;
   let retryRecovered = false;
   let fullRaw = '';
@@ -1464,7 +1467,7 @@ export const runMomentCommentGeneration = async (
     try {
       const parseMomentReplyFrom = async (text) => {
         if (!text) return false;
-        const retryParser = createParser();
+        const retryParser = createParser(parserOptions);
         const retryEvents = retryParser.push(text);
         const result = applyEvents(retryEvents);
         if (result?.touchedMoments) sawMomentReply = true;
@@ -1561,6 +1564,7 @@ export const createMomentCommentLifecycleRuntime = ({
 
   return async (momentId, commentText, meta = null) => {
     const previewOnly = meta?.previewOnly === true;
+    const chatTimeMode = getChatTimeMode();
     const record = previewOnly ? () => {} : emitRecord;
     const id = String(momentId || '').trim();
     const mode = String(meta?.mode || meta?.source || meta?.kind || '').trim().toLowerCase();
@@ -1737,6 +1741,7 @@ export const createMomentCommentLifecycleRuntime = ({
       bumpMomentEngagement,
       resolvePrivateChatTargetSessionId: resolvePrivateTarget,
       buildPrivateChatMessages: (messages, targetSessionId) => buildMomentPrivateChatMessages(messages, {
+        timeMode: chatTimeMode,
         getActiveUserName,
         normalizeName: normalize,
         normalizeLooseName: normalizeLoose,
@@ -1748,6 +1753,7 @@ export const createMomentCommentLifecycleRuntime = ({
       appendPrivateChatMessage,
       resolveGroupChatTargetSessionId,
       buildGroupChatMessages: (messages, targetSessionId) => buildMomentGroupChatMessages(messages, {
+        timeMode: chatTimeMode,
         getActiveUserName,
         normalizeName: normalize,
         normalizeLooseName: normalizeLoose,
@@ -1797,6 +1803,7 @@ export const createMomentCommentLifecycleRuntime = ({
         memoryGuidePosition: memoryRuntimeConfig.memoryGuidePosition,
         memoryGuideDepth: memoryRuntimeConfig.memoryGuideDepth,
       });
+      context.meta = { ...(context.meta || {}), chatTimeMode };
       if (previewOnly) return { ok:true, input:isPublishedMomentComment
         ? (momentPromptContent || getMomentPromptLine('moment_comment.image_only')) : userComment,
         context:{ ...context, meta:{ ...context.meta, previewOnly:true, skipScripts:true, macroVariableState:new Map(), agentPromptDraft:meta.agentPromptDraft } } };

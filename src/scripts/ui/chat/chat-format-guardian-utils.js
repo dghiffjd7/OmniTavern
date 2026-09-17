@@ -1,4 +1,5 @@
 import { DialogueStreamParser } from './dialogue-stream-parser.js';
+import { getChatTimeMode } from '../../utils/chat-time-policy.js';
 import {
   FORMAT_PATCH_MAX_CHANGED_LINES,
   FORMAT_PATCH_MAX_PATCHES,
@@ -242,7 +243,7 @@ export const resolveChatFormatGuardianFormatProfile = ({
   };
 };
 
-const normalizeEnabledFormatEntries = (enabledFormats = {}) => {
+const normalizeEnabledFormatEntries = (enabledFormats = {}, timeMode = getChatTimeMode()) => {
   if (Array.isArray(enabledFormats)) {
     return enabledFormats
       .map(item => trim(item))
@@ -250,7 +251,7 @@ const normalizeEnabledFormatEntries = (enabledFormats = {}) => {
       .map(id => ({
         id,
         label: CHAT_FORMAT_PROMPT_LABEL_KEYS[id] ? getPromptLine(CHAT_FORMAT_PROMPT_LABEL_KEYS[id]) : id,
-        snippet: getBuiltinPhoneFormatGuardianSnippet(id),
+        snippet: getBuiltinPhoneFormatGuardianSnippet(id, { timeMode }),
       }));
   }
   const src = isPlainObject(enabledFormats) ? enabledFormats : {};
@@ -259,7 +260,7 @@ const normalizeEnabledFormatEntries = (enabledFormats = {}) => {
     .map(id => ({
       id,
       label: getPromptLine(CHAT_FORMAT_PROMPT_LABEL_KEYS[id]),
-      snippet: getBuiltinPhoneFormatGuardianSnippet(id),
+      snippet: getBuiltinPhoneFormatGuardianSnippet(id, { timeMode }),
     }));
 };
 
@@ -330,8 +331,8 @@ const serializeFormatEntries = (entries = []) => (
 const buildPrivateChatTagName = ({ userName = '我', sessionLabel = '' } = {}) =>
   `${trim(userName, '我')}和${trim(sessionLabel, '联系人名')}的私聊`;
 
-const buildPrivateDirectRepairExample = ({ userName = '我', sessionLabel = '', fallbackTime = '' } = {}) => {
-  const time = trim(fallbackTime, '00:00');
+const buildPrivateDirectRepairExample = ({ userName = '我', sessionLabel = '', fallbackTime = '', timeMode = getChatTimeMode() } = {}) => {
+  const time = trim(fallbackTime);
   const contactName = getPromptLine('format_guardian.example.contact');
   return [
     getPromptLine('format_guardian.example.error_label'),
@@ -339,6 +340,7 @@ const buildPrivateDirectRepairExample = ({ userName = '我', sessionLabel = '', 
     '',
     getPromptLine('format_guardian.example.correct_label'),
     serializeBuiltinPhoneFormat('private_chat', {
+      timeMode,
       userName,
       targetName: trim(sessionLabel, contactName),
       messages: [{
@@ -355,9 +357,10 @@ const buildDirectRepairExample = ({
   sessionLabel = '',
   fallbackTime = '',
   target = CHAT_FORMAT_GUARDIAN_TARGETS.privateChat,
+  timeMode = getChatTimeMode(),
 } = {}) => {
   const normalizedTarget = normalizeChatFormatGuardianTarget(target, CHAT_FORMAT_GUARDIAN_TARGETS.privateChat);
-  const time = trim(fallbackTime, '00:00');
+  const time = trim(fallbackTime);
   if (normalizedTarget === CHAT_FORMAT_GUARDIAN_TARGETS.groupChat) {
     const memberA = getPromptLine('format_guardian.example.member_a');
     const memberB = getPromptLine('format_guardian.example.member_b');
@@ -367,6 +370,7 @@ const buildDirectRepairExample = ({
       '',
       getPromptLine('format_guardian.example.correct_label'),
       serializeBuiltinPhoneFormat('group_chat', {
+        timeMode,
         groupName: trim(sessionLabel, getPromptLine('format_guardian.example.group')),
         members: [memberA, memberB],
         messages: [{
@@ -399,6 +403,7 @@ const buildDirectRepairExample = ({
       '',
       getPromptLine('format_guardian.example.correct_label'),
       serializeBuiltinPhoneFormat('moment_post', {
+        timeMode,
         posts: [{
           author: trim(userName, '我'),
           content: getPromptLine('format_guardian.example.post_content'),
@@ -435,7 +440,7 @@ const buildDirectRepairExample = ({
       normalizedTarget === CHAT_FORMAT_GUARDIAN_TARGETS.forum) {
     return '';
   }
-  return buildPrivateDirectRepairExample({ userName, sessionLabel, fallbackTime });
+  return buildPrivateDirectRepairExample({ userName, sessionLabel, fallbackTime, timeMode });
 };
 
 const compactParserReportForPrompt = (report = null, { maxEvents = 6, maxIssues = 8 } = {}) => {
@@ -472,16 +477,17 @@ export const buildChatFormatGuardianModelPrompt = ({
   formatTarget = CHAT_FORMAT_GUARDIAN_TARGETS.privateChat,
   baseRevision = 'format-run:unbound',
   repairTarget = null,
+  timeMode = getChatTimeMode(),
 } = {}) => {
   const rawAssistantText = String(assistantText ?? '');
   const reminder = String(formatReminderText ?? '').trim();
   const customGuide = String(customFormatGuide ?? '').trim().slice(0, 6000);
-  const formatEntries = normalizeEnabledFormatEntries(enabledFormats);
+  const formatEntries = normalizeEnabledFormatEntries(enabledFormats, timeMode);
   const formatSummary = serializeFormatEntries(formatEntries);
   const compactReport = compactParserReportForPrompt(parserReport);
   const numberedAssistantText = rawAssistantText ? formatNumberedLines(rawAssistantText) : '';
   const looseChatRowCount = countLooseChatRows(rawAssistantText);
-  const repairFallbackTime = trim(compactReport?.repairFallbackTime, '00:00');
+  const repairFallbackTime = trim(compactReport?.repairFallbackTime);
   const privateTagName = buildPrivateChatTagName({ userName, sessionLabel });
   const normalizedTarget = normalizeChatFormatGuardianTarget(formatTarget, CHAT_FORMAT_GUARDIAN_TARGETS.privateChat);
   const hasPrivateFormat = formatEntries.some(entry => entry.id === 'privateChat');
@@ -492,6 +498,7 @@ export const buildChatFormatGuardianModelPrompt = ({
     userName,
     sessionLabel,
     fallbackTime: repairFallbackTime,
+    timeMode,
     target: normalizedTarget,
   });
   const noEventsHint = compactReport?.status === 'no_events'
@@ -502,7 +509,7 @@ export const buildChatFormatGuardianModelPrompt = ({
         hasPrivateFormat
           ? getPromptLine('format_guardian.no_events.private', { tag: privateTagName })
           : getPromptLine('format_guardian.no_events.current'),
-        getPromptLine('format_guardian.no_events.time', { time: repairFallbackTime }),
+        getPromptLine(timeMode==='ai'?'phone_time.ai':'phone_time.local'),
       ].join('\n')
       : (customGuide
         ? getPromptLine('format_guardian.no_events.custom')
@@ -515,6 +522,7 @@ export const buildChatFormatGuardianModelPrompt = ({
   // Preserve the existing default/legacy message shape. Explicit task edits
   // replace the business instructions, while patch and scene rules still apply.
   const system = [
+    getPromptLine(timeMode==='ai'?'phone_time.ai':'phone_time.local'),
     ...(replacesTask && task !== defaultTaskLines.join('\n')
       ? [task, protocol]
       : [defaultTaskLines[0], protocol, ...defaultTaskLines.slice(1)]),
@@ -787,7 +795,6 @@ export const validateChatFormatEventDraft = (event = {}) => {
   if (!draft.speakerId && !draft.speakerName && draft.type !== CHAT_FORMAT_EVENT_TYPES.groupSystemEvent) {
     warnings.push('speaker is unresolved');
   }
-  if (!draft.time && draft.surface === CHAT_SURFACE) warnings.push('time is missing');
   if (draft.confidence < 0.7) warnings.push('low confidence');
   return {
     ok: errors.length === 0,

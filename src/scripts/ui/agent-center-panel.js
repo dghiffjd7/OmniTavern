@@ -1,5 +1,6 @@
 import { createAgentConfigurationEditor } from './agent-configuration-editor.js';
 import { isConfigurableAgent } from '../storage/agent-config-store.js';
+import { agentIconMarkup, getAgentIconName } from '../agent/agent-icons.js';
 import { buildAgentCenterView } from './agent-center-view-model.js';
 import { rankModelCandidates } from '../utils/model-candidates.js';
 import { findAgentCenterResource } from './agent-center-resource-contract.js';
@@ -2850,9 +2851,9 @@ const AGENT_CARD_GLYPHS = Object.freeze({
     memory_manager: '◇',
 });
 
-const displayAgentCardGlyph = card => (
-    AGENT_CARD_GLYPHS[trim(card?.id)] || trim(card?.title, 'A').slice(0, 1).toUpperCase()
-);
+const displayAgentCardGlyph = card => isConfigurableAgent(card?.id)
+    ? agentIconMarkup(getAgentIconName(card.featureState || card))
+    : escapeHtml(AGENT_CARD_GLYPHS[trim(card?.id)] || trim(card?.title, 'A').slice(0, 1).toUpperCase());
 
 const FEATURE_AGENT_CARD_IDS = new Set([
     'reply_check',
@@ -4137,7 +4138,7 @@ export class AgentCenterPanel {
         return `
             <div class="agent-center-agent-title-row">
                 <div class="agent-center-agent-title-main">
-                    <span class="agent-center-agent-badge" data-i18n-skip>${escapeHtml(displayAgentCardGlyph(agent))}</span>
+                    <span class="agent-center-agent-badge" data-i18n-skip>${displayAgentCardGlyph(agent)}</span>
                     <div>
                         <div class="agent-center-card-title">${escapeHtml(title)}</div>
                         <div class="agent-center-card-sub">${escapeHtml(agent.summary || '')}</div>
@@ -4193,7 +4194,7 @@ export class AgentCenterPanel {
         return `
             <div class="agent-center-agent-title-row">
                 <div class="agent-center-agent-title-main">
-                    <span class="agent-center-agent-badge" data-i18n-skip>${escapeHtml(displayAgentCardGlyph(agent))}</span>
+                    <span class="agent-center-agent-badge" data-i18n-skip>${displayAgentCardGlyph(agent)}</span>
                     <div>
                         <div class="agent-center-card-title">${escapeHtml(agent.title || displayAgentFeature(agent.id))}</div>
                         <div class="agent-center-card-sub">${escapeHtml(agent.summary || '')}</div>
@@ -4225,7 +4226,7 @@ export class AgentCenterPanel {
         return `
             <div class="agent-center-agent-title-row">
                 <div class="agent-center-agent-title-main">
-                    <span class="agent-center-agent-badge">${escapeHtml(displayAgentCardGlyph(agent))}</span>
+                    <span class="agent-center-agent-badge">${displayAgentCardGlyph(agent)}</span>
                     <div>
                         <div class="agent-center-card-title">${escapeHtml(agent.title || displayAgentFeature(agent.id))}</div>
                         <div class="agent-center-card-sub">${escapeHtml(subtitle)}</div>

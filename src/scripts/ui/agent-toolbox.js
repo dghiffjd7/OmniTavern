@@ -1,157 +1,412 @@
 import { t } from '../i18n/index.js';
 import { allowsAgentInvocation, isInputAgent } from '../agent/agent-invocation.js';
+import { agentIconMarkup, getAgentIconName } from '../agent/agent-icons.js';
+import { agentToolContextKey, isAgentToolReply } from '../agent/agent-tool-targets.js';
 import { createMessageClipboardUiRuntime } from './chat/message-clipboard-ui-utils.js';
+import { createAgentToolboxView, toolboxEscape as e, toolboxButton as button, toolboxNamedIcon, toolboxManagementMarkup } from './agent-toolbox-view.js';
+import { normalizeToolboxPreferences, reconcileToolboxPreferences, getToolboxItems, setToolboxItemVisible,
+  isAgentToolToggle, toolboxVisibleCount } from './agent-toolbox-model.js';
 
-const e = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
-const icon = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="3"/><path d="M8 7V4h8v3M3 12h18M10 12v3h4v-3"/></svg>';
 const labels = { running:'处理中', ready:'待查看', reviewing:'正在查看', applied:'已应用', ignored:'已收起', failed:'失败', expired:'已过期', cancelled:'已取消', unchanged:'无需修改', succeeded:'已完成', skipped:'未执行' };
+const pendingStates = new Set(['running', 'ready', 'reviewing']);
 const isNote = job => job?.outputMode === 'note' || job?.kind === 'note';
-const eligibleReply = m => m?.role === 'assistant' && (!m.type || m.type === 'text') && !m.pending && !m.error && !['pending','sending'].includes(m.status) && !m.meta?.generatedMedia;
-const sameContext = (a, b) => ['sessionId','scopeId','place','archiveId'].every(k => String(a?.[k] || '') === String(b?.[k] || ''));
+const sameContext = (a, b) => agentToolContextKey(a) === agentToolContextKey(b);
+const sourceHint = (config, snapshot) => snapshot?.targetMode === 'full' || config.target?.mode === 'full' ? '完整回复' : ['tags', 'regex'].includes(config.target?.mode) ? '指定部分' : '正文';
 
 export const createAgentToolbox = ({ input, actions, getContext, getMessages, getInputSnapshot, openAgent, openCenter,
-  openFormatResult = openCenter, triggerContainer, anchorEl, beforeOpen = () => {}, documentRef = document, storage = globalThis.localStorage } = {}) => {
-  const doc = documentRef, win = doc.defaultView, bindings = [];
+  openFormatResult = openCenter, triggerContainer, anchorEl, targetEventRoot, beforeOpen = () => {}, documentRef = document, storage = globalThis.localStorage } = {}) => {
+  const doc = documentRef, win = doc.defaultView, bindings = [], nodes = new Map(), formatJobs = new Map(), toggling = new Set(), invoking = new Set();
   const clipboard = createMessageClipboardUiRuntime({ documentLike: doc, navigatorLike: win.navigator, execCopyCommand: command => doc.execCommand(command) });
-  let prefs = { pinned: [], order: [], shortcut: null };
-  try { const raw = JSON.parse(storage?.getItem('agent_toolbox_ui_v1') || '{}'); prefs = { ...prefs, ...raw, pinned: Array.isArray(raw.pinned) ? raw.pinned : [], order: Array.isArray(raw.order) ? raw.order : [] }; } catch {}
-  const savePrefs = () => { try { storage?.setItem('agent_toolbox_ui_v1', JSON.stringify(prefs)); } catch {} };
-  const style = doc.createElement('style'); style.textContent = `
-  .agent-toolbox-trigger{position:relative;color:var(--app-text-secondary);flex-shrink:0}
-  .agent-toolbox-trigger:hover,.agent-toolbox-trigger[aria-expanded=true]{background:var(--app-accent-soft);color:var(--app-accent-primary)}
-  body[data-theme-mode='dark'] .agent-toolbox-trigger::before{display:none!important}
-  .agent-toolbox-trigger svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}.agent-toolbox-trigger small{position:absolute;top:-5px;right:-5px;min-width:15px;padding:0 3px;line-height:15px;border-radius:9px;background:var(--app-accent-primary);color:var(--app-text-on-accent,#fff);font-size:10px}
-  .agent-toolbox-anchor{position:relative}.agent-toolbox-ready-dot{position:absolute;top:2px;right:2px;width:6px;height:6px;border-radius:50%;background:var(--app-accent-primary);box-shadow:0 0 0 2px var(--app-surface-card)}.agent-toolbox-ready-dot[hidden]{display:none!important}
-  .agent-toolbox-panel{position:fixed;z-index:22500;box-sizing:border-box;width:340px;padding:10px;border:1px solid var(--app-border-default);border-radius:17px;background:var(--app-surface-card);color:var(--app-text-primary);box-shadow:var(--app-shadow-lg,0 14px 40px #0003);font:13px/1.55 var(--app-font-family,inherit);overflow:auto;overscroll-behavior:contain}
-  .agent-toolbox-panel[hidden],.agent-toolbox-trigger[hidden]{display:none!important}.agent-toolbox-panel *{box-sizing:border-box}.agent-toolbox-panel button{font:inherit;color:inherit;background:transparent;border:0;border-radius:9px;cursor:pointer;min-height:44px}.agent-toolbox-panel button:hover{background:var(--app-surface-hover)}.agent-toolbox-panel button:disabled{opacity:.42;cursor:default}
-  .agent-toolbox-panel :is(button,input,select):focus-visible{outline:2px solid var(--app-accent-primary);outline-offset:1px}.agent-toolbox-top{display:flex;align-items:center;gap:4px;padding-bottom:8px;border-bottom:1px solid var(--app-border-subtle)}.agent-toolbox-top select{flex:1;min-width:0;border:0;border-radius:9px;background:var(--app-surface-subtle);color:inherit;min-height:42px;padding:0 8px;font:inherit}.agent-toolbox-top button{min-width:34px;font-size:18px}
-  .agent-toolbox-search{width:100%;border:1px solid var(--app-border-default);border-radius:9px;padding:9px 11px;margin:8px 0;background:var(--app-surface-subtle);color:inherit;font:inherit;min-height:40px}.agent-toolbox-items{max-height:260px;overflow:auto;overscroll-behavior:contain}.agent-toolbox-item{display:flex;align-items:center;gap:2px;border-radius:11px}.agent-toolbox-item>button:first-child{flex:1;min-width:0;text-align:left;display:flex;align-items:center;gap:8px;padding:9px}.agent-toolbox-item .agent-tool-name{overflow-wrap:anywhere;flex:1}.agent-toolbox-item small{color:var(--app-text-secondary);font-size:10px;white-space:nowrap}.agent-toolbox-pin{flex:none;width:34px;font-size:16px;color:var(--app-text-muted)!important}.agent-toolbox-pin[aria-pressed=true]{color:var(--app-accent-primary)!important}
-  .agent-toolbox-result{margin-top:7px;border-top:1px solid var(--app-border-subtle);padding:10px 4px 3px}.agent-toolbox-result pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;max-height:180px;overflow:auto;margin:8px 0}.agent-toolbox-result strong{font-size:12px;font-weight:600}.agent-toolbox-result-actions{display:flex;gap:6px;flex-wrap:wrap}.agent-toolbox-result-actions button{padding:5px 10px;background:var(--app-surface-subtle)}.agent-toolbox-status{color:var(--app-text-secondary);font-size:12px;overflow-wrap:anywhere}.agent-toolbox-settings{border-top:1px solid var(--app-border-subtle);padding:8px 4px 0;margin-top:7px;font-size:12px;color:var(--app-text-secondary)}.agent-toolbox-settings summary{cursor:pointer;min-height:32px;padding-top:5px}.agent-toolbox-order{display:flex;align-items:center;gap:4px}.agent-toolbox-order span{flex:1;min-width:0;overflow-wrap:anywhere}.agent-toolbox-order button{width:32px}.agent-toolbox-empty{padding:13px 7px}.agent-toolbox-shortcut{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
-  @media(max-width:600px){.agent-toolbox-panel{border-radius:16px}.agent-toolbox-items{max-height:210px}.agent-toolbox-result pre{max-height:140px}}
-  `; doc.head.append(style);
-  const trigger = doc.createElement('button'); trigger.type = 'button'; trigger.className = 'chat-action-btn agent-toolbox-trigger';
-  trigger.setAttribute('aria-label', t('Agent 工具箱')); trigger.title = t('Agent 工具箱'); trigger.setAttribute('aria-expanded', 'false'); trigger.innerHTML = icon + '<small hidden></small>';
-  const row = input.closest('.chat-input-row');
-  (triggerContainer || row?.querySelector('.chat-action-inline'))?.append(trigger);
-  const entryAnchor = anchorEl || row?.querySelector('.voice-btn') || input;
-  const anchorBadge = doc.createElement('span'); anchorBadge.className = 'agent-toolbox-ready-dot'; anchorBadge.hidden = true; anchorBadge.setAttribute('aria-hidden','true');
-  if(entryAnchor !== input){entryAnchor.classList.add('agent-toolbox-anchor');entryAnchor.append(anchorBadge);}
-  const panel = doc.createElement('div'); panel.className = 'agent-toolbox-panel'; panel.hidden = true; panel.setAttribute('role','dialog'); panel.setAttribute('aria-label',t('Agent 工具箱')); doc.body.append(panel);
-  let context = null, target = null, anchor = null, selectedId = '', selectedRunId = '', status = '', resultNotice = '', query = '', recording = false;
-  let renderFrame;
-  const formatJobs = new Map();
-  const allConfigs = () => actions.listAgentConfigurations({ context: getContext() }).map(r => r.config);
-  const configs = () => allConfigs().filter(c => allowsAgentInvocation(c,'manual'));
-  const sorted = () => configs().sort((a,b) => Number(Boolean(targetAvailable(b)))-Number(Boolean(targetAvailable(a))) || Number(prefs.pinned.includes(b.id))-Number(prefs.pinned.includes(a.id))
-    || (prefs.order.includes(a.id)?prefs.order.indexOf(a.id):999)-(prefs.order.includes(b.id)?prefs.order.indexOf(b.id):999));
-  const currentReplies = () => (getMessages(getContext().sessionId) || []).filter(eligibleReply).slice(-20).reverse();
-  const runs = () => [...actions.listInputAgentRuns(), ...actions.listTextEditRuns(), ...formatJobs.values()].filter(j => sameContext(j.context,getContext()));
-  const runFor = config => runs().filter(j => j.agentId===config.id && (isInputAgent(config) ? j.revision===target?.inputTarget?.revision && j.start===target.inputTarget.start && j.end===target.inputTarget.end : j.messageId===target?.messageId)).at(-1);
-  const targetAvailable = config => isInputAgent(config) ? target?.kind==='input' && target.inputTarget?.text.trim()
-    : target?.kind==='reply' && currentReplies().some(m => m.id===target.messageId) && (config.kind!=='format_review' || currentReplies()[0]?.id===target.messageId);
-  const targetHint = config => t(isInputAgent(config) ? '请先在输入框填写内容' : config.kind==='format_review' && target?.kind==='reply' ? '选择最新一轮已完成的回复' : '选择一条回复');
-  const close = () => {panel.hidden=true;trigger.setAttribute('aria-expanded','false');recording=false;};
-  const place = () => {
-    if(panel.hidden)return;
-    const vv=win.visualViewport, left=vv?.offsetLeft||0,top=vv?.offsetTop||0,width=vv?.width||win.innerWidth,height=vv?.height||win.innerHeight;
-    panel.style.width=`${Math.min(340,width-20)}px`;panel.style.maxHeight=`${Math.max(120,height-24)}px`;
-    const r=anchor && Number.isFinite(anchor.x)?{left:anchor.x,top:anchor.y,bottom:anchor.y}:entryAnchor.getBoundingClientRect();
-    const box=panel.getBoundingClientRect();panel.style.left=`${Math.max(left+10,Math.min(left+width-box.width-10,r.left))}px`;
-    panel.style.top=`${Math.max(top+10,Math.min(top+height-box.height-10,r.top-box.height-8>=top+10?r.top-box.height-8:r.bottom+8))}px`;
+  let prefs;
+  try { prefs = normalizeToolboxPreferences(JSON.parse(storage?.getItem('agent_toolbox_ui_v2') || storage?.getItem('agent_toolbox_ui_v1') || '{}')); }
+  catch { prefs = normalizeToolboxPreferences(); }
+  const savePrefs = () => { try { storage?.setItem('agent_toolbox_ui_v2', JSON.stringify(prefs)); } catch {} };
+  const row = input.closest('.chat-input-row'), entryAnchor = anchorEl || row?.querySelector('.voice-btn') || input;
+  const view = createAgentToolboxView(doc, triggerContainer || row?.querySelector('.chat-action-inline'), entryAnchor);
+  const { trigger, panel, card, icons, shelf, legend, notice, inbox } = view;
+  let catalog = [], items = [], context = null, selectedId = '', selectedRunId = '', mode = 'shelf', prepared = null, preparing = false;
+  let target = null, inputTarget = null, selectionSnapshot = null, controller = null, picking = false, recording = false, ordering = false;
+  let shortcutError = '';
+  let frame = 0, targetFrame = 0, epoch = 0, disposed = false, cardStamp = '', resultStamp = '', returnFocus = null, resume = null;
+  const replies = () => {
+    const messages = getMessages(getContext().sessionId) || [], result = [];
+    for (let i = messages.length - 1; i >= 0 && result.length < 20; i--) if (isAgentToolReply(messages[i])) result.push(messages[i]);
+    return result;
   };
-  const render = () => {
-    const ready=runs().filter(j=>j.status==='ready').length, badge=trigger.querySelector('small');badge.hidden=!ready;badge.textContent=String(ready);
-    trigger.hidden=!['chat','writing'].includes(getContext().place)||!getContext().sessionId;
-    anchorBadge.hidden=!ready||trigger.hidden;anchorBadge.title=ready?`${t('Agent 工具箱')} · ${t('待查看')} ${ready}`:'';
-    trigger.setAttribute('aria-label',ready?`${t('Agent 工具箱')} · ${t('待查看')} ${ready}`:t('Agent 工具箱'));
-    if(panel.hidden)return;
-    if(!sameContext(context,getContext())){close();return;}
-    const focus=doc.activeElement, focusKey=panel.contains(focus)?focus.dataset.key:'', caret=focus?.selectionStart;
-    const items=sorted(), visible=items.filter(c=>c.title.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
-    const replyOptions=currentReplies();
-    const optionValue=target?.kind==='reply'?target.messageId:'input';
-    const selected=allConfigs().find(c=>c.id===selectedId && c.enabled), job=selected && (runs().find(j=>j.id===selectedRunId && j.agentId===selected.id) || runFor(selected));
-    const candidates=target?.kind==='input' ? runs().filter(j=>j.id.startsWith('input-run-') && j.revision===target.inputTarget?.revision && ['running','ready'].includes(j.status) && !items.some(c=>c.id===j.agentId) && allConfigs().some(c=>c.id===j.agentId && c.enabled)) : [];
-    const replyCandidates=runs().filter(j=>j.outputMode==='note' && ['running','ready'].includes(j.status) && !items.some(c=>c.id===j.agentId) && allConfigs().some(c=>c.id===j.agentId && c.enabled)).slice(-6).reverse();
-    const text=job?.text||job?.message||status;
-    panel.innerHTML=`<div class="agent-toolbox-top"><select data-key="target" aria-label="${e(t('处理对象'))}"><option value="input" ${optionValue==='input'?'selected':''}>${e(target?.inputTarget?.end>target?.inputTarget?.start?t('已选草稿文字'):t('当前草稿'))}</option>${replyOptions.map((m,i)=>`<option value="${e(m.id)}" ${optionValue===m.id?'selected':''}>${e(t(i===0?'最近回复':'历史回复'))} · ${e(String(m.content||'').replace(/<[^>]*>/g,'').slice(0,24))}</option>`).join('')}</select><button data-key="refresh" title="${e(t('更新处理对象'))}" aria-label="${e(t('更新处理对象'))}">↻</button><button data-key="close" aria-label="${e(t('关闭'))}">×</button></div>
-      ${items.length>6?`<input class="agent-toolbox-search" data-key="search" placeholder="${e(t('搜索 Agent'))}" value="${e(query)}" aria-label="${e(t('搜索 Agent'))}">`:''}
-      <div class="agent-toolbox-items">${visible.map(c=>{const j=runFor(c),available=targetAvailable(c);return `<div class="agent-toolbox-item"><button data-key="run:${e(c.id)}" ${available?'':'disabled'} title="${e(available?c.title:targetHint(c))}"><span class="agent-tool-name">${e(c.title)}</span><small>${e(t(j?labels[j.status]||'待查看':isInputAgent(c)?'草稿':'回复'))}</small></button>${!available?`<button class="has-help" data-help-mode="tap" data-help="${e(targetHint(c))}" aria-label="${e(targetHint(c))}">?</button>`:''}<button class="agent-toolbox-pin" data-key="pin:${e(c.id)}" aria-pressed="${prefs.pinned.includes(c.id)}" aria-label="${e(t('置顶'))}">${prefs.pinned.includes(c.id)?'★':'☆'}</button></div>`}).join('')||`<div class="agent-toolbox-empty">${items.length?e(t('没有匹配的工具')):`<button data-key="manage">${e(t('添加手动工具'))}</button>`}</div>`}</div>
-      ${candidates.length?`<div class="agent-toolbox-status">${e(t('输入任务'))}</div><div class="agent-toolbox-items">${candidates.map(j=>`<div class="agent-toolbox-item"><button data-key="result:${e(j.agentId)}"><span class="agent-tool-name">${e(j.title)}</span><small>${e(t(labels[j.status]))}</small></button></div>`).join('')}</div>`:''}
-      ${replyCandidates.length?`<div class="agent-toolbox-status">${e(t('回复任务'))}</div><div class="agent-toolbox-items">${replyCandidates.map(j=>`<div class="agent-toolbox-item"><button data-key="result-run:${e(j.id)}"><span class="agent-tool-name">${e(j.title)}</span><small>${e(t(labels[j.status]))}</small></button></div>`).join('')}</div>`:''}
-      ${selectedId||status?`<div class="agent-toolbox-result"><strong>${e(selected?.title||'')}</strong><div class="agent-toolbox-status" role="status">${e(resultNotice||t(job?isNote(job)&&job.status==='ready'?'资料与建议':labels[job.status]||'':status))}</div>${text&&text!==status?`<pre data-i18n-skip="true" tabindex="0">${e(text)}</pre>`:''}<div class="agent-toolbox-result-actions">${job?.status==='running'?`<button data-key="cancel:${e(job.id)}">${e(t('取消'))}</button>`:''}${job?.status==='ready'?isNote(job)?`<button data-key="copy:${e(job.id)}">${e(t('复制结果'))}</button><button data-key="ignore:${e(job.id)}">${e(t('收起结果'))}</button>`:isInputAgent(selected)?`<button data-key="apply:${e(job.id)}">${e(t(job.kind==='rewrite'?'查看修改':'采纳'))}</button><button data-key="ignore:${e(job.id)}">${e(t('收起结果'))}</button>`:`<button data-key="review:${e(job.id)}">${e(t('查看修改'))}</button>`:''}${job?.trace?.steps?.length?`<button data-key="process:${e(job.id)}">${e(t('执行过程'))}</button>`:''}${selected?`<button data-key="config:${e(selected.id)}">${e(t('配置'))}</button>`:''}${selected?.kind==='format_review'&&job?.status==='succeeded'?`<button data-key="format-result">${e(t('查看结果'))}</button>`:''}</div></div>`:''}
-      <details class="agent-toolbox-settings"><summary>${e(t('工具设置'))}</summary><div class="agent-toolbox-shortcut"><button data-key="shortcut">${e(recording?t('按下快捷键'):prefs.shortcut?.label||t('设置快捷键'))}</button>${prefs.shortcut?`<button data-key="clear-shortcut">${e(t('清除'))}</button>`:''}<button data-key="manage">${e(t('管理工具'))}</button></div>${items.map(c=>`<div class="agent-toolbox-order"><span>${e(c.title)}</span><button data-key="up:${e(c.id)}" aria-label="${e(t('上移'))}">↑</button><button data-key="down:${e(c.id)}" aria-label="${e(t('下移'))}">↓</button></div>`).join('')}</details>`;
-    if(focusKey){const next=[...panel.querySelectorAll('[data-key]')].find(n=>n.dataset.key===focusKey);next?.focus({preventScroll:true});if(next?.setSelectionRange&&Number.isFinite(caret))next.setSelectionRange(caret,caret);}
+  const runs = () => [...(actions.listInputAgentRuns?.() || []), ...(actions.listTextEditRuns?.() || []), ...formatJobs.values()]
+    .filter(job => sameContext(job.context, getContext()));
+  const currentConfig = () => catalog.find(config => config.id === selectedId);
+  const jobFor = (id, jobs = runs()) => jobs.find(job => job.id === selectedRunId && job.agentId === id)
+    || jobs.filter(job => job.agentId === id && pendingStates.has(job.status)).at(-1)
+    || jobs.filter(job => job.agentId === id && (isInputAgent(catalog.find(config => config.id === id))
+      ? job.revision === inputTarget?.revision : job.messageId === target?.messageId)).at(-1);
+  const readCatalog = () => {
+    catalog = (actions.listAgentConfigurations({ context: getContext() }) || []).map(record => record.config).filter(Boolean);
+    const next = reconcileToolboxPreferences(prefs, catalog, getContext());
+    if (JSON.stringify(next) !== JSON.stringify(prefs)) { prefs = next; savePrefs(); }
+    items = getToolboxItems(prefs, catalog, getContext());
+  };
+  const visibleWidth = () => Math.max(180, Math.min(396, (win.visualViewport?.width || win.innerWidth) - 24));
+  const place = () => {
+    if (panel.hidden) return;
+    const vv = win.visualViewport, left = vv?.offsetLeft || 0, top = vv?.offsetTop || 0;
+    const width = vv?.width || win.innerWidth, height = vv?.height || win.innerHeight, r = entryAnchor.getBoundingClientRect();
+    panel.style.width = `${visibleWidth()}px`;
+    const available = Math.max(100, Math.min(height - 24, r.top - top - 12));
+    panel.style.maxHeight = `${Math.max(100, height - 24)}px`;
+    card.style.maxHeight = `${Math.max(90, available - shelf.offsetHeight - inbox.offsetHeight - (notice.hidden ? 0 : notice.offsetHeight + 8) - 20)}px`;
+    const box = panel.getBoundingClientRect();
+    panel.style.left = `${Math.max(left + 12, Math.min(left + width - box.width - 12, r.left))}px`;
+    panel.style.top = `${Math.max(top + 12, Math.min(top + height - box.height - 12, r.top - box.height - 8))}px`;
+    view.positionTooltips();
+  };
+  const tell = message => {
+    notice.hidden = !message;
+    notice.innerHTML = message ? `<span>${e(t(message))}</span>${button('dismiss-notice', '关闭', { icon: 'close' })}` : '';
     place();
   };
-  const refresh=()=>{win.cancelAnimationFrame(renderFrame);renderFrame=win.requestAnimationFrame(render);};
-  const open = (options = {}) => {
-    context={...getContext()};anchor=options.anchor||null;
-    target=options.messageId?{kind:'reply',messageId:options.messageId,selectedText:options.selectedText||''}:{kind:'input',inputTarget:getInputSnapshot()};
-    beforeOpen();
-    selectedId='';selectedRunId='';status='';resultNotice='';query='';panel.hidden=false;trigger.setAttribute('aria-expanded','true');render();
-    if(options.keyboard)panel.querySelector('[data-key="search"], [data-key="target"]')?.focus();
+  const cancelPick = (restore = false) => {
+    if (!picking) return;
+    picking = false; controller?.cancel?.(); shelf.hidden = false; notice.hidden = true;
+    if (restore) { mode = 'task'; mountCard(); render(); }
   };
-  const invoke = async id => {
-    const config=configs().find(c=>c.id===id);
-    if(!config||!sameContext(context,getContext())||!targetAvailable(config)){status=t('当前工具或处理对象已变化');render();return;}
-    selectedId=id;selectedRunId='';resultNotice='';
-    const prior=runFor(config);if(prior&&['running','ready','reviewing'].includes(prior.status)){render();return;}
-    const frozen={...context}, savedTarget={...target};
-    status=t('处理中');render();
+  const close = () => {
+    epoch++; cancelPick(); panel.hidden = true; trigger.setAttribute('aria-expanded', 'false'); recording = false; ordering = false;
+    panel.classList.remove('is-entering');
+  };
+  const focusShelf = id => (nodes.get(id) || panel.querySelector('[data-key=manage]'))?.focus({ preventScroll: true });
+  const back = ({ dryRun = false } = {}) => {
+    if (panel.hidden) return false;
+    if (dryRun) return true;
+    if (picking) { cancelPick(true); return true; }
+    if (recording || ordering) { recording = false; ordering = false; render(); return true; }
+    if (mode !== 'shelf') { epoch++; mode = 'shelf'; recording = false; preparing = false; render(); focusShelf(selectedId); }
+    else { close(); (returnFocus?.isConnected && returnFocus.getClientRects().length ? returnFocus : entryAnchor).focus({ preventScroll: true }); }
+    return true;
+  };
+  const mountCard = () => {
+    cardStamp = ''; resultStamp = '';
+    const config = currentConfig();
+    if (mode === 'task' && config) {
+      card.innerHTML = `<div class="at-card-head">${button('back', '返回', { icon: 'back' })}<div class="at-card-heading">${toolboxNamedIcon(config)}<strong data-i18n-skip>${e(config.title)}</strong></div>${button(`config:${config.id}`, '配置', { icon: 'settings' })}</div>
+        <div class="at-scope"></div><div class="at-target"></div><p class="at-status" data-target-status role="status"></p><div class="at-run-actions"></div><div class="at-result" hidden></div>`;
+    }
+  };
+  const renderTarget = config => {
+    const job = jobFor(config.id), frozen = prepared?.snapshot, locked = pendingStates.has(job?.status);
+    const inputTool = isInputAgent(config), format = config.kind === 'format_review', selected = !format && (frozen?.selected || selectionSnapshot?.selected);
+    const preview = inputTool ? inputTarget?.text || '' : frozen?.target?.text || '';
+    const previewText = inputTool && inputTarget?.end > inputTarget?.start ? preview.slice(inputTarget.start, inputTarget.end) : preview;
+    const scopeLabel = inputTool ? inputTarget?.end > inputTarget?.start ? '已选草稿文字' : '当前草稿'
+      : format ? '整轮原始回复' : selected ? '已选文字' : sourceHint(config, frozen);
+    const total = format ? frozen?.formatTarget?.sourceMessageIds?.length || 1 : 0;
+    const stamp = JSON.stringify([preparing, prepared?.ok, prepared?.message, target?.messageId, preview, previewText, scopeLabel, total, locked, Boolean(selectionSnapshot)]);
+    if (stamp !== cardStamp) {
+      cardStamp = stamp;
+      card.querySelector('.at-scope').innerHTML = `<strong>${e(t(scopeLabel))}</strong><span class="at-count">${total ? e(t('共 {count} 条消息', { count: total })) : previewText ? e(t('{count} 字', { count: Array.from(previewText).length })) : ''}</span>${button('refresh-target', inputTool ? '更新草稿' : '更新处理对象', { icon: 'refresh', disabled: locked || preparing })}`;
+      const availableReplies = replies(), currentMessage = availableReplies.find(message => message.id === target?.messageId);
+      const picker = !inputTool ? `<select data-key="target" ${locked ? 'disabled' : ''} aria-label="${e(t('处理对象'))}">${!currentMessage ? `<option value="${e(target?.messageId || '')}">${e(t('暂无可处理的回复'))}</option>` : ''}${availableReplies.map((message, index) => `<option value="${e(message.id)}" ${message.id === target?.messageId ? 'selected' : ''}>${e(t(index ? '历史回复' : '最近回复'))} · ${e(String(message.content || '').replace(/<[^>]*>/g, '').slice(0, 36))}</option>`).join('')}</select>` : '';
+      const turnIds = format && frozen?.formatTarget?.sourceMessageIds;
+      const excerpt = turnIds?.length ? (getMessages(context.sessionId) || []).filter(message => turnIds.includes(message.id))
+        .map(message => String(message.content || '').replace(/<[^>]*>/g, '')).join('\n') : previewText;
+      const targetHost = card.querySelector('.at-target'), opened = targetHost.querySelector('details')?.open;
+      targetHost.innerHTML = `${picker}${preparing ? `<p class="at-status">${e(t('正在提取处理范围…'))}</p>` : previewText ? `<p class="at-target-excerpt" data-i18n-skip>${e(excerpt.slice(0, 160))}${excerpt.length > 160 ? '…' : ''}</p><details${opened ? ' open' : ''}><summary>${e(t('查看处理内容'))}</summary><pre class="at-target-summary" data-i18n-skip tabindex="0">${e(previewText.slice(0, 6000))}${previewText.length > 6000 ? '\n…' : ''}</pre></details>` : ''}
+        ${format && selectionSnapshot ? `<p class="at-status">${e(t('选区用于定位回复，格式检查会处理整轮。'))}</p>` : ''}
+        <div class="at-target-actions">${!inputTool && !format ? button('pick', '选择文字', { disabled: locked || !controller }) : ''}${selected || selectionSnapshot && !format ? button('clear-selection', '使用配置范围', { disabled: locked }) : ''}</div>`;
+    }
+    const why = preparing ? '正在提取处理范围…' : invoking.has(config.id) && !locked ? '处理中' : !config.enabled ? '此 Agent 已关闭，可在配置中开启' : !allowsAgentInvocation(config, 'manual') ? '此 Agent 仅自动执行，可在配置中调整调用方式' : !prepared?.ok && !inputTool ? prepared?.message || '暂无可处理的回复' : inputTool && !inputTarget?.text?.trim() ? '请先在输入框填写内容' : '';
+    card.querySelector('[data-target-status]').textContent = t(why);
+    const canRun = !why && !locked, runHost = card.querySelector('.at-run-actions');
+    const runMarkup = locked ? '' : button('execute', format ? '检查格式' : '运行一次', { primary: true, disabled: !canRun });
+    if (runHost.innerHTML !== runMarkup) runHost.innerHTML = runMarkup;
+  };
+  const renderResult = (config, job) => {
+    const host = card.querySelector('.at-result');
+    const stamp = JSON.stringify([job?.id, job?.status, job?.text, job?.message, Boolean(job?.trace?.steps?.length)]);
+    if (stamp === resultStamp) return;
+    resultStamp = stamp; host.hidden = !job; if (!job) return;
+    const inputJob = job.id.startsWith('input-run'), formatJob = formatJobs.has(job.id), resultText = job.text || job.message || '';
+    host.innerHTML = `<div class="at-status" role="status">${e(t(labels[job.status] || '待查看'))}${job.messageId && job.messageId !== target?.messageId ? ` · ${e(t('来自先前选择的回复'))}` : ''}</div>${resultText ? `<pre data-i18n-skip tabindex="0">${e(resultText)}</pre>` : ''}<div class="at-result-actions">
+      ${job.status === 'running' ? button(`cancel:${job.id}`, '取消') : ''}
+      ${job.status === 'ready' ? isNote(job) ? button(`copy:${job.id}`, '复制结果') + button(`ignore:${job.id}`, '收起结果') : inputJob ? button(`apply:${job.id}`, job.kind === 'rewrite' ? '查看修改' : '采纳') + button(`ignore:${job.id}`, '收起结果') : button(`review:${job.id}`, '查看修改') + button(`ignore:${job.id}`, '收起结果') : ''}
+      ${formatJob && job.status === 'succeeded' ? button('format-result', '查看结果') : ''}
+      ${job.trace?.steps?.length ? button(`process:${job.id}`, '执行过程') : ''}</div>`;
+  };
+  const renderManagement = () => {
+    const stamp = JSON.stringify([mode, catalog, items.map(config => config.id), prefs.shortcut, recording, shortcutError, ordering]);
+    if (cardStamp === stamp) return;
+    cardStamp = stamp;
+    const focusedKey = card.contains(doc.activeElement) ? doc.activeElement.dataset.key : '', scrollTop = card.scrollTop;
+    const expanded = card.querySelector('.at-hidden-tools')?.open;
+    card.innerHTML = toolboxManagementMarkup({ items, catalog, ordering, shortcut: prefs.shortcut, recording, shortcutError, expanded });
+    card.scrollTop = scrollTop;
+    if (focusedKey) {
+      const control = [...card.querySelectorAll('[data-key]')].find(node => node.dataset.key === focusedKey);
+      const rowId = /^(?:up|down):(.+)$/.exec(focusedKey)?.[1];
+      const fallback = rowId ? [...card.querySelectorAll('.at-config')].find(node => node.dataset.key === `config:${rowId}`)
+        : card.querySelector(focusedKey.startsWith('visible:') ? '.at-hidden-tools>summary' : focusedKey.includes('shortcut') ? '[data-key=shortcut]' : '[data-key=sort]');
+      const focusTarget = control?.getClientRects().length && !control.disabled ? control : fallback;
+      focusTarget?.focus({ preventScroll: true });
+    }
+  };
+  const render = () => {
+    if (disposed) return;
+    const jobs = runs(), ready = jobs.filter(job => job.status === 'ready' || formatJobs.has(job.id) && job.unread).length;
+    const badge = trigger.querySelector('small'); badge.hidden = !ready; badge.textContent = String(ready);
+    trigger.hidden = !['chat', 'writing'].includes(getContext().place) || !getContext().sessionId;
+    view.badge.hidden = !ready || trigger.hidden;
+    trigger.setAttribute('aria-label', ready ? `${t('Agent 工具箱')} · ${t('待查看')} ${ready}` : t('Agent 工具箱'));
+    if (panel.hidden) return;
+    if (!sameContext(context, getContext()) || trigger.hidden) { close(); return; }
+    const count = toolboxVisibleCount(visibleWidth(), items.length), visible = items.slice(0, count);
+    for (const [id, node] of nodes) if (!visible.some(config => config.id === id)) { node.remove(); nodes.delete(id); }
+    for (const [index, config] of visible.entries()) {
+      let node = nodes.get(config.id);
+      if (!node) { node = doc.createElement('button'); node.type = 'button'; node.className = 'at-tool'; node.dataset.key = `tool:${config.id}`;
+        node.innerHTML = `${agentIconMarkup(getAgentIconName(config))}<span class="at-tool-state" aria-hidden="true"></span><span class="at-tooltip" aria-hidden="true"></span>`; nodes.set(config.id, node); }
+      const iconName = getAgentIconName(config); if (node.dataset.icon !== iconName) { node.querySelector('svg').outerHTML = agentIconMarkup(iconName); node.dataset.icon = iconName; }
+      if (icons.children[index] !== node) icons.insertBefore(node, icons.children[index] || null);
+      const job = jobs.filter(item => item.agentId === config.id && (pendingStates.has(item.status) || item.unread)).at(-1);
+      const toggle = isAgentToolToggle(config), state = job?.status || (config.enabled ? 'enabled' : 'disabled');
+      node.dataset.status = state; node.dataset.enabled = String(config.enabled); node.disabled = toggling.has(config.id);
+      node.toggleAttribute('aria-pressed', toggle); if (toggle) node.setAttribute('aria-pressed', String(config.enabled));
+      node.toggleAttribute('aria-expanded', !toggle); if (!toggle) node.setAttribute('aria-expanded', String(mode === 'task' && selectedId === config.id));
+      const text = `${config.title} · ${t(job ? labels[job.status] || '待查看' : toggle ? config.enabled ? '点击关闭' : '点击开启' : '查看工具')}`;
+      node.setAttribute('aria-label', text); node.querySelector('.at-tooltip').textContent = text;
+      node.querySelector('.at-tool-state').textContent = job?.status === 'running' ? '…' : job?.status === 'ready' || job?.unread ? '1' : toggle ? config.enabled ? '✓' : '−' : '';
+      node.querySelector('.at-tool-state').hidden = !node.querySelector('.at-tool-state').textContent;
+    }
+    panel.querySelector('[data-key=more]').hidden = items.length <= count;
+    panel.querySelector('[data-key=more]').setAttribute('aria-expanded', String(mode === 'more'));
+    panel.querySelector('[data-key=manage]').setAttribute('aria-expanded', String(mode === 'manage'));
+    const activeJobs = jobs.filter(job => pendingStates.has(job.status) || job.unread);
+    inbox.hidden = picking || !activeJobs.length || mode === 'runs';
+    const inboxMarkup = button('runs', ready ? t('{count} 个结果待查看', { count: ready }) : t('{count} 个任务处理中', { count: activeJobs.length }));
+    if (inbox.innerHTML !== inboxMarkup) inbox.innerHTML = inboxMarkup;
+    card.dataset.mode = mode;
+    card.hidden = mode === 'shelf' || picking;
+    if (!card.hidden) {
+      if (mode === 'manage') renderManagement();
+      else if (mode === 'runs') {
+        const stamp = JSON.stringify([mode, activeJobs.map(job => [job.id, job.status, job.title])]);
+        if (cardStamp !== stamp) { cardStamp = stamp; card.innerHTML = `<div class="at-card-head">${button('back', '返回', { icon: 'back' })}<div class="at-card-heading"><strong>${e(t('任务与结果'))}</strong></div></div><div class="at-overflow">${activeJobs.map(job => `<button type="button" data-key="result:${e(job.id)}"><span class="at-result-entry" data-i18n-skip>${e(job.title || catalog.find(config => config.id === job.agentId)?.title || '')}</span><small>${e(t(labels[job.status] || '待查看'))}</small></button>`).join('') || `<p class="at-status">${e(t('暂无待查看的结果'))}</p>`}</div>`; }
+      }
+      else if (mode === 'more') {
+        const stamp = JSON.stringify([mode, count, items, jobs.map(job => [job.id, job.status])]);
+        if (cardStamp !== stamp) { cardStamp = stamp; card.innerHTML = `<div class="at-card-head">${button('back', '返回', { icon: 'back' })}<div class="at-card-heading"><strong>${e(t('更多工具'))}</strong></div></div><div class="at-overflow">${items.slice(count).map(config => `<button type="button" data-key="tool:${e(config.id)}">${toolboxNamedIcon(config)}<span data-i18n-skip>${e(config.title)}</span><small>${e(t(config.enabled ? '已开启' : '已关闭'))}</small></button>`).join('')}</div>`; }
+      } else {
+        const config = currentConfig();
+        if (!config) { mode = 'shelf'; card.hidden = true; } else { if (!card.querySelector('.at-target')) mountCard(); renderTarget(config); renderResult(config, jobFor(config.id, jobs)); }
+      }
+    }
+    const showLegend = !picking && mode === 'shelf' && !prefs.legendDismissed && (win.matchMedia('(pointer:coarse)').matches || win.innerWidth <= 600);
+    legend.hidden = !showLegend;
+    if (showLegend) {
+      const markup = `${button('dismiss-legend', '关闭', { icon: 'close' })}<p>${e(t('点图标使用工具，齿轮管理快捷栏。'))}</p><div class="at-legend-list">${items.slice(0, count).map(config => `<span data-i18n-skip>${agentIconMarkup(getAgentIconName(config))}${e(config.title)}</span>`).join('')}</div>`;
+      if (legend.innerHTML !== markup) legend.innerHTML = markup;
+    }
+    if (!items.length && mode === 'shelf' && !picking) { notice.hidden = false; notice.innerHTML = `<span>${e(t('还没有快捷工具'))}</span>${button('center', '添加工具')}`; }
+    place();
+  };
+  const refresh = () => { readCatalog(); win.cancelAnimationFrame(frame); frame = win.requestAnimationFrame(render); };
+  const refreshStatus = () => { win.cancelAnimationFrame(frame); frame = win.requestAnimationFrame(render); };
+  const prepare = async () => {
+    const config = currentConfig(); if (!config || mode !== 'task') return;
+    const version = ++epoch; prepared = null; preparing = true; render();
+    try {
+      const result = isInputAgent(config) ? { ok: true } : await actions.prepareAgentToolTarget({ id: config.id, context: { ...context }, messageId: target?.messageId,
+        selectionSnapshot: selectionSnapshot || undefined });
+      if (disposed || version !== epoch || !sameContext(context, getContext())) return;
+      prepared = result; if (result?.ok && result.snapshot) target = { messageId: result.snapshot.messageId };
+    } catch (error) { if (version === epoch) prepared = { ok: false, message: String(error.message || error) }; }
+    finally { if (version === epoch) { preparing = false; render(); } }
+  };
+  const showTool = (id, runId = '') => {
+    const config = catalog.find(item => item.id === id); if (!config) return;
+    selectedId = id; selectedRunId = ''; mode = 'task'; ordering = false; recording = false; notice.hidden = true; mountCard();
+    const active = runs().find(job => job.id === runId) || runs().filter(job => job.agentId === id && pendingStates.has(job.status)).at(-1);
+    if (active) { selectedRunId = active.id; if (active.messageId) { target = { messageId: active.messageId }; if (selectionSnapshot?.messageId !== active.messageId) selectionSnapshot = null; } }
+    if (!isInputAgent(config) && !target?.messageId) target = { messageId: replies()[0]?.id || '' };
+    void prepare();
+  };
+  const open = (options = {}) => {
+    context = { ...getContext() }; inputTarget = getInputSnapshot(); returnFocus = options.returnFocus || entryAnchor;
+    readCatalog(); beforeOpen();
+    const continuing = resume && sameContext(resume.context, context) && !options.selectionSnapshot && !options.messageId ? resume : null;
+    resume = null;
+    target = options.messageId ? { messageId: options.messageId } : continuing?.target || null;
+    selectionSnapshot = options.selectionSnapshot || continuing?.selectionSnapshot || null;
+    if (selectionSnapshot) target = { messageId: selectionSnapshot.messageId };
+    mode = continuing?.mode === 'manage' ? 'manage' : 'shelf'; ordering = false; recording = false; selectedId = ''; selectedRunId = ''; prepared = null; preparing = false; notice.hidden = true;
+    panel.hidden = false; shelf.hidden = false; trigger.setAttribute('aria-expanded', 'true'); panel.classList.add('is-entering');
+    if (continuing?.mode === 'task' && catalog.some(config => config.id === continuing.id)) showTool(continuing.id); else render();
+    const configControl = mode === 'manage' && [...card.querySelectorAll('.at-config')].find(node => node.dataset.key === `config:${continuing.id}` && node.getClientRects().length);
+    if (configControl) configControl.focus({ preventScroll: true });
+    else if (options.keyboard || triggerContainer?.contains(doc.activeElement)) focusShelf(items[0]?.id);
+  };
+  const toggle = async config => {
+    if (toggling.has(config.id)) return;
+    const frozen = { ...context }; toggling.add(config.id); render();
+    try {
+      const saved = actions.getAgentConfiguration({ id: config.id, context: frozen, scope: 'local' });
+      const result = await actions.saveAgentConfiguration({ id: config.id, context: frozen, scope: 'local', revision: saved.revision,
+        config: { ...saved.config, enabled: !saved.config.enabled, inputConsent: !saved.config.enabled || saved.config.inputConsent } });
+      if (sameContext(frozen, getContext())) {
+        readCatalog();
+        if (result.ok) win.toastr?.info?.(t(saved.config.enabled ? '已关闭当前会话的输入建议' : '已开启当前会话的输入建议'));
+        else win.toastr?.warning?.(t(result.message || '配置已变化，请重新打开'));
+      }
+    } catch (error) { if (sameContext(frozen, getContext())) win.toastr?.error?.(t(String(error.message || error))); }
+    finally { toggling.delete(config.id); render(); }
+  };
+  const invoke = async () => {
+    const config = currentConfig();
+    if (!config || preparing || invoking.has(config.id) || !allowsAgentInvocation(config, 'manual') || !sameContext(context, getContext()) || !prepared?.ok) return;
+    if (pendingStates.has(jobFor(config.id)?.status)) { render(); return; }
+    const frozen = { ...context }, snapshot = prepared.snapshot, savedInput = inputTarget;
+    invoking.add(config.id); render();
     try {
       let result;
-      if(isInputAgent(config))result=await actions.runConfiguredInputAgent({id,context:frozen,inputTarget:savedTarget.inputTarget});
-      else if(config.kind==='text_edit')result=await actions.runTextEditAgent({id,context:frozen,messageId:savedTarget.messageId,selectedText:savedTarget.selectedText});
+      if (isInputAgent(config)) result = await actions.runConfiguredInputAgent({ id: config.id, context: frozen, inputTarget: savedInput });
+      else if (config.kind === 'text_edit') result = await actions.runTextEditAgent({ id: config.id, context: frozen, messageId: snapshot.messageId, targetSnapshot: snapshot });
       else {
-        const controller=new AbortController(), key=`tool-format:${Date.now()}`;
-        const job={id:key,agentId:id,title:config.title,context:frozen,messageId:savedTarget.messageId,status:'running',controller};formatJobs.set(key,job);for(const [k,j] of formatJobs){if(formatJobs.size<=20)break;if(j.status!=='running')formatJobs.delete(k);}refresh();
-        try { result=await actions.runConfiguredFormatReview({id,context:frozen,messageId:savedTarget.messageId,signal:controller.signal});job.status=controller.signal.aborted?'cancelled':result.status;job.message=result.reason||''; } catch(error) { job.status='failed';job.message=String(error.message||error);throw error; }
+        const abort = new AbortController(), id = `tool-format:${Date.now()}:${formatJobs.size}`;
+        const job = { id, agentId: config.id, title: config.title, context: frozen, messageId: snapshot.messageId, status: 'running', controller: abort };
+        formatJobs.set(id, job); selectedRunId = id; render();
+        try { result = await actions.runConfiguredFormatReview({ id: config.id, context: frozen, messageId: snapshot.messageId, targetSnapshot: snapshot, signal: abort.signal });
+          job.status = abort.signal.aborted ? 'cancelled' : result.status; job.message = result.error || ''; job.unread = job.status === 'succeeded'; }
+        catch (error) { job.status = 'failed'; job.message = String(error.message || error); throw error; }
+        while (formatJobs.size > 20) { const old = [...formatJobs.values()].find(item => item.status !== 'running'); if (!old) break; formatJobs.delete(old.id); }
       }
-      if(sameContext(frozen,getContext())){status=result?.reason?t(result.reason):t(result?.status==='succeeded'?'已完成':'处理中');render();}
-    }catch(error){if(sameContext(frozen,getContext())){status=String(error.message||error);render();}}
+      if (sameContext(frozen, getContext())) {
+        if (result?.artifact?.runId) selectedRunId = result.artifact.runId;
+        if (result?.status === 'failed' || result?.status === 'skipped') tell(result.reason || '未执行');
+      }
+    } catch (error) { if (sameContext(frozen, getContext())) tell(String(error.message || error)); }
+    finally { invoking.delete(config.id); render(); }
   };
-  const listen=(el,type,fn,opts)=>{el?.addEventListener(type,fn,opts);bindings.push(()=>el?.removeEventListener(type,fn,opts));};
-  listen(trigger,'click',event=>{event.preventDefault();event.stopPropagation();if(panel.hidden)open({keyboard:event.detail===0});else close();});
-  listen(doc,'pointerdown',event=>{if(!panel.contains(event.target)&&!trigger.contains(event.target))close();});
-  listen(panel,'input',event=>{if(event.target.dataset.key==='search'){query=event.target.value;render();}});
-  listen(panel,'change',event=>{if(event.target.dataset.key==='target'){target=event.target.value==='input'?{kind:'input',inputTarget:getInputSnapshot()}:{kind:'reply',messageId:event.target.value};selectedId='';selectedRunId='';resultNotice='';status='';render();}});
-  listen(panel,'click',async event=>{
-    const key=event.target.closest('[data-key]')?.dataset.key;if(!key)return;
+  const startPick = () => {
+    if (!controller || !currentConfig() || pendingStates.has(jobFor(selectedId)?.status)) return;
+    picking = true; card.hidden = true; shelf.hidden = true; legend.hidden = true; inbox.hidden = true;
+    notice.hidden = false; notice.innerHTML = `<span>${e(t('在一条 AI 消息内选择文字，再点选区旁的工具箱。'))}</span>${button('cancel-pick', '取消')}`;
+    controller.start?.(); place();
+  };
+  const useSelection = async options => {
+    const frozen = { ...getContext() }, selection = await actions.captureAgentToolSelection({ ...options, context: frozen });
+    if (!sameContext(frozen, getContext()) || disposed) return;
+    const resumeId = picking ? selectedId : '';
+    if (!selection.ok) { cancelPick(true); if (panel.hidden) open(); tell(selection.message || '选中文字无法对应原文'); return; }
+    cancelPick();
+    if (!resumeId) open({ selectionSnapshot: selection.snapshot, messageId: options.messageId, returnFocus: options.returnFocus });
+    else { selectionSnapshot = selection.snapshot; target = { messageId: selection.snapshot.messageId }; shelf.hidden = false; showTool(resumeId); }
+  };
+  const configure = id => {
+    resume = { id, mode, context: { ...context }, target, selectionSnapshot };
+    close(); openAgent(id, { messageId: target?.messageId, context: { ...context } });
+  };
+  const listen = (node, type, callback, options) => { node?.addEventListener(type, callback, options); bindings.push(() => node?.removeEventListener(type, callback, options)); };
+  listen(trigger, 'click', event => { event.preventDefault(); event.stopPropagation(); panel.hidden ? open({ keyboard: event.detail === 0 }) : close(); });
+  listen(doc, 'pointerdown', event => { if (!picking && !panel.hidden && !panel.contains(event.target) && !trigger.contains(event.target)) close(); });
+  listen(panel, 'change', event => {
+    if (event.target.dataset.key !== 'target') return;
+    target = { messageId: event.target.value }; selectionSnapshot = null; selectedRunId = ''; void prepare();
+  });
+  listen(panel, 'click', async event => {
+    const control = event.target.closest('[data-key]'), key = control?.dataset.key; if (!key || control.disabled) return;
     try {
-      if(key==='close')close();
-      else if(key==='refresh'){if(target.kind==='input')target.inputTarget=getInputSnapshot();status='';render();}
-      else if(key==='manage'){close();openCenter();}
-      else if(key==='shortcut'){recording=true;event.target.textContent=t('按下快捷键');}
-      else if(key==='clear-shortcut'){prefs.shortcut=null;savePrefs();render();}
-      else if(key==='format-result'){close();openFormatResult(target.messageId);}
-      else if(key.startsWith('result:')){selectedId=key.slice(7);selectedRunId='';resultNotice='';render();}
-      else if(key.startsWith('result-run:')){const job=runs().find(j=>j.id===key.slice(11));if(job){selectedId=job.agentId;selectedRunId=job.id;target={kind:'reply',messageId:job.messageId};resultNotice='';render();}}
-      else if(key.startsWith('run:'))await invoke(key.slice(4));
-      else if(key.startsWith('config:')){const id=key.slice(7);close();openAgent(id,{messageId:target?.messageId});}
-      else if(key.startsWith('pin:')){const id=key.slice(4);prefs.pinned=prefs.pinned.includes(id)?prefs.pinned.filter(x=>x!==id):[...prefs.pinned,id];savePrefs();render();}
-      else if(key.startsWith('up:')||key.startsWith('down:')){const id=key.slice(key.indexOf(':')+1),ids=sorted().map(c=>c.id),i=ids.indexOf(id),j=i+(key.startsWith('up:')?-1:1);if(j>=0&&j<ids.length){[ids[i],ids[j]]=[ids[j],ids[i]];prefs.order=ids;savePrefs();render();panel.querySelector('details').open=true;place();}}
-      else if(key.startsWith('cancel:')){const id=key.slice(7);if(id.startsWith('input-run:')||id.startsWith('input-run-'))actions.cancelInputAgentRun(id);else if(formatJobs.has(id)){formatJobs.get(id).controller.abort();formatJobs.get(id).status='cancelled';}else actions.cancelTextEditRun(id);render();}
-      else if(key.startsWith('apply:')){close();await actions.applyInputAgentRun(key.slice(6));refresh();}
-      else if(key.startsWith('ignore:')){const id=key.slice(7),job=runs().find(j=>j.id===id);if(job?.outputMode)actions.ignoreTextEditRun(id);else actions.ignoreInputAgentRun(id);selectedId='';selectedRunId='';resultNotice='';status='';refresh();}
-      else if(key.startsWith('copy:')){const job=runs().find(j=>j.id===key.slice(5)),frozen={...context};if(job?.text&&isNote(job)){const copied=await clipboard.copyToClipboard(job.text);if(sameContext(frozen,getContext())){resultNotice=t(copied?'已复制':'复制失败');render();}}}
-      else if(key.startsWith('process:')){const job=runs().find(j=>j.id===key.slice(8));if(job){close();openAgent(job.agentId,{messageId:job.messageId,context:job.context});}}
-      else if(key.startsWith('review:')){const job=runs().find(j=>j.id===key.slice(7));if(isNote(job)){selectedId=job.agentId;selectedRunId=job.id;render();}else{close();await actions.openTextEditRun(key.slice(7));}}
-    }catch(error){status=String(error.message||error);render();}
+      if (key === 'close') close();
+      else if (key === 'back') back();
+      else if (key === 'dismiss-notice') { notice.hidden = true; place(); }
+      else if (key === 'dismiss-legend') { prefs.legendDismissed = true; savePrefs(); render(); }
+      else if (key === 'manage' || key === 'more' || key === 'runs') { epoch++; preparing = false; ordering = false; recording = false; mode = key; cardStamp = ''; render(); card.querySelector('button')?.focus({ preventScroll: true }); }
+      else if (key === 'center') { close(); openCenter(); }
+      else if (key === 'execute') await invoke();
+      else if (key === 'pick') startPick();
+      else if (key === 'cancel-pick') cancelPick(true);
+      else if (key === 'refresh-target' || key === 'clear-selection') {
+        if (isInputAgent(currentConfig())) inputTarget = getInputSnapshot();
+        else if (key === 'clear-selection') selectionSnapshot = null;
+        else { selectionSnapshot = null; target = { messageId: target?.messageId || replies()[0]?.id || '' }; }
+        selectedRunId = ''; void prepare();
+      }
+      else if (key === 'format-result') { const job = jobFor(selectedId); if (job) job.unread = false; close(); openFormatResult(target?.messageId); refreshStatus(); }
+      else if (key === 'shortcut') { recording = true; shortcutError = ''; cardStamp = ''; render(); card.querySelector('[data-key=shortcut]')?.focus({ preventScroll: true }); }
+      else if (key === 'cancel-shortcut') { recording = false; render(); card.querySelector('[data-key=shortcut]')?.focus({ preventScroll: true }); }
+      else if (key === 'clear-shortcut') { prefs.shortcut = null; savePrefs(); cardStamp = ''; render(); }
+      else if (key === 'sort') { ordering = !ordering; recording = false; render(); }
+      else if (key.startsWith('tool:')) { const config = catalog.find(item => item.id === key.slice(5)); if (config) isAgentToolToggle(config) ? await toggle(config) : showTool(config.id); }
+      else if (key.startsWith('config:')) configure(key.slice(7));
+      else if (key.startsWith('result:')) { const job = runs().find(item => item.id === key.slice(7)); if (job) showTool(job.agentId, job.id); }
+      else if (key.startsWith('visible:')) { const id = key.slice(8); prefs = setToolboxItemVisible(prefs, id, !items.some(config => config.id === id), context); savePrefs(); readCatalog(); render(); }
+      else if (key.startsWith('up:') || key.startsWith('down:')) {
+        const id = key.slice(key.indexOf(':') + 1), order = items.map(config => config.id), i = order.indexOf(id), next = i + (key.startsWith('up:') ? -1 : 1);
+        if (next >= 0 && next < order.length) { [order[i], order[next]] = [order[next], order[i]]; prefs.order = [...order, ...prefs.order.filter(value => !order.includes(value))]; savePrefs(); readCatalog(); render(); }
+      }
+      else {
+        const id = key.slice(key.indexOf(':') + 1), job = runs().find(item => item.id === id); if (!job) return;
+        const inputJob = id.startsWith('input-run');
+        if (key.startsWith('cancel:')) { if (formatJobs.has(id)) { job.controller.abort(); job.status = 'cancelled'; } else if (inputJob) actions.cancelInputAgentRun(id); else actions.cancelTextEditRun(id); render(); }
+        else if (key.startsWith('ignore:')) { inputJob ? actions.ignoreInputAgentRun(id) : actions.ignoreTextEditRun(id); render(); }
+        else if (key.startsWith('apply:')) { close(); await actions.applyInputAgentRun(id); refreshStatus(); }
+        else if (key.startsWith('review:')) { close(); await actions.openTextEditRun(id); refreshStatus(); }
+        else if (key.startsWith('copy:')) { const frozen = { ...context }, copied = await clipboard.copyToClipboard(job.text); if (sameContext(frozen, getContext())) tell(copied ? '已复制' : '复制失败'); }
+        else if (key.startsWith('process:')) configure(job.agentId);
+      }
+    } catch (error) { tell(String(error.message || error)); }
   });
-  let pointer={x:0,y:0};listen(doc,'pointermove',event=>{pointer={x:event.clientX,y:event.clientY};},{passive:true});
-  listen(doc,'keydown',event=>{
-    if(event.isComposing||event.keyCode===229)return;
-    if(event.key==='Escape'&&!panel.hidden){event.preventDefault();close();entryAnchor.focus({preventScroll:true});return;}
-    if(recording){if(!event.ctrlKey&&!event.altKey&&!event.metaKey)return;if(['Control','Alt','Meta','Shift'].includes(event.key))return;event.preventDefault();event.stopPropagation();prefs.shortcut={code:event.code,ctrl:event.ctrlKey,alt:event.altKey,meta:event.metaKey,shift:event.shiftKey,label:[event.ctrlKey?'Ctrl':'',event.altKey?'Alt':'',event.metaKey?'Meta':'',event.shiftKey?'Shift':'',event.key.toUpperCase()].filter(Boolean).join(' + ')};savePrefs();recording=false;render();return;}
-    const s=prefs.shortcut;if(s&&event.code===s.code&&event.ctrlKey===s.ctrl&&event.altKey===s.alt&&event.metaKey===s.meta&&event.shiftKey===s.shift&&!trigger.hidden){event.preventDefault();open({keyboard:true,anchor:pointer});}
-  },true);
-  listen(win,'resize',place);listen(win.visualViewport,'resize',place);listen(win.visualViewport,'scroll',place);listen(panel,'toggle',place,true);
-  for(const event of ['agent-input-changed','agent-text-edit-changed','agent-feature-settings-changed','session-changed'])listen(win,event,()=>{
-    for(const j of formatJobs.values())if(j.status==='running'&&(!sameContext(j.context,getContext())||!allConfigs().some(c=>c.id===j.agentId && c.enabled))){j.controller.abort();j.status='cancelled';}
-    while(formatJobs.size>20){const old=[...formatJobs.values()].find(j=>j.status!=='running');if(!old)break;formatJobs.delete(old.id);}refresh();
+  listen(doc, 'keydown', event => {
+    if (event.isComposing || event.keyCode === 229) return;
+    if (event.key === 'Escape' && !panel.hidden) { event.preventDefault(); event.stopPropagation(); back(); return; }
+    if (recording) {
+      if (event.key === 'Tab') return;
+      event.preventDefault(); event.stopImmediatePropagation();
+      if (event.repeat || ['Control', 'Alt', 'Meta', 'Shift'].includes(event.key)) return;
+      if (!(event.ctrlKey || event.altKey || event.metaKey) || !event.code || ['Dead', 'Unidentified'].includes(event.key)) {
+        shortcutError = '请按住 Ctrl、Alt 或 ⌘，再按另一个键。'; render(); return;
+      }
+      prefs.shortcut = { code: event.code, ctrl: event.ctrlKey, alt: event.altKey, meta: event.metaKey, shift: event.shiftKey,
+        label: [event.ctrlKey && 'Ctrl', event.altKey && 'Alt', event.metaKey && 'Meta', event.shiftKey && 'Shift', event.key.toUpperCase()].filter(Boolean).join(' + ') };
+      recording = false; savePrefs(); cardStamp = ''; render(); return;
+    }
+    const shortcut = prefs.shortcut;
+    if (!event.repeat && shortcut && event.code === shortcut.code && event.ctrlKey === shortcut.ctrl && event.altKey === shortcut.alt && event.metaKey === shortcut.meta && event.shiftKey === shortcut.shift && !trigger.hidden) {
+      event.preventDefault(); event.stopPropagation(); open({ keyboard: true });
+    }
+  }, true);
+  listen(panel, 'keydown', event => {
+    if (!event.target.closest('.at-shelf') || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    const buttons = [...shelf.querySelectorAll('button')].filter(node => !node.hidden && !node.disabled);
+    const at = buttons.indexOf(doc.activeElement), next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (at + (event.key === 'ArrowLeft' ? -1 : 1) + buttons.length) % buttons.length;
+    event.preventDefault(); event.stopPropagation(); buttons[next]?.focus();
   });
-  const observer=new win.MutationObserver(()=>{close();refresh();});observer.observe(doc.body,{attributes:true,attributeFilter:['data-ui-mode']});
-  render();
-  return {open,close,refresh,trigger,panel,listRuns:runs,dispose:()=>{close();win.cancelAnimationFrame(renderFrame);bindings.forEach(fn=>fn());observer.disconnect();for(const j of formatJobs.values())j.controller.abort();trigger.remove();anchorBadge.remove();entryAnchor.classList.remove('agent-toolbox-anchor');panel.remove();style.remove();}};
+  listen(panel, 'animationend', event => { if (event.target === panel) panel.classList.contains('is-entering') && panel.classList.remove('is-entering'); });
+  listen(panel, 'toggle', place, true);
+  listen(win, 'resize', refreshStatus); listen(win.visualViewport, 'resize', refreshStatus); listen(win.visualViewport, 'scroll', place);
+  for (const name of ['agent-input-changed', 'agent-text-edit-changed']) listen(win, name, refreshStatus);
+  listen(win, 'agent-feature-settings-changed', () => {
+    readCatalog();
+    for (const job of formatJobs.values()) if (job.status === 'running' && !catalog.some(config => config.id === job.agentId && config.enabled)) { job.controller.abort(); job.status = 'cancelled'; }
+    if (!panel.hidden && mode === 'task') { mountCard(); void prepare(); } else refreshStatus();
+  });
+  listen(win, 'session-changed', () => { close(); resume = null; selectionSnapshot = null; readCatalog();
+    for (const job of formatJobs.values()) if (job.status === 'running' && !sameContext(job.context, getContext())) { job.controller.abort(); job.status = 'cancelled'; } refreshStatus(); });
+  const observer = new win.MutationObserver(() => { close(); resume = null; refresh(); });
+  observer.observe(doc.body, { attributes: true, attributeFilter: ['data-ui-mode'] });
+  const targetObserver = new win.MutationObserver(() => {
+    if (panel.hidden || !prepared?.snapshot || targetFrame) return;
+    targetFrame = win.requestAnimationFrame(() => {
+      targetFrame = 0;
+      if (prepared?.snapshot && actions.isAgentToolTargetCurrent?.(prepared.snapshot) === false) {
+        prepared = { ok: false, message: '消息、回复分支或存档已变化，请重新选择文字' }; render();
+      }
+    });
+  });
+  if (targetEventRoot) targetObserver.observe(targetEventRoot, { childList: true, subtree: true, characterData: true });
+  readCatalog(); render();
+  return { open, close, back, refresh, trigger, panel, listRuns: runs, useSelection,
+    captureSelectionIdentity: messageId => actions.captureAgentToolSelectionIdentity?.({ messageId }),
+    setSelectionController: value => { controller = value; },
+    hasSelectionTools: () => catalog.some(config => !isInputAgent(config) && config.enabled),
+    dispose: () => { close(); disposed = true; win.cancelAnimationFrame(frame); win.cancelAnimationFrame(targetFrame); bindings.forEach(remove => remove()); observer.disconnect(); targetObserver.disconnect(); for (const job of formatJobs.values()) job.controller.abort(); view.dispose(); },
+  };
 };

@@ -1,13 +1,12 @@
 import { createTextEditRuntime } from '../agent/text-edit-runtime.js';
 import { createAgentConfigurationService } from '../agent/agent-configuration-service.js';
-import { allowsAgentInvocation, isInputAgent } from '../agent/agent-invocation.js';
 import { bindInputAgentComposer } from './chat/input-agent-composer.js';
 import { createRenderedAgentTargetResolver } from './chat/agent-rendered-body.js';
 import { createAgentToolbox } from './agent-toolbox.js';
 
 // Agent 配置、输入候选、回复修改与工具箱的装配及生命周期；app.js 提供模型和持久化能力。
 export const createAgentToolsAppRuntime = ({ ui, store, getContext, getMessages, findMessage, getRaw, getProfiles, getEvidence,
-  captureModel, request, previewRequest, commitReply, notifyReply, getDisplaySource, getReasoningBoundaries, getCurrentModelLabel, resolveReference, listReferenceSources, listAvailableTools, buildFormatPreview, runFormat, budget,
+  captureModel, request, previewRequest, commitReply, notifyReply, getDisplaySource, getReasoningBoundaries, getCurrentModelLabel, resolveReference, listReferenceSources, listAvailableTools, buildFormatPreview, runFormat, getFormatTarget, budget,
   openAgent, openCenter, openFormatResult, toolboxContainer, toolboxAnchor, onToolboxOpen, storage, documentRef = document } = {}) => {
   const win = documentRef.defaultView;
   const resolveTarget = getDisplaySource ? createRenderedAgentTargetResolver({ getDisplaySource, getReasoningBoundaries, documentRef }) : undefined;
@@ -26,18 +25,16 @@ export const createAgentToolsAppRuntime = ({ ui, store, getContext, getMessages,
     review: options => ui.openFormatPatchReview(options), onChange: changed('agent-input-changed'), budget,
   });
   const actions = createAgentConfigurationService({ store,getContext,getMessages,getRaw,getProfiles,getEvidence,
-    runtime:textEditRuntime, runFormat, buildFormatPreview, previewRequest, resolveTarget, getCurrentModelLabel, resolveReference, listReferenceSources, listAvailableTools,
+    runtime:textEditRuntime, runFormat, getFormatTarget, buildFormatPreview, previewRequest, resolveTarget, getCurrentModelLabel, resolveReference, listReferenceSources, listAvailableTools,
     getInput: () => ({before:ui.inputEl.value.slice(0,ui.inputEl.selectionStart),after:ui.inputEl.value.slice(ui.inputEl.selectionEnd)}),
     getInputRuntime: () => inputAgents, buildInputPreview: config => inputAgents.preview(config),
   });
   const toolbox = createAgentToolbox({input:ui.inputEl,actions,getContext,getMessages,getInputSnapshot:inputAgents.snapshot,openAgent,openCenter,openFormatResult,
-    triggerContainer:toolboxContainer,anchorEl:toolboxAnchor,beforeOpen:onToolboxOpen,documentRef,storage});
-  const previousCanEdit = ui.canEditWithAgent;
-  ui.canEditWithAgent = () => store.list(getContext()).some(r => !isInputAgent(r.config) && allowsAgentInvocation(r.config,'manual'));
-  const reconcile = () => {textEditRuntime.reconcile();inputAgents.reconcile();runFormat?.reconcile?.();toolbox.refresh();};
+    triggerContainer:toolboxContainer,anchorEl:toolboxAnchor,targetEventRoot:ui.scrollEl,beforeOpen:onToolboxOpen,documentRef,storage});
+  const reconcile = () => {textEditRuntime.reconcile();inputAgents.reconcile();runFormat?.reconcile?.();};
   win.addEventListener('agent-feature-settings-changed',reconcile);
   win.addEventListener('session-changed',reconcile);
   return {actions,textEditRuntime,inputAgents,toolbox,
-    dispose:()=>{win.removeEventListener('agent-feature-settings-changed',reconcile);win.removeEventListener('session-changed',reconcile);ui.canEditWithAgent=previousCanEdit;toolbox.dispose();inputAgents.dispose();textEditRuntime.dispose();},
+    dispose:()=>{win.removeEventListener('agent-feature-settings-changed',reconcile);win.removeEventListener('session-changed',reconcile);toolbox.dispose();inputAgents.dispose();textEditRuntime.dispose();},
   };
 };

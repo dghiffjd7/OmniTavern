@@ -2994,7 +2994,6 @@ export class ChatUI {
       resolveContextMenuContext,
       buildContextMenuActions,
       canCheckFormatForMessage: nextMessage => this.canCheckFormatForMessage?.(nextMessage) === true,
-      canEditWithAgent: nextMessage => this.canEditWithAgent?.(nextMessage) === true,
       isThreadingEnabledForMessage: nextMessage => this.isThreadingEnabledForMessage(nextMessage),
       normalizeReactionEntries,
       createContextMenuReactionRow,

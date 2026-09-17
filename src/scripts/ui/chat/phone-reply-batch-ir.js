@@ -1,3 +1,4 @@
+import { getChatTimeMode } from '../../utils/chat-time-policy.js';
 import {
   serializeBuiltinPhoneBatch,
   serializeBuiltinPhoneFormat,
@@ -179,6 +180,7 @@ const buildMessageProperties = ({
   stickerKeywords,
   speakerIds = [],
   requireSpeaker = false,
+  timeMode = getChatTimeMode(),
 } = {}) => {
   const supportsSpecialItems = itemTypes.some(type => type !== 'text');
   const properties = {
@@ -208,7 +210,7 @@ const buildMessageProperties = ({
     ...(itemTypes.includes('music')
       ? { artist: { type: 'string', minLength: 1, maxLength: 200 } }
       : {}),
-    time: { type: 'string', pattern: '^(?:[01]?\\d|2[0-3]):[0-5]\\d$' },
+    ...(timeMode==='ai'?{time: { type: 'string', pattern: '^(?:[01]?\\d|2[0-3]):[0-5]\\d$' }}:{}),
   };
   return {
     type: 'object',
@@ -333,6 +335,7 @@ const buildVariableUpdateSchema = () => ({
 
 export const buildPhoneReplyBatchProviderToolDefinition = ({
   target = {},
+  timeMode = target.timeMode ?? getChatTimeMode(),
   capabilities = {},
   allowedItemTypes = DEFAULT_ITEM_TYPES,
   allowedStickerKeywords = [],
@@ -360,6 +363,7 @@ export const buildPhoneReplyBatchProviderToolDefinition = ({
           minItems: 1,
           maxItems: MAX_MESSAGES,
           items: buildMessageProperties({
+            timeMode,
             itemTypes,
             stickerKeywords,
             speakerIds: members.map(item => item.id),
@@ -387,7 +391,7 @@ export const buildPhoneReplyBatchProviderToolDefinition = ({
               properties: {
                 ...(requireAuthor ? { authorId: { type: 'string', enum: momentAuthors.map(item => item.id) } } : {}),
                 content: { type: 'string', minLength: 1, maxLength: MAX_CONTENT_CHARS },
-                time: { type: 'string', pattern: '^(?:[01]?\\d|2[0-3]):[0-5]\\d$' },
+                ...(timeMode==='ai'?{time: { type: 'string', pattern: '^(?:[01]?\\d|2[0-3]):[0-5]\\d$' }}:{}),
                 views: { type: 'integer', minimum: 0 },
                 likes: { type: 'integer', minimum: 0 },
                 comments: buildCommentsSchema({ requireName: true }),
@@ -423,7 +427,7 @@ export const buildPhoneReplyBatchProviderToolDefinition = ({
             type: 'array',
             minItems: 1,
             maxItems: MAX_MESSAGES,
-            items: buildMessageProperties({ itemTypes, stickerKeywords }),
+            items: buildMessageProperties({ itemTypes, stickerKeywords, timeMode }),
           },
         },
       });
@@ -442,6 +446,7 @@ export const buildPhoneReplyBatchProviderToolDefinition = ({
             minItems: 1,
             maxItems: MAX_MESSAGES,
             items: buildMessageProperties({
+            timeMode,
               itemTypes: itemTypes.filter(type => type !== 'transfer'),
               stickerKeywords,
               speakerIds: memberIds,
@@ -1082,7 +1087,7 @@ const serializeVariableOperations = operations => [
   '</json_patch>',
 ].join('\n');
 
-export const serializePhoneReplyBatchIr = (ir = {}, { expectedSessionId = '' } = {}) => {
+export const serializePhoneReplyBatchIr = (ir = {}, { expectedSessionId = '', timeMode = getChatTimeMode() } = {}) => {
   const validation = validatePhoneReplyBatchIr(ir, { expectedSessionId });
   if (!validation.ok) return { ...validation, raw: '' };
   const mode = trim(ir?.context?.mode).toLowerCase();
@@ -1153,7 +1158,7 @@ export const serializePhoneReplyBatchIr = (ir = {}, { expectedSessionId = '' } =
     if (item.kind === 'summary') return { kind: 'summary', content: item.content };
     return { kind: item.kind };
   });
-  const raw = serializeBuiltinPhoneBatch(canonicalItems, { mode });
+  const raw = serializeBuiltinPhoneBatch(canonicalItems, { mode, timeMode });
 
   if (STANDARD_MODES.has(mode)) {
     const contract = validateBuiltinPhoneFormat(raw, { surface: mode });
@@ -1170,7 +1175,7 @@ export const serializePhoneReplyBatchIr = (ir = {}, { expectedSessionId = '' } =
   const isolatedContracts = canonicalItems
     .filter(item => item?.surface)
     .map((item) => validateBuiltinPhoneFormat(
-      serializeBuiltinPhoneFormat(item.surface, item.payload),
+      serializeBuiltinPhoneFormat(item.surface, {...item.payload,timeMode}),
       { surface: item.surface },
     ));
   const failed = isolatedContracts.find(contract => !contract.valid);

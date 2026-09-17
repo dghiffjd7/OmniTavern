@@ -467,6 +467,7 @@ export const normalizePhoneBatchProviderFcCalls = ({
     };
   }
   const serialized = serializePhoneReplyBatchIr(built.ir, {
+    timeMode: target.timeMode,
     expectedSessionId: trim(target?.sessionId),
   });
   if (!serialized.ok) {
@@ -505,6 +506,7 @@ export const runPhoneBatchProviderFcAttempt = async ({
   onModelUsage = null,
   onProviderUsage = null,
   onFirstProviderDelta = null,
+  onProviderDelta = null,
   requestOptions = {},
   allowedItemTypes = ['text'],
   allowedStickerKeywords = [],
@@ -579,6 +581,7 @@ export const runPhoneBatchProviderFcAttempt = async ({
     toolName: PHONE_REPLY_IR_BATCH_TOOL_NAME,
     onPreview: onStructuredPreview,
     onFirstArgumentsDelta: onFirstProviderDelta,
+    onArgumentsDelta: onProviderDelta,
     now,
   });
   let capturedUsage = null;

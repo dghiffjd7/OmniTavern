@@ -1,7 +1,10 @@
 import english from './prompt-locales/en.js';
 import traditionalChinese from './prompt-locales/zh-TW.js';
+import { withoutPhonePromptTime } from '../utils/phone-format-time-prompt.js';
 
 export const CANONICAL_RUNTIME_PROMPT_DEFAULTS = Object.freeze({
+  'phone_time.local': '时间格式：聊天行使用“说话人--正文”，动态主帖使用“作者--正文--浏览数--点赞数”。不要生成时间字段。每条消息独立成行，正文换行使用 <br>；接收时间由应用记录。',
+  'phone_time.ai': '时间格式：聊天行使用“说话人--正文--HH:mm”，动态主帖使用“作者--正文--HH:mm--浏览数--点赞数”。时间为有效的 24 小时制；评论不需要时间字段。',
   'phone_image_rules.legacy': [
     '【图片或视频消息相关】',
     '- 格式：[img-内容]',
@@ -222,14 +225,14 @@ export const CANONICAL_RUNTIME_PROMPT_DEFAULTS = Object.freeze({
   'format_guardian.no_events.repairable': '这属于可修复的标签缺漏。保留原文发言人、顺序和正文，只补齐下方格式范例或格式规则明确要求的标签、字段和闭合结构。',
   'format_guardian.no_events.private': '私聊场景优先补成：MiPhone_start / msg_start / <{tag}> / 原聊天行 / </{tag}> / msg_end / MiPhone_end。',
   'format_guardian.no_events.current': '优先补成当前目标格式要求的最小合法结构。',
-  'format_guardian.no_events.time': '若聊天行缺少时间字段，优先使用 repairFallbackTime（{time}）；没有可用时间时使用 00:00。',
+  'format_guardian.no_events.time': '时间字段遵循当前格式设置；缺失时间由应用记录，不要编造时间。',
   'format_guardian.no_events.custom': '本地解析器没有发现聊天协议内容，但本次存在 Custom Format Guide：修复目标以该 Guide 为准——保留正文原样，按 Guide 补齐要求的结构（如状态块、结构标签），canRepair 应为 true；只有正文为空时才返回 canRepair=false。',
   'format_guardian.no_events.empty': '本地解析器没有发现可提交的完整协议内容。若原始回复为空、完全没有有效聊天/动态内容，或修复必然需要编造正文，不要补写剧情；返回 status="cannot_repair"、linePatches=[]，并在 repairSummary 中建议用户重新生成。',
   'format_guardian.system.role': '你是聊天回复格式修复 Agent。',
   'format_guardian.system.protocol': '你必须遵守 {version}：产物是最小行补丁，不是修复后的完整原文。',
   'format_guardian.system.task': '任务：独立检查一段 AI 完整原始回复，并只用最小行补丁修复格式。',
   'format_guardian.system.scope': '只修复格式，不评价剧情、修辞、角色一致性或用户意图。',
-  'format_guardian.system.allowed': '允许修复：补齐/移动/闭合协议标签，补齐 msg 外层，补齐缺失时间，移除末尾残缺半行，把“说话人: 正文”转换为“说话人--正文--HH:mm”。',
+  'format_guardian.system.allowed': '允许修复：补齐/移动/闭合协议标签，补齐 msg 外层，移除末尾残缺半行，把“说话人: 正文”转换为聊天行。时间字段遵循当前格式设置；不要编造缺失的时间。',
   'format_guardian.system.forbidden': '禁止修改：不得改写正文语义，不得新增剧情内容，不得扩写角色台词。',
   'format_guardian.system.private': '私聊标签遵循现有协议：<{{user}}和联系人名的私聊>...</{{user}}和联系人名的私聊>；{{user}} 经过宏替换后也可能表现为“我和联系人名的私聊”或“用户名和联系人名的私聊”。',
   'format_guardian.system.loose_rows': '如果原始回复没有任何外层标签，但包含“说话人--正文”或“说话人--正文--HH:mm”聊天行，应视为可修复的标签缺漏，优先补齐标签而不是建议重新生成。',
@@ -262,7 +265,7 @@ export const CANONICAL_RUNTIME_PROMPT_DEFAULTS = Object.freeze({
     'Never return correctedText or a full corrected response.',
     'Use exact 1-based line ranges and exact originalLines. Never abbreviate replacementLines.',
   ].join('\n'),
-  'format_guardian.regenerate.hint_time': '补齐每条聊天消息的时间',
+  'format_guardian.regenerate.hint_time': '遵循当前聊天时间格式，不要编造缺失的时间',
   'format_guardian.regenerate.hint_target': '明确私聊对象、群名或动态目标',
   'format_guardian.regenerate.hint_speaker': '明确说话人，并使用联系人或群成员名称',
   'format_guardian.regenerate.hint_content': '保留实际正文内容',
@@ -589,16 +592,18 @@ export const getPromptLocale = () => activeLocale;
 export const getLocalizedPromptText = (key, fallback = undefined) => {
   const promptKey = String(key || '');
   const source = fallback === undefined ? CANONICAL_RUNTIME_PROMPT_DEFAULTS[promptKey] : fallback;
-  if (activeLocale === 'zh-CN') return String(source ?? '');
+  const project=value => ['phone_format_chat_rules','phone_format_moment_rules'].includes(promptKey) ? withoutPhonePromptTime(value) : String(value ?? '');
+  if (activeLocale === 'zh-CN') return project(source);
   const value = catalogs[activeLocale]?.[promptKey];
-  return typeof value === 'string' && value ? value : String(source ?? '');
+  return project(typeof value === 'string' && value ? value : source);
 };
 
 export const localizeOfficialPromptRecord = (record = {}, defaults = {}) => {
   const next = { ...(record && typeof record === 'object' ? record : {}) };
   if (activeLocale === 'zh-CN') return next;
   Object.entries(defaults || {}).forEach(([key, canonical]) => {
-    if (typeof next[key] !== 'string' || !samePromptText(next[key], canonical)) return;
+    const original=key.startsWith('phone_format_')?withoutPhonePromptTime(next[key]):next[key];
+    if (typeof next[key] !== 'string' || !samePromptText(original, canonical)) return;
     next[key] = getLocalizedPromptText(key, canonical);
   });
   return next;
@@ -610,7 +615,8 @@ export const canonicalizeOfficialPromptRecord = (record = {}, defaults = {}) => 
   Object.entries(defaults || {}).forEach(([key, canonical]) => {
     if (typeof next[key] !== 'string') return;
     const localized = getLocalizedPromptText(key, canonical);
-    if (localized !== canonical && samePromptText(next[key], localized)) next[key] = canonical;
+    const original=key.startsWith('phone_format_')?withoutPhonePromptTime(next[key]):next[key];
+    if (localized !== canonical && samePromptText(original, localized)) next[key] = canonical;
   });
   return next;
 };

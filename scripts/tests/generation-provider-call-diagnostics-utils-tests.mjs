@@ -21,7 +21,9 @@ const fcCallId = tracker.start({
   stream: true,
 });
 clock = 1_200;
-assert.equal(tracker.markFirstMeaningfulDelta(fcCallId), true);
+assert.equal(tracker.observeMeaningfulDelta(fcCallId), true);
+clock = 1_500;
+assert.equal(tracker.observeMeaningfulDelta(fcCallId), false, 'later samples do not trigger UI snapshots');
 clock = 1_600;
 tracker.observeUsage(fcCallId, {
   provider: 'openai',
@@ -62,15 +64,42 @@ assert.equal(calls[0].latencyMs, 700);
 assert.equal(calls[0].firstMeaningfulDeltaLatencyMs, 200);
 assert.equal(calls[0].outputDurationMs, 500);
 assert.equal(calls[0].tokensPerSecond, 20);
+assert.equal(calls[0].streamDeltaCount, 2);
+assert.equal(calls[0].streamObservedDurationMs, 300);
+assert.equal(calls[0].outputSpeedStatus, 'measured');
 assert.equal(calls[0].systemFingerprint, 'fp-call-1');
 assert.equal(calls[1].mode, 'legacy_text_fallback');
 assert.equal(calls[1].latencyMs, 300);
 assert.equal(calls[1].firstMeaningfulDeltaLatencyMs, null);
 assert.equal(calls[1].tokensPerSecond, null);
+assert.equal(calls[1].outputSpeedStatus, 'non_stream');
 assert.equal(calls[1].responseId, 'response-call-2');
 
 assert.equal(tracker.markFirstMeaningfulDelta(fcCallId, { at: 2_100 }), false, 'first delta is immutable');
 assert.equal(tracker.finish(fcCallId, { outcome: 'failed', completedAt: 2_200 }), false, 'finished calls are immutable');
 assert.equal(tracker.getActiveCallId(), '', 'no active call remains after the fallback completes');
+
+clock = 3000;
+const burstId = tracker.start({ stream: true });
+clock = 86376 + 3000;
+assert.equal(tracker.observeMeaningfulDelta(burstId), true);
+clock += 18;
+tracker.finish(burstId, { usage: { completionTokens: 4337 } });
+const burst = tracker.snapshot().at(-1);
+assert.equal(burst.tokensPerSecond, null);
+assert.equal(burst.streamDeltaCount, 1);
+assert.equal(burst.outputSpeedStatus, 'insufficient_samples');
+assert.equal(tracker.observeMeaningfulDelta(burstId), false);
+
+const cancelledId = tracker.start({ stream: true });
+clock += 100;
+tracker.observeMeaningfulDelta(cancelledId);
+clock += 800;
+tracker.observeMeaningfulDelta(cancelledId);
+tracker.finish(cancelledId, { outcome: 'cancelled' });
+const cancelled = tracker.snapshot().at(-1);
+assert.equal(cancelled.tokensPerSecond, null);
+assert.equal(cancelled.completionTokens, null, 'missing usage stays unknown');
+assert.equal(cancelled.outputSpeedStatus, 'missing_usage');
 
 console.log('generation-provider-call-diagnostics-utils-tests passed');

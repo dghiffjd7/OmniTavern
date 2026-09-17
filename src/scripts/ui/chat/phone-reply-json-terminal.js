@@ -145,6 +145,7 @@ const buildArgumentsSchema = ({
         allowedStickerKeywords,
       })
     : buildPrivateReplyProviderToolDefinition({
+      timeMode: target.timeMode,
         allowedItemTypes,
         allowedStickerKeywords,
       });
@@ -427,6 +428,7 @@ export const runPhoneReplyJsonAttempt = async ({
   requestOptions = {},
   onProviderUsage = null,
   onFirstProviderDelta = null,
+  onProviderDelta = null,
   now = Date.now,
 } = {}) => {
   if (enabled !== true || !client || typeof client.chat !== 'function') {
@@ -472,9 +474,13 @@ export const runPhoneReplyJsonAttempt = async ({
       for await (const chunk of client.streamChat(messages, options)) {
         if (typeof chunk !== 'string') continue;
         text += chunk;
-        if (!firstMeaningfulDeltaObserved && isMeaningfulTextStreamDelta(chunk)) {
-          firstMeaningfulDeltaObserved = true;
-          try { onFirstProviderDelta?.({ at: Number(now?.() || Date.now()) || Date.now() }); } catch {}
+        if (isMeaningfulTextStreamDelta(chunk)) {
+          const event = { at: Number(now?.() || Date.now()) || Date.now() };
+          try { onProviderDelta?.(event); } catch {}
+          if (!firstMeaningfulDeltaObserved) {
+            firstMeaningfulDeltaObserved = true;
+            try { onFirstProviderDelta?.(event); } catch {}
+          }
         }
       }
     } else {

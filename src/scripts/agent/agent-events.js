@@ -46,6 +46,9 @@ const normalizeProviderCallUsage = (raw = {}) => {
     ),
     outputDurationMs: toNullableMetric(src.outputDurationMs, { integer: true }),
     tokensPerSecond: toNullableMetric(src.tokensPerSecond),
+    outputSpeedStatus: responseIdentity(src.outputSpeedStatus),
+    streamDeltaCount: toNullableMetric(src.streamDeltaCount, { integer: true }),
+    streamObservedDurationMs: toNullableMetric(src.streamObservedDurationMs, { integer: true }),
     finishReason: responseIdentity(src.finishReason ?? src.finish_reason),
     systemFingerprint: responseIdentity(src.systemFingerprint ?? src.system_fingerprint),
     modelVersion: responseIdentity(src.modelVersion ?? src.model_version),
@@ -90,11 +93,14 @@ export const normalizeAgentUsage = (raw = {}) => {
     firstUserVisibleRenderLatencyMs: toNullableMetric(src.firstUserVisibleRenderLatencyMs, { integer: true }),
     outputDurationMs: toNullableMetric(src.outputDurationMs, { integer: true }),
     tokensPerSecond: toNullableMetric(src.tokensPerSecond),
+    streamDeltaCount: toNullableMetric(src.streamDeltaCount, { integer: true }),
+    streamObservedDurationMs: toNullableMetric(src.streamObservedDurationMs, { integer: true }),
   };
   Object.entries(optionalMetrics).forEach(([key, value]) => {
     if (value != null) normalized[key] = value;
   });
   [
+    ['outputSpeedStatus', src.outputSpeedStatus],
     ['systemFingerprint', src.systemFingerprint ?? src.system_fingerprint],
     ['modelVersion', src.modelVersion ?? src.model_version],
     ['responseId', src.responseId ?? src.response_id],

@@ -1,4 +1,6 @@
 import { getLocalizedPromptText } from '../i18n/prompt-locale.js';
+import { getChatTimeMode, normalizeChatProtocolTime } from './chat-time-policy.js';
+import { parseProtocolChatRow, parseProtocolMomentHeader } from './protocol-message-row.js';
 
 export const BUILTIN_PHONE_FORMAT_CONTRACT_VERSION = 'miphone.text.v1';
 
@@ -58,9 +60,11 @@ const safeName = (value, fallback) => oneLine(value, fallback)
 
 const safeContent = (value, fallback = '正文') => oneLine(value, fallback).replace(/--/g, '——');
 
-const safeTime = (value, fallback = '00:00') => {
-  const time = oneLine(value, fallback);
-  return /^(?:\d{1,2}:\d{2}|HH:mm)$/.test(time) ? time : fallback;
+const timeFields = (payload, value) => {
+  if((payload.timeMode ?? getChatTimeMode())!=='ai')return [];
+  if(payload.placeholder===true)return ['HH:mm'];
+  const time=normalizeChatProtocolTime(value);
+  return time?[time]:[];
 };
 
 const safeCount = (value, fallback = 0) => {
@@ -80,7 +84,7 @@ const serializePrivateBody = (payload = {}) => {
   const rows = messages.map(message => [
     safeName(message?.speaker, '说话人'),
     safeContent(message?.content, '正文'),
-    safeTime(message?.time, payload.placeholder === true ? 'HH:mm' : '00:00'),
+    ...timeFields(payload,message?.time),
   ].join('--'));
   return [`<${tagName}>`, ...rows, `</${tagName}>`];
 };
@@ -96,7 +100,7 @@ const serializeGroupBody = (payload = {}) => {
   const rows = messages.map(message => [
     safeName(message?.speaker, '说话人'),
     safeContent(message?.content, '正文'),
-    safeTime(message?.time, payload.placeholder === true ? 'HH:mm' : '00:00'),
+    ...timeFields(payload,message?.time),
   ].join('--'));
   return [
     `<群聊:${groupName}>`,
@@ -122,7 +126,7 @@ const serializeMomentPostBody = (payload = {}) => {
     rows.push([
       safeName(post?.author, '发布者'),
       safeContent(post?.content, '动态正文'),
-      safeTime(post?.time, payload.placeholder === true ? 'HH:mm' : '00:00'),
+      ...timeFields(payload,post?.time),
       safeCount(post?.views),
       safeCount(post?.likes),
     ].join('--'));
@@ -227,7 +231,7 @@ const appendBatchImagePrompt = (payload = {}, prompt = '') => {
   return { ...payload, messages: nextMessages };
 };
 
-export const serializeBuiltinPhoneBatch = (items = [], { mode = '' } = {}) => {
+export const serializeBuiltinPhoneBatch = (items = [], { mode = '', timeMode = getChatTimeMode() } = {}) => {
   const listItems = Array.isArray(items) ? items : [];
   const normalizedMode = String(mode || '').trim().toLowerCase();
   const commentMode = normalizedMode === BUILTIN_PHONE_FORMAT_SURFACES.momentComment || listItems.some(item => (
@@ -255,7 +259,7 @@ export const serializeBuiltinPhoneBatch = (items = [], { mode = '' } = {}) => {
       const payload = index === imagePromptTargetIndex
         ? appendBatchImagePrompt(item?.payload || {}, imagePrompts.join('\n'))
         : (item?.payload || {});
-      body.push(...serializeBuiltinPhoneBatchSurface(surface, payload));
+      body.push(...serializeBuiltinPhoneBatchSurface(surface, {...payload,timeMode}));
       return;
     }
     const kind = String(item?.kind || '').trim().toLowerCase();
@@ -290,7 +294,8 @@ export const serializeBuiltinPhoneBatch = (items = [], { mode = '' } = {}) => {
 
 const guardianSnippets = Object.freeze({
   phoneShell: () => [...BUILTIN_PHONE_FORMAT_SHELL_LINES],
-  privateChat: () => serializePrivateBody({
+  privateChat: (timeMode) => serializePrivateBody({
+    timeMode,
     userName: '{{user}}',
     targetName: getLocalizedPromptText('format_guardian.example.contact'),
     messages: [{
@@ -300,7 +305,8 @@ const guardianSnippets = Object.freeze({
     }],
     placeholder: true,
   }),
-  groupChat: () => serializeGroupBody({
+  groupChat: (timeMode) => serializeGroupBody({
+    timeMode,
     groupName: getLocalizedPromptText('format_guardian.example.group'),
     members: [
       getLocalizedPromptText('format_guardian.example.member_1'),
@@ -313,7 +319,8 @@ const guardianSnippets = Object.freeze({
     }],
     placeholder: true,
   }),
-  momentPost: () => serializeMomentPostBody({
+  momentPost: (timeMode) => serializeMomentPostBody({
+    timeMode,
     posts: [{
       author: getLocalizedPromptText('format_guardian.example.publisher'),
       content: getLocalizedPromptText('format_guardian.example.moment_body'),
@@ -335,9 +342,9 @@ const guardianSnippets = Object.freeze({
   variableUpdate: () => ['<UpdateVariable>', getLocalizedPromptText('format_guardian.example.variable_instruction'), '</UpdateVariable>'],
 });
 
-export const getBuiltinPhoneFormatGuardianSnippet = (id = '') => {
+export const getBuiltinPhoneFormatGuardianSnippet = (id = '', {timeMode=getChatTimeMode()} = {}) => {
   const build = guardianSnippets[String(id || '').trim()];
-  return build ? build() : [];
+  return build ? build(timeMode) : [];
 };
 
 export const buildBuiltinPhoneFormatReminder = ({
@@ -346,9 +353,11 @@ export const buildBuiltinPhoneFormatReminder = ({
   targetName = '联系人名',
   groupName = '群名',
   includeTableEdit = false,
+  timeMode = getChatTimeMode(),
 } = {}) => {
   const normalizedSurface = normalizeSurface(surface);
   const payload = {
+    timeMode,
     userName,
     targetName,
     groupName,
@@ -502,7 +511,7 @@ const validatePrivateBlocks = (body, addIssue) => {
       return;
     }
     const rows = body.slice(start, start + close.index).split('\n').map(line => line.trim()).filter(Boolean);
-    if (!rows.length || rows.some(row => !/^.+?--.+?--\d{1,2}:\d{2}$/.test(row))) {
+    if (!rows.length || rows.some(row => !parseProtocolChatRow(row))) {
       addIssue('private_chat.invalid_row');
     }
   });
@@ -531,7 +540,7 @@ const validateGroupBlocks = (body, addIssue) => {
       return;
     }
     const rows = String(chat[1] || '').split('\n').map(line => line.trim()).filter(Boolean);
-    if (!rows.length || rows.some(row => !/^.+?--.+?--\d{1,2}:\d{2}$/.test(row))) {
+    if (!rows.length || rows.some(row => !parseProtocolChatRow(row))) {
       addIssue('group_chat.invalid_row');
     }
   });
@@ -545,10 +554,7 @@ const validateMomentPost = (body, addIssue) => {
     return;
   }
   const lines = body.slice(starts[0].end, ends[0].index).split('\n').map(line => line.trim()).filter(Boolean);
-  const headers = lines.filter((line) => {
-    const parts = line.split('--').map(part => part.trim());
-    return parts.length >= 5 && /^\d+$/.test(parts[3]) && /^\d+$/.test(parts[4]);
-  });
+  const headers = lines.filter(line => parseProtocolMomentHeader(line));
   if (!headers.length) addIssue('moment_post.invalid_row');
 };
 

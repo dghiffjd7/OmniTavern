@@ -37,6 +37,17 @@ const waitFor = async (predicate, message = 'condition was not met') => {
   assert.fail(message);
 };
 
+// Untimed rows are valid. Repair fixtures now omit the required phone shell.
+const buildMissingPrivateShellPatches = () => [{
+  startLine: 1, endLine: 1,
+  originalLines: ['<我和菲伦的私聊>'],
+  replacementLines: ['MiPhone_start', 'msg_start', '<我和菲伦的私聊>'],
+}, {
+  startLine: 3, endLine: 3,
+  originalLines: ['</我和菲伦的私聊>'],
+  replacementLines: ['</我和菲伦的私聊>', 'msg_end', 'MiPhone_end'],
+}];
+
 test('resolveAfterReceiveSkipScripts prefers explicit override', () => {
   assert.equal(resolveAfterReceiveSkipScripts(true, false), true);
   assert.equal(resolveAfterReceiveSkipScripts(false, true), false);
@@ -448,7 +459,7 @@ test('buildChatFormatGuardianMessagePart summarizes warnings without exposing fu
     part.metadata.decisionActions.filter(action => action.enabled !== false).map(action => action.id),
     ['swipe_retry', 'review_original', 'edit_user_input_suggestion', 'open_agent_center'],
   );
-  assert.equal(part.metadata.inputSuggestion.includes('补齐每条聊天消息的时间'), true);
+  assert.equal(part.metadata.inputSuggestion.includes('不要编造缺失的时间'), true);
 });
 
 test('buildChatFormatGuardianAgentRun records review state without storing full content', () => {
@@ -691,6 +702,7 @@ test('runChatFormatGuardianPreview validates the full rawOriginal before cleaned
     sessionId: 'contact:firen',
     chatFormatGuardian: {
       enabled: true,
+      enabledFormats: { phoneShell: true },
       manualTrigger: true,
       userName: '我',
       resolvePrivateTargetId: name => (name === '菲伦' ? 'contact:firen' : ''),
@@ -709,7 +721,7 @@ test('runChatFormatGuardianPreview validates the full rawOriginal before cleaned
   );
   assert.equal(result.agentRun.steps[0].input.sourceTextKind, 'rawOriginal');
   assert.equal(result.agentRun.metadata.repairCandidate, null);
-  assert.equal(result.result.warnings.includes('time is missing'), true);
+  assert.equal(result.result.warnings.some(warning => warning.includes('phone shell marker')), true);
 });
 
 test('buildChatBodyQualityMessagePart summarizes issues without storing replacement text', () => {
@@ -836,6 +848,7 @@ test('dispatchAfterReceiveEffects attaches chat format preview only through call
     sessionId: 'group:case',
     chatFormatGuardian: {
       enabled: true,
+      enabledFormats: { phoneShell: true },
       manualTrigger: true,
       userName: '我',
       resolveGroupTargetId: name => (name === '调查组' ? 'group:case' : ''),
@@ -922,6 +935,7 @@ test('runChatFormatGuardianPreview always asks permission for model repair of in
     sessionId: 'contact:firen',
     chatFormatGuardian: {
       enabled: true,
+      enabledFormats: { phoneShell: true },
       baseRevision: 'format-run:test-invisible',
       userName: '我',
       resolvePrivateTargetId: name => (name === '菲伦' ? 'contact:firen' : ''),
@@ -929,21 +943,16 @@ test('runChatFormatGuardianPreview always asks permission for model repair of in
       modelReview: {
         enabled: true,
         autoApplyRepair: true,
-        enabledFormats: { privateChat: true },
+        enabledFormats: { phoneShell: true, privateChat: true },
         backgroundChat: async (messages) => {
           modelCalls.push(messages);
           return JSON.stringify({
             protocolVersion: 'format_patch.v1',
             status: 'patch',
             baseRevision: 'format-run:test-invisible',
-            issues: [{ severity: 'warning', type: 'missing_field', message: 'time is missing' }],
-            repairSummary: '补齐时间',
-            linePatches: [{
-              startLine: 2,
-              endLine: 2,
-              originalLines: ['菲伦--今晚别一个人走。'],
-              replacementLines: ['菲伦--今晚别一个人走。--22:12'],
-            }],
+            issues: [{ severity: 'warning', type: 'missing_field', message: 'phone shell marker is missing' }],
+            repairSummary: '补齐外壳标签',
+            linePatches: buildMissingPrivateShellPatches(),
           });
         },
       },
@@ -971,7 +980,7 @@ test('runChatFormatGuardianPreview always asks permission for model repair of in
   assert.equal(repairs.length, 0);
   assert.equal(previews.length, 1);
   assert.equal(previews[0].part.status, 'waiting_permission');
-  assert.match(previews[0].part.metadata.repairCandidate.replacementText, /22:12/);
+  assert.match(previews[0].part.metadata.repairCandidate.replacementText, /MiPhone_start/);
 });
 
 test('runChatFormatGuardianPreview does not auto-apply even when legacy autoApplyRepair is enabled', async () => {
@@ -1133,6 +1142,7 @@ test('runChatFormatGuardianPreview can attach async model format repair candidat
     sessionId: 'contact:firen',
     chatFormatGuardian: {
       enabled: true,
+      enabledFormats: { phoneShell: true },
       manualTrigger: true,
       baseRevision: 'format-run:test-async-candidate',
       userName: '我',
@@ -1140,7 +1150,7 @@ test('runChatFormatGuardianPreview can attach async model format repair candidat
       resolveSpeakerId: name => (name === '菲伦' ? 'contact:firen' : ''),
       modelReview: {
         enabled: true,
-        enabledFormats: { privateChat: true, groupChat: false },
+        enabledFormats: { phoneShell: true, privateChat: true, groupChat: false },
         formatReminderText: '私聊格式：说话人--正文--HH:mm',
         backgroundChat: async (messages, options) => {
           modelCalls.push({ messages, options });
@@ -1151,16 +1161,11 @@ test('runChatFormatGuardianPreview can attach async model format repair candidat
             issues: [{
               severity: 'warning',
               type: 'missing_field',
-              message: 'time is missing',
+              message: 'phone shell marker is missing',
               evidence: '菲伦--今晚别一个人走。',
             }],
-            repairSummary: '补齐私聊消息时间字段',
-            linePatches: [{
-              startLine: 2,
-              endLine: 2,
-              originalLines: ['菲伦--今晚别一个人走。'],
-              replacementLines: ['菲伦--今晚别一个人走。--22:12'],
-            }],
+            repairSummary: '补齐私聊外壳标签',
+            linePatches: buildMissingPrivateShellPatches(),
           });
         },
         requestOptions: { temperature: 0, maxTokens: 900 },
@@ -1193,14 +1198,14 @@ test('runChatFormatGuardianPreview can attach async model format repair candidat
   const modelPart = previews[1].part;
   assert.equal(modelPart.metadata.modelReview.status, 'patch');
   assert.equal(modelPart.metadata.modelReview.correctedText, undefined);
-  assert.equal(modelPart.metadata.modelReview.patchCount, 1);
+  assert.equal(modelPart.metadata.modelReview.patchCount, 2);
   const repairAction = modelPart.metadata.decisionActions.find(action => action.id === 'apply_repair');
   assert.equal(repairAction.repairCandidate.kind, 'model_format_repair');
-  assert.match(repairAction.repairCandidate.replacementText, /22:12/);
+  assert.match(repairAction.repairCandidate.replacementText, /MiPhone_start/);
   assert.equal(repairAction.repairCandidate.formatTarget, 'private_chat');
   assert.deepEqual(
     repairAction.repairCandidate.formatSourceIds,
-    ['privateChat', 'sceneFormatReminder'],
+    ['phoneShell', 'privateChat', 'sceneFormatReminder'],
   );
   assert.equal(runs.at(-1).metadata.repairCandidate.replacementText, undefined);
   assert.equal(message.meta, undefined);
@@ -1223,6 +1228,7 @@ test('runChatFormatGuardianPreview retries one invalid patch response with the o
     sessionId: 'contact:firen',
     chatFormatGuardian: {
       enabled: true,
+      enabledFormats: { phoneShell: true },
       manualTrigger: true,
       baseRevision: 'format-run:test-retry-invalid',
       userName: '我',
@@ -1231,7 +1237,7 @@ test('runChatFormatGuardianPreview retries one invalid patch response with the o
       modelReview: {
         enabled: true,
         force: true,
-        enabledFormats: { privateChat: true },
+        enabledFormats: { phoneShell: true, privateChat: true },
         backgroundChat: async (messages) => {
           modelCalls.push(messages);
           if (modelCalls.length === 1) {
@@ -1249,14 +1255,9 @@ test('runChatFormatGuardianPreview retries one invalid patch response with the o
             protocolVersion: 'format_patch.v1',
             status: 'patch',
             baseRevision: 'format-run:test-retry-invalid',
-            issues: [{ severity: 'warning', type: 'missing_field', message: '补齐时间' }],
-            repairSummary: '补齐缺失时间',
-            linePatches: [{
-              startLine: 2,
-              endLine: 2,
-              originalLines: ['菲伦--今晚别一个人走。'],
-              replacementLines: ['菲伦--今晚别一个人走。--22:12'],
-            }],
+            issues: [{ severity: 'warning', type: 'missing_field', message: '补齐外壳标签' }],
+            repairSummary: '补齐外壳标签',
+            linePatches: buildMissingPrivateShellPatches(),
           });
         },
       },
@@ -1272,7 +1273,7 @@ test('runChatFormatGuardianPreview retries one invalid patch response with the o
   assert.match(modelCalls[1].at(-1).content, /corrected_text_forbidden/);
   assert.equal(previews.at(-1).result.status, 'needs_review');
   assert.equal(previews.at(-1).result.modelReview.attemptCount, 2);
-  assert.match(previews.at(-1).part.metadata.repairCandidate.replacementText, /22:12/);
+  assert.match(previews.at(-1).part.metadata.repairCandidate.replacementText, /MiPhone_start/);
 });
 
 test('runChatFormatGuardianPreview closes as cannot_repair when two social candidates still cannot parse', async () => {
@@ -1378,6 +1379,7 @@ test('runChatFormatGuardianPreview filters model format reminders by resolved ta
     sessionId: 'group:case',
     chatFormatGuardian: {
       enabled: true,
+      enabledFormats: { phoneShell: true },
       manualTrigger: true,
       baseRevision: 'format-run:test-profile-filter',
       userName: '我',
@@ -1595,6 +1597,7 @@ test('dispatchAfterReceiveEffects merges chat format and body quality sidecars',
     sessionId: 'group:case',
     chatFormatGuardian: {
       enabled: true,
+      enabledFormats: { phoneShell: true },
       manualTrigger: true,
       userName: '我',
       resolveGroupTargetId: name => (name === '调查组' ? 'group:case' : ''),

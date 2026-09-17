@@ -247,6 +247,7 @@ export const preparePrivateChatProviderFcRoute = ({
     return { ...eligibility, messages: [], promptDiagnostics: null };
   }
   const toolDefinition = buildPrivateReplyProviderToolDefinition({
+      timeMode: target.timeMode,
     allowedItemTypes,
     allowedStickerKeywords,
   });
@@ -341,6 +342,7 @@ export const normalizePrivateChatProviderFcCalls = ({
     };
   }
   const serialized = serializePhoneReplyIr(built.ir, {
+    timeMode: target.timeMode,
     userName: trim(target?.userName, '我'),
     expectedSessionId: trim(target?.sessionId),
   });
@@ -379,6 +381,7 @@ export const runPrivateChatProviderFcAttempt = async ({
   onModelUsage = null,
   onProviderUsage = null,
   onFirstProviderDelta = null,
+  onProviderDelta = null,
   requestOptions = {},
   allowedItemTypes = ['text'],
   allowedStickerKeywords = [],
@@ -414,6 +417,7 @@ export const runPrivateChatProviderFcAttempt = async ({
     : buildProviderFcRequestPlan({
         config,
         tools: [buildPrivateReplyProviderToolDefinition({
+      timeMode: target.timeMode,
           allowedItemTypes,
           allowedStickerKeywords,
         })],
@@ -451,6 +455,7 @@ export const runPrivateChatProviderFcAttempt = async ({
     toolName: PHONE_REPLY_IR_PRIVATE_TOOL_NAME,
     onPreview: onStructuredPreview,
     onFirstArgumentsDelta: onFirstProviderDelta,
+    onArgumentsDelta: onProviderDelta,
     now,
   });
   let capturedUsage = null;

@@ -1,6 +1,7 @@
 // 独立 Agent 的完整配置；旧功能设置只读回退，显式保存才建立作用域覆盖。
 import { getAgentInvocationMode } from '../agent/agent-invocation.js';
 import { normalizeAgentReferenceConfig } from '../agent/agent-reference-context.js';
+import { normalizeAgentIcon } from '../agent/agent-icons.js';
 export const AGENT_CONFIG_KEY = 'agent_config_library_v1';
 export const CONFIGURABLE_AGENT_IDS = ['text_completion', 'reply_check'];
 const clone = value => value == null ? value : JSON.parse(JSON.stringify(value));
@@ -24,6 +25,7 @@ export const agentConfigScopeKey = (context = {}, scope = 'local') => {
 export const normalizeAgentConfiguration = (value = {}, id = value.id) => ({
   id: text(id), kind: id === 'text_completion' ? 'input_suggestion' : String(id).startsWith('input-agent:') ? 'input_agent' : id === 'reply_check' ? 'format_review' : 'text_edit',
   title: text(value.title).slice(0, 80) || (id === 'text_completion' ? '文本建议' : String(id).startsWith('input-agent:') ? '输入助手' : id === 'reply_check' ? '格式修复' : '正文润色'),
+  icon: normalizeAgentIcon(value.icon),
   enabled: value.enabled === true,
   modelMode: ['none', 'profile', 'follow_current'].includes(value.modelMode) ? value.modelMode : 'none',
   modelProfileId: text(value.modelProfileId), modelOverride: text(value.modelOverride),
