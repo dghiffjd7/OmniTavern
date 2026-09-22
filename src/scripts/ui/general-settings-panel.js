@@ -2177,7 +2177,7 @@ export class GeneralSettingsPanel {
             ${this.renderSettingRow({
               id: 'general-prompt-time',
               title: '发送当前时间给 AI',
-              description: '把当前真实时间一并发给模型。',
+              description: '发送当前真实时间，并为聊天历史标注日期与时段。',
               icon: 'clock',
             })}
             ${this.renderSettingRow({

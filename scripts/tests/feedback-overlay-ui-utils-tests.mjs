@@ -47,9 +47,15 @@ const createFakeDocument = () => {
   const overlay = runtime.openLightbox('image.png');
   assert.equal(documentLike.body.children[0], overlay);
   assert.equal(overlay.className, 'lightbox');
+  assert.equal(overlay.children[0].src, 'image.png');
   overlay.onclick();
   assert.equal(documentLike.body.children.length, 0);
   console.log('ok - openLightbox mounts preview overlay and removes it on click');
+  const quotedUrl = 'https://example.test/" data-filename="reference.png';
+  const quoted = runtime.openLightbox(quotedUrl);
+  assert.equal(quoted.children.length, 1);
+  assert.equal(quoted.children[0].src, quotedUrl, 'image URLs are assigned as a property instead of interpolated into markup');
+  quoted.onclick();
 }
 
 {

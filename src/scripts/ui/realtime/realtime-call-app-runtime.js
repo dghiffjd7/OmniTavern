@@ -63,13 +63,20 @@ export const createRealtimeCallAppRuntime = ({
   windowLike = globalThis.window,
   getCallTarget,
   resolveConnection,
+  resolveProfileBinding = target => globalThis.localStorage ? getRealtimeProfileStore().resolveBinding(target) : null,
   buildSemanticSnapshot,
   isTargetCurrent,
   commitUserMessage,
   commitAssistantMessage,
   commitLiveTranscript,
+  handleMaidTaskRequest,
+  getMaidSurface = () => null,
+  registerSettingsTarget = registerRealtimeSettingsTarget,
   openVoiceSettings = null,
   onLifecycleInvalidated = null,
+  beforeStart = null,
+  onStateChange = null,
+  onExecuteTranscript = null,
   toast = null,
   createPanel = createRealtimeCallPanel,
   createRuntime = createRealtimeCallRuntime,
@@ -79,10 +86,17 @@ export const createRealtimeCallAppRuntime = ({
   let usageTotals = createRealtimeUsageTotals();
   let runtime = null;
   let panel = null;
+  let settingsTarget = null;
+  let presentationTarget = null;
+  let startPending = false;
+  let startVersion = 0;
+  const surface = () => presentationTarget?.uiMode === 'maid' ? getMaidSurface() : panel;
 
   const endAndHide = async reason => {
+    startVersion++;
+    const currentSurface = surface();
     await runtime?.end?.(reason || 'user');
-    panel?.hide?.();
+    currentSurface?.hide?.();
   };
 
   panel = createPanel({
@@ -98,12 +112,18 @@ export const createRealtimeCallAppRuntime = ({
     },
     onInterrupt: () => runtime?.interrupt?.(),
     onEnd: reason => endAndHide(reason),
+    onExecuteTranscript: async text => {
+      const target = runtime?.getState?.().target;
+      if (target?.uiMode !== 'maid' || !text?.trim()) return;
+      await endAndHide('maid_task');
+      await onExecuteTranscript?.(text, target);
+    },
   });
 
   runtime = createRuntime({
     createSessionClient,
     resolveConnection: async options => {
-      const bound = globalThis.localStorage ? await getRealtimeProfileStore().resolveBinding(options?.target) : null;
+      const bound = await resolveProfileBinding(options?.target);
       return bound || resolveConnection?.(options);
     },
     buildSemanticSnapshot,
@@ -112,28 +132,31 @@ export const createRealtimeCallAppRuntime = ({
     commitUserMessage,
     commitAssistantMessage,
     commitLiveTranscript,
+    handleMaidTaskRequest,
     onStateChange: state => {
-      panel?.renderState?.(state);
-      if (state.status === 'idle') panel?.hide?.();
-      button?.classList?.toggle?.('is-active', state.status !== 'idle');
-      button?.setAttribute?.('aria-pressed', String(state.status !== 'idle'));
+      surface()?.renderState?.(state);
+      if (state.status === 'idle') surface()?.hide?.();
+      const active = state.status !== 'idle' && state.target?.uiMode !== 'maid';
+      button?.classList?.toggle?.('is-active', active);
+      button?.setAttribute?.('aria-pressed', String(active));
+      onStateChange?.(state);
     },
-    onCaption: caption => panel?.setCaption?.(caption),
-    onAudioLevel: value => panel?.setAudioLevel?.(value),
+    onCaption: caption => surface()?.setCaption?.(caption),
+    onAudioLevel: value => surface()?.setAudioLevel?.(value),
     onUsage: event => {
       usageTotals = accumulateRealtimeUsage(usageTotals, event);
-      panel?.setUsage?.(usageTotals);
+      surface()?.setUsage?.(usageTotals);
     },
     onWarning: message => {
-      panel?.setWarning?.(message);
+      surface()?.setWarning?.(message);
       toast?.warning?.(message);
     },
     onError: error => {
       const message = String(error?.message || error || 'Realtime 语音发生错误');
-      panel?.setWarning?.(message);
+      surface()?.setWarning?.(message);
       if (error?.code === 'input_transcription_failed') toast?.warning?.(message);
       else toast?.error?.(message);
-      if (String(error?.code || '').startsWith('realtime_config_')) void openVoiceSettings?.();
+      if (String(error?.code || '').startsWith('realtime_config_')) void openVoiceSettings?.(settingsTarget);
     },
   });
 
@@ -144,27 +167,45 @@ export const createRealtimeCallAppRuntime = ({
     button.disabled = target.supported !== true;
   };
 
-  const handleButtonClick = async () => {
-    const target = getCallTarget?.() || {};
-    if (!target.supported) {
-      toast?.warning?.(target.reason || '当前会话暂不支持实时语音');
+  const startCall = async (target = getCallTarget?.() || {}) => {
+    if (!target?.supported) {
+      toast?.warning?.(target?.reason || '当前会话暂不支持实时语音');
       return false;
     }
-    if (runtime.getState().status !== 'idle') {
-      panel.show(target, { expanded: true });
-      return true;
-    }
-    usageTotals = createRealtimeUsageTotals();
-    panel.setUsage(usageTotals);
-    panel.setWarning('');
-    panel.setCaption({ role: '', text: '连接后即可自然说话' });
-    panel.show(target, { expanded: true });
-    const started = await runtime.start();
-    if (!started) panel.hide();
-    return started;
+    if (startPending) return false;
+    startPending = true;
+    try {
+      const active = runtime.getState();
+      if (active.status !== 'idle' && isRealtimeCallTargetMatch(active.target, target)) {
+        if (target.uiMode === 'maid') surface()?.toggleControls?.();
+        else panel.show(active.target, { expanded: true });
+        return true;
+      }
+      if (active.status !== 'idle') await endAndHide('switch_target');
+      settingsTarget = target;
+      presentationTarget = target;
+      const version = ++startVersion;
+      await beforeStart?.(target);
+      if (version !== startVersion) return false;
+      usageTotals = createRealtimeUsageTotals();
+      surface()?.setUsage?.(usageTotals);
+      surface()?.setWarning?.('');
+      surface()?.show?.(target, { expanded: true });
+      surface()?.setCaption?.({ role: '', text: '连接后即可自然说话' });
+      const started = await runtime.start(target);
+      if (!started) surface()?.hide?.();
+      return started;
+    } catch (error) {
+      surface()?.hide?.();
+      onStateChange?.({ status: 'idle', target: null });
+      toast?.error?.(String(error?.message || error));
+      return false;
+    } finally { startPending = false; }
   };
+  const handleButtonClick = () => startCall();
 
-  const unregisterSettingsTarget = registerRealtimeSettingsTarget(getCallTarget, handleButtonClick);
+  const getSettingsTarget = () => settingsTarget?.uiMode === 'maid' ? settingsTarget : getCallTarget?.();
+  const unregisterSettingsTarget = registerSettingsTarget(getSettingsTarget, () => startCall(getSettingsTarget()));
 
   const endForLifecycle = reason => {
     // Live drains timestamped fragments and final usage before invalidation.
@@ -192,6 +233,8 @@ export const createRealtimeCallAppRuntime = ({
     panel,
     syncButtonAvailability,
     endAndHide,
+    startCall,
+    setSettingsTarget: target => { settingsTarget = target; },
     destroy: async () => {
       unregisterSettingsTarget();
       button?.removeEventListener?.('click', handleButtonClick);

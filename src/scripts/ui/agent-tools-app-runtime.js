@@ -40,7 +40,7 @@ export const createAgentToolsAppRuntime = ({ ui, store, getContext, getMessages,
     review: options => ui.openFormatPatchReview(options), onChange: changed('agent-input-changed'), budget,
   });
   const actions = createAgentConfigurationService({ store,getContext,getMessages,getRaw,getProfiles,getEvidence,
-    runtime:textEditRuntime, runFormat, formatRuntime, getFormatTarget, buildFormatPreview, previewRequest, resolveTarget, getCurrentModelLabel, resolveReference, listReferenceSources, listAvailableTools,
+    runtime:textEditRuntime, runFormat, formatRuntime, getFormatTarget, buildFormatPreview, previewRequest, captureModel, resolveTarget, getCurrentModelLabel, resolveReference, listReferenceSources, listAvailableTools,
     getInput: () => ({before:ui.inputEl.value.slice(0,ui.inputEl.selectionStart),after:ui.inputEl.value.slice(ui.inputEl.selectionEnd)}),
     getInputRuntime: () => inputAgents, buildInputPreview: config => inputAgents.preview(config),
   });

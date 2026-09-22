@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import { AGENT_FEATURE_DEFINITIONS } from '../../src/scripts/agent/agent-feature-settings.js';
+import { getAgentCardDefinitions } from '../../src/scripts/ui/agent-center-card-catalog.js';
 
 const readJson = async path => JSON.parse(await fs.readFile(path, 'utf8'));
 const sourceEntries = await readJson('scripts/i18n/ui-source-catalog.json');
@@ -11,7 +13,26 @@ const chatUiSource = await fs.readFile('src/scripts/ui/chat/chat-ui.js', 'utf8')
 
 const sources = new Set(sourceEntries.map(entry => entry.source));
 assert.ok(sources.has('提示词 {count}'), 'manual dynamic UI source keys must be extracted');
-assert.ok(sources.has('检查私聊、群聊、动态等输出格式。'), 'Agent Center UI definitions must be extracted');
+// Validate current UI definitions and their extraction provenance instead of freezing obsolete copy.
+const entriesBySource = new Map(sourceEntries.map(entry => [entry.source, entry]));
+for (const [file, definitions] of [
+  ['src/scripts/agent/agent-feature-settings.js', AGENT_FEATURE_DEFINITIONS],
+  ['src/scripts/ui/agent-center-card-catalog.js', getAgentCardDefinitions()],
+]) {
+  assert.ok(definitions.length > 0, `Agent Center definitions must be available: ${file}`);
+  for (const definition of definitions) {
+    const texts = [definition.title, definition.summary, definition.detailTitle, ...definition.detail].filter(Boolean);
+    for (const source of texts) {
+      assert.ok(
+        entriesBySource.get(source)?.references.includes(`${file}#ui-definition`),
+        `Agent Center UI definition must be extracted from ${file} (${definition.id}): ${source}`,
+      );
+      for (const [locale, catalog] of Object.entries({ en: english, 'zh-TW': traditional, pseudo })) {
+        assert.ok(Object.hasOwn(catalog, source), `${locale} must cover Agent Center UI (${definition.id}): ${source}`);
+      }
+    }
+  }
+}
 for (const source of ['比例', '面部修复', '关闭安全检查', '噪声调度']) {
   assert.ok(sources.has(source), `positional UI builder labels must be extracted: ${source}`);
 }
@@ -49,7 +70,7 @@ const auditedSurfaceTranslations = {
   '发布动态': 'Create Post',
   'AI 生成贴图': 'AI Sticker Generator',
   '动图模式': 'Sprite Mode',
-  '描述你想生成的图片，例如角色、场景、风格、构图、光线': 'Describe the image you want, including the character, scene, style, composition, and lighting',
+  '粘贴完整提示词，或描述想生成的图片': 'Paste a complete prompt or describe the image you want',
   '相册': 'Gallery',
   '群聊格式提示词': 'Group Chat Format Prompt',
   '全局世界书（所有会话共享）': 'Global lorebooks (shared across all sessions)',

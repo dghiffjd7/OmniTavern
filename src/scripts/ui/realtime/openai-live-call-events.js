@@ -73,5 +73,5 @@ export const createOpenAiLiveCallEvents = ({ target, settings, commitTranscript,
       onError?.(new Error(String(event.error?.message || t('GPT-Live 服务发生错误'))));
     }
   };
-  return { handle, flush, dispose: () => { ended = true; if (timer !== null) clearTimeoutFn(timer); timer = null; } };
+  return { handle, flush, getGroups: () => transcript.groups, dispose: () => { ended = true; if (timer !== null) clearTimeoutFn(timer); timer = null; } };
 };

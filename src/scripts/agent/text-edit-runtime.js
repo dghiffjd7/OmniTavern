@@ -5,6 +5,7 @@ import { validateFormatRepairFunctionPayloads, extractFormatFunctionBlocks } fro
 import { allowsAgentInvocation } from './agent-invocation.js';
 import { captureAgentReferenceMessages } from './agent-reference-context.js';
 import { agentToolContextKey, agentToolMessageIdentity, isAgentToolReply } from './agent-tool-targets.js';
+import { agentRequestTimeoutMs } from './agent-generation-settings.js';
 
 // Some models wrap otherwise valid JSON in one Markdown code fence. Accept
 // that presentation wrapper only; the revision, exact lines and patch limits
@@ -69,7 +70,7 @@ export const createTextEditRuntime = ({ getContext, getMessage, getMessages, get
     const cancel = () => controller.abort();
     signal?.addEventListener('abort', cancel, { once: true });
     if (signal?.aborted) cancel();
-    const timeout = setTimeout(cancel, 120000);
+    const timeout = setTimeout(cancel, agentRequestTimeoutMs(job.config, 120000));
     try {
       const model = await captureModel(job.config, sessionId);
       const source = await getRaw(message, sessionId);

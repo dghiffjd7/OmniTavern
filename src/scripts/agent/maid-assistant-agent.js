@@ -416,6 +416,7 @@ const createMaidRunTracker = ({ agentTaskRuntime = null, input = '', context = {
       summary: truncateForRun(trackedGoal, 200),
       metadata: {
         goal: trackedGoal,
+        ...(context.source === 'maid_realtime' ? { submissionSource: context.source, submissionId: context.submissionId, voiceCallId: context.voiceCallId } : {}),
         ...(trim(continuation?.sourceRunId) ? {
           resumedFromRunId: trim(continuation.sourceRunId),
           continuationVersion: trim(continuation.version),
@@ -2906,6 +2907,13 @@ export const createMaidAssistantAgent = ({
 
   const executePlan = async (plan, context = {}, tracker = null) => {
     throwIfMaidAborted(context?.signal);
+    // Voice work can wait in the queue while the user switches rooms. Bind an
+    // omitted session target before validation, confirmation and execution.
+    if (context.voiceCallId && trim(context.sessionId)
+      && toolRegistry?.get?.(plan.toolName)?.schema?.properties?.sessionId
+      && !['sessionId', 'sessionName', 'chatName', 'target'].some(key => trim(plan.args?.[key]))) {
+      plan = { ...plan, args: { ...plan.args, sessionId: context.sessionId } };
+    }
     let executablePlan = plan;
     if (capabilityRoutingRuntime && typeof capabilityRoutingRuntime.validatePlan === 'function') {
       let validation = null;

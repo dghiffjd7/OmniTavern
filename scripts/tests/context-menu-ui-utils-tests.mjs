@@ -51,6 +51,16 @@ for (const status of ['interrupted', 'cancelled']) {
   assert.equal(actions.find(item => item.key === 'generate-image')?.label, '重新生成图片');
 }
 
+for (const status of ['running', 'succeeded']) {
+  const actions = buildContextMenuActions({ role: 'assistant', type: status === 'running' ? 'text' : 'image',
+    meta: { generatedMedia: { kind: 'image', status, prompt: 'saved scene' } } });
+  assert.equal(actions.find(action => action.key === 'repeat-image-generation')?.label, '再生成一张');
+  assert.equal(actions.find(action => action.key === 'repeat-image-generation')?.group, 'main');
+  assert.equal(actions.some(action => action.key === 'cancel-media-generation'), status === 'running');
+}
+assert.equal(buildContextMenuActions({ role: 'user', type: 'image' }).some(action => action.key === 'repeat-image-generation'), false);
+assert.equal(buildContextMenuActions({ meta: { generatedMedia: { kind: 'audio', status: 'succeeded', prompt: 'voice' } } }).some(action => action.key === 'repeat-image-generation'), false);
+
 {
   const actions = buildContextMenuActions(
     { role: 'user', type: 'text', meta: { generatedMedia: { status: 'failed', prompt: 'blue sky' } } },
@@ -132,6 +142,7 @@ for (const status of ['interrupted', 'cancelled']) {
   assert.equal(resolveInlineGeneratedImageAsset(message, inlineGeneratedImage)?.prompt, 'cinematic cat');
   assert.equal(actions.find(item => item.key === 'generate-image')?.label, '重新生成图片');
   console.log('ok - buildContextMenuActions labels rich inline generated images as regenerate image');
+  assert.equal(actions.find(item => item.key === 'repeat-image-generation')?.label, '再生成一张');
 }
 
 {

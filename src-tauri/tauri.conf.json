@@ -1,6 +1,6 @@
 {
   "productName": "OmniTavern",
-  "version": "0.7.2-diagnose-2",
+  "version": "0.7.3-diagnose-1",
   "identifier": "com.chatapp.dev",
   "build": {
     "beforeDevCommand": "",
@@ -30,7 +30,7 @@
     },
     "android": {
       "minSdkVersion": 24,
-      "versionCode": 7008
+      "versionCode": 7011
     }
   },
   "app": {

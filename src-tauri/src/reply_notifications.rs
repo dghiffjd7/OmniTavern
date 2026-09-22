@@ -154,6 +154,8 @@ pub fn activate(app: &AppHandle, args: &[String]) {
         runtime.pending = Some(token);
         runtime.channel.clone()
     };
+    // Mobile WebviewWindow does not expose desktop window activation APIs.
+    #[cfg(desktop)]
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         let _ = window.unminimize();

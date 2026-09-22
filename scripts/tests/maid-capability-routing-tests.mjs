@@ -172,6 +172,20 @@ const createCatalogRoutingHarness = () => {
 
 {
   const retriever = createMaidCapabilityRetriever();
+  for (const [input, id] of [
+    ['把刚创建的世界书绑定到角色卡「乙」', 'worldbook.bind_persona'],
+    ['给指定角色卡绑定世界书', 'worldbook.bind_persona'],
+    ['把世界书绑定到角色卡的创意写作，只用于创意写作不要影响私聊', 'worldbook.bind_rp_session'],
+    ['把世界书绑定到聊天室「乙」', 'worldbook.bind_session'],
+  ]) {
+    const result = retriever.retrieve(input, { features: listAppFeatures(), limit: 8 });
+    assert.equal(result[0].id, id, input);
+  }
+  console.log('ok - character-card bindings are distinct from writing-only and room bindings');
+}
+
+{
+  const retriever = createMaidCapabilityRetriever();
   const { catalogFeatures } = createCatalogRoutingHarness();
   const fixtures = [
     ['清理测试用的房间', 'session.delete_many', 'session_batch_delete'],

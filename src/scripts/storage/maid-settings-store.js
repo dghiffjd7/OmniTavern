@@ -89,6 +89,7 @@ const hasExplicitSettings = (raw = {}) => {
     trim(src.boundProfileId) ||
     trim(src.maidPrompt) ||
     trim(src.personaPrompt) ||
+    ['realtime', 'stt'].includes(src.voiceInputMode) ||
     hasExplicitMemoryExtractionSettings(src)
   );
 };
@@ -133,6 +134,7 @@ const toPersistedMaidSettingsState = (state = {}, { now = Date.now } = {}) => {
     updatedAt: normalized.updatedAt,
     boundProfileId: normalized.boundProfileId,
     boundModelOverride: normalized.boundModelOverride,
+    voiceInputMode: normalized.voiceInputMode,
     fallbackProfileId: normalized.fallbackProfileId,
     subAgents: normalized.subAgents,
     subAgentRemindAt: normalized.subAgentRemindAt,
@@ -199,6 +201,7 @@ export const normalizeMaidSettingsState = (raw = {}, { now = Date.now } = {}) =>
     updatedAt: Number(src.updatedAt || safeNow(now)) || safeNow(now),
     boundProfileId: trim(src.boundProfileId),
     boundModelOverride: trim(src.boundModelOverride),
+    voiceInputMode: src.voiceInputMode === 'stt' ? 'stt' : 'realtime',
     fallbackProfileId: trim(src.fallbackProfileId),
     subAgents: (Array.isArray(src.subAgents) ? src.subAgents : [])
       .map(item => normalizeMaidSubAgent(item, { now }))
@@ -298,6 +301,11 @@ export class MaidSettingsStore {
       lastExchangeAt: debugRaw?.lastExchangeAt || 0,
       lastExchangeSource: debugRaw?.lastExchangeSource || '',
       // 新增字段必须进入合并列表，否则 load 会以默认空值重建并在写回时抹掉持久化数据
+      voiceInputMode: chooseFieldFromSources({ localRaw, kvRaw,
+        localValue: localState.voiceInputMode, kvValue: kvState?.voiceInputMode,
+        localHasValue: Object.hasOwn(localRaw, 'voiceInputMode'),
+        kvHasValue: Boolean(kvRaw && Object.hasOwn(kvRaw, 'voiceInputMode')),
+      }),
       boundModelOverride: (readTimestamp(kvRaw) >= readTimestamp(localRaw) ? kvState : localState)?.boundModelOverride
         || kvState?.boundModelOverride || localState.boundModelOverride || '',
       fallbackProfileId: (readTimestamp(kvRaw) >= readTimestamp(localRaw) ? kvState : localState)?.fallbackProfileId
@@ -367,6 +375,18 @@ export class MaidSettingsStore {
   getBoundModelOverride() {
     this.ensureLoaded();
     return trim(this.state.boundModelOverride);
+  }
+
+  getVoiceInputMode() {
+    this.ensureLoaded();
+    return this.state.voiceInputMode;
+  }
+
+  async setVoiceInputMode(mode) {
+    this.ensureLoaded();
+    this.state.voiceInputMode = mode === 'stt' ? 'stt' : 'realtime';
+    await this.write();
+    return this.getVoiceInputMode();
   }
 
   async setBoundModelOverride(model = '') {

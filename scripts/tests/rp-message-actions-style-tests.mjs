@@ -42,7 +42,11 @@ assert.match(creativeCss, /data-ui-mode='chat'[\s\S]*\.rp-reading-settings-btn[\
 assert.match(creativeCss, /data-ui-mode='chat'\]\[data-rp-reading-size='standard'\][\s\S]*font-size:\s*calc\(14\.5px\s*\*\s*var\(--app-font-scale,\s*1\)\)/s);
 assert.match(creativeCss, /data-ui-mode='chat'\]\[data-rp-narrative-font='serif'\][\s\S]*font-family:\s*'Noto Serif SC'/s);
 assert.match(creativeCss, /body:not\(\[data-theme-mode='dark'\]\)\[data-ui-mode='chat'\][\s\S]*\.QQ_chat_charmsg[\s\S]*background:\s*var\(--app-surface-card\)/s);
-assert.match(agentChipSource, /\.chat-room-topbar\s+\.agent-status-chip-mark[\s\S]*linear-gradient\(135deg,\s*#6366f1,\s*#8b5cf6\)/s);
+assert.match(
+  agentChipSource,
+  /\.chat-room-topbar\s+\.agent-status-chip-mark\s*\{[^}]*border-radius:\s*50%[^}]*background:\s*linear-gradient\(145deg,\s*#ffffff\b[^;]*#b8c0ca\b/s,
+  'topbar Agent Center keeps its round silver-coin mark',
+);
 assert.match(
   creativeCss,
   /body\[data-ui-mode='chat'\]:not\(\[data-chat-display='document'\]\)\s+\.QQ_chat_charmsg\s+\.QQ_chat_msgdiv\s*\{[^}]*border-radius:\s*4px 22px 22px 22px\s*!important/s,

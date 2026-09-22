@@ -82,6 +82,7 @@
         "src/scripts/ui/chat/pending-message-utils.js",
         "src/scripts/ui/chat/phone-batch-provider-fc.js",
         "src/scripts/ui/chat/phone-reply-ir.js",
+        "src/scripts/ui/chat/protocol-thinking-utils.js",
         "src/scripts/ui/chat/prompt-context-utils.js",
         "src/scripts/ui/chat/prompt-preview-view-utils.js",
         "src/scripts/ui/chat/prompt-world-debug-utils.js",
@@ -89,7 +90,8 @@
         "src/scripts/ui/chat/rich-text-renderer.js",
         "src/scripts/ui/chat/send-flow-utils.js",
         "src/scripts/ui/chat/session-activity-runtime-utils.js",
-        "src/scripts/utils/builtin-phone-format-contract.js"
+        "src/scripts/utils/builtin-phone-format-contract.js",
+        "src/scripts/utils/phone-format-time-prompt.js"
       ],
       "category": "protocol_compatibility",
       "reason": "Remaining strings are message/media sentinels, legacy Chinese parser aliases, stable role names, or embedded bridge contracts; changing them would break existing chats or imports."

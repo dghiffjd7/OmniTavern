@@ -73,6 +73,14 @@ export const buildContextMenuActions = (message, {
   if (canDownload) {
     actions.push({ key: 'download', label: '下载', group: 'main' });
   }
+  const repeatableImage = inlineGeneratedAsset || message?.meta?.generatedMedia;
+  if (
+    repeatableImage && (!repeatableImage.kind || repeatableImage.kind === 'image') &&
+    String(repeatableImage.prompt || '').trim() &&
+    (['running', 'succeeded'].includes(repeatableImage.status) || (inlineGeneratedAsset && !repeatableImage.status))
+  ) {
+    actions.push({ key: 'repeat-image-generation', label: '再生成一张', group: 'main' });
+  }
   if (message?.meta?.generatedMedia?.status === 'running') {
     actions.push({ key: 'cancel-media-generation', label: '取消生成', group: 'danger', tone: 'danger' });
     return actions;

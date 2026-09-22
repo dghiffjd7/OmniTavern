@@ -1,6 +1,8 @@
 import { isOpenAiLive, buildOpenAiLiveSessionConfig } from './openai-live-config.js';
 import { createOpenAiLiveCallEvents } from './openai-live-call-events.js';
 import { t } from '../../i18n/index.js';
+import { createRealtimeMaidTaskSession } from './realtime-maid-task-session.js';
+import { createMaidRealtimeTools, assertMaidRealtimeCapability } from './realtime-maid-tools.js';
 import {
   buildOpenAiRealtimeSessionConfig,
   normalizeRealtimeVoiceSettings,
@@ -41,6 +43,7 @@ export const createRealtimeCallRuntime = ({
   commitUserMessage,
   commitAssistantMessage,
   commitLiveTranscript,
+  handleMaidTaskRequest,
   onStateChange = null,
   onCaption = null,
   onAudioLevel = null,
@@ -64,6 +67,7 @@ export const createRealtimeCallRuntime = ({
   };
   let sessionClient = null;
   let liveEvents = null;
+  let maidTaskSession = null;
   let target = null;
   let connection = null;
   let responseRecords = new Map();
@@ -238,8 +242,9 @@ export const createRealtimeCallRuntime = ({
   const handleServerEvent = event => {
     const type = String(event?.type || '').trim();
     if (!type || state.status === 'idle') return;
-    if (isLive()) { liveEvents?.handle(event); return; }
+    if (isLive()) { liveEvents?.handle(event); if (state.status !== 'ending') maidTaskSession?.handle(event); return; }
     if (state.status === 'ending') return;
+    maidTaskSession?.handle(event);
     if (type === 'warning') { onWarning?.(event.message); return; }
     if (type === 'usage.delta') { onUsage?.({ type: 'response', usage: event.usage }); return; }
     if (type === 'input.transcript.preview') { onCaption?.({ role: 'user', text: event.text, final: false }); return; }
@@ -362,7 +367,7 @@ export const createRealtimeCallRuntime = ({
       const error = new Error('实时语音连接已中断，请结束后重新拨号');
       error.code = 'connection_lost';
       try { onError?.(error); } catch {}
-      if (isLive() && normalized === 'failed') void end('connection_lost');
+      if ((isLive() || target?.uiMode === 'maid') && normalized === 'failed') void end('connection_lost');
     }
   };
 
@@ -392,9 +397,9 @@ export const createRealtimeCallRuntime = ({
     return false;
   };
 
-  const start = async () => {
+  const start = async (callTarget = null) => {
     if (state.status !== 'idle') return false;
-    target = getCallTarget?.() || null;
+    target = callTarget || getCallTarget?.() || null;
     if (!target?.supported || !target?.sessionId) {
       const error = new Error(target?.reason || '当前会话暂不支持实时语音通话');
       error.code = 'unsupported_target';
@@ -425,6 +430,11 @@ export const createRealtimeCallRuntime = ({
         ...resolved,
         settings: normalizeRealtimeVoiceSettings(resolved.settings),
       };
+      const maidTasks = target.uiMode === 'maid';
+      if (maidTasks) {
+        assertMaidRealtimeCapability(connection.config);
+        if (typeof handleMaidTaskRequest !== 'function') throw new Error(t('女仆任务入口尚未就绪'));
+      }
       const snapshot = await buildSemanticSnapshot?.({
         target,
         inputText: '',
@@ -450,13 +460,18 @@ export const createRealtimeCallRuntime = ({
         onAudioLevel: value => { if (generation === startGeneration) { if (isLive() && (value?.input?.level > 0.03 || value?.output?.level > 0.03)) touchActivity(); onAudioLevel?.(value); } },
       });
       if (!sessionClient) throw new Error('实时语音客户端初始化失败');
+      if (maidTasks) maidTaskSession = createRealtimeMaidTaskSession({
+        target: { ...target }, live: isLive(), provider: connection.config.provider || 'openai',
+        getClient: () => sessionClient, handleTaskRequest: handleMaidTaskRequest,
+        getLiveGroups: () => liveEvents?.getGroups() || [], onError,
+      });
       emitState('connecting', { startedAt, elapsedMs: 0, provider: connection.config.provider || 'openai', openaiBackend: isLive() ? 'live' : 'realtime' });
+      const sessionConfig = isLive() ? buildOpenAiLiveSessionConfig({ ...connection.settings, instructions, maidTasks })
+        : isNatural() ? { ...connection.settings, instructions } : buildOpenAiRealtimeSessionConfig({ ...connection.settings, instructions });
+      if (maidTasks && !isLive()) sessionConfig.tools = createMaidRealtimeTools();
       await sessionClient.connect({
         config: connection.config,
-        sessionConfig: isLive() ? buildOpenAiLiveSessionConfig({ ...connection.settings, instructions }) : isNatural() ? { ...connection.settings, instructions } : buildOpenAiRealtimeSessionConfig({
-          ...connection.settings,
-          instructions,
-        }),
+        sessionConfig,
         signal: connectAbortController?.signal || null,
       });
       assertStartCurrent();
@@ -474,6 +489,7 @@ export const createRealtimeCallRuntime = ({
       if (state.status === 'ending' && endingPromise) { await endingPromise; return false; }
       try { await sessionClient?.close?.(); } catch {}
       liveEvents?.dispose(); liveEvents = null;
+      maidTaskSession?.dispose(); maidTaskSession = null;
       sessionClient = null;
       if (generation === startGeneration) connectAbortController = null;
       if (error?.name === 'AbortError' || error?.cancelled === true || generation !== startGeneration) {
@@ -504,6 +520,7 @@ export const createRealtimeCallRuntime = ({
     try { connectAbortController?.abort?.(); } catch {}
     connectAbortController = null;
     endingPromise = (async () => {
+      maidTaskSession?.dispose(); maidTaskSession = null;
       emitState('ending', { endReason: String(reason || 'user') });
       if (timeoutTimer != null && typeof clearIntervalFn === 'function') clearIntervalFn(timeoutTimer);
       timeoutTimer = null;
@@ -559,6 +576,7 @@ export const createRealtimeCallRuntime = ({
     setMicrophoneMuted,
     setOutputMuted,
     checkTimeouts,
+    notifyTaskUpdate: update => maidTaskSession?.notifyTaskUpdate(update) || false,
     getState: () => ({ ...state, target: state.target ? { ...state.target } : null }),
     whenIdle: () => eventQueue,
   };

@@ -6,6 +6,16 @@ import {
 } from '../../src/scripts/ui/chat/context-menu-action-runtime-utils.js';
 
 {
+  const calls = [], inlineGeneratedImage = { id: 'selected-image' }, wrapper = {};
+  const result = await dispatchContextMenuAction({ actionKey: 'repeat-image-generation', wrapper, inlineGeneratedImage,
+    hideMenu: () => calls.push('hide'), clearLongPress: () => calls.push('clear'),
+    tryAction: async (...args) => calls.push(args),
+  });
+  assert.equal(result, 'repeat-image-generation');
+  assert.deepEqual(calls, ['hide', 'clear', ['repeat-image-generation', { wrapper, inlineGeneratedImage }, { skipFallback: true }]]);
+}
+
+{
   const text = resolveContextMenuCopyText(
     {
       content: '',

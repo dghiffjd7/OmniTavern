@@ -73,6 +73,7 @@ export const limitHistoryByTokenBudget = (
     capPerMessageTokens = null,
     tokenMode = 'rough',
     protectedMessageIndexes = [],
+    getMessagePrefix = null,
   } = {},
 ) => {
   const protectedIndexes = new Set(
@@ -97,23 +98,29 @@ export const limitHistoryByTokenBudget = (
     ? (quota === null ? explicitPerMessage : Math.min(explicitPerMessage, quota))
     : quota;
   let truncatedMessageCount = 0;
+  const prefixTokens = (message, previous = null) => typeof getMessagePrefix === 'function'
+    ? estimateTokens(getMessagePrefix(message, previous), tokenMode)
+    : 0;
 
   // 每条 token 估算只做一次并缓存在 entry 上，淘汰时维护差量和；
   // 数千楼×千字的会话若每删一条就全量重算会拖到秒级。
   let totalTokens = 0;
-  for (const entry of entries) {
+  for (let index = 0; index < entries.length; index++) {
+    const entry = entries[index];
     const message = entry.message;
+    const textLimit = perMessageLimit === null ? null : Math.max(0, perMessageLimit - prefixTokens(message));
     if (
       perMessageLimit !== null
       && !entry.protected
       && message
       && typeof message.content === 'string'
-      && estimateHistoryMessageTokens(message, tokenMode) > perMessageLimit
+      && estimateHistoryMessageTokens(message, tokenMode) > textLimit
     ) {
-      message.content = truncateTextToTokenBudget(message.content, perMessageLimit, tokenMode);
+      message.content = truncateTextToTokenBudget(message.content, textLimit, tokenMode);
       truncatedMessageCount += 1;
     }
-    entry.tokens = estimateHistoryMessageTokens(entry.message, tokenMode);
+    entry.prefixTokens = prefixTokens(entry.message, entries[index - 1]?.message);
+    entry.tokens = estimateHistoryMessageTokens(entry.message, tokenMode) + entry.prefixTokens;
     totalTokens += entry.tokens;
   }
   let droppedMessageCount = 0;
@@ -124,6 +131,14 @@ export const limitHistoryByTokenBudget = (
       if (scanIndex >= entries.length) break;
       totalTokens -= entries[scanIndex].tokens;
       entries.splice(scanIndex, 1);
+      const next = entries[scanIndex];
+      if (next && getMessagePrefix) {
+        const nextPrefixTokens = prefixTokens(next.message, entries[scanIndex - 1]?.message);
+        const delta = nextPrefixTokens - next.prefixTokens;
+        next.prefixTokens = nextPrefixTokens;
+        next.tokens += delta;
+        totalTokens += delta;
+      }
       droppedMessageCount += 1;
     }
     if (
@@ -132,9 +147,10 @@ export const limitHistoryByTokenBudget = (
       && !entries[0].protected
       && typeof entries[0].message?.content === 'string'
     ) {
-      entries[0].message.content = truncateTextToTokenBudget(entries[0].message.content, quota, tokenMode);
+      const textBudget = Math.max(0, quota - prefixTokens(entries[0].message));
+      entries[0].message.content = truncateTextToTokenBudget(entries[0].message.content, textBudget, tokenMode);
       truncatedMessageCount += 1;
-      entries[0].tokens = estimateHistoryMessageTokens(entries[0].message, tokenMode);
+      entries[0].tokens = estimateHistoryMessageTokens(entries[0].message, tokenMode) + prefixTokens(entries[0].message);
       totalTokens = entries[0].tokens;
     }
   }

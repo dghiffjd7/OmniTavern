@@ -5,7 +5,10 @@ export const createFeedbackOverlayUiRuntime = ({
   openLightbox(url) {
     const overlay = documentLike.createElement('div');
     overlay.className = 'lightbox';
-    overlay.innerHTML = `<img src="${url}" alt="preview">`;
+    const img = documentLike.createElement('img');
+    img.src = url;
+    img.alt = 'preview';
+    overlay.appendChild(img);
     overlay.onclick = () => overlay.remove?.();
     documentLike.body.appendChild(overlay);
     return overlay;

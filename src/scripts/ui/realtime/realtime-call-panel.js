@@ -29,6 +29,7 @@ export const createRealtimeCallPanel = ({
   onToggleOutputMute = null,
   onInterrupt = null,
   onEnd = null,
+  onExecuteTranscript = null,
 } = {}) => {
   let layer = null, panel = null, handle = null, body = null, position = null;
   let state = { status: 'idle', muted: false, outputMuted: false, startedAt: 0, elapsedMs: 0 };
@@ -37,6 +38,7 @@ export const createRealtimeCallPanel = ({
   let destroyed = false;
   let previousFocus = null;
   let waveBars = [];
+  let isMaid = false, lastUserText = '';
 
   const setExpanded = (value, { restoreFocus = false } = {}) => {
     if (!panel) return;
@@ -85,6 +87,10 @@ export const createRealtimeCallPanel = ({
     else if (action === 'output') onToggleOutputMute?.();
     else if (action === 'interrupt') onInterrupt?.();
     else if (action === 'end') void onEnd?.('user');
+    else if (action === 'maid-task' && lastUserText) {
+      button.disabled = true;
+      void onExecuteTranscript?.(lastUserText);
+    }
   };
 
   const ensure = () => {
@@ -123,6 +129,7 @@ export const createRealtimeCallPanel = ({
             <p data-i18n-skip>连接后即可自然说话</p>
           </div>
           <div class="realtime-call-warning" role="status" hidden></div>
+          <button type="button" class="realtime-call-action realtime-call-maid-task" data-call-action="maid-task" hidden disabled><span>${t('交给女仆执行')}</span><small data-i18n-skip></small></button>
           <div class="realtime-call-actions">
             <button type="button" class="realtime-call-action" data-call-action="mute" aria-pressed="false">
               ${callIcon('<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7"/>')}
@@ -191,9 +198,16 @@ export const createRealtimeCallPanel = ({
     panel.querySelector('[data-call-action="interrupt"]').hidden = state.openaiBackend === 'live';
   };
 
-  const show = ({ name = '角色', avatar = '' } = {}, { expanded: openControls = true } = {}) => {
+  const show = ({ name = '角色', avatar = '', uiMode = 'chat' } = {}, { expanded: openControls = true } = {}) => {
     ensure();
     if (!layer || destroyed) return false;
+    isMaid = uiMode === 'maid';
+    layer.classList.toggle('is-maid', isMaid);
+    if (layer.hidden) lastUserText = '';
+    const task = panel.querySelector('[data-call-action="maid-task"]');
+    task.hidden = !isMaid || !onExecuteTranscript;
+    task.disabled = !lastUserText;
+    task.querySelector('small').textContent = lastUserText;
     const nameElement = panel.querySelector('.realtime-call-name');
     nameElement.textContent = String(name || translateUiText('角色'));
     nameElement.title = nameElement.textContent;
@@ -233,6 +247,14 @@ export const createRealtimeCallPanel = ({
   const setCaption = ({ role = '', text = '', captions = null } = {}) => {
     ensure();
     if (!panel) return;
+    const userCaption = Array.isArray(captions) ? captions.find(item => item.role === 'user')?.text : role === 'user' ? text : null;
+    if (isMaid && userCaption) {
+      lastUserText = String(userCaption).trim();
+      const task = panel.querySelector('[data-call-action="maid-task"]');
+      task.disabled = !lastUserText;
+      task.querySelector('small').textContent = lastUserText;
+      task.title = lastUserText;
+    }
     const container = panel.querySelector('.realtime-call-caption');
     container.classList.toggle('is-live-captions', Array.isArray(captions));
     if (Array.isArray(captions)) {
@@ -240,7 +262,7 @@ export const createRealtimeCallPanel = ({
       container.replaceChildren();
       for (const caption of captions) {
         const label = documentRef.createElement('span'); label.className = 'realtime-call-caption-role';
-        label.textContent = translateUiText(caption.role === 'user' ? '你' : '角色');
+        label.textContent = translateUiText(caption.role === 'user' ? '你' : isMaid ? '女仆' : '角色');
         const paragraph = documentRef.createElement('p'); paragraph.textContent = String(caption.text || '');
         container.append(label, paragraph);
       }
@@ -251,7 +273,7 @@ export const createRealtimeCallPanel = ({
       const label = documentRef.createElement('span'); label.className = 'realtime-call-caption-role';
       container.replaceChildren(label, documentRef.createElement('p'));
     }
-    panel.querySelector('.realtime-call-caption-role').textContent = translateUiText(role === 'user' ? '你' : role === 'assistant' ? '角色' : '字幕');
+    panel.querySelector('.realtime-call-caption-role').textContent = translateUiText(role === 'user' ? '你' : role === 'assistant' ? isMaid ? '女仆' : '角色' : '字幕');
     const content = panel.querySelector('.realtime-call-caption p');
     content.textContent = String(text || '') || '…';
     if (!role) content.textContent = translateUiText(content.textContent);

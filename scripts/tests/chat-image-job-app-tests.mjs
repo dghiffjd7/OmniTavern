@@ -7,6 +7,9 @@ import { buildGeneratedImageMessagePatch } from '../../src/scripts/ui/media-gene
 import { resolveImageReferenceCapability } from '../../src/scripts/ui/media-generation-service.js';
 import { createDefaultImageGenerationPreset, mergeImageGenerationRequestOptions, resolveImageNegativePromptCapability } from '../../src/scripts/ui/image-generation-params-utils.js';
 import { createImagePromptRuntime } from '../../src/scripts/ui/image-prompt/image-prompt-runtime.js';
+import { normalizeImageGenerationReferenceItems, getGeneratedImageReferenceItems } from '../../src/scripts/ui/image-generation-reference-utils.js';
+import { createImageGenerationReferenceStore } from '../../src/scripts/ui/image-generation-reference-store.js';
+import { createImageGenerationReplayRuntime, resolveImageGenerationReplayConfig } from '../../src/scripts/ui/chat/image-generation-replay-runtime.js';
 
 const source = await readFile(new URL('../../src/scripts/ui/app.js', import.meta.url), 'utf8');
 const extract = (start, end) => {
@@ -17,9 +20,10 @@ const extract = (start, end) => {
 };
 const runSource = extract("let lastChatImageGenerationError = '';", 'const isCreativeExecutionTaskStatusTerminal');
 const retrySource = extract('const retryChatGeneratedMediaFailure =', 'const openChatImageGenerationFlow =');
+const replaySource = extract('const repeatChatImageGeneration =', 'const retryChatGeneratedMediaFailure =');
+const replayActionSource = extract("if (action === 'repeat-image-generation')", "if (action === 'cancel-media-generation')");
 const loadSource = extract('const ensureRecentMessagesAndWorlds =', 'const refreshRenderedMessageAvatars =');
 const cancelSource = extract("if (action === 'cancel-media-generation')", "if (action === 'generate-image')");
-const referenceSource = extract('const normalizeImageGenerationReferenceItems =', 'const readImageGenerationReferenceFiles =');
 const contextSource = source.match(/const getChatImageJobContextKey =[^\n]+/)?.[0];
 assert(contextSource, 'The app must capture both storage scope and archive identity');
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -29,7 +33,7 @@ const deferred = () => {
   return { promise, resolve, reject };
 };
 const tick = () => new Promise(resolve => setImmediate(resolve));
-const fixture = ({ configGate = null, worldGate = null } = {}) => {
+const fixture = ({ configGate = null, worldGate = null, imageConfig = null } = {}) => {
   const sid = 'rp:fixture';
   const rows = new Map();
   const writes = [], rendered = [], calls = [], toasts = [];
@@ -75,7 +79,7 @@ const fixture = ({ configGate = null, worldGate = null } = {}) => {
   preset.paramsByProvider.novelai.promptPrefix = 'watercolor';
   preset.paramsByProvider.novelai.negativePrompt = 'blurry';
   const paramsStore = { ready: Promise.resolve(), getActive: () => preset, list: () => [preset] };
-  const config = { provider: 'novelai', model: 'nai-diffusion-4-5-full' };
+  let config = imageConfig || { provider: 'novelai', model: 'nai-diffusion-4-5-full' };
   const noop = () => {};
   const work = createSessionAsyncWorkRuntime();
   const sandbox = {
@@ -84,6 +88,9 @@ const fixture = ({ configGate = null, worldGate = null } = {}) => {
     logger: { warn: noop },
     ensureImageConfigReady: async () => { if (configGate) await configGate.promise; return config; },
     resolveImageReferenceCapability, resolveImageNegativePromptCapability,
+    normalizeImageGenerationReferenceItems, getGeneratedImageReferenceItems,
+    createImageGenerationReplayRuntime, resolveImageGenerationReplayConfig,
+    imageGenerationReferenceStore: createImageGenerationReferenceStore({}),
     imageGenerationParamsStore: paramsStore, mergeImageGenerationRequestOptions,
     imagePromptRuntime: createImagePromptRuntime({ paramsStore }),
     sessionAsyncWorkRuntime: work,
@@ -116,21 +123,74 @@ const fixture = ({ configGate = null, worldGate = null } = {}) => {
     ensureWorldsForSessionDisplay: async () => { if (worldGate) await worldGate.promise; },
   };
   vm.createContext(sandbox);
-  vm.runInContext(`${contextSource}\n${referenceSource}\n${runSource}\n${retrySource}\n${loadSource}\n
+  vm.runInContext(`${contextSource}\n${runSource}\n${replaySource}\n${retrySource}\n${loadSource}\n
     globalThis.api = { run: runChatImageGeneration, retry: retryChatGeneratedMediaFailure, load: ensureRecentMessagesAndWorlds,
+      repeat: repeatChatImageGeneration,
+      async repeatAction(message, sessionId, payload = {}) { const action = 'repeat-image-generation'; ${replayActionSource} },
       cancel(message, sessionId) { const action = 'cancel-media-generation'; ${cancelSource} },
       getError: () => lastChatImageGenerationError };`, sandbox, { filename: 'app-image-job-contract.js' });
   const complete = (index, suffix = index) => {
     const call = calls[index];
+    const generationParams = { ...call.options.options };
     call.resolve({ id: `asset-${suffix}`, kind: 'image', status: 'succeeded', prompt: call.options.prompt,
-      negativePrompt: call.options.options.negativePrompt, generationParams: call.options.options,
+      provider: call.options.config.provider, model: call.options.config.model,
+      negativePrompt: call.options.options.negativePrompt, generationParams,
       output: { path: `D:\\images\\result-${suffix}.png`, mime: 'image/png' } });
   };
-  return { sid, jobs, work, chatStore, calls, writes, rendered, toasts, api: sandbox.api, complete, list,
+  return { sid, jobs, work, chatStore, calls, writes, rendered, toasts, preset, config, api: sandbox.api, complete, list,
     put: message => rows.set(key(message.id), message),
     setArchive: value => { archive = value; },
+    setConfig: value => { config = value; },
   };
 };
+
+{
+  const f = fixture({ imageConfig: { provider: 'custom', model: 'reference-fixture' } });
+  const references = [{ name: 'character.png', dataUrl: 'data:image/png;base64,cmVmZXJlbmNl' }];
+  const originalRun = f.api.run({ prompt: 'garden portrait', referenceImages: references, surface: 'writing' });
+  await tick();
+  assert.deepEqual(clone(f.calls[0].options.options.referenceImages), references.map(item => item.dataUrl));
+  const mid = f.list()[0].id;
+  f.calls[0].reject(new Error('fixture image provider failure'));
+  assert.equal(await originalRun, false);
+  assert.deepEqual(clone(f.chatStore.findMessage(mid).meta.generatedMedia.generationParams.referenceImages), references.map(item => item.dataUrl));
+  const retry = f.api.retry({ sessionId: f.sid, messageId: mid });
+  await tick();
+  assert.equal(f.calls.length, 2);
+  assert.deepEqual(Array.from(f.calls[1].options.options.referenceImages || []), references.map(item => item.dataUrl),
+    'retrying a failed image must resend the original reference images');
+  f.complete(1, 'reference-retry');
+  assert.equal(await retry, true);
+  assert.equal(f.list().length, 1);
+  assert.deepEqual(getGeneratedImageReferenceItems(clone(f.chatStore.findMessage(mid).meta.generatedMedia))
+    .map(({ dataUrl, name }) => ({ dataUrl, name })), references);
+  console.log('ok - failed image retry resends its original reference images');
+}
+
+{
+  const config = { provider: 'custom', model: 'reference-fixture' };
+  const f = fixture({ imageConfig: config });
+  const persisted = JSON.parse(JSON.stringify({ id: 'restored-image', type: 'text', meta: { generatedMedia: {
+    kind: 'image', status: 'running', prompt: 'restored portrait', surface: 'writing',
+    generationParams: { reference_images: ['data:image/png;base64,YQ==', 'data:image/jpeg;base64,Yg=='] },
+  } } }));
+  f.put(persisted);
+  await f.api.load(f.sid);
+  assert.equal(f.chatStore.findMessage(persisted.id).meta.generatedMedia.status, 'interrupted');
+  const retry = f.api.retry({ sessionId: f.sid, messageId: persisted.id });
+  await tick();
+  assert.deepEqual(Array.from(f.calls[0].options.options.referenceImages), persisted.meta.generatedMedia.generationParams.reference_images);
+  assert.equal(f.chatStore.findMessage(persisted.id).meta.generatedMedia.referenceImageCount, 2);
+  f.calls[0].reject(new Error('fixture failure after restore'));
+  assert.equal(await retry, false);
+  const failed = clone(f.chatStore.findMessage(persisted.id));
+  config.provider = 'novelai';
+  config.model = 'nai-diffusion-4-5-full';
+  assert.equal(await f.api.retry({ sessionId: f.sid, messageId: persisted.id }), false);
+  assert.equal(f.calls.length, 1, 'an incompatible model must not silently submit a text-only retry');
+  assert.deepEqual(clone(f.chatStore.findMessage(persisted.id)), failed, 'rejected retry preserves the original references');
+  console.log('ok - restored interrupted jobs retain legacy references and incompatible retries preserve the saved job');
+}
 
 {
   const f = fixture();
@@ -241,4 +301,45 @@ const fixture = ({ configGate = null, worldGate = null } = {}) => {
   console.log('ok - actual session load recovers orphan jobs and skips recovery after an archive change');
 }
 
+{
+  const f = fixture(); // NovelAI does not accept local reference images in this app.
+  assert.equal(await f.api.run({ prompt: 'reused illustration', referenceImages: ['data:image/png;base64,YQ=='], surface: 'writing' }), false);
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.writes.length, 0, 'a model change cannot silently strip restored references and start a new job');
+}
+{
+  const f = fixture({ imageConfig: { provider: 'openai', model: 'gpt-image-1' } });
+  const first = f.api.run({ prompt: 'original scene', referenceImages: [{ dataUrl: 'data:image/png;base64,YQ==', name: 'ref.png' }],
+    surface: 'writing', generationParamOverrides: { size: '1024x1024', background: 'transparent', output_format: 'webp' } });
+  await tick();
+  const original = f.list()[0], originalSnapshot = clone(original);
+  const originalOptions = clone(f.calls[0].options.options);
+  f.preset.paramsByProvider.openai = { quality: 'high', size: '1536x1024', promptPrefix: 'new prefix', negativePrompt: 'new negative' };
+  f.setConfig({ ...f.config, model: 'gpt-image-2' });
+  const repeated = f.api.repeatAction(original, f.sid);
+  await tick();
+  const newMessage = f.list().find(message => message.id !== original.id);
+  assert(newMessage, 'repeat immediately creates a separate pending bubble');
+  assert.equal(f.jobs.has(original.id, f.sid), true);
+  assert.equal(f.jobs.has(newMessage.id, f.sid), true);
+  assert.deepEqual(clone(f.chatStore.findMessage(original.id)), originalSnapshot);
+  assert.deepEqual(clone(f.calls[1].options.options), originalOptions, 'replay does not inherit changed presets or absent optional parameters');
+  assert.equal(f.calls[1].options.config.model, 'gpt-image-1');
+  assert.equal(f.calls[0].options.signal.aborted, false);
+  f.complete(1); await repeated;
+  assert.equal(f.chatStore.findMessage(original.id).meta.generatedMedia.status, 'running');
+  f.complete(0); await first;
+  assert.equal(f.list().filter(message => message.meta.generatedMedia.status === 'succeeded').length, 2);
+  const completedSnapshot = clone(f.chatStore.findMessage(original.id));
+  const third = f.api.repeat({ sessionId: f.sid, messageId: original.id });
+  await tick();
+  assert.deepEqual(clone(f.calls[2].options.options), originalOptions);
+  f.complete(2); await third;
+  assert.deepEqual(clone(f.chatStore.findMessage(original.id)), completedSnapshot, 'completed source image is not replaced');
+  assert.equal(f.list().length, 3);
+  f.setConfig({ provider: 'novelai', model: 'nai-diffusion-4-5-full' });
+  assert.equal(await f.api.repeat({ sessionId: f.sid, messageId: original.id }), false);
+  assert.equal(f.calls.length, 3, 'channel changes cannot silently reinterpret a saved request');
+  console.log('ok - actual menu action repeats running and completed images as independent jobs with frozen prompt, model, params and references');
+}
 console.log('chat-image-job-app-tests passed');

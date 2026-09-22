@@ -153,7 +153,7 @@ export const searchMaidCapabilityConcepts = (
   const worldbookIntent = /(?:世界书|世借书|world\s*book|worldbook|world\s*lore|lore\s*library|条目|entry\s*titles?|目录页|(?:replace|覆盖).{0,24}全部内容)/iu;
   if (worldbookIntent.test(text) || inferredWorldbookContentIntent.test(text)) {
     add(['worldbook.read', 'worldbook.list'], 84, 'worldbook_domain');
-    add(['worldbook.open', 'worldbook.create', 'worldbook.update_entries', 'worldbook.bind_session', 'worldbook.bind_sessions', 'worldbook.bind_rp_session'], 58, 'worldbook_domain');
+    add(['worldbook.open', 'worldbook.create', 'worldbook.update_entries', 'worldbook.bind_persona', 'worldbook.bind_session', 'worldbook.bind_sessions', 'worldbook.bind_rp_session'], 58, 'worldbook_domain');
     if (has(/(?:有哪些|名单|书名|几本|library|列出.*世界书|worldbook\s*名单)/iu)) {
       add('worldbook.list', 100, 'worldbook_inventory');
     }
@@ -179,6 +179,9 @@ export const searchMaidCapabilityConcepts = (
       if (rpOnlyBinding) {
         add('worldbook.bind_rp_session', 112, 'worldbook_rp_bind');
         add(['worldbook.list', 'worldbook.read'], 92, 'worldbook_bind_verify');
+      } else if (has(/(?:角色卡|人物卡|角色档案|character\s*card|persona|角色世界书)/iu)) {
+        add('worldbook.bind_persona', 112, 'worldbook_persona_bind');
+        add(['worldbook.list', 'app.resource.read'], 92, 'worldbook_bind_verify');
       } else if (has(/(?:批量|多个|这些|所有|全部|都|分别|每个|多间|多個|sessions?)/iu)) {
         add('worldbook.bind_sessions', 105, 'worldbook_batch_bind');
         add(['worldbook.bind_session', 'worldbook.read'], 92, 'worldbook_bind');

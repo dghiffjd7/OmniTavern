@@ -102,9 +102,11 @@ const panel = {
 };
 let runtimeOptions;
 let runtimeStatus = 'idle';
+let runtimeTarget = null;
 const runtime = {
-  getState: () => ({ status: runtimeStatus, muted: false, outputMuted: false }),
-  start: async () => {
+  getState: () => ({ status: runtimeStatus, target: runtimeTarget, muted: false, outputMuted: false }),
+  start: async target => {
+    runtimeTarget = target;
     runtimeStatus = 'listening';
     runtimeOptions.onStateChange({ status: 'listening' });
     return true;
@@ -122,7 +124,7 @@ const appRuntime = createRealtimeCallAppRuntime({
   button,
   documentRef,
   windowLike,
-  getCallTarget: () => ({ supported: true, sessionId: 'contact-1' }),
+  getCallTarget: () => ({ supported: true, sessionId: 'contact-1', uiMode: 'chat', scopeId: 'default', lifecycleEpoch: 0 }),
   resolveConnection: async () => ({}),
   buildSemanticSnapshot: async () => ({}),
   isTargetCurrent: () => true,
@@ -146,12 +148,19 @@ assert.equal(runtimeStatus, 'listening');
 assert.deepEqual(panelCalls.slice(0, 4), [
   ['usage', 0, 0, null, null],
   ['warning', ''],
-  ['caption', '连接后即可自然说话'],
   ['show', 'contact-1', true],
+  ['caption', '连接后即可自然说话'],
 ]);
 
 await button.fire('click');
 assert.deepEqual(panelCalls.at(-1), ['show', 'contact-1', true], 'active call opens its controls');
+
+const maidTarget = { supported: true, sessionId: 'maid', uiMode: 'maid', scopeId: 'default', lifecycleEpoch: 0 };
+await appRuntime.startCall(maidTarget);
+assert.ok(panelCalls.some(call => call[0] === 'end' && call[1] === 'switch_target'));
+assert.equal(runtimeTarget.uiMode, 'maid', 'one shared runtime switches to the explicit maid target');
+await button.fire('click');
+assert.equal(runtimeTarget.sessionId, 'contact-1', 'chat button restores the actual role chat target');
 
 const meterFrame = { input: { level: .3, bands: [.1] }, output: { level: 0, bands: [] } };
 runtimeOptions.onAudioLevel(meterFrame);

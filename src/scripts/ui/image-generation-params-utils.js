@@ -311,7 +311,8 @@ const resolveImageProviderParamSchema = (config = {}) => {
           makeSelect('background', '背景', [
             { value: 'auto', label: '自动' },
             { value: 'opaque', label: '不透明' },
-          ], 'auto', 'gpt-image-2 当前不支持 transparent。'),
+            { value: 'transparent', label: '透明' },
+          ], 'auto', '透明背景使用 PNG 或 WebP；选择透明时 JPEG 会切换为 PNG。'),
           makeSelect('moderation', '审核强度', [
             { value: 'auto', label: '自动' },
             { value: 'low', label: '低' },
@@ -634,6 +635,18 @@ export const normalizeImageGenerationPreset = (preset = {}) => {
   };
 };
 
+export const syncImageGenerationOutputControls = (root) => {
+  const background = root?.querySelector('[data-param-key="background"]');
+  const format = root?.querySelector('[data-param-key="output_format"]');
+  if (!background || !format) return;
+  const transparent = background.value === 'transparent';
+  const jpeg = format.querySelector('option[value="jpeg"]');
+  if (jpeg) jpeg.disabled = transparent;
+  if (transparent && format.value === 'jpeg') format.value = 'png';
+  const compression = root.querySelector('[data-param-key="output_compression"]');
+  if (compression) compression.disabled = format.value === 'png';
+};
+
 export const sanitizeImageGenerationParams = (params = {}, config = {}) => {
   const schema = resolveImageGenerationParamSchema(config);
   const raw = isObject(params) ? params : {};
@@ -666,6 +679,7 @@ export const sanitizeImageGenerationParams = (params = {}, config = {}) => {
     if (text) out[field.key] = text;
   });
 
+  if (out.background === 'transparent' && out.output_format === 'jpeg') out.output_format = 'png';
   if (out.output_format && out.output_format === 'png') {
     delete out.output_compression;
   }

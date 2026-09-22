@@ -28,6 +28,7 @@ const EXTRA_UI_FILES = [
 ];
 const FULL_UI_DEFINITION_FILES = new Set([
   path.join(UI_ROOT, 'agent-configuration-editor.js'),
+  path.join(UI_ROOT, 'agent-generation-editor.js'),
   path.join(UI_ROOT, 'agent-reference-editor.js'),
   path.join(UI_ROOT, 'agent-run-cards.js'),
   path.join(UI_ROOT, 'chat/agent-reference-sources.js'),

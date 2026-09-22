@@ -2,6 +2,7 @@
 import { getAgentInvocationMode } from '../agent/agent-invocation.js';
 import { normalizeAgentReferenceConfig } from '../agent/agent-reference-context.js';
 import { normalizeAgentIcon } from '../agent/agent-icons.js';
+import { normalizeAgentGenerationSettings } from '../agent/agent-generation-settings.js';
 import { normalizeFormatRepairProfiles, mergeFormatRepairProfiles, diffFormatRepairProfiles, resolveFormatRepairProfile, formatRepairProfileTooLong } from '../agent/format-repair-profiles.js';
 export const AGENT_CONFIG_KEY = 'agent_config_library_v1';
 export const CONFIGURABLE_AGENT_IDS = ['text_completion', 'reply_check'];
@@ -39,7 +40,8 @@ export const normalizeAgentConfiguration = (value = {}, id = value.id) => ({
     id: text(block.id) || `block-${index}`, name: text(block.name), text: String(block.text ?? ''),
     role: block.role === 'user' ? 'user' : 'system', enabled: block.enabled !== false,
   })),
-  context: normalizeAgentReferenceConfig(value.context),
+  context: normalizeAgentReferenceConfig(value.context ?? (id === 'text_completion'
+    ? { history: { enabled: true, unit: 'messages', count: 1, includeTarget: false } } : undefined)),
   outputMode: value.outputMode === 'note' ? 'note' : 'edit',
   tools: { enabled: value.tools?.enabled === true && /^(text-edit|input-agent):/.test(String(id)),
     ids: [...new Set((Array.isArray(value.tools?.ids) ? value.tools.ids : []).map(text).filter(Boolean))].slice(0, 12),
@@ -48,7 +50,7 @@ export const normalizeAgentConfiguration = (value = {}, id = value.id) => ({
     start: String(value.target?.start ?? ''), end: String(value.target?.end ?? ''),
     pattern: String(value.target?.pattern ?? ''), flags: text(value.target?.flags), group: integer(value.target?.group, 1, 1, 20) },
   inputConsent: value.inputConsent === true,
-  maxTokens: integer(value.maxTokens, id === 'text_completion' ? 96 : String(id).startsWith('input-agent:') ? 1200 : 6000, 16, 16000),
+  ...normalizeAgentGenerationSettings(value, id),
   updatedAt: Number(value.updatedAt) || 0,
   ...(id === 'reply_check' ? { repairProfiles: normalizeFormatRepairProfiles(value.repairProfiles, value), repairCheckType: value.repairCheckType === 'tableEdit' ? 'tableEdit' : 'custom' } : {}),
 });

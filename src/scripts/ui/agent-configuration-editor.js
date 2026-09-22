@@ -2,11 +2,13 @@ import { t } from '../i18n/index.js';
 import { appConfirm, appChoice } from './app-confirm.js';
 import { createFormatRepairProfileDraft, createFormatRepairProfileId } from '../agent/format-repair-profiles.js';
 import { mountAgentRequestPreview } from './chat/agent-request-preview.js';
-import { createCustomSelectWrapper, bindCustomSelectButton, refreshCustomSelectButton } from './custom-select.js';
+import { createCustomSelectWrapper, bindCustomSelectButton, refreshCustomSelectButton, openCustomSelectMenu, closeCustomSelectMenu } from './custom-select.js';
+import { rankModelCandidates } from '../utils/model-candidates.js';
 import { mapAgentRawSelection } from '../agent/agent-text-target.js';
 import { allowsAgentInvocation, getAgentInvocationMode, isInputAgent } from '../agent/agent-invocation.js';
 import { createAgentReferenceEditor, createAgentToolCapabilitiesEditor } from './agent-reference-editor.js';
 import { createAgentRunCards } from './agent-run-cards.js';
+import { createAgentGenerationEditor } from './agent-generation-editor.js';
 import { bindAgentEditorMotion } from './agent-editor-motion.js';
 import { getBuiltinAgentTask, resolveBuiltinAgentTask } from '../agent/agent-builtin-defaults.js';
 import { getAgentPromptFields } from './chat/agent-prompt-fields.js';
@@ -22,7 +24,7 @@ const installStyle = doc => {
   if (doc.getElementById('agent-configuration-style')) return;
   const style = doc.createElement('style'); style.id = 'agent-configuration-style';
   style.textContent = `
-  .agent-config-editor {display:grid;gap:18px;padding:4px 0 18px;min-width:0}
+  .agent-config-editor {display:grid;gap:18px;padding:4px 0 0;min-width:0}
   .agent-config-editor .ac-repair-library{display:grid;gap:12px;padding:14px;border:1px solid var(--app-border-default);border-radius:16px;background:var(--app-surface-subtle)}.agent-config-editor .ac-repair-library .ac-row{align-items:end}.agent-config-editor .ac-repair-library .ac-row>label{flex:1}.agent-config-editor .ac-repair-actions{display:flex;gap:8px;flex-wrap:wrap}.agent-config-editor .ac-repair-actions button{min-height:44px}.agent-config-editor .ac-repair-name[aria-invalid=true]{border-color:var(--app-danger-text,var(--danger-color))}
   .agent-config-editor label,.agent-config-editor .ac-field {display:grid;gap:8px;min-width:0}
   .agent-config-editor input:not([type=checkbox]),.agent-config-editor textarea,.agent-config-editor select{box-sizing:border-box;width:100%;min-width:0;border:1px solid var(--border-color,rgba(128,128,128,.22));border-radius:12px;padding:10px 12px;background:var(--input-bg,rgba(128,128,128,.06));color:inherit;font:inherit;outline:none}
@@ -38,6 +40,7 @@ const installStyle = doc => {
   .agent-config-editor .ac-task-tools{display:flex;gap:8px;align-items:center;flex-shrink:0}.agent-config-editor .ac-task-origin{font-size:11px;font-weight:400;color:var(--app-text-secondary)}.agent-config-editor .ac-task-tools .agent-center-icon-button{width:44px;height:44px}.agent-config-editor .ac-task-tools button:disabled{opacity:.35;cursor:default}
   .agent-config-editor .ac-builtin-inputs{display:grid;gap:10px}.agent-config-editor .ac-builtin-chips{display:flex;gap:6px;flex-wrap:wrap}.agent-config-editor .ac-builtin-chip{padding:6px 9px;border:1px solid var(--app-border-default);border-radius:9px;background:var(--app-surface-subtle);font-size:12px;line-height:1.5}.agent-config-editor .ac-builtin-chip.has-help:focus-visible{outline:2px solid var(--app-accent-primary);outline-offset:2px}.agent-config-editor .ac-builtin-chip small{font-size:11px;color:var(--app-text-secondary);margin-left:6px}
   .agent-config-editor .ac-builtin-settings{display:grid;gap:14px}.agent-config-editor .ac-readonly-value{padding:10px 0;font-size:13px;color:var(--app-text-secondary);overflow-wrap:anywhere}
+  .agent-config-editor [data-agent-effort][hidden],.agent-config-editor [data-agent-budget-hint][hidden]{display:none}
   .agent-config-editor .ac-modes{display:grid;grid-template-columns:1fr 1fr 1.3fr;gap:3px;padding:4px;border:1px solid var(--app-border-default);border-radius:13px;background:var(--app-surface-subtle)}
   .agent-config-editor .ac-modes label{position:relative;display:flex;align-items:center;justify-content:center;min-height:44px;padding:0 5px;border:1px solid transparent;border-radius:9px;font-size:12px;cursor:pointer;white-space:nowrap;transition:background .16s,border-color .16s,color .16s,box-shadow .16s}
   .agent-config-editor .ac-modes input{position:absolute;opacity:0;width:1px;height:1px;padding:0}
@@ -50,7 +53,8 @@ const installStyle = doc => {
   .agent-config-editor .ac-block{display:grid;gap:8px;padding:12px;border-radius:14px;background:rgba(128,128,128,.055);margin:10px 0}.agent-config-editor .ac-block-heading{display:grid;grid-template-columns:minmax(0,1fr) 44px;gap:8px;align-items:center}.agent-config-editor .ac-block-enabled{display:flex;align-items:center;justify-content:center;min-height:44px;cursor:pointer}.agent-config-editor .ac-block-enabled input{width:18px;height:18px;accent-color:var(--app-accent-primary)}.agent-config-editor .ac-block-actions{display:flex;justify-content:flex-end;gap:4px}
   .agent-config-editor .ac-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.agent-config-editor .ac-target-source{white-space:pre-wrap;overflow-wrap:anywhere;max-height:220px;overflow:auto;border-radius:12px;background:rgba(128,128,128,.05);padding:12px;font-size:12px;line-height:1.7}.agent-config-editor mark{background:rgba(118,172,145,.24);color:inherit;border-radius:3px}
   .agent-config-editor .ac-error{font-size:12px;color:var(--danger-color,#ce5965)}.agent-config-editor .ac-run{border-left:2px solid rgba(128,128,128,.3);padding:9px 12px;font-size:12px;margin:8px 0}.agent-config-editor .ac-status{min-height:1em;font-size:12px}.agent-config-editor .ac-raw-select{font-family:monospace;min-height:180px}
-  .agent-config-editor .ac-actions button,.agent-config-editor .agent-center-icon-button{min-height:44px}.agent-config-editor .agent-center-icon-button{min-width:44px}.agent-config-editor .ac-footer{position:sticky;bottom:-1px;z-index:2;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 0 8px;border-top:1px solid var(--app-border-default);background:var(--app-surface-card)}.agent-config-editor .ac-footer .ac-status{flex:1;min-width:80px;color:var(--app-text-secondary)}.agent-config-editor .ac-footer .ac-actions{margin-left:auto;flex-shrink:0}.agent-config-editor .ac-quick-result{display:contents}.agent-config-editor .ac-footer [data-ac=save]{border-color:var(--app-accent-primary);background:var(--app-accent-primary);color:var(--app-text-on-accent,#fff)}.agent-config-editor .ac-footer button:disabled{opacity:.55;cursor:wait}.agent-config-editor .ac-more .ac-actions{display:grid;grid-template-columns:1fr;justify-items:start}.agent-config-editor .ac-more [data-ac=delete]{color:var(--danger-color,#ce5965)}
+  .agent-config-editor .ac-actions button,.agent-config-editor .agent-center-icon-button{min-height:44px}.agent-config-editor .agent-center-icon-button{min-width:44px}.agent-config-editor .ac-footer{position:sticky;bottom:0;z-index:2;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 0 8px;border-top:1px solid var(--app-border-default);background:var(--app-surface-card)}.agent-config-editor .ac-footer .ac-status{flex:1;min-width:80px;color:var(--app-text-secondary)}.agent-config-editor .ac-footer .ac-actions{margin-left:auto;flex-shrink:0}.agent-config-editor .ac-quick-result{display:contents}.agent-config-editor .ac-footer [data-ac=save]{border-color:var(--app-accent-primary);background:var(--app-accent-primary);color:var(--app-text-on-accent,#fff)}.agent-config-editor .ac-footer button:disabled{opacity:.55;cursor:wait}.agent-config-editor .ac-more .ac-actions{display:grid;grid-template-columns:1fr;justify-items:start}.agent-config-editor .ac-more [data-ac=delete]{color:var(--danger-color,#ce5965)}
+  .agent-config-editor .ac-model-row{display:flex;gap:8px;align-items:center;min-width:0}.agent-config-editor .ac-model-row input{flex:1;min-width:0}.agent-config-editor [data-ac-model-status]{color:var(--app-text-secondary);font-size:12px}.agent-config-editor [data-ac-model-status]:empty{display:none}
   @media(max-width:600px){.agent-config-editor{gap:16px}.agent-config-editor .ac-identity{gap:10px}.agent-config-editor .ac-task textarea{min-height:160px}.agent-config-editor .ac-target-source{max-height:240px}.agent-config-editor .ac-footer{padding-bottom:max(8px,env(safe-area-inset-bottom))}.agent-config-editor .ac-footer .ac-status:empty{display:none}.agent-config-editor .ac-footer .ac-actions{flex:1}.agent-config-editor .ac-footer .ac-actions button{flex:1}}
   @media(prefers-reduced-motion:reduce){.agent-config-editor .ac-modes label,.agent-config-editor .ac-task textarea{transition:none!important}}
   body[data-reduced-motion=on] .agent-config-editor :is(.ac-modes label,.ac-task textarea){transition:none!important}
@@ -65,7 +69,7 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
   repairProfileId = config.repairProfileId || '';
   context = saved.context; scope = saved.scope;
   let initial = '', preview = null, targetView = null, busy = false, alive = true, status = '', sourceRequest = 0, modelRequest = 0, selection = null, skipTargetToggle = false;
-  let referenceEditor = null, toolsEditor = null, runCards = null, motion = null;
+  let referenceEditor = null, toolsEditor = null, runCards = null, motion = null, generationEditor = null, modelInfo = {};
   const stamp = () => JSON.stringify([config, bodyRule]);
   initial = stamp();
   if (id === 'reply_check' && (newRepairProfile || !repairProfileId)) {
@@ -95,12 +99,19 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
     ];
     return `<div class="ac-builtin-inputs">${label('自动包含', '执行时按当前输入或待处理回复自动组装，完整内容可从侧边预览展开查看。')}<div class="ac-builtin-chips">${items.map(([title, count, help]) => `<span class="ac-builtin-chip has-help" tabindex="0" data-help-mode="tap" data-help="${e(t(help))}" data-ac-builtin-input>${e(t(title))}${count ? `<small>${e(t('最多 {count} 字符', { count }))}</small>` : ''}</span>`).join('')}</div></div>`;
   };
-  const builtinSettings = () => !builtin ? '' : `<details data-ac-section="builtin-settings"><summary>${e(t('运行设置'))} <span class="ac-source" data-ac-token-summary>${e(config.maxTokens)} Tokens</span></summary><div class="ac-builtin-settings"><div class="ac-row"><label>${label('最大输出 Tokens', '限制此 Agent 单次输出长度；可在内建默认值上调整。')}<input type="number" name="maxTokens" min="16" max="16000" step="1" inputmode="numeric" value="${e(config.maxTokens)}"></label><div class="ac-field">${label('采样温度', '内建任务使用固定采样温度；最终请求参数可在侧边预览中查看。')}<span class="ac-readonly-value">${id === 'text_completion' ? '0.3' : '0'}</span></div></div><div class="ac-field">${label('返回格式', id === 'text_completion' ? '模型返回可插入光标处的续写文字，侧边预览展示实际任务与返回规则。' : '模型返回最小行补丁，APP 校验原文和版本后展示修改建议。侧边预览展示完整协议。')}<span class="ac-readonly-value">${e(t(id === 'text_completion' ? '续写文本' : '格式修改建议'))}</span></div></div></details>`;
+  const builtinSettings = () => `<details data-ac-section="builtin-settings"><summary>${e(t('运行设置'))} <span class="ac-source" data-ac-token-summary>${e(config.maxTokens)} Tokens</span></summary><div class="ac-builtin-settings"><div data-ac-generation-editor></div>${builtin ? `<div class="ac-field">${label('返回格式', id === 'text_completion' ? '模型返回可插入光标处的续写文字，侧边预览展示实际任务与返回规则。' : '模型返回最小行补丁，APP 校验原文和版本后展示修改建议。侧边预览展示完整协议。')}<span class="ac-readonly-value">${e(t(id === 'text_completion' ? '续写文本' : '格式修改建议'))}</span></div>` : ''}</div></details>`;
+  const selectedModelInfo = () => config.modelMode === 'profile'
+    ? { ...saved.profiles.find(p => p.id === config.modelProfileId), ...(config.modelOverride ? { model: config.modelOverride } : {}) }
+    : config.modelMode === 'follow_current' ? modelInfo : {};
   const refreshCurrentModel = async () => {
-    if (config.modelMode !== 'follow_current' || typeof actions.getAgentCurrentModelLabel !== 'function') return;
+    if (config.modelMode === 'none') return;
     const key = () => JSON.stringify([context, scope, config.modelMode, config.modelProfileId, config.modelOverride]);
     const version = ++modelRequest, currentKey = key();
-    const modelName = await actions.getAgentCurrentModelLabel(options());
+    const info = await actions.getAgentModelInfo?.(options());
+    if (!alive || version !== modelRequest || currentKey !== key()) return;
+    if (info) { modelInfo = info; generationEditor?.updateModel(info); }
+    if (config.modelMode !== 'follow_current') return;
+    const modelName = info?.model ?? await actions.getAgentCurrentModelLabel?.(options());
     if (!alive || version !== modelRequest || currentKey !== key() || typeof modelName !== 'string') return;
     saved.currentModelLabel = modelName;
     const field = node.querySelector('[name="model"]'), option = field?.querySelector('[value="follow_current"]');
@@ -115,11 +126,14 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
       ${rule.mode === 'regex' ? `${text(`${prefix}.pattern`, '正则表达式', rule.pattern, '捕获组需唯一匹配。使用精确边界；匹配缺失或歧义时停止本次处理。')}<div class="ac-row">${text(`${prefix}.group`, '捕获组', rule.group || 1)}${text(`${prefix}.flags`, '标志', rule.flags || '')}</div>` : ''}`;
   };
   const render = () => {
+    const assembledContext = node.querySelector('[data-agent-assembled-context]');
+    modelRequest++;
+    closeCustomSelectMenu();
     skipTargetToggle = false;
     if (hasDraft() && !busy) status = t('尚未保存');
     const opened = [...node.querySelectorAll('details[open]')].map(el => el.dataset.acSection);
     const referenceState = referenceEditor?.snapshot(), toolState = toolsEditor?.snapshot(), runState = runCards?.snapshot();
-    referenceEditor?.dispose(); toolsEditor?.dispose(); runCards?.dispose();
+    referenceEditor?.dispose(); toolsEditor?.dispose(); runCards?.dispose(); generationEditor?.dispose();
     const input = isInputAgent(config), builtinInput = id === 'text_completion', format = id === 'reply_check';
     const localLabel = context.place === 'writing' ? '当前角色卡' : '当前聊天';
     const globalLabel = context.place === 'writing' ? '所有角色卡' : '聊天全局设置';
@@ -137,7 +151,7 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
       ${input && !builtinInput ? select('inputOutput', '结果形式', [['suggestion','续写建议'],['rewrite','修改草稿'],['note','资料与建议']], config.inputOutput, '续写插入光标处；修改通过差异预览确认；资料与建议在工具箱查看。') : ''}
       ${!input && !format ? select('outputMode', '结果形式', [['edit','修改正文'],['note','资料与建议']], config.outputMode || 'edit', '修改正文通过差异预览确认；资料与建议独立显示，适合点评、检查与查找资料。') : ''}
       ${!input && !format ? `<div class="ac-field">${select('target.mode', '处理内容', [['rendered', '显示的正文'], ['body', '按正文规则'], ['full', '完整回复'], ['tags', '指定部分 · 标签'], ['regex', '指定部分 · 正则']], config.target.mode, '显示的正文提取消息中可阅读的叙事文字，排除思考过程、记忆表格与摘要；展开查看本次实际处理内容。', messageId ? '指定回复' : '最新回复')}${targetFields()}<details class="ac-target-preview" data-ac-section="target"><summary>${e(t(config.target.mode === 'rendered' ? '查看本次正文' : '查看匹配内容'))}</summary><div class="ac-target-meta"><span class="ac-source" data-ac-target-count></span><div class="ac-actions">${button('target-preview', '刷新')}${button('raw-selection', '选取原文')}</div></div><div data-ac-target></div></details></div>` : ''}
-      <div class="ac-field">${select('model', '模型', [['none', '请选择模型'], ...(!input ? [['follow_current', currentModel]] : []), ...saved.profiles.map(p => [p.id, p.name])], model, input ? '' : '跟随当前模型使用这次聊天选择的连接与模型，也可为此 Agent 单独指定。')}${config.modelMode === 'profile' ? `<details data-ac-section="model"><summary>${e(t('指定模型名称'))}</summary>${text('modelOverride', '模型名称', config.modelOverride, '留空使用所选 API 配置中的模型，可填写同一连接下的其他模型名称。')}</details>` : ''}</div>
+      <div class="ac-field">${select('model', '连线配置', [['none', '请选择配置'], ...(!input ? [['follow_current', currentModel]] : []), ...saved.profiles.map(p => [p.id, p.name])], model, input ? '' : '跟随当前模型使用这次聊天选择的连接与模型，也可为此 Agent 单独指定。')}${config.modelMode === 'profile' ? `<label>${label('模型名称', '留空使用所选 API 配置中的模型，可填写同一连接下的其他模型名称。')}<span class="ac-model-row"><input name="modelOverride" data-i18n-skip="true" value="${e(config.modelOverride || saved.profiles.find(p => p.id === config.modelProfileId)?.model || '')}" autocomplete="off"><button type="button" class="agent-center-icon-button" data-ac="pick-model" aria-label="${e(t('选择模型'))}" title="${e(t('选择模型'))}" aria-haspopup="true" aria-expanded="false">${icon('down')}</button></span><small data-ac-model-status role="status"></small></label>` : ''}</div>
       ${builtinSettings()}
       <div class="ac-field">${label('调用方式', '自动按设定时机执行；手动从工具箱调用。')}<div class="ac-modes" role="radiogroup" aria-label="${e(t('调用方式'))}">${[['auto','自动'],['manual','手动'],['both','自动＋手动']].map(([value,title]) => `<label><input type="radio" name="invocationMode" value="${value}" ${getAgentInvocationMode(config) === value ? 'checked' : ''}>${e(t(title))}</label>`).join('')}</div>${getAgentInvocationMode(config) !== 'manual' ? `<div class="ac-trigger">${label('自动时机', input ? '输入停顿后处理当前草稿；继续输入时更新任务。' : '按照回复流程的编排顺序，处理已完成的回复。')}<span>${e(t(input ? '输入停顿' : '回复完成后'))}</span></div>` : ''}</div>
       ${format && getAgentInvocationMode(config) !== 'manual' ? select('repairAutomatic', '自动执行方案', [['', '暂停自动执行'], ...repairItems.filter(item => item.config.repairCheckType !== 'tableEdit').map(item => [item.id, item.name])], config.repairProfiles.automaticId || '', '自动检查使用这里绑定的回复格式方案；表格指令方案从工具箱选取后执行。') : ''}
@@ -146,6 +160,7 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
       <details data-ac-section="blocks"><summary>${e(t('自定义提示词区块'))}${config.blocks.length ? ` <span class="ac-source">${config.blocks.length}</span>` : ''}</summary>${config.blocks.map((b, i) => `<div class="ac-block"><div class="ac-block-heading"><input name="blocks.${i}.name" aria-label="${e(t('区块名称'))}" value="${e(b.name)}"><label class="ac-block-enabled" title="${e(t('启用'))}"><input name="blocks.${i}.enabled" type="checkbox" aria-label="${e(t('启用'))}" ${b.enabled ? 'checked' : ''}></label></div>${select(`blocks.${i}.role`, '角色', [['system', 'System'], ['user', 'User']], b.role)}<textarea name="blocks.${i}.text" aria-label="${e(t('区块内容'))}">${e(b.text)}</textarea><div class="ac-block-actions">${['up', 'down', 'copy', 'remove'].map(action => `<button class="agent-center-icon-button" type="button" data-ac="block-${action}" data-index="${i}" title="${e(t(({up:'上移',down:'下移',copy:'复制',remove:'移除'})[action]))}" aria-label="${e(t(({up:'上移',down:'下移',copy:'复制',remove:'移除'})[action]))}">${icon(action)}</button>`).join('')}</div></div>`).join('')}${button('block-add', '添加区块')}</details>
       <details class="ac-more" data-ac-section="more"><summary>${e(t('更多操作'))}</summary><div class="ac-actions">${scope === 'local' ? button('reset', '跟随全局配置') : button('reset', '恢复默认')}${button('copy', '复制到另一模式')}${!builtinInput && !format ? button('delete', '删除 Agent') : ''}</div></details>
       <div data-ac-runs></div><div class="ac-footer"><div class="ac-status" role="status">${e(status)}</div><div class="ac-actions"><span class="ac-quick-result" data-ac-quick-result></span>${(!input && !format ? config.enabled : allowsAgentInvocation(config, 'manual')) ? button('run', runLabel()) : ''}${button('save', '保存')}</div></div>`;
+    if (assembledContext) node.querySelector('.ac-footer').before(assembledContext);
     // Draft sentinel integrates with AC's existing close/discard guard.
     const marker = doc.createElement('input'); marker.type = 'hidden'; marker.name = 'agent-config-draft'; marker.defaultValue = initial; marker.value = stamp(); node.append(marker);
     node.querySelectorAll('select').forEach(el => {
@@ -161,6 +176,8 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
       });
     });
     node.querySelectorAll('details').forEach(el => { el.open = opened.includes(el.dataset.acSection); });
+    generationEditor = createAgentGenerationEditor({ host: node.querySelector('[data-ac-generation-editor]'), getConfig: () => config,
+      model: selectedModelInfo(), onChange: patch => { Object.assign(config, patch); updateMarker(); } });
     referenceEditor = createAgentReferenceEditor({ host: node.querySelector('[data-ac-reference-editor]'), value: config.context, builtinId: id, actions, getOptions: options, state: referenceState, onStatus: setStatus,
       onChange: value => { config.context = value; updateMarker(); } });
     const toolHost = node.querySelector('[data-ac-tool-editor]');
@@ -272,6 +289,7 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
     while (parts.length > 1) obj = obj[parts.shift()];
     const key = parts[0]; obj[key] = field.type === 'checkbox' ? field.checked : ['count','maxChars','group','maxTokens'].includes(key) ? Number(field.value) : field.value;
     if (name === 'prompt' && builtin) config.taskPromptMode = 'replace';
+    if (name === 'modelOverride') generationEditor?.updateModel(selectedModelInfo());
     selection = null; updateMarker();
   });
   node.addEventListener('change', async event => {
@@ -287,7 +305,7 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
       scope = field.value; repairProfileId = ''; reload(); focusField('scope');
     } else if (field.name === 'model') {
       config.modelMode = ['none', 'follow_current'].includes(field.value) ? field.value : 'profile';
-      config.modelProfileId = config.modelMode === 'profile' ? field.value : ''; render(); focusField('model');
+      config.modelProfileId = config.modelMode === 'profile' ? field.value : ''; config.modelOverride = ''; modelInfo = {}; render(); focusField('model');
     } else if (['target.mode','body.mode','context.mode'].includes(field.name)) {
       const [part, key] = field.name.split('.'); (part === 'body' ? bodyRule : config[part])[key] = field.value; selection = null; render(); focusField(field.name);
     } else if (field.name?.startsWith('blocks.') && field.name.endsWith('.role')) { config.blocks[Number(field.name.split('.')[1])].role = field.value; updateMarker(); }
@@ -306,7 +324,37 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
     const action = control.dataset.ac;
     if (busy && !/^(input-cancel|cancel|input-ignore|ignore):/.test(action)) return;
     try {
-      if (action === 'save') await save();
+      if (action === 'pick-model') {
+        if (control.getAttribute('aria-expanded') === 'true') { modelRequest++; closeCustomSelectMenu(); control.setAttribute('aria-expanded', 'false'); control.removeAttribute('aria-busy'); node.querySelector('[data-ac-model-status]').textContent = ''; return; }
+        const version = ++modelRequest, profileId = config.modelProfileId;
+        const field = node.querySelector('[name="modelOverride"]'), message = node.querySelector('[data-ac-model-status]');
+        control.setAttribute('aria-expanded', 'true'); control.setAttribute('aria-busy', 'true');
+        message.textContent = t('加载模型列表…');
+        let models;
+        try { models = await actions.listProfileModels?.(profileId) || []; }
+        catch { models = []; }
+        if (!alive || version !== modelRequest || profileId !== config.modelProfileId || !control.isConnected) return;
+        control.removeAttribute('aria-busy');
+        message.textContent = models.length ? '' : t('该渠道未返回模型列表，可手动输入');
+        if (!models.length) { control.setAttribute('aria-expanded', 'false'); return; }
+        let menu;
+        const navigate = event => {
+          if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeCustomSelectMenu(); control.focus({ preventScroll: true }); return; }
+          if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+          event.preventDefault(); event.stopPropagation();
+          const items = [...menu.querySelectorAll('button')], index = items.indexOf(doc.activeElement);
+          const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : Math.max(0, Math.min(items.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1)));
+          items[next]?.focus();
+        };
+        menu = openCustomSelectMenu({ anchorEl: control.closest('.ac-model-row'), currentValue: field.value,
+          options: rankModelCandidates(models, field.value).map(value => ({ value, label: value })),
+          onSelect: value => { field.value = value; field.dispatchEvent(new doc.defaultView.Event('input', { bubbles: true })); field.focus({ preventScroll: true }); },
+          onClose: () => { menu?.removeEventListener('keydown', navigate); control.setAttribute('aria-expanded', 'false'); },
+        });
+        menu?.addEventListener('keydown', navigate);
+        menu?.querySelector('.is-selected, button')?.focus({ preventScroll: true });
+      }
+      else if (action === 'save') await save();
       else if (action === 'repair-new') {
         if (!await leaveRepairDraft()) return;
         const template = await appChoice({ title: t('新建修复方案'), actions: [{ id: 'blank', label: t('空白方案') }, { id: 'tableEdit', label: t('表格指令') }, { id: 'structure', label: t('回复结构') }] });
@@ -403,6 +451,6 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
         getFields:root=>getAgentPromptFields(root).map(field=>({...field,baseValue:readConfiguredPromptField(saved.config,field.id,config)})),saveField:savePromptField });
     },
     closePreview: () => preview?.close() || false,
-    dispose: () => { alive = false; sourceRequest++; modelRequest++; preview?.dispose(); referenceEditor?.dispose(); toolsEditor?.dispose(); runCards?.dispose(); motion?.dispose(); doc.defaultView.removeEventListener('agent-text-edit-changed', renderRuns); doc.defaultView.removeEventListener('agent-input-changed', renderRuns); doc.defaultView.removeEventListener('agent-format-repair-changed', renderRuns); node.remove(); },
+    dispose: () => { alive = false; sourceRequest++; modelRequest++; closeCustomSelectMenu(); preview?.dispose(); referenceEditor?.dispose(); toolsEditor?.dispose(); runCards?.dispose(); generationEditor?.dispose(); motion?.dispose(); doc.defaultView.removeEventListener('agent-text-edit-changed', renderRuns); doc.defaultView.removeEventListener('agent-input-changed', renderRuns); doc.defaultView.removeEventListener('agent-format-repair-changed', renderRuns); node.remove(); },
   };
 };

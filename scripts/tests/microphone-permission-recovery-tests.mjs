@@ -4,7 +4,9 @@ import { readFile } from 'node:fs/promises';
 import {
   MICROPHONE_PERMISSION_HINT_KEY,
   createMicrophonePermissionRecovery,
+  microphonePermissionRecovery,
 } from '../../src/scripts/ui/microphone-permission-recovery.js';
+import { OpenAiRealtimeSessionClient } from '../../src/scripts/ui/realtime/openai-realtime-session-client.js';
 
 const createStorage = (initial = {}) => {
   const values = new Map(Object.entries(initial));
@@ -115,13 +117,16 @@ const permissionDenied = () => {
 
 {
   const voiceSource = await readFile(new URL('../../src/scripts/ui/chat/voice-interaction-runtime.js', import.meta.url), 'utf8');
-  const realtimeSource = await readFile(new URL('../../src/scripts/ui/realtime/openai-realtime-session-client.js', import.meta.url), 'utf8');
   const recoverySource = await readFile(new URL('../../src/scripts/ui/microphone-permission-recovery.js', import.meta.url), 'utf8');
   const rustSource = await readFile(new URL('../../src-tauri/src/microphone_permission.rs', import.meta.url), 'utf8');
   const kotlinSource = await readFile(new URL('../../src-tauri/gen/android/app/src/main/java/com/chatapp/dev/MicrophonePermissionPlugin.kt', import.meta.url), 'utf8');
   const libSource = await readFile(new URL('../../src-tauri/src/lib.rs', import.meta.url), 'utf8');
   assert.match(voiceSource, /microphoneAccess\.acquire/);
-  assert.match(realtimeSource, /microphoneAccess\.acquire/);
+  assert.equal(
+    new OpenAiRealtimeSessionClient().microphoneAccess,
+    microphonePermissionRecovery,
+    'Realtime must default to the shared microphone permission recovery service',
+  );
   assert.match(recoverySource, /prepare_microphone_permission_retry/);
   assert.doesNotMatch(recoverySource, /plugin:microphone-permission\|prepare_retry/);
   assert.match(rustSource, /SetPermissionState/);

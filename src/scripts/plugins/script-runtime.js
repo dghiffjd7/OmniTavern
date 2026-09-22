@@ -490,8 +490,24 @@ const makeCompatDollar = () => {
       },
       eq: (index) => makeCollection(nodes[Math.trunc(Number(index) || 0)]),
       each: (cb) => {
-        if (typeof cb === 'function') nodes.forEach((node, index) => runCompatCallback(cb, index, node));
+        if (typeof cb === 'function') {
+          for (let index = 0; index < nodes.length; index += 1) {
+            const node = nodes[index];
+            if (runCompatCallback(() => cb.call(node, index, node)) === false) break;
+          }
+        }
         return api;
+      },
+      not: (selector) => {
+        if (typeof selector === 'function') {
+          return makeCollection(nodes.filter((node, index) => !runCompatCallback(() => selector.call(node, index, node))));
+        }
+        if (typeof selector === 'string' && selector.trim()) {
+          const groups = splitSelectorGroups(selector);
+          return makeCollection(nodes.filter(node => node?.nodeType === 1 && !groups.some(group => node.matches?.(group))));
+        }
+        const excluded = new Set(normalizeNodes(selector));
+        return makeCollection(nodes.filter(node => !excluded.has(node)));
       },
       ready: (cb) => {
         if (typeof cb === 'function') runCompatCallback(cb);
@@ -1183,14 +1199,15 @@ const getCompatIndexedSelectorCandidates = (root, selector = '') => {
   const text = String(selector || '').trim();
   if (!text || /[\\s>,+~]/.test(text)) return null;
   const buckets = [];
-  const idMatch = text.match(/#([^\\.\\[#:\\s]+)/);
+  const withoutAttributes = text.replace(/\\[(?:[^\\]"']|"[^"]*"|'[^']*')*\\]/g, '');
+  const idMatch = withoutAttributes.match(/#([^\\.\\[#:\\s]+)/);
   if (idMatch) buckets.push(compatUiIdIndex.get(cssUnescape(idMatch[1])) || new Set());
   const tagMatch = text.match(/^[a-zA-Z][\\w-]*/);
   const tag = String(tagMatch?.[0] || '').toLowerCase();
   const exactAttrs = Array.from(text.matchAll(/\\[([^\\]=~\\^\\$\\*\\|\\s]+)\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\]]+))\\]/g));
   exactAttrs.forEach((match) => {
     if (!tag) return;
-    const value = String(match[2] ?? match[3] ?? match[4] ?? '').trim();
+    const value = String(match[2] ?? match[3] ?? match[4]?.trim() ?? '');
     buckets.push(compatUiExactAttributeIndex.get(getCompatAttributeIndexKey(tag, match[1], value)) || new Set());
   });
   if (!buckets.length) return null;
@@ -1209,20 +1226,30 @@ const matchesCompatSimpleSelector = (node, selector = '') => {
   if (!text) return false;
   text = text.replace(/:scope/g, '').trim();
   if (!text || text === '*') return true;
+  // Parse attributes before IDs/classes: quoted attribute values may contain
+  // dots or hashes. Unsupported operators must never turn into "match all".
+  const attrMatches = Array.from(text.matchAll(/\\[([^\\]=~\\^\\$\\*\\|\\s]+)(?:\\s*([~\\|\\^\\$\\*]?=)\\s*(?:"([^"]*)"|'([^']*)'|([^\\]]+)))?\\]/g));
+  for (const match of attrMatches) {
+    text = text.replace(match[0], '');
+    const actual = getCompatAttribute(node, match[1]);
+    if (actual == null) return false;
+    const operator = match[2];
+    const expected = match[3] ?? match[4] ?? match[5]?.trim() ?? '';
+    const value = String(actual);
+    if (operator === '=' && value !== expected) return false;
+    if (operator === '*=' && (!expected || !value.includes(expected))) return false;
+    if (operator === '^=' && (!expected || !value.startsWith(expected))) return false;
+    if (operator === '$=' && (!expected || !value.endsWith(expected))) return false;
+    if (operator === '~=' && (!expected || !value.split(/\\s+/).includes(expected))) return false;
+    if (operator === '|=' && value !== expected && !value.startsWith(expected + '-')) return false;
+  }
+  if (text.includes('[') || text.includes(']')) return false;
   const tagMatch = text.match(/^[a-zA-Z][\\w-]*/);
   if (tagMatch && String(node.tagName || '').toLowerCase() !== tagMatch[0].toLowerCase()) return false;
   const idMatches = Array.from(text.matchAll(/#([^\\.\\[#:\\s]+)/g));
   if (idMatches.some(match => String(node.id || '') !== cssUnescape(match[1]))) return false;
   const classMatches = Array.from(text.matchAll(/\\.([^\\.\\[#:\\s]+)/g));
   if (classMatches.some(match => !node.classList?.contains?.(cssUnescape(match[1])))) return false;
-  const attrMatches = Array.from(text.matchAll(/\\[([^\\]=~\\^\\$\\*\\|\\s]+)(?:\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\]]+)))?\\]/g));
-  for (const match of attrMatches) {
-    const attr = String(match[1] || '').trim();
-    const expected = match[2] ?? match[3] ?? match[4];
-    const actual = getCompatAttribute(node, attr);
-    if (actual == null) return false;
-    if (expected !== undefined && String(actual) !== String(expected).trim()) return false;
-  }
   return true;
 };
 

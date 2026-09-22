@@ -50,7 +50,7 @@ assert.match(appSource, /maidGuideEmit\(window, 'chat-room-entered'/);
 assert.match(appSource, /registerGuideStartFlowTools/);
 assert.match(appSource, /maidOnboardingRuntime\?\.getSpotlight\?\.\(\)/);
 assert.match(appSource, /maidOnboardingRuntime\?\.handleCommandInputOpen\?\.\(\{ open, anchorEl: rootEl \}\)/);
-assert.match(appSource, /autoFocus: maidOnboardingRuntime\?\.isFirstRunPending\?\.\(\) !== true/);
+assert.match(appSource, /autoFocus: !maidVoiceRuntime\?\.isCallActive\(\) && maidOnboardingRuntime\?\.isFirstRunPending\?\.\(\) !== true/);
 assert.match(appSource, /getMaidBallElement: \(\) => modeSwitch/);
 assert.match(appSource, /createMaidRichScriptGuideRuntime\(\{[\s\S]*?getOnboardingRuntime: \(\) => maidOnboardingRuntime[\s\S]*?isExecutionEnabled:/);
 assert.match(appSource, /createPresetPreviewDiscoveryGuide\(\{[\s\S]*?guideStore: maidGuideStore[\s\S]*?presetPanel\.setPreviewDiscoveryGuide/);

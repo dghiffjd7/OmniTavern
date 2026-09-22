@@ -84,6 +84,41 @@ assert.equal(sent.config.model, 'small-model');
 assert.equal(sent.options.maxTokens, 96);
 assert.equal(sent.options.signal, controller.signal);
 assert.deepEqual(sent.options.tools, []);
+assert.equal(Object.hasOwn(sent.options, 'thinking'), false, 'other providers retain their existing reasoning controls');
 assert.deepEqual(JSON.parse(sent.messages[1].content), { before: state.before, after: state.after });
 assert.equal(buildInputSuggestionMessages({ before: 'a'.repeat(3000), after: 'b'.repeat(1000) })[1].content.length < 3100, true);
+
+// Exercise actual provider serialization: a thinking-only response has no text to display.
+{
+  const { LLMClient } = await import('../../src/scripts/api/client.js');
+  const { createCustomAgentRequestRuntime } = await import('../../src/scripts/agent/custom-agent-request-runtime.js');
+  const { buildInputAgentRequest } = await import('../../src/scripts/agent/input-agent-runtime.js');
+  const model = { provider: 'deepseek', model: 'deepseek-flash', baseUrl: 'https://api.deepseek.com/v1', apiKey: 'fixture' };
+  const settings = { id: 'text_completion', kind: 'input_suggestion', modelMode: 'profile', modelProfileId: 'deepseek', maxTokens: 96 };
+  const bodies = [];
+  const createClient = config => {
+    const client = new LLMClient(config);
+    client.provider.request = async ({ body }) => {
+      const payload = JSON.parse(body); bodies.push(payload);
+      const thinking = payload.thinking?.type !== 'disabled';
+      return { ok: true, status: 200, body: JSON.stringify({ choices: [{ finish_reason: thinking ? 'length' : 'stop',
+        message: { content: thinking ? '' : '公园散步。', reasoning_content: thinking ? 'reasoning only' : '' } }],
+        usage: { completion_tokens: thinking ? 96 : 6 } }) };
+    };
+    return { chat: client.chat.bind(client), prepareChatRequest: client.prepareChatRequest.bind(client) };
+  };
+  const suggest = createInputSuggestionRequest({ getProfileConfig: async () => model, createClient });
+  assert.equal(await suggest({ settings, before: '今天想去', after: '' }, new AbortController().signal), '公园散步。');
+  assert.deepEqual(bodies[0].thinking, { type: 'disabled' });
+  assert.equal(bodies[0].max_tokens, 96, 'short suggestion budget is unchanged');
+  assert.equal(bodies[0].stream, false);
+  const agent = createCustomAgentRequestRuntime({ createClient });
+  const request = buildInputAgentRequest(settings, { text: '今天想去', start: 4, end: 4 });
+  const preview = await agent.preview({ request, model, config: settings });
+  assert.deepEqual(preview.wireRequest.body.thinking, bodies[0].thinking, 'AC preview has the same explicit thinking mode');
+  assert.equal(await agent.request({ request, model, config: settings }), '公园散步。');
+  assert.deepEqual(bodies[1].thinking, bodies[0].thinking, 'manual input suggestion uses the same mode');
+  const other = await agent.preview({ request: { ...request, params: { ...request.params, thinking: { type: 'enabled' } } }, model, config: { id: 'text-edit:fixture' } });
+  assert.deepEqual(other.wireRequest.body.thinking, { type: 'enabled' }, 'other Agents keep their own reasoning policy');
+}
 console.log('ok - input suggestions: model gate, debounce/cancellation, limits, bounded request, graphemes and partial acceptance');

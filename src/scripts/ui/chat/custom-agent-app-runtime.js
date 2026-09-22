@@ -1,4 +1,5 @@
 import { createCustomAgentRequestRuntime } from '../../agent/custom-agent-request-runtime.js';
+import { agentRequestTimeoutMs } from '../../agent/agent-generation-settings.js';
 import { PROVIDER_TOOL_PERMISSION_ACTIONS, applyProviderToolPermissionAction, buildProviderToolPermissionPromptMessage } from '../../agent/provider-tool-permission-actions.js';
 
 // Bind model snapshots and existing APP permissions to the bounded tool runtime.
@@ -9,7 +10,7 @@ export const createCustomAgentAppRuntime = ({ createClient, getProfileConfig, re
     if (config.modelMode === 'none') throw new Error('请先选择模型');
     const model = config.modelMode === 'profile' ? await getProfileConfig(config.modelProfileId) : await resolveCurrentModel(context);
     if (!model) throw new Error('指定的模型配置不存在');
-    return { ...model, ...(config.modelOverride ? { model: config.modelOverride } : {}), timeout: 120000 };
+    return { ...model, ...(config.modelOverride ? { model: config.modelOverride } : {}), timeout: agentRequestTimeoutMs(config, 120000) };
   };
   const active = context => ['sessionId', 'scopeId', 'archiveId', 'place'].every(key =>
     String(getContext()?.[key] || '') === String(context?.[key] || ''));

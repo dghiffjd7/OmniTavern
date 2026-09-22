@@ -1,4 +1,9 @@
 import { getChatTimeMode, createRepairMessageTimeRestorer } from '../utils/chat-time-policy.js';
+import {
+  normalizeImageGenerationReferenceItems,
+  createImageGenerationReferenceReader,
+  getGeneratedImageReferenceItems,
+} from './image-generation-reference-utils.js';
 import { createAgentCenterPromptPreview } from './agent-center-prompt-preview.js';
 import { buildAgentSidecarPromptPreview } from './chat/agent-sidecar-prompt-preview.js';
 import { resolveMemoryUpdateRuntimeConfig } from './chat/memory-update-runtime.js';
@@ -8,6 +13,9 @@ import { ImagePromptEditor } from './image-prompt/image-prompt-editor.js';
 import { IMAGE_PROMPT_TEXT_KEYS, fillImagePromptScene, restoreImagePromptFromAsset } from './image-prompt/image-prompt-utils.js';
 import { createImagePromptRuntime } from './image-prompt/image-prompt-runtime.js';
 import { createChatImagePromptModal } from './chat-image-prompt-modal.js';
+import { createImageGenerationReferenceStore, collectStoredImageReferences } from './image-generation-reference-store.js';
+import { createGeneratedImageAlbumPanel } from './generated-image-album-panel.js';
+import { createImageGenerationReplayRuntime, resolveImageGenerationReplayConfig } from './chat/image-generation-replay-runtime.js';
 import { LLMClient } from '../api/client.js';
 import { captureRequestContext, setRequestContextResolver } from '../api/request-context.js';
 import { canInitClient } from '../api/client-config-utils.js';
@@ -262,6 +270,7 @@ import {
   isGuidedActionElementVisible,
   prepareGuidedActionEntryNavigation,
 } from './app-guided-action-runtime-utils.js';
+import { createMaidCommandSubmit } from './maid-command-submit-runtime.js';
 import { createMaidCommandInputRuntime } from './maid-command-input-runtime-utils.js';
 import { createMaidSettingsPanel } from './maid-settings-panel.js';
 import { createMaidOnboardingRuntime, maidGuideEmit } from './maid-onboarding-runtime.js';
@@ -343,6 +352,7 @@ import {
   resolveRealtimeCallTarget,
 } from './realtime/realtime-call-app-runtime.js';
 import { buildRealtimeSemanticSnapshotFromRequest } from './realtime/realtime-context-builder.js';
+import { createMaidVoiceRuntime } from './maid-voice-runtime.js';
 import {
   normalizeRealtimeVoiceSettings,
   resolveRealtimeConfigReference,
@@ -523,6 +533,7 @@ import { bindBubbleTextSelection } from './chat/bubble-text-selection.js';
 import { allowsAgentInvocation, createInputRequestBudget } from '../agent/agent-invocation.js';
 import { createAgentReferenceAppRuntime } from './chat/agent-reference-app-runtime.js';
 import { createCustomAgentAppRuntime } from './chat/custom-agent-app-runtime.js';
+import { createAgentModelRequest } from '../agent/agent-model-request.js';
 import { createChatImageJobRuntime } from './chat/chat-image-job-runtime.js';
 import { createInputSuggestionRequest } from './chat/input-suggestion-runtime.js';
 import { createExecutionFlowRuntime } from './chat/execution-flow-runtime-utils.js';
@@ -7828,7 +7839,35 @@ const initApp = async () => {
       return '';
     }
   };
+  const imageGenerationReferenceStore = createImageGenerationReferenceStore({
+    getLibrary: sessionId => {
+      const session = chatStore.state?.sessions?.[sessionId];
+      return {
+        items: session?.imageReferenceLibrary || [],
+        remember: reference => {
+          if (!session || chatStore.state?.sessions?.[sessionId] !== session) return;
+          const items = session.imageReferenceLibrary || [];
+          if (items.some(item => item.path === reference.path && item.hash === reference.hash)) return;
+          session.imageReferenceLibrary = [...items.filter(item => item.hash !== reference.hash), reference];
+          chatStore._persist?.();
+        },
+      };
+    },
+    saveDataUrl: (dataUrl, fileName, { sessionId }) => saveStickerAsset(dataUrl, fileName, sessionId || 'generated_images', { forceStream: true }),
+    readDataUrl: async (reference, sessionId) => (await safeInvoke('read_attachment_data_url', {
+      path: reference.path, sessionId: reference.sessionId || sessionId || 'generated_images',
+    }))?.dataUrl,
+    listReferences: sessionId => collectStoredImageReferences({
+      messages: chatStore.getMessages(sessionId) || [],
+      assets: [
+        ...(chatStore.state?.sessions?.[sessionId]?.generatedImageAlbum || []),
+        ...(momentsStore.list?.() || []).flatMap(moment => moment.generatedImages || []),
+      ],
+    }),
+    logger,
+  });
   const mediaGenerationService = createMediaGenerationService({
+    referenceStore: imageGenerationReferenceStore,
     preparePromptRequest: request => imagePromptRuntime.prepare(request),
     createClient: config => new LLMClient(config),
     saveDataUrl: async (dataUrl, fileName, { sessionId } = {}) => {
@@ -8243,56 +8282,9 @@ const initApp = async () => {
     imageConfigNeedsReload = true;
   });
 
-  const normalizeImageGenerationReferenceItems = (items = [], capability = {}) => {
-    const supported = Boolean(capability?.supported);
-    const max = Math.max(0, Math.trunc(Number(capability?.max || 0)));
-    if (!supported || max <= 0) return [];
-    return (Array.isArray(items) ? items : [])
-      .map((item) => {
-        if (typeof item === 'string') {
-          return { dataUrl: item.trim(), name: '', mime: '', size: 0 };
-        }
-        return {
-          dataUrl: String(item?.dataUrl || item?.url || '').trim(),
-          name: String(item?.name || '').trim(),
-          mime: String(item?.mime || item?.type || '').trim(),
-          size: Number(item?.size || 0) || 0,
-        };
-      })
-      .filter(item => item.dataUrl)
-      .slice(0, max);
-  };
-
-  const readImageGenerationReferenceFiles = async (files = [], limit = 0) => {
-    const max = Math.max(0, Math.trunc(Number(limit || 0)));
-    if (max <= 0) return [];
-    const refs = [];
-    for (const file of Array.from(files || [])) {
-      if (refs.length >= max) break;
-      if (!String(file?.type || '').startsWith('image/')) continue;
-      const rawDataUrl = await readFileAsDataUrl(file);
-      if (!rawDataUrl) continue;
-      let dataUrl = rawDataUrl;
-      if (!isGifFile(file)) {
-        try {
-          dataUrl = await compressImageDataUrl(rawDataUrl, {
-            maxDim: 1280,
-            quality: 0.9,
-            maxBytes: 2_000_000,
-          });
-        } catch {
-          dataUrl = rawDataUrl;
-        }
-      }
-      refs.push({
-        dataUrl,
-        name: String(file?.name || '').trim(),
-        mime: String(file?.type || '').trim(),
-        size: Number(file?.size || 0) || 0,
-      });
-    }
-    return refs;
-  };
+  const readImageGenerationReferenceFiles = createImageGenerationReferenceReader({
+    readFileAsDataUrl, isGifFile, compressImageDataUrl,
+  });
 
   const ensureStickerKeywords = pack => {
     const next = { ...pack };
@@ -9955,9 +9947,20 @@ const initApp = async () => {
   const chatInputContainer = document.querySelector('.chat-input-container');
   const realtimeCallButton = document.getElementById('realtime-call-button');
   let realtimeCallRuntime = null;
+  let realtimeCallAppRuntime = null;
+  let maidVoiceRuntime = null;
   let realtimeCallPanel = null;
   let realtimeCallLifecycleEpoch = 0;
+  const openVoiceSettings = async capability => {
+    if (capability === 'realtime') await configPanel.setVoiceConfigView('realtime');
+    else {
+      await configPanel.setVoiceConnectionMode(appSettings.get().voiceConnectionMode, { persist: false, skipLoad: true });
+      await configPanel.setVoiceCapability(capability, { skipLoad: true });
+    }
+    await configPanel.show({ tab: 'voice' });
+  };
   const chatVoiceRuntime = createChatVoiceRuntime({
+    beforeRecording: async () => { await maidVoiceRuntime?.cancelInput(); await realtimeCallAppRuntime?.endAndHide('chat_stt'); },
     resolveConfig: resolveVoiceRuntimeConfig,
     resolveSpeechConfig,
     buildSpeechSegments: buildCreativeSpeechSegments,
@@ -9968,12 +9971,7 @@ const initApp = async () => {
       resolvePlainText: resolveMessagePlainText,
       getBubbleCopyText: nextWrapper => ui.getBubbleCopyText(nextWrapper),
     }),
-    openVoiceSettings: capability => {
-      void (async () => {
-        await configPanel.setVoiceCapability(capability, { skipLoad: true });
-        await configPanel.show({ tab: 'voice' });
-      })();
-    },
+    openVoiceSettings,
     toast: window.toastr,
   });
   chatListCollapseRuntime = createChatListCollapseRuntime({
@@ -15373,6 +15371,7 @@ const initApp = async () => {
   };
   const refreshModeSwitchAnchoredUi = () => {
     if (maidCommandInputRuntime?.isOpen?.()) maidCommandInputRuntime.position?.();
+    maidVoiceRuntime?.position?.();
     executionFlowRuntime?.position?.();
     maidOnboardingRuntime?.getEntryUi?.()?.refreshPosition?.();
   };
@@ -17512,7 +17511,7 @@ const initApp = async () => {
     });
     if (prompt.formatProfile) formatProfile = prompt.formatProfile;
     const featureState = agentDraft || agentFeatureSettingsStore.getSettings(sessionId)?.features?.[AGENT_FEATURE_IDS.replyCheck] || {};
-    const requestOptions = {
+    let requestOptions = {
       temperature: 0,
       maxTokens: featureState.maxTokens || FORMAT_PATCH_MODEL_MAX_TOKENS,
     };
@@ -17542,13 +17541,18 @@ const initApp = async () => {
       logger.warn('resolve chat format guardian prompt preview config failed', err);
       config = window.appBridge.getConfig?.() || null;
     }
+    const requestPreview = config ? await createAgentModelRequest({ config: { ...featureState, id: 'reply_check' },
+      resolveModel: () => config, createClient: model => new LLMClient(model), requestContext: captureRequestContext({ sessionId }),
+      normalizeMessages: (messages, model) => window.appBridge.normalizeOutgoingProviderMessages?.(messages, model) || messages,
+    }).preview(prompt.messages, requestOptions) : null;
+    if (requestPreview) requestOptions = requestPreview.params;
     return {
       at: Date.now(),
       requestId: `chat_format_guardian_preview_${Date.now().toString(36)}`,
       source: 'agent_center_prompt_preview',
-      provider: config?.provider || '',
+      provider: requestPreview?.provider || config?.provider || '',
       baseUrl: config?.baseUrl || '',
-      model: config?.model || '',
+      model: requestPreview?.model || config?.model || '',
       stream: false,
       configProfile,
       session: {
@@ -17568,7 +17572,8 @@ const initApp = async () => {
       },
       options: requestOptions,
       requestOptions,
-      messages: prompt.messages, sections: prompt.sections,
+      messages: requestPreview?.messages || prompt.messages, sections: prompt.sections,
+      ...(requestPreview?.wireRequest ? { wireRequest: requestPreview.wireRequest } : {}),
       agentPrompt: {
         id: AGENT_FEATURE_IDS.replyCheck,
         responseFormat: prompt.responseFormat,
@@ -19494,6 +19499,7 @@ const initApp = async () => {
 	    reuseAutoImageSource = true,
 	    replaceMessageId = '',
 	    sourceMessageIdOverride = undefined,
+	    replaySnapshot = null,
 	  } = {}) => {
 	    const imagePrompt = String(prompt || '').trim();
 	    if (!imagePrompt) return false;
@@ -19503,10 +19509,24 @@ const initApp = async () => {
       return false;
 	    }
 	    const imageContext = getChatImageJobContextKey(sessionId);
-	    const config = await ensureImageConfigReady();
+	    let config = await ensureImageConfigReady();
 	    if (!config) return false;
+	    try {
+	      config = resolveImageGenerationReplayConfig(config, replaySnapshot);
+	    } catch (error) {
+	      lastChatImageGenerationError = error.message;
+	      window.toastr?.warning?.(error.message);
+	      return false;
+	    }
 	    const referenceCapability = resolveImageReferenceCapability(config);
 	    const normalizedReferences = normalizeImageGenerationReferenceItems(referenceImages, referenceCapability);
+	    if (normalizedReferences.length !== referenceImages.length) {
+	      lastChatImageGenerationError = referenceCapability.supported
+	        ? `当前图片模型最多支持 ${referenceCapability.max} 张参考图`
+	        : String(referenceCapability.reason || '当前图片模型不支持参考图');
+	      window.toastr?.warning?.(lastChatImageGenerationError);
+	      return false;
+	    }
 	    const referenceImageCount = normalizedReferences.length;
 	    const negativeCapability = resolveImageNegativePromptCapability(config);
 	    const negativePromptText = negativeCapability?.supported ? String(negativePrompt || '').trim() : '';
@@ -19519,7 +19539,7 @@ const initApp = async () => {
         lastChatImageGenerationError = imageContext !== getChatImageJobContextKey(sessionId) ? '目标聊天或存档已变化' : '目标聊天室已删除';
         return false;
       }
-	    const imageParamsPreset = imageGenerationParamsStore.getActive();
+	    const imageParamsPreset = replaySnapshot ? null : imageGenerationParamsStore.getActive();
 	    const generationExtra = {};
 	    if (referenceImageCount) {
 	      generationExtra.referenceImages = normalizedReferences.map(item => item.dataUrl).filter(Boolean);
@@ -19527,7 +19547,7 @@ const initApp = async () => {
 	    if (negativeCapability?.supported && (negativePromptText || resolvedNegativePromptMode === 'replace')) {
 	      generationExtra.negativePrompt = negativePromptText;
 	    }
-	    let generationOptions = mergeImageGenerationRequestOptions({
+	    let generationOptions = replaySnapshot ? { ...replaySnapshot.generationParams, ...generationExtra } : mergeImageGenerationRequestOptions({
 	      config,
 	      preset: imageParamsPreset,
 	      overrides: generationParamOverrides,
@@ -19579,12 +19599,15 @@ const initApp = async () => {
 	      generatedMedia: {
 	        kind: 'image',
 	        status: 'running',
+	        provider: String(config.provider || ''),
+	        model: String(config.model || ''),
 	        surface: mediaSurface,
 	        targetId: sessionId,
 	        prompt: imagePrompt,
 	        negativePrompt: negativePromptText,
 	        sourceMessageId,
 	        referenceImageCount,
+	        referenceImageNames: normalizedReferences.map(item => item.name),
 	        generationParams: generationOptions,
 	        autoGenerated: Boolean(autoGenerated),
 	        source: autoGenerated ? 'auto_image_prompt' : 'manual',
@@ -19593,7 +19616,7 @@ const initApp = async () => {
 	    const pendingMessage = {
 	      role: sender.role,
 	      type: 'text',
-	      content: `${surfaceCopy.pendingText}：${imagePrompt}${referenceImageCount ? `（参考图 ${referenceImageCount} 张）` : ''}`,
+	      content: `${surfaceCopy.pendingText}：${imagePrompt}`,
 	      name: sender.name,
 	      avatar: sender.avatar,
 	      time: formatNowTime(),
@@ -19673,6 +19696,7 @@ const initApp = async () => {
 	        window.toastr?.success?.(surfaceCopy.successText);
 	        return true;
 	      }
+	      const generationParams = asset.generationParams;
 	      const imagePatch = buildGeneratedImageMessagePatch(asset, {
 	        sourceMessageId,
 	        surface: mediaSurface,
@@ -19687,7 +19711,8 @@ const initApp = async () => {
 	          ...(imagePatch.meta?.generatedMedia || {}),
 	          negativePrompt: asset.negativePrompt,
 	          referenceImageCount,
-	          generationParams: asset.generationParams,
+	          referenceImageNames: normalizedReferences.map(item => item.name),
+	          generationParams,
 	          autoGenerated: Boolean(autoGenerated),
 	          source: autoGenerated ? 'auto_image_prompt' : 'manual',
 	        },
@@ -19790,6 +19815,13 @@ const initApp = async () => {
       summary: '已完成 · 查看流程',
     });
   };
+  const repeatChatImageGeneration = createImageGenerationReplayRuntime({
+    getMessage: (messageId, sessionId) => chatStore.findMessage(messageId, sessionId),
+    getContextKey: getChatImageJobContextKey,
+    loadReferences: (references, sessionId) => imageGenerationReferenceStore.load(references, sessionId),
+    runImageGeneration: args => runChatImageGeneration(args),
+    notifyError: message => window.toastr?.warning?.(message),
+  });
   const retryChatGeneratedMediaFailure = async ({
     sessionId = '',
     messageId = '',
@@ -19814,6 +19846,13 @@ const initApp = async () => {
       return false;
     }
     const surface = String(generated.surface || '').trim() || resolveMediaSurfaceForSession(sid);
+    let referenceImages;
+    try {
+      referenceImages = await imageGenerationReferenceStore.load(getGeneratedImageReferenceItems(generated), sid);
+    } catch (error) {
+      window.toastr?.error?.(error.message);
+      return false;
+    }
     window.toastr?.info?.('正在重新生成图片');
     const creativeTaskId = appendCreativeExecutionImageRetryTask({
       sessionId: sid,
@@ -19825,6 +19864,7 @@ const initApp = async () => {
       sourceMessage: message,
       surface,
       targetSessionId: sid,
+      referenceImages,
       negativePrompt: String(generated.negativePrompt || generated.negative_prompt || '').trim(),
       generationParamOverrides: generated.generationParams && typeof generated.generationParams === 'object'
         ? { ...generated.generationParams }
@@ -19853,7 +19893,15 @@ const initApp = async () => {
 	    sourceMessage = null,
 	    surface = '',
 	    useComposerFallback = true,
+	    referenceAsset = null,
 	  } = {}) => {
+	    let initialReferences = [];
+	    try {
+	      initialReferences = await imageGenerationReferenceStore.load(getGeneratedImageReferenceItems(referenceAsset), referenceAsset?.scope?.targetId || chatStore.getCurrent());
+	    } catch (error) {
+	      window.toastr?.error?.(error.message);
+	      return false;
+	    }
 	    const mediaSurface = surface || resolveMediaSurfaceForSession();
 	    const surfaceCopy = getMediaSurfaceCopy(mediaSurface);
 	    const showWritingAssets = isWritingMediaSurface(mediaSurface);
@@ -19865,6 +19913,7 @@ const initApp = async () => {
 	    const generationParamContext = await loadImageGenerationParamContext();
 	      const modalResult = await getChatImagePromptModal().open({
 	      initialPrompt: seedPrompt,
+	      referenceImages: initialReferences,
 	      title: surfaceCopy.title,
 	      subtitle: surfaceCopy.subtitle,
 	      impactText: surfaceCopy.impactText,
@@ -21551,6 +21600,12 @@ const initApp = async () => {
 	    if (!config) return false;
 	    const referenceCapability = resolveImageReferenceCapability(config);
 	    const normalizedReferences = normalizeImageGenerationReferenceItems(referenceImages, referenceCapability);
+	    if (normalizedReferences.length !== referenceImages.length) {
+	      window.toastr?.warning?.(referenceCapability.supported
+	        ? `当前图片模型最多支持 ${referenceCapability.max} 张参考图`
+	        : String(referenceCapability.reason || '当前图片模型不支持参考图'));
+	      return false;
+	    }
 	    const negativeCapability = resolveImageNegativePromptCapability(config);
 	    const negativePromptText = negativeCapability?.supported ? String(negativePrompt || '').trim() : '';
 	    const resolvedNegativePromptMode = negativePromptMode === 'replace' ? 'replace' : 'append';
@@ -21632,6 +21687,13 @@ const initApp = async () => {
 	      window.toastr?.warning?.('没有找到原始生图提示词，无法重新生成');
 	      return false;
 	    }
+	    let initialReferences;
+	    try {
+	      initialReferences = await imageGenerationReferenceStore.load(getGeneratedImageReferenceItems(asset), sessionId);
+	    } catch (error) {
+	      window.toastr?.error?.(error.message);
+	      return false;
+	    }
 	    const mediaSurface = resolveMediaSurfaceForSession(sessionId);
 	    const isWritingSurface = mediaSurface === 'writing';
 	    const surfaceCopy = getMediaSurfaceCopy(mediaSurface);
@@ -21640,6 +21702,7 @@ const initApp = async () => {
 	    const modalResult = await getChatImagePromptModal().open({
 	      initialPrompt: prompt,
 	      title: isWritingSurface ? '重新生成插图' : '重新生成图片',
+	      referenceImages: initialReferences,
 	      subtitle: isWritingSurface
 	        ? '使用这张插图的提示词重新生成，并替换当前图片'
 	        : '使用这张图片的提示词重新生成，并替换当前图片',
@@ -21785,241 +21848,10 @@ const initApp = async () => {
 	    window.toastr?.success?.('动态图片已删除');
 	    return true;
 	  };
-	  const generatedImageAlbumPanel = (() => {
-	    let overlay = null;
-	    let titleEl = null;
-	    let subtitleEl = null;
-	    let countEl = null;
-	    let listEl = null;
-	    let detailEl = null;
-	    let detailImageEl = null;
-	    let detailPromptEl = null;
-	    let detailPromptWrapEl = null;
-	    let detailNegativePromptEl = null;
-	    let detailNegativeWrapEl = null;
-	    let detailMetaEl = null;
-	    let detailUseBtn = null;
-	    let detailDeleteBtn = null;
-	    let toolbarActionBtn = null;
-	    let activeDetailAsset = null;
-	    let lastAssets = [];
-	    let lastOptions = {};
-	    const ensure = () => {
-	      if (overlay) return;
-	      overlay = document.createElement('div');
-	      overlay.id = 'generated-image-album-overlay';
-	      overlay.className = 'writing-media-assets-overlay';
-	      overlay.innerHTML = `
-	        <div class="writing-media-assets-panel" role="dialog" aria-modal="true" aria-labelledby="generated-image-album-title">
-	          <div class="writing-media-assets-header">
-	            <div>
-	              <div id="generated-image-album-title" class="writing-media-assets-title">相册</div>
-	              <div class="writing-media-assets-subtitle">当前会话生成的图片与提示词</div>
-	            </div>
-	            <button type="button" class="writing-media-assets-close" aria-label="关闭">×</button>
-	          </div>
-	          <div class="writing-media-assets-toolbar">
-	            <span class="writing-media-assets-count"></span>
-	            <button type="button" data-action="album-toolbar-action" hidden></button>
-	          </div>
-	          <div class="writing-media-assets-list"></div>
-	        </div>
-	        <div class="generated-image-album-detail" hidden>
-	          <div class="generated-image-album-detail-card" role="dialog" aria-modal="true" aria-labelledby="generated-image-album-detail-title">
-	            <div class="generated-image-album-detail-header">
-	              <div>
-	                <div id="generated-image-album-detail-title" class="generated-image-album-detail-title">图片详情</div>
-	                <div class="generated-image-album-detail-meta" data-i18n-skip></div>
-	              </div>
-	              <button type="button" class="generated-image-album-detail-close" aria-label="关闭">×</button>
-	            </div>
-	            <div class="generated-image-album-detail-body">
-	              <img class="generated-image-album-detail-image" alt="生成图片">
-	              <div class="generated-image-album-detail-prompt-wrap">
-	                <div class="generated-image-album-detail-label">正向提示词</div>
-	                <pre class="generated-image-album-detail-prompt"></pre>
-	              </div>
-	              <div class="generated-image-album-detail-prompt-wrap generated-image-album-detail-negative-wrap" hidden>
-	                <div class="generated-image-album-detail-label">负面提示词</div>
-	                <pre class="generated-image-album-detail-prompt generated-image-album-detail-negative-prompt"></pre>
-	              </div>
-		            </div>
-		            <div class="generated-image-album-detail-actions">
-		              <button type="button" data-action="use-detail-asset">使用</button>
-		              <button type="button" class="is-danger" data-action="delete-detail-asset">删除</button>
-		            </div>
-		          </div>
-		        </div>
-	      `;
-	      document.body.appendChild(overlay);
-	      titleEl = overlay.querySelector('.writing-media-assets-title');
-	      subtitleEl = overlay.querySelector('.writing-media-assets-subtitle');
-	      countEl = overlay.querySelector('.writing-media-assets-count');
-	      listEl = overlay.querySelector('.writing-media-assets-list');
-	      detailEl = overlay.querySelector('.generated-image-album-detail');
-	      detailImageEl = overlay.querySelector('.generated-image-album-detail-image');
-	      detailPromptEl = overlay.querySelector('.generated-image-album-detail-prompt');
-	      detailPromptWrapEl = overlay.querySelector('.generated-image-album-detail-prompt-wrap');
-	      detailNegativePromptEl = overlay.querySelector('.generated-image-album-detail-negative-prompt');
-	      detailNegativeWrapEl = overlay.querySelector('.generated-image-album-detail-negative-wrap');
-	      detailMetaEl = overlay.querySelector('.generated-image-album-detail-meta');
-	      detailUseBtn = overlay.querySelector('[data-action="use-detail-asset"]');
-	      detailDeleteBtn = overlay.querySelector('[data-action="delete-detail-asset"]');
-	      toolbarActionBtn = overlay.querySelector('[data-action="album-toolbar-action"]');
-	      const closeAlbum = () => {
-	        overlay.classList.remove('is-active');
-	        if (detailEl) detailEl.hidden = true;
-	        activeDetailAsset = null;
-	      };
-	      overlay.querySelector('.writing-media-assets-close')?.addEventListener('click', closeAlbum);
-	      overlay.querySelector('.generated-image-album-detail-close')?.addEventListener('click', () => {
-	        if (detailEl) detailEl.hidden = true;
-	        activeDetailAsset = null;
-	      });
-	      detailEl?.addEventListener('click', event => {
-	        if (event.target === detailEl) {
-	          detailEl.hidden = true;
-	          activeDetailAsset = null;
-	        }
-	      });
-	      bindBackdropActivation(overlay, {
-	        documentLike: document,
-	        onActivate: () => closeAlbum(),
-	      });
-	      const openDetail = (asset = {}) => {
-	        const url = resolveGeneratedImagePreviewUrl(asset);
-	        if (!detailEl || !url) return;
-	        activeDetailAsset = asset;
-	        const prompt = String(asset.prompt || '').trim();
-	        const negativePrompt = getGeneratedImageNegativePrompt(asset);
-	        const model = [asset.provider, asset.model].filter(Boolean).join(' · ') || '图片模型';
-	        const time = formatGeneratedImageAlbumTime(asset.createdAt);
-	        const source = String(asset.sourceLabel || '').trim();
-	        if (detailImageEl) {
-	          detailImageEl.src = url;
-	          detailImageEl.alt = prompt || '生成图片';
-	        }
-	        if (detailPromptWrapEl) detailPromptWrapEl.hidden = !prompt;
-	        if (detailPromptEl) detailPromptEl.textContent = prompt;
-	        if (detailNegativeWrapEl) detailNegativeWrapEl.hidden = !negativePrompt;
-	        if (detailNegativePromptEl) detailNegativePromptEl.textContent = negativePrompt;
-	        if (detailMetaEl) detailMetaEl.textContent = [model, source, time].filter(Boolean).join(' · ');
-	        if (detailUseBtn) {
-	          detailUseBtn.disabled = !prompt;
-	          detailUseBtn.hidden = lastOptions.allowUse === false;
-	        }
-	        if (detailDeleteBtn) detailDeleteBtn.hidden = lastOptions.allowDelete !== true;
-	        detailEl.hidden = false;
-	      };
-	      overlay.addEventListener('click', async event => {
-	        const btn = event.target?.closest?.('button[data-action]');
-	        if (btn) {
-		        const action = btn.dataset.action || '';
-		        if (action === 'album-toolbar-action') {
-		          if (typeof lastOptions.onToolbarAction !== 'function') return;
-		          overlay.classList.remove('is-active');
-		          if (detailEl) detailEl.hidden = true;
-		          activeDetailAsset = null;
-		          await lastOptions.onToolbarAction();
-		          return;
-		        }
-	          const assetId = btn.closest('[data-asset-id]')?.dataset?.assetId || '';
-		        const isDetailAction = action.includes('detail');
-		        const asset = isDetailAction
-		          ? activeDetailAsset
-		          : lastAssets.find(item => String(item.albumId || item.id || '') === assetId);
-		          if (!asset) return;
-		          if (action === 'use-asset' || action === 'use-detail-asset') {
-		            const handler = typeof lastOptions.onUse === 'function'
-		              ? lastOptions.onUse
-		              : null;
-		            if (!handler) return;
-		            if (detailEl) detailEl.hidden = true;
-		            activeDetailAsset = null;
-		            closeAlbum();
-		            await handler(asset);
-		          }
-		          if (action === 'delete-asset' || action === 'delete-detail-asset') {
-		            if (typeof lastOptions.onDelete !== 'function') return;
-		            const ok = await lastOptions.onDelete(asset);
-		            if (!ok) return;
-		            if (detailEl) detailEl.hidden = true;
-		            activeDetailAsset = null;
-		            lastAssets = typeof lastOptions.collect === 'function' ? lastOptions.collect() : [];
-		            render();
-		          }
-		          return;
-		        }
-	        const detailImage = event.target?.closest?.('.generated-image-album-detail-image');
-	        if (detailImage && detailImage.src) {
-	          ui.openLightbox?.(detailImage.src);
-	          return;
-	        }
-	        const card = event.target?.closest?.('.writing-media-asset-card[data-asset-id]');
-	        if (!card) return;
-	        const asset = lastAssets.find(item => String(item.albumId || item.id || '') === String(card.dataset.assetId || ''));
-	        if (asset) openDetail(asset);
-	      });
-	    };
-	    const render = () => {
-	      ensure();
-	      const title = String(lastOptions.title || '相册');
-	      const subtitle = String(lastOptions.subtitle || '当前会话生成的图片与提示词');
-	      if (titleEl) titleEl.textContent = title;
-	      if (subtitleEl) subtitleEl.textContent = subtitle;
-	      if (countEl) countEl.textContent = lastAssets.length ? `${lastAssets.length} 张图片` : '暂无图片';
-	      if (toolbarActionBtn) {
-	        const text = String(lastOptions.toolbarActionText || '').trim();
-	        const enabled = Boolean(text && typeof lastOptions.onToolbarAction === 'function');
-	        toolbarActionBtn.hidden = !enabled;
-	        if (enabled) toolbarActionBtn.textContent = text;
-	      }
-	      if (!listEl) return;
-	      if (!lastAssets.length) {
-	        listEl.innerHTML = `<div class="writing-media-assets-empty">${escapeHtml(lastOptions.emptyText || '还没有生成图片。')}</div>`;
-	        return;
-	      }
-		      listEl.innerHTML = lastAssets.map(asset => {
-		        const url = resolveGeneratedImagePreviewUrl(asset);
-		        const prompt = String(asset.prompt || '').trim();
-		        const negative = getGeneratedImageNegativePrompt(asset);
-		        const model = [asset.provider, asset.model].filter(Boolean).join(' · ') || '图片模型';
-		        const time = formatGeneratedImageAlbumTime(asset.createdAt);
-		        const source = String(asset.sourceLabel || '').trim();
-		        const showUse = lastOptions.allowUse !== false;
-		        const showDelete = lastOptions.allowDelete === true;
-		        const useButton = showUse
-		          ? `<button type="button" data-action="use-asset" ${prompt ? '' : 'disabled'}>使用</button>`
-		          : '';
-		        return `
-		          <div class="writing-media-asset-card" data-asset-id="${escapeHtml(String(asset.albumId || asset.id || ''))}">
-		            <img src="${escapeHtml(url)}" alt="${escapeHtml(prompt || '生成图片')}" data-preview-url="${escapeHtml(url)}">
-	            <div class="writing-media-asset-meta">
-	              <div class="writing-media-asset-prompt" data-i18n-skip>${escapeHtml(prompt || translateUiText('（无提示词）'))}</div>
-	              ${negative ? `<div class="writing-media-asset-prompt writing-media-asset-negative"><span>负面：</span><span data-i18n-skip>${escapeHtml(negative)}</span></div>` : ''}
-	              <div class="writing-media-asset-model" data-i18n-skip>${escapeHtml([model, source, time].filter(Boolean).join(' · '))}</div>
-		            </div>
-		            <div class="writing-media-asset-actions">
-		              ${useButton}
-		              ${showDelete ? '<button type="button" class="is-danger" data-action="delete-asset">删除</button>' : ''}
-		            </div>
-		          </div>
-		        `;
-	      }).join('');
-	    };
-	    return {
-	      open(options = {}) {
-	        ensure();
-	        lastOptions = options || {};
-	        lastAssets = typeof options.collect === 'function' ? options.collect() : [];
-	        if (detailEl) detailEl.hidden = true;
-	        activeDetailAsset = null;
-	        render();
-	        overlay.classList.add('is-active');
-	      },
-	      render,
-	    };
-	  })();
+	  const generatedImageAlbumPanel = createGeneratedImageAlbumPanel({
+    resolveGeneratedImagePreviewUrl, getGeneratedImageNegativePrompt, formatGeneratedImageAlbumTime,
+    openLightbox: url => ui.openLightbox?.(url), escapeHtml, translateUiText,
+  });
 	  const openGeneratedImageAlbumPanel = ({ surface = 'chat' } = {}) => {
 	    if (surface === 'moments') {
 	      generatedImageAlbumPanel.open({
@@ -22054,6 +21886,7 @@ const initApp = async () => {
 	      allowDelete: true,
 	      onUse: async asset => openChatImageGenerationFlow({
 	        surface: 'chat',
+	        referenceAsset: asset,
 	        initialPrompt: String(asset.prompt || '').trim(),
 	        initialNegativePrompt: getGeneratedImageNegativePrompt(asset),
 	        generationParamOverrides: await buildImageGenerationOverridesFromAsset(asset),
@@ -22173,6 +22006,7 @@ const initApp = async () => {
 	      },
 	      onUse: async asset => openChatImageGenerationFlow({
 	        surface: 'writing',
+	        referenceAsset: asset,
 	        initialPrompt: String(asset.prompt || '').trim(),
 	        initialNegativePrompt: getGeneratedImageNegativePrompt(asset),
 	        generationParamOverrides: await buildImageGenerationOverridesFromAsset(asset),
@@ -22715,6 +22549,16 @@ const initApp = async () => {
       );
       refreshChatAndContacts({ immediate: true });
       return { jumpedToTarget: false, stale: false, blocked: true, reason: enterGuard.reason };
+    }
+    // Agent navigation can open a normal room directly from creative writing.
+    // Align its shell before rendering history; exitRpMode would reopen the old
+    // social room concurrently with this explicitly requested destination.
+    if (uiMode === 'rp' && !isRpSessionId(sid)) {
+      uiMode = 'chat';
+      persistUiMode();
+      applyUiModeUI();
+      if (rpToolbar) rpToolbar.style.display = 'none';
+      if (backToListBtn) backToListBtn.style.display = '';
     }
     const enterRequest = beginChatEnterRequest(sid);
     const contact = contactsStore.getContact(sid);
@@ -24063,8 +23907,10 @@ const initApp = async () => {
     const sid = String(sessionId || '').trim();
     if (!sid) return { ok: false, reason: 'missing_session_id' };
     realtimeCallLifecycleEpoch += 1;
-    await realtimeCallRuntime?.end?.('session_reset');
-    realtimeCallPanel?.hide?.();
+    if (realtimeCallRuntime?.getState?.().target?.uiMode !== 'maid') {
+      await realtimeCallRuntime?.end?.('session_reset');
+      realtimeCallPanel?.hide?.();
+    }
     cancelInitialHistoryFill(sid);
     try {
       ui.hideTyping?.();
@@ -24213,8 +24059,10 @@ const initApp = async () => {
       chatStore.startNewChat = (id = chatStore.getCurrent(), archiveName = '', options = {}) => {
         const sid = String(id || chatStore.getCurrent() || '').trim();
         realtimeCallLifecycleEpoch += 1;
-        void realtimeCallRuntime?.end?.('session_reset');
-        realtimeCallPanel?.hide?.();
+        if (realtimeCallRuntime?.getState?.().target?.uiMode !== 'maid') {
+          void realtimeCallRuntime?.end?.('session_reset');
+          realtimeCallPanel?.hide?.();
+        }
         const result = originalStartNewChat(id, archiveName, options);
         if (sid && isRpSessionId(sid) && options?.skipRpGreetingSeed !== true) {
           seedRpGreetingIfNeeded(sid).catch(() => {});
@@ -24351,6 +24199,8 @@ const initApp = async () => {
   const maidSettingsPanel = createMaidSettingsPanel({
     documentRef: document,
     settingsStore: maidSettingsStore,
+    onOpenVoiceConfig: mode => maidVoiceRuntime?.openSettings(mode),
+    onVoiceModeChanged: () => maidVoiceRuntime?.sync(),
     listModelProfiles: () => (chatConfigManager.getProfiles?.() || []).map(profile => ({
       id: String(profile?.id || '').trim(),
       name: String(profile?.name || profile?.id || '').trim(),
@@ -24461,8 +24311,14 @@ const initApp = async () => {
   maidCommandInputRuntime = createMaidCommandInputRuntime({
     documentRef: document,
     modeSwitchEl: modeSwitch,
+    getVoiceState: () => maidVoiceRuntime?.getState() || {},
+    onVoiceAction: kind => maidVoiceRuntime?.action(kind),
+    onVoiceTextSubmit: (text, attachments) => maidVoiceRuntime?.submitText(text, attachments),
+    onChooseVoiceMode: () => maidVoiceRuntime?.chooseMode(),
+    onCloseVoiceInput: () => maidVoiceRuntime?.cancelInput(),
     onToggleSelection: () => maidSelectionMode.toggle(),
     onOpenStateChange: ({ open, rootEl }) => {
+      maidVoiceRuntime?.setInputOpen(open);
       executionFlowRuntime?.rearbitrateMaidTrace?.({ commandInputOpen: open });
       maidOnboardingRuntime?.handleCommandInputOpen?.({ open, anchorEl: rootEl });
       if (open) maidGuideEmit(window, 'maid-command-opened', {});
@@ -24472,103 +24328,17 @@ const initApp = async () => {
     getBallDragRuntime: () => modeSwitchInteractionRuntime,
     maxImageAttachments: 4,
     onAttachFiles: buildMaidImageAttachments,
-    onSubmit: async (text, controls = {}) => {
-      const intent = matchMaidIntent(text);
-      if (intent) {
-        if (intent.kind === 'skip') maidOnboardingRuntime?.skip?.();
-        let flowId = String(intent.flowId || '').trim();
-        if (flowId === 'first-chat' && !hasConfiguredMaidProfile()) flowId = 'setup-api';
-        if (flowId) maidOnboardingRuntime?.startFlow?.(flowId);
-        return {
-          ok: true,
-          responseType: 'local',
-          message: flowId === 'setup-api' && intent.flowId === 'first-chat'
-            ? '主人还没给我接上大脑呢～先把 API 接好，我就陪你完成第一次对话。'
-            : intent.reply,
-          actions: (Array.isArray(intent.chips) ? intent.chips : []).map(chip => ({
-            label: chip.label,
-            onClick: () => maidOnboardingRuntime?.startFlow?.(chip.flowId),
-          })),
-        };
-      }
-      let runtimeConfig = null;
-      try {
-        runtimeConfig = await resolveMaidRuntimeConfig();
-      } catch (error) {
-        logger.debug('maid runtime config unavailable for command input', error);
-      }
-      if (!runtimeConfig?.configured) {
-        return {
-          ok: true,
-          responseType: 'local',
-          message: '主人还没给我接上大脑呢～要我带你把 API 配好吗？',
-          actions: [{
-            label: '带我配置 API',
-            onClick: () => maidOnboardingRuntime?.startFlow?.('setup-api'),
-          }],
-        };
-      }
-      const attachments = Array.isArray(controls?.attachments) ? controls.attachments : [];
-      const visionCheck = await checkMaidVisionInput(attachments);
-      if (!visionCheck.ok) {
-        return {
-          ok: false,
-          status: 'failed',
-          reason: visionCheck.capability?.status || 'maid_vision_not_supported',
-          message: visionCheck.message,
-        };
-      }
-      maidSettingsStore.setLastExchange({
-        requestPrompt: '本次请求尚未发送模型提示词。',
-        appContext: buildAppFeatureSearchContextText(text, { limit: 5 }),
-        fullResponse: '',
-        source: 'pending',
-      });
-      const maidTurnContext = {
-        sessionId: chatStore.getCurrent(),
-        uiMode,
-        activePage,
-        userSelection: maidSelectionMode.getItems(),
-      };
-      const result = await maidAssistantAgent.runPrompt(text, {
-        ...maidTurnContext,
-        maidAttachments: attachments,
-        signal: controls?.signal || null,
-        maxReactSteps: maidSettingsStore.getMaxReactSteps?.(),
-        resolveMaidSelectionRegion: regionId => maidSelectionMode.resolveCaptureRegion(regionId),
-        requestToolConfirmation: requestMaidToolConfirmation,
-        onStatus: (status = {}) => {
-          const message = String(status?.message || '').trim();
-          if (!message) return;
-          controls?.setStatus?.(message, status?.tone || 'thinking');
-        },
-      });
-      await recordMaidTurnFromResult({
-        input: text,
-        result,
-        context: maidTurnContext,
-      });
-      const latestExchange = maidSettingsStore.getLastExchange?.() || {};
-      if (!String(latestExchange.requestPrompt || '').trim() || latestExchange.source === 'pending') {
-        maidSettingsStore.setLastExchange({
-          requestPrompt: '本次请求未成功调用模型提示词；未执行本地直连工具。',
-          appContext: buildAppFeatureSearchContextText(text, { limit: 5 }),
-          fullResponse: result?.message || result?.reason || '',
-          source: 'no_model_result',
-        });
-      }
-      if (result?.ok === false && result?.status !== 'cancelled') {
-        window.toastr?.warning?.(result.message || result.reason || '女仆暂时无法执行这个请求');
-      } else if (
-        result?.message &&
-        result?.responseType !== 'chat' &&
-        !['awaiting_confirmation', 'cancelled'].includes(String(result?.status || '').trim())
-      ) {
-        // 完整回复已在女仆气泡中展示；通知只提示任务结束，不重复全文
-        window.toastr?.success?.('女仆已完成任务 ✓');
-      }
-      return result;
-    },
+    onSubmit: createMaidCommandSubmit({
+      getVoiceRuntime: () => maidVoiceRuntime,
+      getOnboardingRuntime: () => maidOnboardingRuntime,
+      matchMaidIntent, hasConfiguredMaidProfile, resolveMaidRuntimeConfig,
+      logger, checkMaidVisionInput, maidSettingsStore, buildAppFeatureSearchContextText,
+      getAppContext: () => ({ sessionId: chatStore.getCurrent(), uiMode, activePage, userSelection: maidSelectionMode.getItems() }),
+      maidAssistantAgent,
+      resolveSelectionRegion: (regionId, context) => context.source === 'maid_realtime' && (context.sessionId !== chatStore.getCurrent() || context.activePage !== activePage)
+        ? { ok: false, reason: 'region_scope_changed', regionId } : maidSelectionMode.resolveCaptureRegion(regionId),
+      requestMaidToolConfirmation, recordMaidTurnFromResult, toast: window.toastr,
+    }),
     onCancelActive: async ({ queuedCount = 0 } = {}) => {
       if (!queuedCount) return 'all_stop';
       return appChoice({
@@ -24621,8 +24391,9 @@ const initApp = async () => {
     vibrate: value => navigator.vibrate?.(value),
     onLongPress: () => {
       wakeModeSwitch();
+      maidVoiceRuntime?.prepareOpenInput();
       void openMaidCommandOrSettings({
-        autoFocus: maidOnboardingRuntime?.isFirstRunPending?.() !== true,
+        autoFocus: !maidVoiceRuntime?.isCallActive() && maidOnboardingRuntime?.isFirstRunPending?.() !== true,
       });
       return true;
     },
@@ -24636,7 +24407,7 @@ const initApp = async () => {
     getViewportSize,
     getBallDragRuntime: () => modeSwitchInteractionRuntime,
     // 女仆流首选画布 = 指令条白色结果流（结构化 trace 卡原位并入，避免双流）
-    onMaidTrace: view => maidCommandInputRuntime?.applyTraceView?.(view) === true,
+    onMaidTrace: view => maidCommandInputRuntime?.applyTraceView?.(view) === true || maidVoiceRuntime?.consumeTrace(view) === true,
     onCancelMaidRun: ({ runId = '' } = {}) => maidCommandInputRuntime?.cancelActive?.({ runId }),
   });
   executionFlowRuntime.attachCreativeLane?.(creativeExecutionLaneRuntime);
@@ -27098,31 +26869,16 @@ const initApp = async () => {
     const agentContextSnapshot = { ...getAgentConfigContext(sid), archiveId: chatStore.getCurrentArchiveId(sid) || '' };
     const useProfile = modelMode === 'profile' && String(featureState.modelProfileId || '').trim();
     if (!useProfile && (!isBridgeConfigured(window.appBridge) || typeof window.appBridge?.backgroundChat !== 'function')) return { enabled: false };
-    // Capture model selection now, before loading disk-backed reply text. Keep an
-    // unused preview/options resolution from producing an unhandled rejection.
-    const modelSnapshot = (async () => {
-      try {
-        const config = useProfile
-          ? await chatConfigManager.getRuntimeConfigByProfileId(featureState.modelProfileId)
-          : (await window.appBridge.resolveRequestRuntimeConfig({ sessionId: sid, uiMode: targetUiMode }))?.config;
-        if (!config) throw new Error('Agent 指定模型配置不存在');
-        const modelOverride = String(featureState.modelOverride || '').trim();
-        return { config: {
-          ...(modelOverride ? { ...config, model: modelOverride } : config),
-          timeout: Math.min(Number(config.timeout) > 0 ? Number(config.timeout) : 240000, 240000),
-        } };
-      } catch (error) { return { error }; }
-    })();
-    const backgroundChat = async (messages, options = {}) => {
-      const snapshot = await modelSnapshot;
-      if (snapshot.error) throw snapshot.error;
-      if (!useProfile) return window.appBridge.backgroundChat(messages, { ...options, runtimeConfigOverride: snapshot.config, requestContext });
-      const { presetContext: _presetContext, ...requestOptions } = options || {};
-      return new LLMClient(snapshot.config).chat(messages, { ...requestOptions, requestContext });
-    };
+    const modelRequest = createAgentModelRequest({ config: { ...featureState, id: 'reply_check' }, requestContext,
+      resolveModel: async () => useProfile
+        ? chatConfigManager.getRuntimeConfigByProfileId(featureState.modelProfileId)
+        : (await window.appBridge.resolveRequestRuntimeConfig({ sessionId: sid, uiMode: targetUiMode }))?.config,
+      createClient: config => new LLMClient(config),
+      normalizeMessages: (messages, model) => window.appBridge.normalizeOutgoingProviderMessages?.(messages, model) || messages,
+    });
     return {
       enabled: true,
-      backgroundChat,
+      backgroundChat: modelRequest.chat,
       userName: activeUser?.name || '我',
       sessionLabel: getChatFormatGuardianSessionLabel(sid),
       enabledFormats: promptContext.enabledFormats,
@@ -27144,7 +26900,7 @@ const initApp = async () => {
         maxTokens: featureState.maxTokens || FORMAT_PATCH_MODEL_MAX_TOKENS,
         presetContext: { sessionId: sid, uiMode: targetUiMode },
       },
-      timeoutMs: 60000,
+      timeoutMs: modelRequest.timeoutMs,
       autoApplyRepair: false,
       recordSucceededRun: false,
     };
@@ -31871,7 +31627,7 @@ const initApp = async () => {
   };
 
   const isRealtimeCallTargetCurrent = target => (
-    isRealtimeCallTargetMatch(target, getRealtimeCallTarget())
+    target?.uiMode === 'maid' ? maidVoiceRuntime?.isTargetCurrent(target) : isRealtimeCallTargetMatch(target, getRealtimeCallTarget())
   );
 
   const buildRealtimeSemanticSnapshot = async ({
@@ -32000,7 +31756,28 @@ const initApp = async () => {
     return { messageId: String(saved?.id || '').trim() };
   };
 
-  const realtimeCallAppRuntime = createRealtimeCallAppRuntime({
+  maidVoiceRuntime = createMaidVoiceRuntime({
+    documentRef: document, windowLike: window, modeSwitchEl: modeSwitch,
+    settingsStore: maidSettingsStore, conversationStore: maidConversationStore,
+    prepareConversationContext: prepareMaidConversationContext,
+    getAppContext: () => ({ sessionId: chatStore.getCurrent(), uiMode, activePage, userSelection: maidSelectionMode.getItems() }),
+    getCommandRuntime: () => maidCommandInputRuntime,
+    getCallAppRuntime: () => realtimeCallAppRuntime,
+    cancelChatVoice: () => chatVoiceRuntime.cancel(), resolveVoiceConfig: resolveVoiceRuntimeConfig,
+    openVoiceConfig: openVoiceSettings,
+    onDebugSnapshot: recordMaidDebugSnapshot, onContextInjected: recordMaidContextInjection, toast: window.toastr,
+  });
+  const commitChatLiveTranscript = createLiveTranscriptCommitter({
+    isTargetCurrent: isRealtimeCallTargetCurrent,
+    findMessage: (id, sid) => chatStore.findMessage(id, sid),
+    appendMessage: (message, sid) => chatStore.appendMessage(message, sid),
+    updateMessage: (id, message, sid) => chatStore.updateMessage(id, message, sid),
+    getUser: () => ({ name: getActiveUserProfile()?.name || '我', avatar: getActiveUserAvatar() }),
+    formatTime: formatNowTime,
+    onAdded: (message, target) => { ui.addMessage(message); autoMarkReadIfActive(target.sessionId, message.id); refreshChatAndContacts(); },
+    onUpdated: message => ui.updateMessage(message.id, message),
+  });
+  realtimeCallAppRuntime = createRealtimeCallAppRuntime({
     button: realtimeCallButton,
     documentRef: document,
     windowLike: window,
@@ -32026,21 +31803,17 @@ const initApp = async () => {
       error.code = `realtime_config_${resolved.reason || 'invalid'}`;
       throw error;
     },
-    buildSemanticSnapshot: buildRealtimeSemanticSnapshot,
+    beforeStart: target => maidVoiceRuntime.beforeRealtimeStart(target),
+    getMaidSurface: () => maidVoiceRuntime.getSurface(),
+    handleMaidTaskRequest: options => maidVoiceRuntime.handleTaskRequest(options),
+    onStateChange: state => maidVoiceRuntime.onCallState(state),
+    onExecuteTranscript: text => maidVoiceRuntime.executeTranscript(text),
+    buildSemanticSnapshot: options => options.target?.uiMode === 'maid' ? maidVoiceRuntime.buildSemanticSnapshot(options) : buildRealtimeSemanticSnapshot(options),
     isTargetCurrent: isRealtimeCallTargetCurrent,
-    commitUserMessage: commitRealtimeUserMessage,
-    commitAssistantMessage: commitRealtimeAssistantMessage,
-    commitLiveTranscript: createLiveTranscriptCommitter({
-      isTargetCurrent: isRealtimeCallTargetCurrent,
-      findMessage: (id, sid) => chatStore.findMessage(id, sid),
-      appendMessage: (message, sid) => chatStore.appendMessage(message, sid),
-      updateMessage: (id, message, sid) => chatStore.updateMessage(id, message, sid),
-      getUser: () => ({ name: getActiveUserProfile()?.name || '我', avatar: getActiveUserAvatar() }),
-      formatTime: formatNowTime,
-      onAdded: (message, target) => { ui.addMessage(message); autoMarkReadIfActive(target.sessionId, message.id); refreshChatAndContacts(); },
-      onUpdated: message => ui.updateMessage(message.id, message),
-    }),
-    openVoiceSettings: () => configPanel.show({ tab: 'voice' }),
+    commitUserMessage: options => options.target?.uiMode === 'maid' ? maidVoiceRuntime.commitUserMessage(options) : commitRealtimeUserMessage(options),
+    commitAssistantMessage: options => options.target?.uiMode === 'maid' ? maidVoiceRuntime.commitAssistantMessage(options) : commitRealtimeAssistantMessage(options),
+    commitLiveTranscript: options => options.target?.uiMode === 'maid' ? maidVoiceRuntime.commitLiveTranscript(options) : commitChatLiveTranscript(options),
+    openVoiceSettings: () => openVoiceSettings('realtime'),
     onLifecycleInvalidated: () => { realtimeCallLifecycleEpoch += 1; },
     toast: window.toastr,
   });
@@ -32594,6 +32367,13 @@ const initApp = async () => {
     }
     if (action === 'download') {
       await downloadChatAttachment(message);
+      return true;
+    }
+    if (action === 'repeat-image-generation') {
+      await repeatChatImageGeneration({
+        sessionId, messageId: String(message?.id || ''),
+        inlineGeneratedImage: payload?.inlineGeneratedImage || null,
+      });
       return true;
     }
     if (action === 'cancel-media-generation') {
@@ -33302,8 +33082,10 @@ const initApp = async () => {
     onSessionChanged: async (id) => {
       await chatVoiceRuntime.cancel();
       realtimeCallLifecycleEpoch += 1;
-      await realtimeCallRuntime?.end?.('session_changed');
-      realtimeCallPanel?.hide?.();
+      if (realtimeCallRuntime?.getState?.().target?.uiMode !== 'maid') {
+        await realtimeCallRuntime?.end?.('session_changed');
+        realtimeCallPanel?.hide?.();
+      }
       await runSessionChangedFlow({
         sessionId: id,
         beginEnterRequest: sid => beginChatEnterRequest(sid),

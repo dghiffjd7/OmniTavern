@@ -364,7 +364,7 @@ import {
   assert.equal(Object.hasOwn(request.payload, 'frequency_penalty'), false);
   assert.equal(Object.hasOwn(request.payload, 'seed'), false);
   assert.equal(Object.hasOwn(request.payload, 'n'), false);
-  assert.equal(Object.hasOwn(request.payload, 'stream'), false);
+  assert.equal(request.payload.stream, false, 'prepared requests must retain the selected non-streaming mode');
   assert.equal(Object.hasOwn(request.payload, 'thinkingLevel'), false);
   assert.equal(Object.hasOwn(request.payload, 'thinkingBudget'), false);
   console.log('ok - custom Gemini chat request matches OpenAI-compatible payload shape');

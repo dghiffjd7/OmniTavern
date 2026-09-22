@@ -102,10 +102,12 @@ export class RealtimeSettingsPanel {
       await this.store.remove(profile.id); this.selectedId = this.store.activeId; this.draft = this.store.get(this.selectedId); this.dirty = false; this.render();
     }));
     this.root.querySelector('#rt-unbind')?.addEventListener('click', () => this.run(async () => {
-      await this.store.bindTarget(getRealtimeSettingsTarget()); this.render(); this.status('当前角色已改为跟随全局实时配置');
+      const target = getRealtimeSettingsTarget();
+      await this.store.bindTarget(target); this.render(); this.status(target?.uiMode === 'maid' ? '女仆已改为跟随全局实时配置' : '当前角色已改为跟随全局实时配置');
     }));
     this.root.querySelector('#rt-bind')?.addEventListener('click', () => this.run(async () => {
-      this.requireSaved(); await this.store.bindTarget(getRealtimeSettingsTarget(), this.draft.id); this.render(); this.status('已为当前角色绑定实时声音');
+      this.requireSaved(); const target = getRealtimeSettingsTarget();
+      await this.store.bindTarget(target, this.draft.id); this.render(); this.status(target?.uiMode === 'maid' ? '已为女仆绑定实时声音' : '已为当前角色绑定实时声音');
     }));
     this.root.querySelector('#rt-try-call')?.addEventListener('click', () => {
       if (this.dirty || (this.draft && !this.draft.id)) { this.status('请先保存设置，再开始试用通话', true); return; }
@@ -237,9 +239,9 @@ export class RealtimeSettingsPanel {
   targetFields() {
     const target = getRealtimeSettingsTarget(); if (!target?.supported) return '';
     const binding = this.store.getBinding(target), profile = binding && this.store.get(binding.profileId);
-    return `<div class="api-config-realtime-target"><strong>${tr('当前角色的实时声音')} · ${escape(target.name || target.sessionId)}</strong>
+    return `<div class="api-config-realtime-target"><strong>${tr(target.uiMode === 'maid' ? '女仆的实时声音' : '当前角色的实时声音')} · ${escape(target.name || target.sessionId)}</strong>
       <p>${binding ? `${escape(profile?.name || translateUiText('设置档已不存在'))} · ${escape(binding.voice)}` : tr('跟随全局实时配置')}</p>
-      <div class="api-config-realtime-actions">${this.draft?.id ? button('rt-bind', '为当前角色使用此声音') : ''}${binding ? button('rt-unbind', '跟随全局实时配置') : ''}${button('rt-try-call', '试用当前通话配置')}</div></div>`;
+      <div class="api-config-realtime-actions">${this.draft?.id ? button('rt-bind', target.uiMode === 'maid' ? '为女仆使用此声音' : '为当前角色使用此声音') : ''}${binding ? button('rt-unbind', '跟随全局实时配置') : ''}${button('rt-try-call', '试用当前通话配置')}</div></div>`;
   }
   fields(profile, preset) {
     const input = (id, label, value = '', type = 'text', extra = '', messages = []) => `<label class="api-config-realtime-field">${helpTitle(label, messages)}<input id="${id}" type="${type}" value="${escape(value)}" autocomplete="off" ${extra}></label>`;

@@ -15,7 +15,7 @@ export const filterOpenAiLiveModels = items => modelIds(items).filter(isOpenAiLi
 export const filterOpenAiLiveBackendModels = items => modelIds(items).filter(id => /^(?:gpt-|o\d)/i.test(id)
   && !/(?:live|realtime|audio|transcri|tts|image|search|instruct|embedding|moderation)/i.test(id));
 
-export const buildOpenAiLiveSessionConfig = ({ realtimeModel, model, liveBackendModel, voice = 'marin', instructions = '' } = {}) => {
+export const buildOpenAiLiveSessionConfig = ({ realtimeModel, model, liveBackendModel, voice = 'marin', instructions = '', maidTasks = false } = {}) => {
   const voiceModel = String(realtimeModel || model || OPENAI_LIVE_MODEL).trim();
   const backendModel = String(liveBackendModel || OPENAI_LIVE_BACKEND_MODEL).trim();
   if (!isOpenAiLiveModel(voiceModel)) throw new Error(t('请填写 GPT-Live 模型 ID，例如 gpt-live-1'));
@@ -24,7 +24,7 @@ export const buildOpenAiLiveSessionConfig = ({ realtimeModel, model, liveBackend
     model: voiceModel,
     instructions: String(instructions),
     audio: { output: { voice } },
-    delegation: {
+    delegation: maidTasks ? { type: 'client' } : {
       type: 'responses',
       responses: {
         model: backendModel,

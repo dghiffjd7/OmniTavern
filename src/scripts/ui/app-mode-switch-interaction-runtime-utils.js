@@ -41,6 +41,7 @@ export function createModeSwitchInteractionRuntime({
   longPressMs = 560,
   longPressMoveTolerance = 8,
   onLongPress = null,
+  onClick = null,
 } = {}) {
   let modeSwitchBounceHandle = null;
   let maidBounceCount = 0;
@@ -352,6 +353,7 @@ export function createModeSwitchInteractionRuntime({
   const handleClick = () => {
     if (modeSwitchSuppressClick) return false;
     wakeModeSwitch();
+    if (onClick?.() === true) return true;
     if (getUiMode() === 'rp') {
       exitRpMode();
     } else {

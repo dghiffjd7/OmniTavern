@@ -260,6 +260,79 @@ assert.equal(isEsmLikeScriptForTests('async function load() { return await Promi
 console.log('ok - script runtime recognizes actual ESM import and export syntax');
 
 {
+  const { sandbox } = createWorkerHarness();
+  await sandbox.self.onmessage({ data: {
+    type: 'sync', settings: { allowNetwork: false }, scripts: [],
+  } });
+  const failures = vm.runInContext(`(() => {
+    const failures = [];
+    const root = document.createElement('section');
+    document.body.appendChild(root);
+    const user = document.createElement('div');
+    user.id = 'preset-user'; user.className = 'mes is_user';
+    const assistant = document.createElement('div');
+    assistant.id = 'preset-assistant'; assistant.className = 'mes';
+    const legacy = document.createElement('div');
+    legacy.id = 'preset-legacy'; legacy.className = 'prefix sb-group-v44';
+    const unrelated = document.createElement('div');
+    unrelated.id = 'preset-unrelated'; unrelated.className = 'sb-settings';
+    [user, assistant, legacy, unrelated].forEach(node => root.appendChild(node));
+    const cleanup = $('[class*="sb-group-v"]');
+    if (cleanup.length !== 1 || cleanup[0] !== legacy) failures.push('legacy cleanup selector matched unrelated nodes');
+    legacy.setAttribute('data-pattern', ' sb.group#v44 ');
+    legacy.setAttribute('lang', 'zh-TW');
+    const matchers = [
+      ['div[data-pattern=" sb.group#v44 "]', legacy],
+      ['[data-pattern*="group#v"]', legacy],
+      ['[class^="prefix"]', legacy],
+      ['[class$="v44"]', legacy],
+      ['[class~="sb-group-v44"]', legacy],
+      ['[lang|="zh"]', legacy],
+      ['[data-missing*="sb-group-v"]', null],
+      ['[class*=""]', null],
+      ['[class!="unrelated"]', null],
+    ];
+    for (const [selector, expected] of matchers) {
+      const matches = root.querySelectorAll(selector);
+      if (matches.length !== (expected ? 1 : 0) || (expected && matches[0] !== expected)) failures.push('incorrect attribute match: ' + selector);
+    }
+    const seen = [];
+    const selected = $([user, assistant]);
+    const same = selected.each(function(index, node) {
+      seen.push(this === node && node === selected[index]);
+      return false;
+    }) === selected;
+    if (!same || seen.length !== 1 || seen[0] !== true) failures.push('each callback lost node binding or early exit');
+    if (typeof selected.not !== 'function') {
+      failures.push('preset scan: not is not a function');
+    } else {
+      const scanned = [];
+      selected.not('.is_user').each(function() { scanned.push(this.id); });
+      if (scanned.join(',') !== assistant.id || selected.length !== 2) failures.push('not must keep only the assistant without mutating its input');
+      if (selected.not(user)[0] !== assistant || selected.not($(user))[0] !== assistant || selected.not([user])[0] !== assistant) failures.push('not must accept nodes and collections');
+      if (selected.not(function(index, node) { return this === node && index === 0; })[0] !== assistant) failures.push('not callback must receive the current node and index');
+      if (selected.not().length !== 2 || selected.not('.is_user, .mes').length !== 0 || $([]).not('.is_user').length !== 0) failures.push('not must support empty input and selector lists');
+      const detached = document.createElement('div'); detached.className = 'is_user';
+      if ($(detached).not('.is_user').length !== 0) failures.push('not must filter detached elements');
+      const text = document.createTextNode('plain');
+      if ($([text, assistant]).not('.is_user').get().join() !== $(assistant).get().join()) failures.push('selector exclusions must omit non-elements');
+    }
+    // This is the original preset startup/refresh shape: remove legacy widgets,
+    // clear old markers, then scan assistant messages. Keep unrelated UI intact.
+    cleanup.remove();
+    assistant.setAttribute('data-sb-v41-processed', 'true');
+    assistant.setAttribute('data-sb-v44-processed', 'true');
+    $('[data-sb-v41-processed], [data-sb-v44-processed]')
+      .removeAttr('data-sb-v41-processed').removeAttr('data-sb-v44-processed');
+    if (assistant.hasAttribute('data-sb-v41-processed') || assistant.hasAttribute('data-sb-v44-processed')) failures.push('preset startup did not clear stale markers');
+    if (document.getElementById('preset-unrelated') !== unrelated || document.getElementById('preset-assistant') !== assistant || document.body.parentNode !== document.documentElement) failures.push('preset cleanup detached unrelated UI');
+    return failures;
+  })()`, sandbox);
+  assert.deepEqual(Array.from(failures), []);
+  console.log('ok - preset startup cleanup preserves unrelated UI and scanning excludes user messages with correctly bound callbacks');
+}
+
+{
   const { sandbox, messages } = createWorkerHarness();
   await sandbox.self.onmessage({
     data: { type: 'sync', settings: { allowNetwork: false }, context: { sessionId: 'remove-attr' }, scripts: [] },

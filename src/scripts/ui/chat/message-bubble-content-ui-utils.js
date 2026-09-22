@@ -2,6 +2,7 @@ import {
   hideCreativeContentTagsForDisplay,
   resolveCreativeRichRenderSource,
 } from './creative-content-display-utils.js';
+import { appendGeneratedImageReferences } from './generated-image-reference-view.js';
 
 const appendChild = (parent, child) => {
   parent?.appendChild?.(child);
@@ -381,5 +382,6 @@ export const renderMessageBubbleContentCore = ({
     }
   }
 
+  appendGeneratedImageReferences({ bubble, message, documentLike, openLightbox, translateText });
   return bubble;
 };

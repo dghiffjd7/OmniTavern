@@ -1,6 +1,8 @@
 // These three APIs share event names, but their session schemas are not interchangeable.
 export const buildJsonRealtimeSession = (profile, instructions) => {
-  const session = { instructions, voice: profile.voice };
+  const session = { instructions, voice: profile.voice,
+    ...(profile.maidTools?.length ? { tools: profile.provider === 'xai_voice' ? profile.maidTools : profile.maidTools.map(({ type, ...fn }) => ({ type, function: fn })) } : {}),
+  };
   if (profile.provider === 'xai_voice') return { ...session,
     turn_detection: { type: 'server_vad', threshold: .85, silence_duration_ms: 600 },
     audio: { input: { format: { type: 'audio/pcm', rate: 24000 }, transcription: { model: 'grok-transcribe' } }, output: { format: { type: 'audio/pcm', rate: 24000 } } },
@@ -18,6 +20,11 @@ export const createJsonRealtimeProtocol = ({ profile, instructions, send, emit, 
     audio: audio => send({ type: 'input_audio_buffer.append', audio }),
     cancel: () => { clear(); suppressed = true; if (responseId) send({ type: 'response.cancel' }); },
     close: () => {},
+    toolResults: results => {
+      results.forEach(({ call, result }) => send({ type: 'conversation.item.create', item: { type: 'function_call_output', call_id: call.id, output: JSON.stringify(result) } }));
+    },
+    taskUpdate: text => send({ type: 'conversation.item.create', item: { type: 'message', role: 'system', content: [{ type: 'input_text', text }] } }),
+    respond: () => send({ type: 'response.create' }),
     receive: event => {
       const type = event.type;
       if (type === 'session.updated') ready();

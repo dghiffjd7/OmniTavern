@@ -255,6 +255,8 @@ export const createChatVoiceRuntime = ({
   documentLike = globalThis.document,
   windowLike = globalThis.window,
   maxRecordingMs = DEFAULT_MAX_RECORDING_MS,
+  beforeRecording = null,
+  onRecorderStateChange = null,
   playerFactory = options => new PcmStreamPlayer(options),
 } = {}) => {
   let mediaRecorder = null;
@@ -273,6 +275,7 @@ export const createChatVoiceRuntime = ({
   let speechMessageId = '';
   let speechRunVersion = 0;
   const cleanups = [];
+  let recorderState = 'idle', recordingVersion = 0;
 
   const notify = (level, message) => {
     const handler = toast?.[level] || toast?.info;
@@ -285,6 +288,8 @@ export const createChatVoiceRuntime = ({
   };
 
   const setRecorderState = state => {
+    recorderState = state;
+    onRecorderStateChange?.(state);
     if (!recorderButton) return;
     recorderButton.classList?.toggle?.('is-recording', state === 'recording');
     recorderButton.classList?.toggle?.('is-transcribing', state === 'transcribing');
@@ -335,14 +340,16 @@ export const createChatVoiceRuntime = ({
       return;
     }
     setRecorderState('transcribing');
-    transcriptionController = new AbortController();
+    const controller = new AbortController();
+    transcriptionController = controller;
     try {
       const transcript = await voiceClient.transcribe(config, {
         audio,
         mimeType: audio.type,
         language: config.sttLanguage,
-        signal: transcriptionController.signal,
+        signal: controller.signal,
       });
+      if (controller.signal.aborted) return;
       insertTranscriptAtSelection(composerInput, transcript);
       notify('success', '语音已转成文字');
       resolveRecordingStop?.(true);
@@ -350,7 +357,8 @@ export const createChatVoiceRuntime = ({
       if (!isAbortError(error)) notify('error', formatVoiceError(error));
       resolveRecordingStop?.(false);
     } finally {
-      transcriptionController = null;
+      if (transcriptionController === controller) transcriptionController = null;
+      resolveRecordingStop?.(false);
       resolveRecordingStop = null;
       recordingStopPromise = null;
       setRecorderState('idle');
@@ -358,18 +366,24 @@ export const createChatVoiceRuntime = ({
   };
 
   const startRecording = async () => {
-    const config = await resolveConfig?.('stt');
-    if (!validateRuntimeConfig(config, 'stt')) {
-      showConfigRequired('stt');
-      return false;
-    }
-    if (!mediaDevices?.getUserMedia || !MediaRecorderCtor) {
-      notify('error', '当前装置不支持麦克风录音。');
-      return false;
-    }
+    const version = ++recordingVersion;
     setRecorderState('starting');
     try {
-      mediaStream = await microphoneAccess.acquire({
+      await beforeRecording?.();
+      if (version !== recordingVersion) return false;
+      const config = await resolveConfig?.('stt');
+      if (version !== recordingVersion) return false;
+      if (!validateRuntimeConfig(config, 'stt')) {
+        setRecorderState('idle');
+        showConfigRequired('stt');
+        return false;
+      }
+      if (!mediaDevices?.getUserMedia || !MediaRecorderCtor) {
+        setRecorderState('idle');
+        notify('error', '当前装置不支持麦克风录音。');
+        return false;
+      }
+      const acquiredStream = await microphoneAccess.acquire({
         mediaDevices,
         constraints: {
           audio: {
@@ -379,6 +393,8 @@ export const createChatVoiceRuntime = ({
           },
         },
       });
+      if (version !== recordingVersion) { acquiredStream?.getTracks?.().forEach(track => track.stop()); return false; }
+      mediaStream = acquiredStream;
       const mimeType = selectRecorderMimeType(MediaRecorderCtor);
       mediaRecorder = mimeType
         ? new MediaRecorderCtor(mediaStream, { mimeType })
@@ -401,6 +417,7 @@ export const createChatVoiceRuntime = ({
       notify('info', '正在录音，再点一次麦克风即可转成文字。');
       return true;
     } catch (error) {
+      if (version !== recordingVersion) return false;
       clearRecordingTimer();
       stopTracks();
       mediaRecorder = null;
@@ -420,6 +437,7 @@ export const createChatVoiceRuntime = ({
   };
 
   const toggleRecording = async () => {
+    if (recorderState === 'starting') { recordingVersion++; setRecorderState('idle'); return false; }
     if (transcriptionController) {
       transcriptionController.abort();
       transcriptionController = null;
@@ -605,6 +623,7 @@ export const createChatVoiceRuntime = ({
   };
 
   const cancel = async () => {
+    recordingVersion++;
     transcriptionController?.abort();
     transcriptionController = null;
     if (recordingStopPromise) {
@@ -646,5 +665,6 @@ export const createChatVoiceRuntime = ({
     stopRecording,
     stopSpeech,
     toggleRecording,
+    getRecorderState: () => recorderState,
   };
 };

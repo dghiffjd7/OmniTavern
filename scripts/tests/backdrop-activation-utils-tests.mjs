@@ -128,6 +128,7 @@ const createEventTarget = () => {
     'src/scripts/ui/agent-center-panel.js',
     'src/scripts/ui/character-card-importer.js',
     'src/scripts/ui/config-panel.js',
+    'src/scripts/ui/request-params-panel.js',
     'src/scripts/ui/persona-panel.js',
     'src/scripts/ui/script-panel.js',
     'src/scripts/ui/user-panel.js',
@@ -151,12 +152,14 @@ const createEventTarget = () => {
   for (const rel of [
     'src/scripts/ui/character-card-importer.js',
     'src/scripts/ui/script-panel.js',
-    'src/scripts/ui/config-panel.js',
+    'src/scripts/ui/request-params-panel.js',
   ]) {
     const source = await read(rel);
+    const unbindName = source.match(/const\s+(\w+)\s*=\s*bindBackdropActivation\(overlay,/)?.[1];
+    assert.ok(unbindName, `${rel} 的一次性弹窗应保留 backdrop 解绑函数`);
     assert.match(
       source,
-      /unbindBackdropActivation\(\);[\s\S]{0,200}?overlay\.remove\(\)/,
+      new RegExp(`\\b${unbindName}\\(\\);[\\s\\S]{0,200}?overlay\\.remove\\(\\)`),
       `${rel} 的一次性弹窗关闭时必须先解绑 backdrop 监听`,
     );
   }

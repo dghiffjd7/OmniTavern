@@ -7,4 +7,4 @@ export const registerRealtimeSettingsTarget = (getTarget, start) => {
 export const getRealtimeSettingsTarget = () => resolver?.() || null;
 export const startRealtimeSettingsCall = () => startCall?.() || false;
 export const realtimeTargetBindingKey = target => target?.supported && target.sessionId
-  ? JSON.stringify([String(target.scopeId || 'default'), target.uiMode === 'rp' ? 'rp' : 'chat', String(target.sessionId)]) : '';
+  ? JSON.stringify([String(target.scopeId || 'default'), ['rp', 'maid'].includes(target.uiMode) ? target.uiMode : 'chat', String(target.sessionId)]) : '';

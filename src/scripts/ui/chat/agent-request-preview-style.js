@@ -5,7 +5,7 @@ export const installAgentRequestPreviewStyle = doc => {
   .agent-center-floating-card.has-wide-request-preview{width:min(1120px,calc(100vw - 48px))}
   .agent-center-floating-face-back.has-request-preview{overflow:hidden}
   .hop-request-workspace{position:relative;display:flex;flex:1;min-height:0;min-width:0;overflow:hidden;margin:0 -16px -18px}
-  .hop-request-editor{display:grid;align-content:start;gap:16px;flex:0 0 100%;box-sizing:border-box;min-width:0;padding:0 40px 24px 16px;overflow:auto;scrollbar-width:thin;transition:none}
+  .hop-request-editor{display:grid;align-content:start;gap:16px;flex:0 0 100%;box-sizing:border-box;min-width:0;padding:0 40px 0 16px;overflow:auto;scrollbar-width:thin;transition:none}
   .hop-request-workspace[data-preview=split] .hop-request-editor{flex-basis:50%}
   .hop-request-workspace[data-preview=full] .hop-request-editor{visibility:hidden}
   .hop-request-pane{position:absolute;inset:0 0 0 auto;display:flex;flex-direction:column;width:50%;background:var(--app-surface-card);border-left:1px solid var(--app-border-default);transform:translateX(102%);visibility:hidden;transition:none}
@@ -93,7 +93,8 @@ export const installAgentRequestPreviewStyle = doc => {
   .agent-memory-prompt-blocks textarea,.hop-request-source-links select{width:100%;box-sizing:border-box}.hop-request-source-links select{min-height:44px}
   .agent-memory-assembly{margin-top:16px}.agent-memory-assembly .agent-center-agent-field-grid{grid-template-columns:repeat(2,minmax(0,1fr));padding-bottom:14px}
   .agent-memory-assembly .agent-center-agent-field{margin-block:0}
-  .agent-memory-save{position:sticky;bottom:-24px;padding:12px 0;background:var(--app-surface-card);border-top:1px solid var(--app-border-subtle);z-index:1}
+  .agent-memory-save{position:sticky;bottom:0;padding:12px 0 max(12px,env(safe-area-inset-bottom,0px));background:var(--app-surface-card);border-top:1px solid var(--app-border-subtle);z-index:1}
+  .hop-request-editor>[data-memory-agent-editor]{padding-bottom:0}
   .agent-center-agent-textarea[data-preview-active]{outline:2px solid var(--app-accent-primary);outline-offset:2px}
   @media(max-width:600px){.agent-center-floating-card.has-wide-request-preview{width:calc(100vw - 24px)}.hop-request-workspace{margin:0 -12px -16px}.hop-request-editor{padding-left:12px}.hop-request-head{padding-inline:14px}.hop-request-scroll{padding:16px 18px max(24px,env(safe-area-inset-bottom)) 40px}.hop-request-field-link{min-height:44px}.hop-request-field-editor textarea{max-height:32dvh}}
   @media(prefers-reduced-motion:reduce){.hop-request-workspace *{transition:none!important;animation:none!important}}

@@ -61,6 +61,7 @@ export const mountAgentRequestPreview = ({ host, buildRequest, savedState = null
   contextPanel.dataset.agentAssembledContext = '';
   const memoryEditor = editor.querySelector('[data-memory-agent-editor]');
   if (memoryEditor) memoryEditor.querySelector('.agent-center-memory-mode-setting')?.after(contextPanel);
+  else if (editor.querySelector('.ac-footer')) editor.querySelector('.ac-footer').before(contextPanel);
   else editor.append(contextPanel);
   workspace.append(editor);
   workspace.insertAdjacentHTML('beforeend', `<aside class="hop-request-pane" aria-label="${escapeHtml(t('请求预览'))}">

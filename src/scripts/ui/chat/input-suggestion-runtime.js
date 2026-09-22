@@ -1,5 +1,6 @@
 import { buildConfigurableInputMessages } from '../../agent/agent-request-builder.js';
 import { allowsAgentInvocation } from '../../agent/agent-invocation.js';
+import { agentRequestTimeoutMs, buildAgentGenerationOptions } from '../../agent/agent-generation-settings.js';
 
 // 输入阶段的短句续写：独立模型、可取消请求；不进入发送链或 Agent 运行记录。
 export const buildInputSuggestionMessages = buildConfigurableInputMessages;
@@ -41,10 +42,13 @@ export const createInputSuggestionRequest = ({ getProfileConfig, createClient, r
   const referenceContext = typeof resolveReference === 'function'
     ? await resolveReference(snapshot, signal) : snapshot.referenceContext;
   if (signal?.aborted) return '';
-  const client = createClient({ ...config, ...(settings.modelOverride ? { model: settings.modelOverride } : {}) });
+  const agentConfig = { ...settings, id: 'text_completion' };
+  const modelConfig = { ...config, ...(settings.modelOverride ? { model: settings.modelOverride } : {}), timeout: agentRequestTimeoutMs(agentConfig) };
+  const client = createClient(modelConfig);
+  const params = buildAgentGenerationOptions({ maxTokens: settings.maxTokens || 96, temperature: 0.3 }, modelConfig, agentConfig);
   return client.chat(buildInputSuggestionMessages({ ...snapshot, referenceContext }), { signal, requestContext: snapshot.requestContext,
-    maxTokens: settings.maxTokens || 96, temperature: 0.3, tools: [], toolChoice: 'none',
-    requestParamConstraints: { maxOutputTokens: settings.maxTokens || 96, tools: 'none' } });
+    ...params, tools: [], toolChoice: 'none',
+    requestParamConstraints: { maxOutputTokens: params.maxTokens, tools: 'none' } });
 };
 
 export const createInputSuggestionRuntime = ({
@@ -87,7 +91,7 @@ export const createInputSuggestionRuntime = ({
       const activeController = new AbortController();
       controller = activeController;
       recent.push(now());
-      const timeout = setTimer(() => activeController.abort(), timeoutMs);
+      const timeout = setTimer(() => activeController.abort(), agentRequestTimeoutMs(snapshot.settings, timeoutMs));
       try {
         onStatus('requesting');
         const result = await request(snapshot, activeController.signal);

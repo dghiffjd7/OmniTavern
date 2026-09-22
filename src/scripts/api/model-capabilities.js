@@ -55,6 +55,7 @@ const GEMINI_OPENAI_REASONING_OPTIONS = Object.freeze([
 ]);
 
 const DEEPSEEK_REASONING_OPTIONS = Object.freeze([
+  { value: 'low', label: '低' },
   { value: 'high', label: '高' },
   { value: 'max', label: '最大' },
 ]);
@@ -220,6 +221,7 @@ const geminiLevelFromEffort = (effort, supportedOptions = []) => {
 const deepSeekEffortFromSetting = (effort) => {
   const normalized = normalizeReasoningEffort(effort, 'high');
   if (normalized === 'max') return 'max';
+  if (normalized === 'low' || normalized === 'minimal') return 'low';
   return 'high';
 };
 
@@ -323,7 +325,7 @@ export const getReasoningCapability = ({ provider, model, baseUrl } = {}) => {
       effortControl: true,
       effortOptions: DEEPSEEK_REASONING_OPTIONS,
       allowCustomEffort: false,
-      hint: 'DeepSeek 推理强度：高（默认）/ 最大；low/medium 会被映射为 high。思考模式下 temperature 等采样参数会被忽略。',
+      hint: 'DeepSeek 推理强度：低 / 高（默认）/ 最大。思考模式下 temperature 等采样参数会被忽略。',
     };
   }
 
@@ -364,7 +366,7 @@ export const getReasoningCapability = ({ provider, model, baseUrl } = {}) => {
         effortControl: true,
         effortOptions: DEEPSEEK_REASONING_OPTIONS,
         allowCustomEffort: false,
-        hint: 'DeepSeek 推理强度：高（默认）/ 最大；思考模式下 temperature 等采样参数会被忽略。',
+        hint: 'DeepSeek 推理强度：低 / 高（默认）/ 最大。思考模式下 temperature 等采样参数会被忽略。',
       };
     }
     if (isGeminiModel(m) && isOfficialGeminiOpenAIBaseUrl(baseUrl)) {

@@ -2,6 +2,7 @@ import { allowsAgentInvocation, isInputAgent } from './agent-invocation.js';
 import { agentPromptBlockSections, buildAgentReferenceContext, buildConfigurableInputMessages, buildTextEditRequest, shouldAddInputSuggestionContract } from './agent-request-builder.js';
 import { normalizeFormatPatchModelResult } from '../ui/chat/format-patch-transaction-utils.js';
 import { normalizeInputSuggestion } from '../ui/chat/input-suggestion-runtime.js';
+import { agentRequestTimeoutMs, normalizeAgentGenerationSettings } from './agent-generation-settings.js';
 
 const clone = value => JSON.parse(JSON.stringify(value));
 const identity = snapshot => JSON.stringify([snapshot?.context, snapshot?.revision, snapshot?.text, snapshot?.start, snapshot?.end]);
@@ -21,7 +22,7 @@ export const buildInputAgentRequest = (config, snapshot, referenceContext = null
     return { messages, sections: [{ source: '任务要求', editField: 'prompt' }, ...agentPromptBlockSections(config),
       ...(shouldAddInputSuggestionContract(config) ? [{ source: '返回格式' }] : []),
       ...(reference.text ? [{ source: '参考上下文', origin: '只读 · 在上下文组装中调整来源' }] : []), { source: '光标前后文本' }],
-      target: { start, end: start, text: '' }, params: { maxTokens: Math.min(400, config.maxTokens), tools: [], toolChoice: 'none', temperature: .3 } };
+      target: { start, end: start, text: '' }, params: { maxTokens: normalizeAgentGenerationSettings(config).maxTokens, tools: [], toolChoice: 'none', temperature: .3 } };
   }
   const target = { start: end > start ? start : 0, end: end > start ? end : text.length, text: end > start ? text.slice(start, end) : text };
   if (output === 'rewrite') return { ...buildTextEditRequest({ config, target, referenceContext: reference }), target };
@@ -75,7 +76,7 @@ export const createInputAgentRuntime = ({ getSnapshot, getConfig, listConfigs, c
     while (jobs.size >= 20) { const old = [...jobs.values()].find(j => j.status !== 'running'); if (!old) break; jobs.delete(old.id); }
     const job = { id: `input-run-${Date.now()}-${++sequence}`, agentId, config, output, snapshot, invocation, scope, key, controller: new AbortController(), status: 'running' };
     jobs.set(job.id, job); emit();
-    const timeout = setTimer(() => job.controller.abort(), config.tools?.enabled ? 120000 : timeoutMs);
+    const timeout = setTimer(() => job.controller.abort(), agentRequestTimeoutMs(config, config.tools?.enabled ? 120000 : timeoutMs));
     try {
       job.reference = resolveReference ? await resolveReference({ config: config.context, context: snapshot.context, messages: snapshot.messages, signal: job.controller.signal }) : null;
       if (!fresh(job)) throw new Error('任务已取消或草稿已变化');

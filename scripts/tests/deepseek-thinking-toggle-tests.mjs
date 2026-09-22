@@ -61,3 +61,25 @@ const provider = new DeepseekProvider({
   }).response_format, { type: 'json_object' });
   console.log('ok - DeepSeek chat requests preserve documented JSON Output response_format');
 }
+
+{
+  const previousWindow = globalThis.window, previousCustomEvent = globalThis.CustomEvent, previousInfo = console.info;
+  const logs = [];
+  try {
+    globalThis.window = { dispatchEvent: event => logs.push(event.detail?.message || '') };
+    globalThis.CustomEvent = class { constructor(type, options) { this.type = type; this.detail = options.detail; } };
+    console.info = () => {};
+    const reasoning = 'upstream reasoning without final text';
+    provider.request = async () => ({ ok: true, status: 200, body: JSON.stringify({ choices: [{ finish_reason: 'length', message: { content: '', reasoning_content: reasoning } }], usage: { completion_tokens: 96 } }) });
+    assert.equal(await provider.chat([{ role: 'user', content: 'fixture' }], { maxTokens: 96 }), '', 'reasoning must never become the visible answer');
+    const diagnostic = logs.find(log => log.includes('finish_reason=length'));
+    assert.ok(diagnostic?.includes(`reasoning_chars=${reasoning.length}`), 'non-streaming diagnostics count actual upstream reasoning');
+    assert.ok(diagnostic.includes('output_chars=0'));
+    assert.equal(diagnostic.includes(reasoning), false, 'diagnostics include counts, not response content');
+  } finally {
+    if (previousWindow === undefined) delete globalThis.window; else globalThis.window = previousWindow;
+    if (previousCustomEvent === undefined) delete globalThis.CustomEvent; else globalThis.CustomEvent = previousCustomEvent;
+    console.info = previousInfo;
+  }
+  console.log('ok - non-streaming DeepSeek diagnostics distinguish reasoning from visible text');
+}

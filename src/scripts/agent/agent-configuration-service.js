@@ -7,7 +7,7 @@ import { createAgentToolTargets } from './agent-tool-targets.js';
 import { resolveFormatRepairProfile, saveFormatRepairProfileDraft } from './format-repair-profiles.js';
 
 export const createAgentConfigurationService = ({ store, getContext, getMessages, getRaw, getEvidence = () => [], getProfiles,
-  getInput = () => ({ before: '', after: '' }), getInputRuntime = () => null, buildInputPreview = null,
+  getInput = () => ({ before: '', after: '' }), getInputRuntime = () => null, buildInputPreview = null, captureModel = null,
   buildFormatPreview, previewRequest = null, runtime, runFormat, formatRuntime = null, getFormatTarget, resolveReference = null, listReferenceSources = async () => [], listAvailableTools = async () => [], resolveTarget = resolveAgentTextTargetAsync, getCurrentModelLabel = () => '', onChanged = () => {} } = {}) => {
   const context = options => options?.context || getContext();
   const checkContext = c => { const current = getContext(); return current.place === c.place && current.scopeId === c.scopeId && (!c.sessionId || current.sessionId === c.sessionId) && (c.archiveId === undefined || c.archiveId === current.archiveId); };
@@ -17,7 +17,7 @@ export const createAgentConfigurationService = ({ store, getContext, getMessages
     const profileId = options.repairProfileId ?? result.config?.repairProfiles?.automaticId ?? result.config?.repairProfiles?.items[0]?.id;
     const config = options.id === 'reply_check' ? resolveFormatRepairProfile(result.config, profileId || result.config?.repairProfiles?.items[0]?.id) : result.config;
     return { ...result, config, context: { ...result.context, ...(c.archiveId !== undefined ? { archiveId: c.archiveId } : {}) }, bodyRule: body.config?.target || { mode: 'tags', start: '', end: '' }, bodyRevision: body.revision,
-      profiles: getProfiles().map(p => ({ id: p.id, name: p.name || p.label || p.id, model: p.model || '' })) };
+      profiles: getProfiles().map(p => ({ id: p.id, name: p.name || p.label || p.id, model: p.model || '', provider: p.provider || '', baseUrl: p.baseUrl || '' })) };
   };
   const toolTargets = createAgentToolTargets({ getContext, getMessages, getRaw, read, resolveTarget, getFormatTarget });
   const source = async options => {
@@ -51,6 +51,13 @@ export const createAgentConfigurationService = ({ store, getContext, getMessages
     isAgentToolTargetCurrent: toolTargets.isCurrent,
     getAgentConfiguration: read,
     getAgentCurrentModelLabel: options => getCurrentModelLabel(context(options)),
+    getAgentModelInfo: async options => {
+      const c = context(options), config = options.config || read(options).config;
+      if (!captureModel || config.modelMode === 'none' || !checkContext(c)) return null;
+      const model = await captureModel(config, c);
+      // Credentials and request overrides must never be exposed to the editor.
+      return checkContext(c) ? { provider: model.provider, model: model.model, baseUrl: model.baseUrl } : null;
+    },
     listAgentReferenceSources: async options => {
       const c = context(options); if (!checkContext(c)) return [];
       const config = options.config || read(options).config;

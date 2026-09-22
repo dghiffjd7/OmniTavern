@@ -2,6 +2,7 @@ import { normalizeMaidImageAttachments } from '../maid-attachment-parts.js';
 import { validateMaidWorldbookSourcePlan } from '../maid-source-grounding.js';
 import { BUILTIN_PHONE_FORMAT_WORLDBOOK_ID } from '../../storage/builtin-worldbooks.js';
 import { resolveWorldSessionBindingMutation } from '../../storage/world-session-binding-utils.js';
+import { createWorldbookPersonaBindingTool } from './worldbook-persona-binding-tool.js';
 import {
   buildWorldbookEntryGenerationPrompt,
   readWorldAiGenerationSettings,
@@ -2793,7 +2794,7 @@ export const createAppContentAgentTools = ({
   {
     name: 'worldbook.list',
     title: 'List worldbooks',
-    description: 'List saved APP worldbooks and mark current-session/global bindings when available.',
+    description: 'List saved APP worldbooks and mark current-session/global bindings and character-card personaBindings (id, name, enabled) when available.',
     source: 'maid-app-content',
     permissions: [],
     riskLevel: 'low',
@@ -2826,11 +2827,14 @@ export const createAppContentAgentTools = ({
       for (const id of ids.slice(0, limit)) {
         const metadata = typeof getWorldInfoMetadata === 'function' ? await getWorldInfoMetadata(id) : null;
         const data = metadata ? null : (typeof getWorldInfo === 'function' ? await getWorldInfo(id) : null);
-        worldbooks.push(summarizeWorldbook(id, data, {
+        worldbooks.push({ ...summarizeWorldbook(id, data, {
           entriesCount: metadata?.entriesCount,
           boundToCurrentSession: sessionIds.includes(id),
           global: globalIds.includes(id),
-        }));
+        }), personaBindings: listStoreItems(personaStore)
+          .filter(persona => trim(persona?.source?.worldbookId) === id)
+          .map(persona => ({ personaId: trim(persona.id), personaName: trim(persona.name || persona.id), enabled: persona.source.worldbookEnabled !== false })),
+        });
       }
       return {
         ok: true,
@@ -2839,6 +2843,12 @@ export const createAppContentAgentTools = ({
       };
     },
     summarizeResult: result => `listed ${Number(result?.worldbooks?.length || 0)} worldbook(s)`,
+  },
+  {
+    ...createWorldbookPersonaBindingTool({
+      personaStore, waitForWorldStoreReady, readWorldbookSnapshot, assignWorldToPersona,
+      refreshChatAndContacts, confirmDestructiveWrite,
+    }),
   },
   {
     name: 'worldbook.bind_session',

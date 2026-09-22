@@ -231,6 +231,14 @@ import {
   resolveCoverageProtectedHistoryIndexes,
 } from './chat/llm-history-utils.js';
 import {
+  HISTORY_TIMESTAMP_FIELD,
+  createHistoryTimeFormatter,
+  isHistoryTimeContextEnabled,
+  prependHistoryTimeLabel,
+  projectHistoryTimeMessages,
+  resolveHistoryTimestamp,
+} from './chat/history-time-context-utils.js';
+import {
   getChatToMomentsBridgeTableIds,
   getChatToRpBridgeSourceMeta,
   getChatToRpBridgeTableIds,
@@ -493,8 +501,7 @@ const formatExactTime = (ts) => {
   }
 };
 
-const buildTimeContextText = () => {
-  const now = new Date();
+const buildTimeContextText = (now = new Date()) => {
   const locale = getPromptLocale();
   const date = now.toLocaleDateString(locale, { year: 'numeric', month: '2-digit', day: '2-digit' });
   const weekday = now.toLocaleDateString(locale, { weekday: 'long' });
@@ -3862,6 +3869,7 @@ class AppBridge {
           ...sanitizedContextMeta,
           rawUserMessage: originalInput,
           userMessageProcessed: true,
+          promptTimeNow: Date.now(),
         },
       };
       let preliminaryConfig = this.config?.get?.() || {};
@@ -3888,6 +3896,9 @@ class AppBridge {
           model: String(preliminaryConfig?.model || preliminaryCalibration.model || ''),
         },
       };
+      const historyTimeBudgetFormatter = isHistoryTimeContextEnabled(nextContext, appSettings.get())
+        ? createHistoryTimeFormatter()
+        : null;
       try {
         let memoryPlan = await this.buildMemoryPromptPlan(nextContext);
         if (!memoryPlan?.budget) {
@@ -3936,6 +3947,7 @@ class AppBridge {
           const firstPass = limitHistoryByTokenBudget(originalHistory, {
             inputBudgetTokens: recentQuota,
             tokenMode: preliminaryTokenMode,
+            getMessagePrefix: historyTimeBudgetFormatter?.prefixFor,
           });
           let finalHistory = firstPass;
           let coverageLine = null;
@@ -3972,6 +3984,7 @@ class AppBridge {
                 inputBudgetTokens: recentQuota,
                 protectedMessageIndexes,
                 tokenMode: preliminaryTokenMode,
+                getMessagePrefix: historyTimeBudgetFormatter?.prefixFor,
               });
             }
           }
@@ -6119,7 +6132,19 @@ class AppBridge {
       if (typeof raw === 'boolean') return raw;
       return settingsSnapshot.promptCurrentTimeEnabled === true;
     })();
-    const timeContextBlock = includeTimeContext ? { role: 'system', content: buildTimeContextText() } : null;
+    const historyTimeEnabled = isHistoryTimeContextEnabled(context, settingsSnapshot);
+    const historyTimeFormatter = createHistoryTimeFormatter();
+    const promptTimeNow = resolveHistoryTimestamp({ timestamp: context?.meta?.promptTimeNow }) || Date.now();
+    const timeContextBlock = includeTimeContext ? {
+      role: 'system',
+      content: [buildTimeContextText(new Date(promptTimeNow)),
+        historyTimeEnabled ? getLocalizedPromptText('time_context.history_hint') : '',
+      ].filter(Boolean).join('\n'),
+    } : null;
+    const buildPendingUserMessage = content => ({
+      role: 'user', content,
+      ...(historyTimeEnabled ? { [HISTORY_TIMESTAMP_FIELD]: promptTimeNow } : {}),
+    });
     const parseInjectedPrompt = (rawPrompt, fallbackPositions = ['after_persona'], fallbackDepth = 0) => {
       const content = typeof rawPrompt?.content === 'string' ? String(rawPrompt.content).trim() : '';
       if (!content) return null;
@@ -6379,9 +6404,14 @@ class AppBridge {
     const pendingUserContent = buildUserContentWithAttachments(pendingUserPrompt);
     const attachmentOnlyContent = hasUserAttachments ? buildUserContentWithAttachments('') : '';
     let attachmentsInserted = false;
-    const effectiveLastUserMessage = overrideLastUserMessageRaw.trim()
+    const effectiveLastUserMessageRaw = overrideLastUserMessageRaw.trim()
       ? overrideLastUserMessageRaw.trim()
       : pendingUserPrompt;
+    // A preset can consume the current input via {{lastUserMessage}} instead
+    // of a normal user turn, even before history. Give that copy its own date.
+    const effectiveLastUserMessage = historyTimeEnabled && !suppressPendingUserTurn && (pendingUserPrompt || hasUserAttachments)
+      ? prependHistoryTimeLabel(effectiveLastUserMessageRaw, historyTimeFormatter.labelFor({ timestamp: promptTimeNow }))
+      : effectiveLastUserMessageRaw;
     const macroUiMode = String(context?.meta?.uiMode || context?.uiMode || '').trim().toLowerCase() === 'rp' ? 'rp' : 'chat';
     const macroUseGlobalVariables = context?.meta?.useGlobalVariables === true || context?.useGlobalVariables === true;
     const processTextMacrosWithPendingFlag = (rawText, extraContext) => {
@@ -6999,7 +7029,11 @@ const stringifyMessageContent = (content) => {
   return String(content ?? '');
 };
     const finalizeProviderMessages = () => {
-      return this.normalizeOutgoingProviderMessages(messages, requestConfig, {
+      const datedMessages = projectHistoryTimeMessages(messages, {
+        enabled: historyTimeEnabled,
+        formatter: historyTimeFormatter,
+      });
+      return this.normalizeOutgoingProviderMessages(datedMessages, requestConfig, {
         syntheticAssistantDowngradeCount,
       });
     };
@@ -8245,11 +8279,14 @@ const stringifyMessageContent = (content) => {
           ? (String(m?.name || '').trim() || name2)
           : (role === 'user' ? name1 : name2);
         const normalized = normalizeHistoryLineBreaks(out, role, { preserveParagraphs: preserveCreativeHistoryParagraphs });
-        return { role, content: withSpeakerPrefix(normalized, speaker) };
+        return {
+          role, content: withSpeakerPrefix(normalized, speaker),
+          ...(historyTimeEnabled ? { [HISTORY_TIMESTAMP_FIELD]: resolveHistoryTimestamp(m) } : {}),
+        };
       });
 
       const pendingUserHistoryEntry = (pendingUserPrompt || hasUserAttachments)
-        ? { role: 'user', content: pendingUserContent }
+        ? buildPendingUserMessage(pendingUserContent)
         : null;
       let pendingUserInsertIndex = -1;
       const insertPendingUserIntoHistory = () => {
@@ -8679,11 +8716,11 @@ const stringifyMessageContent = (content) => {
       const pendingUserInserted = pendingUserInsertIndex >= 0;
       insertDepthBeforeLatestMessages();
       if (!usedLastUserMessageForPendingInput && !pendingUserInserted && (pendingUserPrompt || hasUserAttachments)) {
-        messages.push({ role: 'user', content: pendingUserContent });
+        messages.push(buildPendingUserMessage(pendingUserContent));
         if (hasUserAttachments) attachmentsInserted = true;
       }
       if (hasUserAttachments && !attachmentsInserted && attachmentOnlyContent) {
-        messages.push({ role: 'user', content: attachmentOnlyContent });
+        messages.push(buildPendingUserMessage(attachmentOnlyContent));
 	      }
 	      insertDepthAfterLatestMessages();
 	      applyWorldTemplateInject();
@@ -8916,7 +8953,10 @@ const stringifyMessageContent = (content) => {
       }
       return String(content ?? '');
     };
-    const history = Array.isArray(context.history) ? context.history.map(m => ({ ...m })) : [];
+    const history = Array.isArray(context.history) ? context.history.map(m => ({
+      ...m,
+      ...(historyTimeEnabled ? { [HISTORY_TIMESTAMP_FIELD]: resolveHistoryTimestamp(m) } : {}),
+    })) : [];
     // Prefix speaker names to reduce model confusion (role is still preserved)
     try {
       for (const m of history) {
@@ -9155,11 +9195,11 @@ const stringifyMessageContent = (content) => {
     // 5) Current user message
     insertDepthBeforeLatestMessages();
     if (!usedLastUserMessageForPendingInput && (pendingUserPrompt || hasUserAttachments)) {
-      messages.push({ role: 'user', content: pendingUserContent });
+      messages.push(buildPendingUserMessage(pendingUserContent));
       if (hasUserAttachments) attachmentsInserted = true;
     }
 	    if (hasUserAttachments && !attachmentsInserted && attachmentOnlyContent) {
-	      messages.push({ role: 'user', content: attachmentOnlyContent });
+	      messages.push(buildPendingUserMessage(attachmentOnlyContent));
 	    }
 	    insertDepthAfterLatestMessages();
 	    applyWorldTemplateInject();

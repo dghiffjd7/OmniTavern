@@ -193,6 +193,7 @@ export const createMediaGenerationService = ({
   now = () => Date.now(),
   logger = console,
   preparePromptRequest = null,
+  referenceStore = null,
 } = {}) => {
   const fetchImageAsDataUrl = async (url, signal) => {
     const raw = String(url || '').trim();
@@ -360,6 +361,7 @@ export const createMediaGenerationService = ({
     if (!config || typeof config !== 'object') throw new Error('图片生成配置为空');
     if (typeof createClient !== 'function') throw new Error('图片生成客户端未配置');
     throwIfAborted(signal);
+    const referenceInputs = [...(options.referenceImages || options.reference_images || [])];
 
     const execute = async () => {
       const client = createClient(config);
@@ -386,6 +388,13 @@ export const createMediaGenerationService = ({
       if (!output.path && !output.url && !output.dataUrl) {
         throw new Error('图片生成成功，但保存结果失败');
       }
+      const generationParams = normalizeGenerationMetadataOptions(options);
+      if (referenceInputs.length) {
+        generationParams.referenceImages = referenceStore
+          ? await referenceStore.persist(referenceInputs, sessionId)
+          : referenceInputs;
+      }
+      throwIfAborted(signal);
 
       return {
         id: createId('image'),
@@ -394,7 +403,7 @@ export const createMediaGenerationService = ({
         model: String(config.model || '').trim(),
         prompt: text,
         negativePrompt: String(options.negativePrompt || options.negative_prompt || '').trim(),
-        generationParams: normalizeGenerationMetadataOptions(options),
+        generationParams,
         output,
         status: 'succeeded',
         scope: {

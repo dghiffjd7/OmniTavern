@@ -18,7 +18,7 @@ export class NativeRealtimeSessionClient {
     Object.assign(this, { onEvent, onConnectionState, onAudioLevel, invoke, createChannel, createAudio, createVertexAuth: vertexAuthFactory }); this.closed = true; this.generation = 0; this.pendingFinals = new Map(); this.transcripts = new Map();
   }
   async connect({ config, sessionConfig, signal } = {}) {
-    await this.close(); this.closed = false; this.config = config; this.instructions = sessionConfig.instructions; this.history = []; this.resumeHandle = ''; this.activeResponse = '';
+    await this.close(); this.closed = false; this.config = { ...config, maidTools: sessionConfig.tools }; this.instructions = sessionConfig.instructions; this.history = []; this.resumeHandle = ''; this.activeResponse = '';
     this.authController = new AbortController(); this.vertexAuth = null;
     this.abort = () => { this.rejectReady?.(abortError()); void this.close(); }; this.signal = signal;
     if (signal?.aborted) { await this.close(); throw abortError(); }
@@ -159,6 +159,13 @@ export class NativeRealtimeSessionClient {
     }
   }
   sendEvent(event) { if (event.type === 'response.cancel') this.protocol?.cancel(); }
+  sendToolResults(results) { if (!this.closed) this.protocol?.toolResults?.(results); }
+  sendTaskUpdate(text) {
+    if (this.closed) return;
+    this.history.push({ role: 'user', text });
+    this.protocol?.taskUpdate?.(text);
+  }
+  requestResponse() { if (!this.closed) this.protocol?.respond?.(); }
   setMicrophoneMuted(value) { return this.audio?.setMicrophoneMuted(value) === true; }
   setOutputMuted(value) { return this.audio?.setOutputMuted(value) === true; }
   fail(error) {

@@ -79,8 +79,8 @@ test('falls back to global profile when no binding exists', () => {
 test('generation resolves request config before building provider messages', async () => {
   const bridgePath = fileURLToPath(new URL('../../src/scripts/ui/bridge.js', import.meta.url));
   const source = await readFile(bridgePath, 'utf8');
-  const start = source.indexOf('async generate(userMessage, context = {})');
-  const end = source.indexOf('async backgroundChat(messages, options = {})');
+  const start = source.search(/^  async generate\(/m);
+  const end = source.search(/^  async backgroundChat\(/m);
   assert.ok(start >= 0 && end > start, 'bridge generate body should be discoverable');
   const body = source.slice(start, end);
   const resolveIndex = body.indexOf('const requestRuntime = await this.resolveRequestRuntimeConfig(presetContext);');

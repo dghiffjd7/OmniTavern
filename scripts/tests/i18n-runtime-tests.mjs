@@ -179,6 +179,19 @@ assert.equal(
   'The current image model supports up to 3 reference images',
 );
 assert.equal(translateUiText('图片请求失败（HTTP 400）'), 'Image request failed (HTTP 400)');
+assert.equal(translateUiText('预设请求失败：HTTP 502'), 'Preset request failed: HTTP 502');
+assert.equal(
+  translateUiText('预设消息后处理必须是函数'),
+  'Preset message postprocessor must be a function',
+);
+assert.equal(
+  translateUiText('请求参数：temperature · 参数路径重复或与上级、下级字段冲突：temperature'),
+  'Request parameters: temperature · Duplicate parameter path or conflict with a parent or child field: temperature',
+);
+assert.equal(
+  translateUiText('应用后将处理 3 处表格指令'),
+  'Applying the changes will process 3 table commands',
+);
 assert.equal(translateUiText('Thought for 1 秒'), 'Thought for 1 second');
 assert.equal(translateUiText('Thought for 9 秒'), 'Thought for 9 seconds');
 assert.equal(translateUiText('[图片已过期]'), '[Image expired]');

@@ -86,6 +86,8 @@ export const projectMaidRunToTraceView = (run = null) => {
   const doneCount = steps.filter(step => ['succeeded', 'failed', 'cancelled', 'skipped'].includes(step.status)).length;
   return {
     runId: trim(run.id),
+    source: trim(run.metadata?.submissionSource),
+    submissionId: trim(run.metadata?.submissionId),
     title: trim(run.metadata?.goal, trim(run.title, '女仆任务')),
     status,
     statusLabel: statusMeta(status).label,
@@ -842,7 +844,8 @@ export const createExecutionFlowRuntime = ({
   const rearbitrateMaidTrace = ({ commandInputOpen = false } = {}) => {
     const view = state.view;
     if (!view || !trim(view.runId)) return false;
-    if (commandInputOpen) return state.visible ? consumeMaidTraceView(view) : false;
+    if (commandInputOpen) return state.visible || view.source === 'maid_realtime' ? consumeMaidTraceView(view) : false;
+    if (view.source === 'maid_realtime') return consumeMaidTraceView(view);
     maidTraceConsumerRunId = '';
     if (view.terminal) return false;
     state.signature = '';

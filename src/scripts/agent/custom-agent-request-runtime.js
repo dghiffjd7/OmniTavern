@@ -1,5 +1,6 @@
 import { captureRequestContext } from '../api/request-context.js';
 import { isReasoningStreamEvent } from '../api/native-reasoning.js';
+import { agentRequestTimeoutMs, buildAgentGenerationOptions } from './agent-generation-settings.js';
 import { buildProviderFcRequestPlan, sanitizeProviderFcInheritedRequestOptions } from './provider-fc-transport.js';
 import { createProviderToolCallDeltaAccumulator } from './provider-tool-call-delta-adapter.js';
 import { getCustomAgentReferenceTool } from './custom-agent-tool-catalog.js';
@@ -63,7 +64,7 @@ export const createCustomAgentRequestRuntime = ({ createClient, listTools = () =
   const finalOptions = (params, maxTokens) => ({ ...params, maxTokens, requestParamConstraints:{ ...(params.requestParamConstraints || {}), tools:'none', maxOutputTokens:maxTokens } });
   const lookupMessages = (messages, observations = []) => [...messages, { role:'system', content:LOOKUP_STAGE_INSTRUCTION }, ...observations];
   const preview = async ({ request:payload = {}, model = {}, config = {}, context = {} } = {}) => {
-    const messages = (payload.messages || []).map(message => ({ ...message })), params = payload.params || {};
+    const messages = (payload.messages || []).map(message => ({ ...message })), params = buildAgentGenerationOptions(payload.params, model, config);
     const maxTokens = bounded(params.maxTokens ?? params.max_tokens, 4096, 1, 32000);
     const lookup = await buildLookup({ params, model, context, config, maxTokens });
     const client = createClient(model);
@@ -90,7 +91,7 @@ export const createCustomAgentRequestRuntime = ({ createClient, listTools = () =
     };
     const relayAbort = () => controller.abort(signal?.reason);
     signal?.addEventListener('abort', relayAbort, { once: true });
-    const timer = setTimeout(() => controller.abort(abortError('Agent 执行超时，请稍后重试')), LIMITS.requestMs);
+    const timer = setTimeout(() => controller.abort(abortError('Agent 执行超时，请稍后重试')), agentRequestTimeoutMs(config, LIMITS.requestMs));
     const crop = (value, limit) => {
       const source = text(value);
       if (source.length <= limit) return source;
@@ -122,7 +123,7 @@ export const createCustomAgentRequestRuntime = ({ createClient, listTools = () =
       check();
       const client = createClient(model);
       const originalMessages = (payload.messages || []).map(message => ({ ...message }));
-      const params = payload.params || {};
+      const params = buildAgentGenerationOptions(payload.params, model, config);
       const maxTokens = bounded(params.maxTokens ?? params.max_tokens, 4096, 1, 32000);
       const requestContext = captureRequestContext(context);
       const runModel = async ({ messages, options, kind, label, useTools = false }) => {

@@ -358,7 +358,12 @@ const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
     waitForWorldStoreReady: async () => true,
     getWorldIdsForSession: async sessionId => sessionWorldIds.get(sessionId) || [],
     getGlobalWorldId: async () => '',
-    assignWorldToPersona: async (personaId, worldId, options) => boundWorlds.push({ personaId, worldId, options }),
+    assignWorldToPersona: async (personaId, worldId, options) => {
+      boundWorlds.push({ personaId, worldId, options });
+      const persona = personas.get(personaId);
+      persona.source = { ...persona.source, worldbookId: worldId, worldbookEnabled: options.enabled };
+      return true;
+    },
     getRpSessionId: personaId => `rp:${personaId}`,
     bindWorldToSession: async (sessionId, worldIds, options) => {
       sessionWorldIds.set(sessionId, [...worldIds]);
@@ -778,6 +783,15 @@ const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
       const result = await getTool(tools, 'worldbook.list').execute({ sessionId: current });
       assert.equal(result.ok, true);
       assert.ok(result.worldbooks.some(item => item.id === 'CatalogWorld'));
+      return;
+    }
+    if (feature.id === 'worldbook.bind_persona') {
+      const result = await getTool(tools, 'worldbook.bind_persona').execute({ personaName: 'CatalogRole', worldbookId: 'CatalogWorld' });
+      assert.equal(result.ok, true);
+      assert.equal(result.scope, 'persona');
+      assert.equal(result.personaId, 'persona-1');
+      const listed = await getTool(tools, 'worldbook.list').execute({});
+      assert(listed.worldbooks.find(book => book.id === 'CatalogWorld').personaBindings.some(binding => binding.personaId === result.personaId && binding.enabled));
       return;
     }
     if (feature.id === 'worldbook.bind_session') {

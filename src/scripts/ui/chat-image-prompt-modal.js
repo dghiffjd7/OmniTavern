@@ -1,6 +1,6 @@
 import { ImagePromptEditor } from './image-prompt/image-prompt-editor.js';
 import { IMAGE_PROMPT_TEXT_KEYS } from './image-prompt/image-prompt-utils.js';
-import { resolveImageGenerationParamSchema, getImageGenerationSizeError } from './image-generation-params-utils.js';
+import { resolveImageGenerationParamSchema, getImageGenerationSizeError, syncImageGenerationOutputControls } from './image-generation-params-utils.js';
 import { createImageGenerationSizeControl, validateImageGenerationSizeControls } from './image-generation-size-control.js';
 import { resolveImageReferenceCapability } from './media-generation-service.js';
 import { bindBackdropActivation } from './backdrop-activation-utils.js';
@@ -139,6 +139,7 @@ export const createChatImagePromptModal = ({
       };
       const syncAdvancedOverridesFromFields = () => {
         if (!advancedFieldsEl) return;
+        syncImageGenerationOutputControls(advancedFieldsEl);
         const next = {};
         (generationParamSchema?.fields || []).forEach(field => {
           if (isNegativePromptField(field)) return;
@@ -200,6 +201,7 @@ export const createChatImagePromptModal = ({
           }
           advancedFieldsEl.appendChild(label);
         });
+        syncImageGenerationOutputControls(advancedFieldsEl);
       };
       const openAdvancedPage = () => {
         renderAdvancedFields();
@@ -279,7 +281,6 @@ export const createChatImagePromptModal = ({
         const nextCapability = await referenceCapabilityLoader();
         if (version !== openVersion || !overlay.classList.contains('is-active')) return;
         referenceCapability = nextCapability || resolveImageReferenceCapability({});
-        referenceImages = normalizeImageGenerationReferenceItems(referenceImages, referenceCapability);
         renderReferences();
       };
       const close = (value = null) => {
@@ -299,6 +300,12 @@ export const createChatImagePromptModal = ({
         if (typeof resolve === 'function') resolve(value);
       };
       const submit = () => {
+        if (referenceImages.length && (!referenceCapability?.supported || referenceImages.length > Number(referenceCapability.max || 0))) {
+          statusEl.textContent = !referenceCapability?.supported
+            ? '当前模型不支持这些参考图，请切换模型或移除参考图后再生成'
+            : `参考图最多 ${referenceCapability.max} 张，请移除多余的参考图后再生成`;
+          return;
+        }
         if (generationParamSchema.fields.some(field => field.type === 'image-size' && getImageGenerationSizeError(getParamFieldValue(field, { ...generationParamBase, ...generationParamOverrides })))) {
           openAdvancedPage(); validateImageGenerationSizeControls(advancedFieldsEl); return;
         }
@@ -398,7 +405,7 @@ export const createChatImagePromptModal = ({
             : {};
           applyGenerationParamContext(generationParamContext || {});
           referenceCapability = nextReferenceCapability || resolveImageReferenceCapability({});
-          referenceImages = normalizeImageGenerationReferenceItems(initialReferenceImages, referenceCapability);
+          referenceImages = normalizeImageGenerationReferenceItems(initialReferenceImages, { supported: true, max: initialReferenceImages.length });
           const titleEl = overlay.querySelector('.chat-image-gen-title');
           const subtitleEl = overlay.querySelector('.chat-image-gen-subtitle');
           if (titleEl) titleEl.textContent = title;

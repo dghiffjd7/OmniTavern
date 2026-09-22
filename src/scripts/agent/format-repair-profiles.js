@@ -1,4 +1,5 @@
 import { normalizeAgentReferenceConfig } from './agent-reference-context.js';
+import { normalizeAgentGenerationSettings } from './agent-generation-settings.js';
 
 const clone = value => JSON.parse(JSON.stringify(value));
 const text = value => String(value ?? '').trim();
@@ -13,7 +14,7 @@ export const formatRepairProfileConfig = (value = {}) => ({
     role: block.role === 'user' ? 'user' : 'system', enabled: block.enabled !== false,
   })),
   context: normalizeAgentReferenceConfig(value.context),
-  maxTokens: Math.max(16, Math.min(16000, Math.trunc(Number(value.maxTokens)) || 6000)),
+  ...normalizeAgentGenerationSettings(value, 'reply_check'),
   repairCheckType: value.repairCheckType === 'tableEdit' ? 'tableEdit' : 'custom',
 });
 

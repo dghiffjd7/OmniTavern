@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 
 import { OpenAiRealtimeSessionClient } from '../../src/scripts/ui/realtime/openai-realtime-session-client.js';
+import { microphonePermissionRecovery } from '../../src/scripts/ui/microphone-permission-recovery.js';
 
 class FakeDataChannel {
   constructor() {
@@ -66,6 +67,8 @@ const audioElement = {
 const events = [];
 const connectionStates = [];
 const calls = [];
+const microphoneCalls = [];
+const mediaDevices = { getUserMedia: async () => stream };
 const meterCalls = [], audioLevels = [];
 let meterCallback;
 const client = new OpenAiRealtimeSessionClient({
@@ -74,7 +77,13 @@ const client = new OpenAiRealtimeSessionClient({
     return 'v=0\r\no=fake-answer';
   },
   peerConnectionClass: FakePeerConnection,
-  mediaDevices: { getUserMedia: async () => stream },
+  mediaDevices,
+  microphoneAccess: {
+    acquire: async options => {
+      microphoneCalls.push(options);
+      return microphonePermissionRecovery.acquire(options);
+    },
+  },
   createAudioElement: () => audioElement,
   onEvent: event => events.push(event),
   onConnectionState: state => connectionStates.push(state),
@@ -89,6 +98,12 @@ await client.connect({
   config: { baseUrl: 'https://api.openai.com/v1', apiKey: 'sk-secret' },
   sessionConfig: { type: 'realtime', model: 'gpt-realtime-2.1' },
 });
+assert.equal(microphoneCalls.length, 1, 'Realtime must acquire audio through the permission recovery service');
+assert.equal(microphoneCalls[0].mediaDevices, mediaDevices);
+assert.deepEqual(microphoneCalls[0].constraints, {
+  audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+});
+assert.equal(client.localStream, stream);
 assert.equal(calls.length, 1);
 assert.equal(calls[0].command, 'openai_realtime_create_call');
 assert.equal(calls[0].args.sdp, 'v=0\r\no=fake-offer\r\n');

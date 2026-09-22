@@ -8,6 +8,7 @@ import {
   normalizeImageProviderKey,
   resolveImageGenerationParamSchema,
   sanitizeImageGenerationParams,
+  syncImageGenerationOutputControls,
 } from './image-generation-params-utils.js';
 
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>"]/g, (ch) => ({
@@ -305,6 +306,9 @@ export class ImageGenerationParamsPanel {
   }
 
   bindFieldInteractions() {
+    const syncOutput = () => syncImageGenerationOutputControls(this.body);
+    this.body?.querySelectorAll('[data-param-key="background"], [data-param-key="output_format"]').forEach(el => el.addEventListener('change', syncOutput));
+    syncOutput();
     this.body?.querySelectorAll('.image-size-control').forEach(bindImageGenerationSizeControl);
     const samplerEl = this.body?.querySelector('[data-param-key="sampler"]');
     const smEl = this.body?.querySelector('[data-param-key="sm"]');

@@ -52,9 +52,9 @@ export const dispatchContextMenuAction = async ({
     return 'reply';
   }
 
-  if (actionKey === 'generate-image') {
-    await tryAction?.('generate-image', { wrapper, inlineGeneratedImage }, { skipFallback: true });
-    return 'generate-image';
+  if (actionKey === 'generate-image' || actionKey === 'repeat-image-generation') {
+    await tryAction?.(actionKey, { wrapper, inlineGeneratedImage }, { skipFallback: true });
+    return actionKey;
   }
 
   if (actionKey === 'edit') {

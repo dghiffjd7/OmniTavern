@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 
 import { createMaidCommandInputRuntime } from '../../src/scripts/ui/maid-command-input-runtime-utils.js';
+import { createMaidVoiceTaskRuntime } from '../../src/scripts/ui/maid-voice-task-runtime.js';
 
 const createClassList = () => {
   const set = new Set();
@@ -856,4 +857,32 @@ class FakeDocument {
   // 空闲时带 runId 的停止请求同样不抛错且返回 false
   assert.equal(await runtime.cancelActive({ runId: 'run-current' }), false);
   console.log('ok - execution-flow stop only cancels the submission that owns the projected run');
+}
+
+{
+  const started = [], documentRef = new FakeDocument(); let voiceTasks;
+  const runtime = createMaidCommandInputRuntime({ documentRef, getViewportSize: () => ({ w: 360, h: 640 }),
+    getVoiceState: () => ({ available: true, call: 'listening' }),
+    onVoiceTextSubmit: (text, attachments) => voiceTasks.request({ target: { maidCallId: 'voice' }, args: { request: text }, attachments, preserveDraft: false, showInput: true }),
+    onAttachFiles: async files => files.map(file => ({ id: file.name, kind: 'image', url: 'data:image/png;base64,AA==', name: file.name })),
+    onSubmit: (text, controls) => new Promise(resolve => { started.push({ text, controls, resolve }); controls.signal.addEventListener('abort', () => resolve({ cancelled: true })); }),
+    setTimeoutFn: () => 0, clearTimeoutFn() {},
+  });
+  voiceTasks = createMaidVoiceTaskRuntime({ getCommandRuntime: () => runtime });
+  runtime.open({ autoFocus: false }); runtime.getElements().inputEl.value = '保留草稿';
+  await runtime.addFiles([{ name: 'ref.png', type: 'image/png', size: 12 }]); runtime.setStatus('旧结果', 'success');
+  runtime.collapse(); assert.equal(runtime.isOpen(), false); assert.equal(runtime.getAttachments().length, 1);
+  runtime.open({ autoFocus: false }); assert.equal(runtime.getElements().inputEl.value, '保留草稿'); assert.equal(runtime.getResultMessages().at(-1).message, '旧结果');
+  documentRef.dispatchEvent('pointerdown', { target: new FakeElement() }); assert.equal(runtime.getAttachments().length, 1, 'voice outside-close preserves attachments');
+  const first = await voiceTasks.request({ target: { maidCallId: 'voice' }, args: { request: '第一项' }, requestId: 'one' });
+  assert.equal(runtime.isOpen(), false); assert.equal(runtime.getElements().inputEl.value, '保留草稿');
+  const second = await voiceTasks.request({ target: { maidCallId: 'voice' }, args: { request: '第二项' }, requestId: 'two' });
+  assert.equal(started.length, 1); assert.equal(runtime.getQueue()[0].id, second.task_id);
+  await voiceTasks.cancel(first.task_id); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(started.length, 2, 'stop-current leaves the next queued task intact'); assert.equal(started[1].controls.source, 'maid_realtime');
+  started[1].resolve({ ok: true, message: '完成第二项' }); await new Promise(resolve => setImmediate(resolve));
+  runtime.open({ autoFocus: false }); const typed = await runtime.submit(); assert(typed.accepted);
+  assert.equal(started[2].text, '保留草稿'); assert.equal(started[2].controls.attachments.length, 1); assert.equal(runtime.getAttachments().length, 0);
+  started[2].resolve({ ok: true }); await new Promise(resolve => setImmediate(resolve));
+  console.log('ok - continuous voice preserves drafts, uses the real queue and stops only the selected task');
 }

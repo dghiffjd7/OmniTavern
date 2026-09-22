@@ -60,3 +60,37 @@ Windows 专项：`npm run test:image-prompt`。开发窗口交互：`node script
 聊天／创意写作的独立生图消息由进程内任务管理器按角色作用域、会话、存档和消息 ID 管理。消息持久化为生成中时，实际请求控制器仍属于本次进程；重开 APP 或开发热重载后，进入会话及加载较早记录会把没有活跃请求的记录标为“生成已中断”，保留原提示词、负向和 generationParams（包括分块提示词快照），通过原卡重新生成。
 
 取消会立即更新消息并中止本次请求。重新生成可复用原卡；旧请求迟到的成功、失败及 finally 只作用于其原任务，不能覆盖新结果。图片任务状态优先于 RP 的旧 raw／显示缓存，取消、中断、失败均提供重试入口，有错误详情时才折叠展示。图片配置／提示词准备及请求返回时校验原作用域和存档，避免切换后写入错误会话。
+
+## 参考图与重试
+
+参考图属于单次图片任务。普通生图参数的 schema 会过滤参考图，因此失败重试必须从原任务的 `generationParams.referenceImages`（兼容 `reference_images`）单独恢复，再走参考图输入入口。读取历史参考图不受当前模型能力限制；实际重试若当前模型不支持或数量超限，会提示原因并保留原消息，避免静默转成纯文生图。
+
+生成中和失败任务保留本次输入快照；成功后，素材服务将实际发送的参考图保存为会话附件，`generationParams.referenceImages` 保存 `{path, sessionId, hash, mime, bytes}` 描述，不在每张素材里复制 base64。文件名另存为 `referenceImageNames`。兼容旧 `reference_images` 和内嵌 data URL；已被旧版重试覆盖、原图数据已经丢失的记录，需要重新附图，无法根据数量补回图片。
+
+生成中、失败／取消／中断及成功图片气泡下方仅显示参考图缩略卡片；多图并排、空间不足时换行，保留完整比例，不显示区域说明或图片标题。文件名仅用于无障碍标签；点击或键盘激活后复用现有图片放大层。参考图位于错误详情折叠区域外，查看时不触发气泡菜单或重试。设计参考 [Midjourney Image Prompts](https://docs.midjourney.com/hc/en-us/articles/32040250122381-Image-Prompts) 的可见参考图片入口，并沿用项目主题和原生消息布局。
+
+- `ui/image-generation-reference-utils.js`：参考图归一化、读取／压缩、任务快照恢复。读取／压缩从 `app.js` 等价迁出，保留 GIF、数量限制和压缩失败回退行为。
+- `ui/chat/generated-image-reference-view.js`：参考图卡片与放大入口；主气泡渲染器负责接入。
+- 回归：`image-generation-reference-utils-tests.mjs`、`chat-image-job-app-tests.mjs`、`message-bubble-content-ui-utils-tests.mjs`。参考图工具专项已接入 `test:image-generation-params`。
+
+## 素材参考图与透明背景（2026-09-21）
+
+插图素材／聊天室相册的列表及详情，显示同一组无文字参考图小卡片；点击或键盘激活可放大。“使用”恢复当次参考图及原有提示词／参数，正文内插图的重新生成也恢复参考图。读取失败会提示重新附加；当前模型不支持或数量超限时保留卡片，让用户移除或切换模型，不静默丢图后提交。
+
+`image-generation-reference-store.js` 按图片字节的 SHA-256 在同一会话去重，合并并发保存。会话元数据的 `imageReferenceLibrary` 只存轻量描述，重启后即使原生成消息尚未分页加载也能找到附件；复用前检查文件内容，失效路径会在下一次保存时重建。预览和重发共用同一份实际输入图片，不重新压缩或另外存一份缩略图。不同会话各自拥有文件；删除单张素材保留共享输入，清理会话附件时统一处理，避免影响其他素材或正在进行的生成。磁盘保存异常时素材仍保留原输入，不将已付费生成变成失败。
+
+例如同一张 2MB 参考图在同一会话生成 20 次，参考图文件仍约 2MB，另加少量描述；20 张生成结果本身的空间另计。这是本项目的存储实现。网站交互可参考 [Midjourney 的上传图库、重复选择与固定参考图](https://docs.midjourney.com/hc/en-us/articles/32040250122381-Image-Prompts)，其文档未公开后端去重方式。
+
+OpenAI GPT Image 参数新增“背景 → 透明”，普通生成和参考图编辑均传 `background: transparent`。输出使用 PNG 或 WebP；透明时禁选 JPEG，已有 JPEG 自动切为 PNG，同时不发送 PNG 的压缩质量。输出 MIME 跟随返回格式，WebP 不再误标为 PNG。DALL·E 参数保持原能力范围。依据 [OpenAI 官方图片生成文档](https://developers.openai.com/api/docs/guides/image-generation)。兼容中转是否支持该参数仍由实际端点决定。
+
+素材面板完整迁出 app.js 到 `generated-image-album-panel.js`，其列表／详情／使用／删除回调维持原 contract，再接入参考图展示。新增 `image-generation-reference-store-tests.mjs`、`generated-image-album-reuse-tests.mjs` 覆盖保存去重、重启、原生路径失效、实际复用入口以及透明格式约束。Windows 原数据 dev 的 `dev-image-asset-references-cdp-smoke.mjs` 使用独立临时附件验证列表、详情、鼠标／键盘放大、自动附加、透明参数与 390px 布局；结束后清除测试附件，没有调用云端生图。
+
+## 气泡菜单“再生成一张”（2026-09-21）
+
+生成中和已完成的图片气泡菜单增加“再生成一张”；正文内已生成插图也可通过对应图片菜单使用。点击即沿用当次提示词、参数和参考图，新增独立任务与气泡，保留原图及正在进行的请求。原来的“重新生成图片”维持替换原结果的行为。
+
+`chat/image-generation-replay-runtime.js` 在读取附件前复制原请求快照，恢复完整提示词区块、前后缀和负向，单独加载附件；当前预设的修改不参与本次复用，包括原请求中未指定的可选参数。生成中记录也保存服务商和模型；同服务商下恢复原模型，若当前服务商不同则提示切回，避免按其他渠道重新解释参数。连接及凭据使用当前配置，不保存密钥。旧记录缺少模型／服务商时沿用当前渠道。
+
+附件无法读取、切换作用域／存档或原消息被删除时不启动任务。原任务与复用任务各有独立 ID、取消和完成状态；复用结果不会覆盖原图，先后返回也不相互影响。
+
+专项覆盖实际 app 菜单分发与生成链路、并发乱序完成、原图不变、预设／模型变化、旧提示词、参考图读取失败和存档切换；新模块测试已接入 `test:image-generation-params`。Windows 原数据 dev 的 `dev-image-replay-menu-cdp-smoke.mjs` 用内存消息和模拟请求验证菜单、鼠标／键盘点击及 390px 布局，结束后移除临时 UI，不写入用户聊天、不调用云端生图。

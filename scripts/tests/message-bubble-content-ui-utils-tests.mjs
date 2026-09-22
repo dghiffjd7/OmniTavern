@@ -373,6 +373,38 @@ const createFakeDocument = () => {
 
 {
   const documentLike = createFakeDocument();
+  const referenceImages = ['data:image/png;base64,YQ==', 'data:image/jpeg;base64,Yg=='];
+  for (const status of ['running', 'failed', 'cancelled', 'interrupted', 'succeeded']) {
+    const bubble = documentLike.createElement('div');
+    const previews = [];
+    const message = { type: status === 'succeeded' ? 'image' : 'text', content: 'current image attempt',
+      meta: { generatedMedia: { kind: 'image', status, error: status === 'failed' ? 'fixture error' : '',
+        prompt: 'portrait', generationParams: { referenceImages }, referenceImageNames: ['character.png', 'scene.jpg'] } } };
+    const before = structuredClone(message);
+    renderMessageBubbleContentCore({ bubble, message, documentLike, openLightbox: url => previews.push(url) });
+    const gallery = bubble.children.at(-1);
+    assert.equal(gallery.className, 'generated-image-references');
+    assert.notEqual(gallery.parentNode?.tagName, 'DETAILS', 'reference images must stay visible when the error details are collapsed');
+    const cards = gallery.children[0].children;
+    assert.equal(cards.length, 2);
+    let stopped = 0;
+    cards.forEach((card, index) => {
+      assert.equal(card.tagName, 'BUTTON');
+      assert.equal(card.children[0].src, referenceImages[index]);
+      assert.equal(card.children[0].alt, message.meta.generatedMedia.referenceImageNames[index]);
+      card.emit('click', { stopPropagation() { stopped++; } });
+    });
+    assert.deepEqual(previews, referenceImages);
+    assert.equal(stopped, 2);
+    assert.deepEqual(message, before);
+    cards[0].children[0].onerror();
+    assert.equal(cards[0].children[0].alt, '图片加载失败');
+  }
+  console.log('ok - image reference cards stay visible throughout the job and open the exact selected image without triggering bubble actions');
+}
+
+{
+  const documentLike = createFakeDocument();
   const bubble = documentLike.createElement('div');
   const target = documentLike.createElement('div');
   let normalizedInput = null;

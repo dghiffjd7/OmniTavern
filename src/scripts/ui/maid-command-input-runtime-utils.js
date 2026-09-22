@@ -6,6 +6,8 @@ import {
 
 import { renderMaidMarkdownHtml } from './maid-markdown-utils.js';
 import { getLocalizedPromptText } from '../i18n/prompt-locale.js';
+import { bindMaidVoiceButton } from './maid-voice-button.js';
+import { t } from '../i18n/index.js';
 
 const STYLE_ID = 'maid-command-input-runtime-style';
 const FIELD_MIN_HEIGHT = 32;
@@ -603,11 +605,16 @@ export const createMaidCommandInputRuntime = ({
   modeSwitchEl = null,
   getViewportSize = () => ({ w: 0, h: 0 }),
   onSubmit = async () => ({}),
+  onVoiceTextSubmit = null,
   onCancelActive = null,
   onSettings = null,
   onAttachFiles = null,
   onToggleSelection = null,
   onOpenStateChange = null,
+  getVoiceState = () => ({}),
+  onVoiceAction = null,
+  onChooseVoiceMode = null,
+  onCloseVoiceInput = null,
   maxImageAttachments = DEFAULT_MAX_IMAGE_ATTACHMENTS,
   setTimeoutFn = globalThis?.setTimeout || null,
   clearTimeoutFn = globalThis?.clearTimeout || null,
@@ -623,6 +630,7 @@ export const createMaidCommandInputRuntime = ({
   let settingsBtn = null;
   let selectionBtn = null;
   let submitBtn = null;
+  let voiceButton = null;
   let resultEl = null;
   let closeTimer = null;
   let isOpen = false;
@@ -670,6 +678,7 @@ export const createMaidCommandInputRuntime = ({
   const getMaxImages = () => Math.max(1, Math.trunc(Number(maxImageAttachments || 0)) || DEFAULT_MAX_IMAGE_ATTACHMENTS);
 
   const renderAttachments = () => {
+    voiceButton?.sync();
     if (!attachmentsEl || !rootEl) return;
     attachmentsEl.innerHTML = '';
     rootEl.classList.toggle('has-attachments', imageAttachments.length > 0);
@@ -1026,6 +1035,7 @@ export const createMaidCommandInputRuntime = ({
 
   const updateSubmitButton = () => {
     if (!submitBtn) return;
+    if (voiceButton) { voiceButton.sync(); return; }
     submitBtn.type = isSubmitting ? 'button' : 'submit';
     submitBtn.innerHTML = isSubmitting ? ICONS.stop : ICONS.send;
     submitBtn.disabled = cancelPending;
@@ -1159,8 +1169,14 @@ export const createMaidCommandInputRuntime = ({
         setResult(entry.wasQueued ? '女仆正在处理下一项排队任务...' : '女仆正在回复...', 'progress');
         let result = null;
         try {
+          entry.controls?.onStatus?.(t('正在处理'), 'progress');
           result = await onSubmit(entry.text, {
-            setStatus: (message = '', tone = 'thinking') => setResult(message, tone),
+            ...entry.controls,
+            submissionId: entry.id,
+            setStatus: (message = '', tone = 'thinking') => {
+              setResult(message, tone);
+              entry.controls?.onStatus?.(message, tone);
+            },
             attachments: entry.attachments,
             signal: submissionAbortController.signal,
           });
@@ -1214,6 +1230,7 @@ export const createMaidCommandInputRuntime = ({
   };
 
   const resizeInput = () => {
+    voiceButton?.sync();
     if (!inputEl) return;
     inputEl.style.height = 'auto';
     const scrollHeight = Math.max(FIELD_MIN_HEIGHT, Number(inputEl.scrollHeight || 0) || FIELD_MIN_HEIGHT);
@@ -1298,6 +1315,11 @@ export const createMaidCommandInputRuntime = ({
     submitBtn.type = 'submit';
     submitBtn.innerHTML = ICONS.send;
     submitBtn.setAttribute('aria-label', '发送给女仆');
+    voiceButton = bindMaidVoiceButton({ button: submitBtn,
+      getState: () => ({ ...getVoiceState(), available: typeof onVoiceAction === 'function', submitting: isSubmitting,
+        hasDraft: Boolean(trim(inputEl?.value) || imageAttachments.length), cancelPending }),
+      onAction: onVoiceAction, onChooseMode: onChooseVoiceMode,
+    });
     dragHandleEl = documentRef.createElement?.('div');
     if (dragHandleEl) {
       dragHandleEl.className = 'maid-command-input-drag';
@@ -1341,7 +1363,7 @@ export const createMaidCommandInputRuntime = ({
         close();
         return;
       }
-      if (event.key === 'Enter' && event.shiftKey !== true) {
+      if (event.key === 'Enter' && event.shiftKey !== true && !event.isComposing && event.keyCode !== 229) {
         event.preventDefault?.();
         void submit();
       }
@@ -1439,10 +1461,12 @@ export const createMaidCommandInputRuntime = ({
     return true;
   };
 
-  const close = () => {
+  const close = ({ preserve = Boolean(getVoiceState?.().call) && getVoiceState().call !== 'idle' } = {}) => {
+    voiceButton?.cancelGesture();
+    void onCloseVoiceInput?.();
     clearCloseTimer();
     const wasOpen = isOpen;
-    const shouldPreserveResult = isSubmitting && (resultMessages.length > 0 || Boolean(liveStatus));
+    const shouldPreserveResult = (preserve || isSubmitting) && (resultMessages.length > 0 || Boolean(liveStatus));
     isOpen = false;
     if (!isSubmitting) setSubmitting(false);
     rootEl?.classList.remove('is-open');
@@ -1450,18 +1474,17 @@ export const createMaidCommandInputRuntime = ({
     modeSwitchEl?.classList.remove?.('is-maid-input-open');
     if (shouldPreserveResult) {
       restoreResultOnNextOpen = true;
-    } else {
+    } else if (!preserve) {
       clearResult();
       clearAttachments();
     }
     unbindOutsidePointer();
+    inputEl?.blur?.();
     if (wasOpen) notifyOpenStateChange();
     return true;
   };
 
-  const submit = () => {
-    const text = trim(inputEl?.value);
-    const attachments = imageAttachments.slice();
+  const enqueueSubmission = (text, attachments, { preserveDraft = false, ...controls } = {}) => {
     if (!text && !attachments.length) return false;
     clearCloseTimer();
     restoreResultOnNextOpen = false;
@@ -1473,14 +1496,15 @@ export const createMaidCommandInputRuntime = ({
       resolveSubmission = resolve;
     });
     const entry = {
-      id: `maid_submission_${submissionSeq}`,
+      id: controls.id || `maid_submission_${submissionSeq}`,
+      controls,
       text: text || getLocalizedPromptText('maid.image_only_input', '请看这张图片。'),
       attachments,
       wasQueued,
       resolve: resolveSubmission,
     };
     queuedSubmissions.push(entry);
-    if (inputEl) {
+    if (inputEl && !preserveDraft) {
       inputEl.value = '';
       clearAttachments();
       resizeInput();
@@ -1488,6 +1512,14 @@ export const createMaidCommandInputRuntime = ({
     if (wasQueued) showQueuedSubmission(entry);
     else void processSubmissionQueue();
     return completion;
+  };
+  const submit = () => {
+    const text = trim(inputEl?.value), attachments = imageAttachments.slice();
+    if (!text && !attachments.length) return false;
+    if (getVoiceState?.().call && getVoiceState().call !== 'idle' && onVoiceTextSubmit) {
+      return onVoiceTextSubmit(text || getLocalizedPromptText('maid.image_only_input', '请看这张图片。'), attachments);
+    }
+    return enqueueSubmission(text, attachments);
   };
 
   const setSelectionState = ({ active = false, count = 0 } = {}) => {
@@ -1499,10 +1531,23 @@ export const createMaidCommandInputRuntime = ({
   };
 
   return {
+    syncVoiceState: () => voiceButton?.sync(),
     setSelectionState,
     open,
     close,
     submit,
+    collapse: () => close({ preserve: true }),
+    submitVoiceTask: (text, options = {}) => {
+      if (options.showInput !== false) open({ autoFocus: false });
+      else ensure();
+      return enqueueSubmission(trim(text), options.attachments || [], { preserveDraft: true, ...options });
+    },
+    cancelSubmission: id => {
+      if (cancelQueued(id)) return true;
+      if (activeSubmission?.id !== id || !activeAbortController || activeAbortController.signal.aborted) return false;
+      activeAbortController.abort(new DOMException('Maid task stopped by user', 'AbortError'));
+      return true;
+    },
     position,
     setStatus: (message = '', tone = 'info') => setResult(message, tone),
     applyTraceView,

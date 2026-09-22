@@ -131,7 +131,8 @@ const truncateToTokenBudget = (value = '', maxTokens = 0) => {
 
 const formatMaidHistoryTurn = (turn = {}) => [
   `- 时间: ${new Date(Number(turn.at || 0) || Date.now()).toISOString()}`,
-  `  用户: ${trim(turn.input, '-')}`,
+  (turn.responseType === 'realtime' || turn.context?.voiceCallId) && !turn.input ? '' : `  用户: ${trim(turn.input, '-')}`,
+  turn.context?.voiceRequestText ? `  语音任务: ${turn.context.voiceRequestText}` : '',
   turn.toolName ? `  工具: ${turn.toolName}` : '',
   turn.featureId ? `  功能: ${turn.featureId}` : '',
   turn.status ? `  状态: ${turn.status}` : '',
@@ -545,10 +546,10 @@ const normalizeTurn = (raw = {}, { now = Date.now } = {}) => {
   return {
     id,
     at,
-    input: truncate(src.input, 2000),
+    input: truncate(src.input, src.responseType === 'realtime' ? 12000 : 2000),
     status: trim(src.status || src.resultStatus),
     responseType: trim(src.responseType),
-    message: truncate(src.message || src.response || src.reason, 2400),
+    message: truncate(src.message || src.response || src.reason, src.responseType === 'realtime' ? 12000 : 2400),
     toolName: trim(src.toolName || plan.toolName || output.toolName),
     featureId: trim(src.featureId || plan.featureId),
     title: trim(src.title || plan.title),
@@ -1611,7 +1612,7 @@ export class MaidConversationStore {
     ].filter(Boolean).join('\n')).join('\n\n');
   }
 
-  async appendTurn(turn = {}) {
+  async appendTurn(turn = {}, { requirePersisted = false } = {}) {
     this.ensureLoaded();
     const normalizedTurn = normalizeTurn({
       ...turn,
@@ -1628,13 +1629,43 @@ export class MaidConversationStore {
     const compactedRow = this.shouldCompactHistory()
       ? this.compactHistoryToMemory()
       : null;
-    await this.write();
+    const persisted = await this.write();
     if (compactedRow) this.schedulePendingExtractions();
+    if (requirePersisted && !persisted) return null;
     return this.exportState();
   }
 
+  // Voice transcript revisions belong to maid history, never to a role chat.
+  async upsertRealtimeTranscript({ id, role, text, callId, meta = {}, previousText = null } = {}) {
+    this.ensureLoaded();
+    if (!id || !callId || !['user', 'assistant'].includes(role) || !trim(text)) return null;
+    const old = this.state.turns.find(turn => turn.id === id);
+    const field = role === 'user' ? 'input' : 'message';
+    if (old && (old.context?.realtimeCallId !== callId || old.context?.realtimeRole !== role
+      || old.compacted || (previousText !== null && old[field] !== previousText))) return { ignored: true };
+    const turn = normalizeTurn({ ...old, id, [field]: text, status: 'succeeded', responseType: 'realtime',
+      compactionProtection: 'realtime_transcript', context: { ...meta, realtimeCallId: callId, realtimeRole: role, uiMode: 'maid' },
+    }, { now: this.now });
+    if (old) { Object.assign(old, turn); if (!await this.write()) return null; }
+    else if (!await this.appendTurn(turn, { requirePersisted: true })) return null;
+    return { messageId: id };
+  }
+
+  async finalizeRealtimeConversation(callId) {
+    this.ensureLoaded();
+    let changed = false;
+    this.state.turns.forEach(turn => {
+      if (turn.context?.realtimeCallId !== callId || turn.compactionProtection !== 'realtime_transcript') return;
+      turn.compactionProtection = ''; changed = true;
+    });
+    if (!changed) return;
+    const compacted = this.shouldCompactHistory() ? this.compactHistoryToMemory() : null;
+    await this.write();
+    if (compacted) this.schedulePendingExtractions();
+  }
+
   releaseSupersededCompactionProtections(nextTurn = {}) {
-    const protectedTurns = this.state.turns.filter(turn => trim(turn?.compactionProtection));
+    const protectedTurns = this.state.turns.filter(turn => trim(turn?.compactionProtection) && turn.compactionProtection !== 'realtime_transcript');
     if (!protectedTurns.length) return 0;
     const input = trim(nextTurn?.input);
     const status = trim(nextTurn?.status).toLowerCase();

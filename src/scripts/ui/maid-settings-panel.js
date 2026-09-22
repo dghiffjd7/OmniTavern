@@ -1927,6 +1927,8 @@ export const createMaidSettingsPanel = ({
   listModelProfiles = null,
   listProfileModels = null,
   onOpenApiConfig = null,
+  onOpenVoiceConfig = null,
+  onVoiceModeChanged = null,
   getAppKnowledgeText = () => '',
   getHistoryContextText = () => '',
   getMemoryTableText = () => '',
@@ -2522,7 +2524,20 @@ export const createMaidSettingsPanel = ({
       const memoryExtractionMode = memoryExtraction.mode === 'custom' ? 'custom' : 'follow_main';
       const memoryExtractionProfile = profileById(memoryExtraction.profileId);
 
-      if (apiPage === 'main') {
+      if (apiPage === 'voice') {
+        const mode = settingsStore?.getVoiceInputMode?.() || 'realtime';
+        apiSection.innerHTML = `
+          <button type="button" class="maid-api-back" data-api-back>${ICONS.chevron}<span>返回</span></button>
+          <div class="maid-api-group">
+            <div class="maid-api-group-title">女仆语音</div>
+            <label class="maid-api-field"><span class="maid-api-field-label">空输入时的默认按钮</span>
+              <select class="maid-subagent-select" data-maid-voice-mode><option value="realtime" ${mode === 'realtime' ? 'selected' : ''}>实时通话</option><option value="stt" ${mode === 'stt' ? 'selected' : ''}>语音输入</option></select>
+            </label>
+            <p class="maid-api-group-desc">长按或右键点击语音按钮，也可切换默认模式。语音输入会先转成文字，由你确认后发送。</p>
+            <button type="button" class="maid-settings-action" data-maid-voice-config="realtime">实时语音配置</button>
+            <button type="button" class="maid-settings-action" data-maid-voice-config="stt">语音输入配置</button>
+          </div>`;
+      } else if (apiPage === 'main') {
         const shownModel = boundOverride || boundProfile?.model || '';
         apiSection.innerHTML = `
           <button type="button" class="maid-api-back" data-api-back>${ICONS.chevron}<span>返回</span></button>
@@ -2693,6 +2708,11 @@ export const createMaidSettingsPanel = ({
               </span>
               <span class="maid-api-nav-chevron">${ICONS.chevron}</span>
             </button>
+            <button type="button" class="maid-api-nav-item" data-api-nav="voice">
+              <span class="maid-api-nav-icon">${ICONS.maid}</span>
+              <span class="maid-api-nav-copy"><span class="maid-api-nav-heading"><span class="maid-api-nav-title">女仆语音</span></span><span class="maid-api-nav-summary">${settingsStore?.getVoiceInputMode?.() === 'stt' ? '语音输入' : '实时通话'}</span></span>
+              <span class="maid-api-nav-chevron">${ICONS.chevron}</span>
+            </button>
             <button type="button" class="maid-api-nav-item" data-api-nav="subagent">
               <span class="maid-api-nav-icon is-subagent">${ICONS.bolt}</span>
               <span class="maid-api-nav-copy">
@@ -2763,6 +2783,13 @@ export const createMaidSettingsPanel = ({
     };
 
     const bindApiSectionEvents = () => {
+      apiSection.querySelector('[data-maid-voice-mode]')?.addEventListener('change', async event => {
+        await settingsStore?.setVoiceInputMode?.(event.target.value);
+        onVoiceModeChanged?.();
+      });
+      apiSection.querySelectorAll('[data-maid-voice-config]').forEach(button => button.addEventListener('click', () => {
+        hide(); void onOpenVoiceConfig?.(button.dataset.maidVoiceConfig);
+      }));
       const profiles = (typeof listModelProfiles === 'function' ? listModelProfiles() : []) || [];
       apiSection.querySelectorAll('[data-api-nav]').forEach((btn) => {
         btn.addEventListener('click', () => {

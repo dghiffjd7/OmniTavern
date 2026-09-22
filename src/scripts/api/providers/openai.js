@@ -688,6 +688,7 @@ export class OpenAIProvider {
     reportProviderWebSources(options, data, { provider: this.provider });
 
     const content = data.choices?.[0]?.message?.content ?? '';
+    const { reasoning } = extractOpenAICompatibleStreamParts({ delta: data.choices?.[0]?.message });
     emitOpenAIResponseDiagnostics({
       phase: 'chat',
       provider: this.provider,
@@ -699,6 +700,7 @@ export class OpenAIProvider {
       payload: { ...prepared.payload, __timeoutMs: this.timeout },
       finishReason: pickOpenAICompatibleFinishReason(data),
       outputChars: typeof content === 'string' ? content.length : String(content ?? '').length,
+      reasoningChars: reasoning.length,
       usageBody: data,
     });
 
@@ -1052,6 +1054,16 @@ export class OpenAIProvider {
    */
   async generateImage(prompt, options = {}) {
     const { signal } = options || {};
+    let outputFormat = String(options.outputFormat || options.output_format || 'png').toLowerCase();
+    if (isOpenAIGptImageModel(this.model) && options.background === 'transparent' && outputFormat === 'jpeg') {
+      outputFormat = 'png';
+      options = { ...options, outputFormat, output_format: outputFormat };
+    }
+    if (outputFormat === 'png') {
+      options = { ...options };
+      delete options.outputCompression;
+      delete options.output_compression;
+    }
     const referenceImages = normalizeImageReferenceInputs(options.referenceImages);
     if (referenceImages.length) {
       if (!isOpenAIGptImageModel(this.model)) {
@@ -1089,7 +1101,7 @@ export class OpenAIProvider {
       return list.map((item, index) => {
         const b64 = item?.b64_json || item?.b64 || '';
         if (b64) {
-          return { dataUrl: `data:image/png;base64,${b64}`, index };
+          return { dataUrl: `data:image/${data.output_format || outputFormat};base64,${b64}`, index };
         }
         const url = String(item?.url || '').trim();
         return { url, index };
@@ -1134,7 +1146,7 @@ export class OpenAIProvider {
     return list.map((item, index) => {
       const b64 = item?.b64_json || item?.b64 || '';
       if (b64) {
-        return { dataUrl: `data:image/png;base64,${b64}`, index };
+        return { dataUrl: `data:image/${data.output_format || outputFormat};base64,${b64}`, index };
       }
       const url = String(item?.url || '').trim();
       return { url, index };

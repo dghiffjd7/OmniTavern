@@ -112,7 +112,6 @@ const momentCommentRuntime = createMomentCommentLifecycleRuntime({
   parseSpecialMessage: content => ({ type: 'text', content, meta: {} }),
   userAvatar: 'user.png',
   resolveAssistantAvatar: () => 'alice.png',
-  formatNowTime: () => 'NOW',
   appendPrivateChatMessage: (message, targetSessionId) => {
     const list = chatMessages.get(targetSessionId) || [];
     const saved = {
@@ -129,9 +128,10 @@ const momentCommentRuntime = createMomentCommentLifecycleRuntime({
   generate: async (comment, context) => {
     assert.equal(comment, '想你了');
     assert.equal(context.task.targetName, 'Bob');
+    assert.equal(context.meta.chatTimeMode, 'local');
     return rawReply;
   },
-  createParser: () => new DialogueStreamParser({ userName: '我' }),
+  createParser: options => new DialogueStreamParser({ userName: '我', ...options }),
   saveRawReply: async raw => savedRaw.push(raw),
   flushMoments: async () => {},
   addSummary: async summary => summaries.push(summary),
@@ -161,7 +161,17 @@ const send = createMomentFeedSendHandler({
   generateCommentId: () => 'user-comment-1',
 });
 
-const sent = await send();
+// The default policy uses local delivery time even when legacy AI timestamps are present.
+const deliveredAt = new Date(2026, 8, 18, 9, 30).getTime();
+const displayTime = new Date(deliveredAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+const realNow = Date.now;
+let sent;
+Date.now = () => deliveredAt;
+try {
+  sent = await send();
+} finally {
+  Date.now = realNow;
+}
 
 assert.equal(sent, true);
 assert.equal(inputEl.value, '');
@@ -186,6 +196,8 @@ assert.deepEqual(comments[2], {
   content: '我也想你',
   replyTo: 'c0',
   replyToAuthor: 'Bob',
+  time: displayTime,
+  meta: { chatTime: { source: 'local', receivedAt: deliveredAt, deliveredAt } },
 });
 assert.equal(momentRecord.engagement, 6);
 
@@ -225,17 +237,20 @@ assert.deepEqual(
       id: 'chat-1',
       role: 'assistant',
       content: '私聊补一句',
-      time: '10:01',
+      time: displayTime,
       avatar: 'alice.png',
-      meta: {},
+      meta: { chatTime: { source: 'local', receivedAt: deliveredAt, modelTime: '10:01', deliveredAt } },
     },
     {
       id: 'chat-2',
       role: 'user',
       content: '收到啦',
-      time: '10:02',
+      time: displayTime,
       avatar: 'user.png',
-      meta: { generatedByAssistant: true },
+      meta: {
+        chatTime: { source: 'local', receivedAt: deliveredAt, modelTime: '10:02', deliveredAt },
+        generatedByAssistant: true,
+      },
     },
   ],
 );

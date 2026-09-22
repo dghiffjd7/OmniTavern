@@ -8,6 +8,7 @@ import { buildTextEditRequest, buildConfigurableInputMessages } from '../../src/
 import { createTextEditRuntime, validateTextEditCandidate, normalizeTextEditModelResult } from '../../src/scripts/agent/text-edit-runtime.js';
 import { buildChatFormatGuardianModelPrompt } from '../../src/scripts/ui/chat/chat-format-guardian-utils.js';
 import { createAgentConfigurationService } from '../../src/scripts/agent/agent-configuration-service.js';
+import { createAgentModelRequest } from '../../src/scripts/agent/agent-model-request.js';
 import { createHopscotchExecutors, createHopscotchTurnRuntime } from '../../src/scripts/ui/chat/hopscotch-turn-runtime.js';
 import { createHopscotchBoardStore } from '../../src/scripts/storage/hopscotch-board-store.js';
 import { validateHopscotchBoard } from '../../src/scripts/ui/chat/hopscotch-board-utils.js';
@@ -188,11 +189,12 @@ const appSource = readFileSync(new URL('../../src/scripts/ui/app.js', import.met
 const assembly = appSource.slice(appSource.indexOf('  const buildChatFormatGuardianModelReviewOptions ='), appSource.indexOf('  const buildChatFormatGuardianOptions ='));
 let activeModel = { model: 'before' }, sentModel, modelMode = 'follow_current';
 const buildOptions = runInNewContext(`${assembly}; buildChatFormatGuardianModelReviewOptions`, {
+  createAgentModelRequest,
   agentFeatureSettingsStore: { isEnabled: () => true, getSettings: () => ({ features: { reply_check: { modelMode, modelProfileId: 'profile' } } }) },
   AGENT_FEATURE_IDS: { replyCheck: 'reply_check' }, resolveUiModeForSession: () => 'rp',
   buildChatFormatGuardianModelContext: () => ({ enabledFormats: {} }), captureRequestContext: () => ({ captured: true }),
   chatConfigManager: { getRuntimeConfigByProfileId: async () => ({ ...activeModel }) },
-  window: { appBridge: { resolveRequestRuntimeConfig: async () => ({ config: { ...activeModel } }), backgroundChat: async (_messages, options) => { sentModel = options.runtimeConfigOverride.model; } } },
+  window: { appBridge: { resolveRequestRuntimeConfig: async () => ({ config: { ...activeModel } }), backgroundChat: async () => { assert.fail('Agent requests must not inherit preset generation settings'); } } },
   LLMClient: class { constructor(config) { this.config = config; } async chat() { sentModel = this.config.model; } },
   isBridgeConfigured: () => true, getChatFormatGuardianSessionLabel: () => '', getSessionFormatGuide: () => 'guide',
   getAgentConfigContext: () => writing, agentReferenceRuntime: { resolveReference: async options => ({ text: options.targetMessageId || '' }) }, chatStore: { getMessages: () => [], getCurrentArchiveId: () => '' }, contactsStore: { getContact: () => null },

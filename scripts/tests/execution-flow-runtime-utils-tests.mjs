@@ -288,6 +288,12 @@ const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
     '终态已回收并关闭后，全新打开不得反复复活上一条 trace',
   );
   assert.equal(handedOff.rt.getState().visible, false);
+  fakeRun.status = 'running'; fakeRun.metadata = { ...fakeRun.metadata, submissionSource: 'maid_realtime' };
+  const voiceProjection = makeRt(view => view.source === 'maid_realtime');
+  voiceProjection.emit({ runId: 'run_x' });
+  assert.equal(voiceProjection.rt.getState().visible, false, 'voice work is consumed by the original ball surface');
+  voiceProjection.rt.rearbitrateMaidTrace({ commandInputOpen: false });
+  assert.equal(voiceProjection.rt.getState().expanded, false, 'collapsing input never auto-expands a voice trace');
   console.log('ok - onMaidTrace 消费语义（指令条优先、面板兜底）');
 }
 

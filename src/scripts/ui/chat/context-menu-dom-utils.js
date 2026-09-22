@@ -6,6 +6,7 @@ const ACTION_ICON_MAP = {
   download: '↓',
   'cancel-media-generation': '×',
   'generate-image': '图',
+  'repeat-image-generation': '⧉',
   'copy-text': '⧉',
   regenerate: '↻',
   'select-voice': '♫',

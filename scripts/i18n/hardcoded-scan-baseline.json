@@ -360,12 +360,6 @@
     "reason": "These literals are canonical fallbacks behind prompt-locale builders; English actual-send output is asserted by prompt-locale and memory-template tests."
   },
   {
-    "file": "src/scripts/memory/memory-injection-audit-utils.js",
-    "text": "[图片]",
-    "category": "protocol_compatibility",
-    "reason": "Remaining strings are message/media sentinels, legacy Chinese parser aliases, stable role names, or embedded bridge contracts; changing them would break existing chats or imports."
-  },
-  {
     "file": "src/scripts/memory/memory-keyword-recall-utils.js",
     "text": "这个",
     "category": "language_data",
@@ -601,7 +595,7 @@
   },
   {
     "file": "src/scripts/plugins/script-runtime.js",
-    "text": "const scripts = new Map(); let currentContext = { sessionId: '', personaId: '', presetId: '', presetIds: [], worldId: '', worldIds: [] }; let currentSettings = ",
+    "text": "const scripts = new Map(); let currentContext = { sessionId: '', personaId: '', presetId: '', presetIds: [], worldId: '', worldIds: [] }; let pendingScriptSync ",
     "category": "developer_diagnostic",
     "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
   },
@@ -685,12 +679,6 @@
   },
   {
     "file": "src/scripts/ui/app.js",
-    "text": "[附件]",
-    "category": "protocol_compatibility",
-    "reason": "Remaining strings are message/media sentinels, legacy Chinese parser aliases, stable role names, or embedded bridge contracts; changing them would break existing chats or imports."
-  },
-  {
-    "file": "src/scripts/ui/app.js",
     "text": "7 阶段",
     "category": "protocol_compatibility",
     "reason": "Remaining strings are message/media sentinels, legacy Chinese parser aliases, stable role names, or embedded bridge contracts; changing them would break existing chats or imports."
@@ -727,12 +715,6 @@
   },
   {
     "file": "src/scripts/ui/app.js",
-    "text": "[图片]",
-    "category": "protocol_compatibility",
-    "reason": "Remaining strings are message/media sentinels, legacy Chinese parser aliases, stable role names, or embedded bridge contracts; changing them would break existing chats or imports."
-  },
-  {
-    "file": "src/scripts/ui/app.js",
     "text": "[插图：\u0000\u0000]",
     "category": "protocol_compatibility",
     "reason": "Remaining strings are message/media sentinels, legacy Chinese parser aliases, stable role names, or embedded bridge contracts; changing them would break existing chats or imports."
@@ -746,12 +728,6 @@
   {
     "file": "src/scripts/ui/app.js",
     "text": "[图片]x\u0000",
-    "category": "protocol_compatibility",
-    "reason": "Remaining strings are message/media sentinels, legacy Chinese parser aliases, stable role names, or embedded bridge contracts; changing them would break existing chats or imports."
-  },
-  {
-    "file": "src/scripts/ui/app.js",
-    "text": "[文件]",
     "category": "protocol_compatibility",
     "reason": "Remaining strings are message/media sentinels, legacy Chinese parser aliases, stable role names, or embedded bridge contracts; changing them would break existing chats or imports."
   },
@@ -1303,12 +1279,6 @@
   },
   {
     "file": "src/scripts/ui/bridge.js",
-    "text": "[图片]",
-    "category": "prompt_fallback",
-    "reason": "The remaining bridge literals are canonical prompt fallbacks passed through prompt/memory locale helpers or stable protocol examples; all user-visible bridge chrome has moved to the UI catalog."
-  },
-  {
-    "file": "src/scripts/ui/bridge.js",
     "text": "世界书已被其他操作修改，请载入最新内容后重试。",
     "category": "prompt_fallback",
     "reason": "The remaining bridge literals are canonical prompt fallbacks passed through prompt/memory locale helpers or stable protocol examples; all user-visible bridge chrome has moved to the UI catalog."
@@ -1567,7 +1537,7 @@
   },
   {
     "file": "src/scripts/ui/chat/dialogue-stream-parser.js",
-    "text": "系统消息--\u0000",
+    "text": "系统消息--$1",
     "category": "protocol_compatibility",
     "reason": "Remaining strings are message/media sentinels, legacy Chinese parser aliases, stable role names, or embedded bridge contracts; changing them would break existing chats or imports."
   },
@@ -1597,12 +1567,6 @@
   },
   {
     "file": "src/scripts/ui/chat/llm-history-entry-utils.js",
-    "text": "[图片]",
-    "category": "protocol_compatibility",
-    "reason": "Remaining strings are message/media sentinels, legacy Chinese parser aliases, stable role names, or embedded bridge contracts; changing them would break existing chats or imports."
-  },
-  {
-    "file": "src/scripts/ui/chat/llm-history-entry-utils.js",
     "text": "系统消息（我们能解析的这种）：\u0000",
     "category": "protocol_compatibility",
     "reason": "Remaining strings are message/media sentinels, legacy Chinese parser aliases, stable role names, or embedded bridge contracts; changing them would break existing chats or imports."
@@ -1624,48 +1588,6 @@
     "text": "只输出 <tableEdit>...</tableEdit>，不要输出任何解释。",
     "category": "prompt_fallback",
     "reason": "These literals are canonical fallbacks behind prompt-locale builders; English actual-send output is asserted by prompt-locale and memory-template tests."
-  },
-  {
-    "file": "src/scripts/ui/chat/message-bubble-content-ui-utils.js",
-    "text": "[图片]",
-    "category": "protocol_compatibility",
-    "reason": "Remaining strings are message/media sentinels, legacy Chinese parser aliases, stable role names, or embedded bridge contracts; changing them would break existing chats or imports."
-  },
-  {
-    "file": "src/scripts/ui/chat/message-interaction-utils.js",
-    "text": "[附件]",
-    "category": "protocol_compatibility",
-    "reason": "Remaining strings are message/media sentinels, legacy Chinese parser aliases, stable role names, or embedded bridge contracts; changing them would break existing chats or imports."
-  },
-  {
-    "file": "src/scripts/ui/chat/message-interaction-utils.js",
-    "text": "[图片]",
-    "category": "protocol_compatibility",
-    "reason": "Remaining strings are message/media sentinels, legacy Chinese parser aliases, stable role names, or embedded bridge contracts; changing them would break existing chats or imports."
-  },
-  {
-    "file": "src/scripts/ui/chat/message-interaction-utils.js",
-    "text": "[音乐] \u0000",
-    "category": "protocol_compatibility",
-    "reason": "Remaining strings are message/media sentinels, legacy Chinese parser aliases, stable role names, or embedded bridge contracts; changing them would break existing chats or imports."
-  },
-  {
-    "file": "src/scripts/ui/chat/message-interaction-utils.js",
-    "text": "[转账] \u0000",
-    "category": "protocol_compatibility",
-    "reason": "Remaining strings are message/media sentinels, legacy Chinese parser aliases, stable role names, or embedded bridge contracts; changing them would break existing chats or imports."
-  },
-  {
-    "file": "src/scripts/ui/chat/message-interaction-utils.js",
-    "text": "[表情]",
-    "category": "protocol_compatibility",
-    "reason": "Remaining strings are message/media sentinels, legacy Chinese parser aliases, stable role names, or embedded bridge contracts; changing them would break existing chats or imports."
-  },
-  {
-    "file": "src/scripts/ui/chat/message-interaction-utils.js",
-    "text": "[文件] \u0000",
-    "category": "protocol_compatibility",
-    "reason": "Remaining strings are message/media sentinels, legacy Chinese parser aliases, stable role names, or embedded bridge contracts; changing them would break existing chats or imports."
   },
   {
     "file": "src/scripts/ui/chat/message-interaction-utils.js",
@@ -1729,18 +1651,6 @@
   },
   {
     "file": "src/scripts/ui/chat/pending-message-utils.js",
-    "text": "[附件]",
-    "category": "protocol_compatibility",
-    "reason": "Remaining strings are message/media sentinels, legacy Chinese parser aliases, stable role names, or embedded bridge contracts; changing them would break existing chats or imports."
-  },
-  {
-    "file": "src/scripts/ui/chat/pending-message-utils.js",
-    "text": "[图片]",
-    "category": "protocol_compatibility",
-    "reason": "Remaining strings are message/media sentinels, legacy Chinese parser aliases, stable role names, or embedded bridge contracts; changing them would break existing chats or imports."
-  },
-  {
-    "file": "src/scripts/ui/chat/pending-message-utils.js",
     "text": "[文件] \u0000",
     "category": "protocol_compatibility",
     "reason": "Remaining strings are message/media sentinels, legacy Chinese parser aliases, stable role names, or embedded bridge contracts; changing them would break existing chats or imports."
@@ -1794,8 +1704,8 @@
     "reason": "Remaining strings are message/media sentinels, legacy Chinese parser aliases, stable role names, or embedded bridge contracts; changing them would break existing chats or imports."
   },
   {
-    "file": "src/scripts/ui/chat/request-prompt-utils.js",
-    "text": "[图片]",
+    "file": "src/scripts/ui/chat/protocol-thinking-utils.js",
+    "text": "的私聊",
     "category": "protocol_compatibility",
     "reason": "Remaining strings are message/media sentinels, legacy Chinese parser aliases, stable role names, or embedded bridge contracts; changing them would break existing chats or imports."
   },
@@ -1832,12 +1742,6 @@
   {
     "file": "src/scripts/ui/chat/rich-text-renderer.js",
     "text": "<script> (() => { const CHATAPP_IFRAME_ID = \u0000; const CHATAPP_DEBUG_TAG = \u0000; const CHATAPP_MESSAGE_ID = \u0000; const CHATAPP_MESSAGE_INDEX = \u0000; const CHATAPP_SEED_ME",
-    "category": "protocol_compatibility",
-    "reason": "Remaining strings are message/media sentinels, legacy Chinese parser aliases, stable role names, or embedded bridge contracts; changing them would break existing chats or imports."
-  },
-  {
-    "file": "src/scripts/ui/chat/send-flow-utils.js",
-    "text": "[图片]",
     "category": "protocol_compatibility",
     "reason": "Remaining strings are message/media sentinels, legacy Chinese parser aliases, stable role names, or embedded bridge contracts; changing them would break existing chats or imports."
   },
@@ -2184,12 +2088,6 @@
     "reason": "These literals are canonical fallbacks behind prompt-locale builders; English actual-send output is asserted by prompt-locale and memory-template tests."
   },
   {
-    "file": "src/scripts/ui/realtime/realtime-context-builder.js",
-    "text": "【最近对话】",
-    "category": "prompt_fallback",
-    "reason": "These literals are canonical fallbacks behind prompt-locale builders; English actual-send output is asserted by prompt-locale and memory-template tests."
-  },
-  {
     "file": "src/scripts/utils/boot-diagnostics.js",
     "text": "(无)",
     "category": "developer_diagnostic",
@@ -2354,6 +2252,30 @@
   {
     "file": "src/scripts/utils/builtin-phone-format-contract.js",
     "text": "< s* / s*群聊 s*[:：] s*\u0000 s*>",
+    "category": "protocol_compatibility",
+    "reason": "Remaining strings are message/media sentinels, legacy Chinese parser aliases, stable role names, or embedded bridge contracts; changing them would break existing chats or imports."
+  },
+  {
+    "file": "src/scripts/utils/phone-format-time-prompt.js",
+    "text": "前后依然要加发言人和时间",
+    "category": "protocol_compatibility",
+    "reason": "Remaining strings are message/media sentinels, legacy Chinese parser aliases, stable role names, or embedded bridge contracts; changing them would break existing chats or imports."
+  },
+  {
+    "file": "src/scripts/utils/phone-format-time-prompt.js",
+    "text": "前面依然要加发言人",
+    "category": "protocol_compatibility",
+    "reason": "Remaining strings are message/media sentinels, legacy Chinese parser aliases, stable role names, or embedded bridge contracts; changing them would break existing chats or imports."
+  },
+  {
+    "file": "src/scripts/utils/phone-format-time-prompt.js",
+    "text": "前後依然要加發言人和時間",
+    "category": "protocol_compatibility",
+    "reason": "Remaining strings are message/media sentinels, legacy Chinese parser aliases, stable role names, or embedded bridge contracts; changing them would break existing chats or imports."
+  },
+  {
+    "file": "src/scripts/utils/phone-format-time-prompt.js",
+    "text": "前面依然要加發言人",
     "category": "protocol_compatibility",
     "reason": "Remaining strings are message/media sentinels, legacy Chinese parser aliases, stable role names, or embedded bridge contracts; changing them would break existing chats or imports."
   },

@@ -8,6 +8,7 @@ export const buildGeminiLiveSetup = (profile, instructions, resumeHandle = '') =
   systemInstruction: { parts: [{ text: instructions }] }, inputAudioTranscription: {}, outputAudioTranscription: {},
   sessionResumption: resumeHandle ? { handle: resumeHandle } : {},
   contextWindowCompression: { slidingWindow: {} },
+  ...(profile.maidTools?.length ? { tools: [{ functionDeclarations: profile.maidTools.map(({ name, description, parameters }) => ({ name, description, parameters })) }] } : {}),
 } });
 export const createGeminiLiveProtocol = ({ profile, instructions, send, emit, ready, play, clear, renew, resumeHandle = '', onResumeHandle }) => {
   let responseId = '', userText = '', assistantText = '', suppressed = false;
@@ -19,6 +20,8 @@ export const createGeminiLiveProtocol = ({ profile, instructions, send, emit, re
     // Gemini has no response.cancel; discard the rest of the current playback locally.
     cancel: () => { clear(); suppressed = true; },
     close: () => send({ realtimeInput: { audioStreamEnd: true } }),
+    toolResults: results => send({ toolResponse: { functionResponses: results.map(({ call, result }) => ({ id: call.id, name: call.name, response: result })) } }),
+    taskUpdate: text => send({ clientContent: { turns: [{ role: 'user', parts: [{ text }] }], turnComplete: true } }),
     receive: message => {
       // Gemini also sends UTF-8 JSON in binary WebSocket frames, including setupComplete.
       if (message instanceof Uint8Array) {
@@ -29,6 +32,11 @@ export const createGeminiLiveProtocol = ({ profile, instructions, send, emit, re
       if (message.sessionResumptionUpdate?.resumable) onResumeHandle?.(message.sessionResumptionUpdate.newHandle);
       if (message.goAway) renew();
       if (message.error) { emit({ type: 'error', error: { message: 'Gemini Live 返回错误，请检查模型和账号权限', code: String(message.error.code || '') } }); return; }
+      if (message.toolCall?.functionCalls?.length) {
+        user();
+        emit({ type: 'maid.tools.requested', calls: message.toolCall.functionCalls.map(call => ({ id: call.id, name: call.name, arguments: call.args })) });
+      }
+      if (message.toolCallCancellation) emit({ type: 'maid.tools.cancelled', ids: message.toolCallCancellation.ids || [] });
       const content = message.serverContent || {};
       if (content.interrupted) {
         clear(); user(); if (responseId) emit({ type: 'response.cancelled', response_id: responseId });
