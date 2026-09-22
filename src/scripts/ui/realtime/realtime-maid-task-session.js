@@ -26,7 +26,7 @@ export const createRealtimeMaidTaskSession = ({
     }
     needsResponse = false;
     if (provider === 'openai') { responseRequested = true; send({ type: 'response.create' }); }
-    else if (['xai_voice', 'qwen_audio_realtime', 'step_realtime'].includes(provider)) { responseRequested = true; client.requestResponse?.(); }
+    else if (['xai_voice', 'qwen_audio_realtime', 'step_realtime', 'custom'].includes(provider)) { responseRequested = true; client.requestResponse?.(); }
   };
   const report = error => { try { onError(error); } catch {} };
   const execute = async call => {
@@ -61,7 +61,7 @@ export const createRealtimeMaidTaskSession = ({
         needsResponse = true;
       } else {
         getClient()?.sendToolResults?.(results);
-        if (['xai_voice', 'qwen_audio_realtime', 'step_realtime'].includes(provider)) needsResponse = true;
+        if (['xai_voice', 'qwen_audio_realtime', 'step_realtime', 'custom'].includes(provider)) needsResponse = true;
       }
     } catch (error) { report(error); }
     finally { waiting--; flush(); }

@@ -12,9 +12,10 @@ import { NativeRealtimeSessionClient } from '../../src/scripts/ui/realtime/nativ
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 let count = 0;
 const test = async (name, body) => { await body(); console.log(`ok - ${name}`); count++; };
-await test('all seven providers have independent model and voice defaults', () => {
-  assert.equal(Object.keys(REALTIME_PROVIDERS).length, 7);
-  for (const id of Object.keys(REALTIME_PROVIDERS)) validateRealtimeProfile(makeRealtimeProfile(id));
+await test('official providers keep defaults and custom requires an explicit endpoint', () => {
+  assert.equal(Object.keys(REALTIME_PROVIDERS).length, 8);
+  for (const id of Object.keys(REALTIME_PROVIDERS).filter(id => id !== 'custom')) validateRealtimeProfile(makeRealtimeProfile(id));
+  assert.throws(() => validateRealtimeProfile(makeRealtimeProfile('custom')));
   assert.equal(makeRealtimeProfile('gemini_live').voice, 'Kore');
 });
 await test('profiles keep typed credentials outside metadata and roll back failed saves', async () => {

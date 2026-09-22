@@ -14,6 +14,7 @@ const cleanProfile = input => {
   for (const key of ['replyLanguage', 'transcriptionLanguage']) result[key] = text(result[key]).replace(/\s+/g, ' ').slice(0, 80);
   if (result.provider === 'step_realtime' && !result.region) result.region = 'cn';
   if (result.provider === 'openai') for (const key of ['openaiBackend', 'liveBackendModel']) result[key] = text(result[key]);
+  if (result.provider === 'custom') for (const key of ['customProtocol', 'endpoint', 'authMode', 'authHeader', 'transcriptionModel']) result[key] = text(result[key]);
   if (result.provider === 'gemini_live') for (const key of ['geminiBackend', 'vertexaiAuthMode', 'vertexaiProjectId']) result[key] = text(result[key]);
   result.idleTimeoutMinutes = Math.min(30, Math.max(1, Number(result.idleTimeoutMinutes) || 10));
   result.voiceKind = input.voiceKind === 'custom' ? 'custom' : 'system';
@@ -66,10 +67,10 @@ export class RealtimeProfileStore {
       const oldCredentials = await this.credentials(previous);
       const effectiveCredentials = validateRealtimeCredentials(profile.provider, credentials || oldCredentials, profile);
       if (usesGeminiServiceAccount(profile) && !profile.vertexaiProjectId) profile.vertexaiProjectId = text(parseRealtimeServiceAccount(effectiveCredentials.vertexaiServiceAccount).project_id);
-      const changed = credentials && JSON.stringify(credentials) !== JSON.stringify(oldCredentials);
+      const changed = !previous?.credentialId || (credentials && JSON.stringify(credentials) !== JSON.stringify(oldCredentials));
       let newCredentialId = '';
       try {
-        if (changed) { newCredentialId = await (await this.getKeyring()).addKey(profile.id, JSON.stringify(credentials), 'Realtime credentials'); profile.credentialId = newCredentialId; }
+        if (changed) { newCredentialId = await (await this.getKeyring()).addKey(profile.id, JSON.stringify(effectiveCredentials), 'Realtime credentials'); profile.credentialId = newCredentialId; }
         else profile.credentialId = previous?.credentialId || profile.credentialId;
         validateRealtimeProfile(profile);
         if (!profile.credentialId) throw new Error('请先填写服务商凭证');
@@ -118,7 +119,7 @@ export class RealtimeProfileStore {
   async resolveProfile(profile) {
     validateRealtimeProfile(profile);
     const credentials = validateRealtimeCredentials(profile.provider, await this.credentials(profile), profile);
-    return { ok: true, settings: { ...profile, realtimeModel: profile.model, transcriptionModel: isOpenAiLive(profile) ? '' : 'gpt-4o-mini-transcribe', contextMode: isOpenAiLive(profile) ? 'full_duplex' : profile.provider === 'openai' ? 'per_turn' : 'session_snapshot' },
+    return { ok: true, settings: { ...profile, realtimeModel: profile.model, transcriptionModel: isOpenAiLive(profile) ? '' : profile.provider === 'custom' ? profile.transcriptionModel : 'gpt-4o-mini-transcribe', contextMode: isOpenAiLive(profile) ? 'full_duplex' : ['openai', 'custom'].includes(profile.provider) ? 'per_turn' : 'session_snapshot' },
       config: { ...profile, credentials, apiKey: credentials.apiKey || '', baseUrl: profile.provider === 'openai' ? 'https://api.openai.com/v1' : '' } };
   }
   async resolve() {

@@ -45,3 +45,11 @@ Worker 面板投影按虚拟节点 ID 更新已有 DOM，文本输入不重建�
 Windows PowerShell：`npm run test:creative-preset`。另外检查了预设作用域、正则运行时、取消、创意流式、现有 FC 传输与供应方工具参数适配测试。
 
 当前 Windows dev 的原始 Kemini 脚本已验证面板显示、真实按钮切换后重载保持、临时提示词／正则不落盘、命名写回及复原、OpenAI 流式／非流式与 Gemini `partialArgs` 正文还原。Reborn 的真实 SPreset 配置已验证消息后处理、工具注入及 Unicode 输出。完整诊断生成链通过本机 HTTP 模拟供应方验证用量、正文与零聊天写入，临时测试绑定／设置在结束后恢复。
+
+## Reborn 正文段落兼容修复（2026-09-22）
+
+在原数据 dev 的 Reborn 历史候选回复中确认：原文与显示正则处理后的正文都有空行，但思维折叠的 HTML replacement 结束围栏直接接上模型的 `<game>` 标签，形成 ` ```<game>`。严格行尾围栏解析漏掉此边界，直到后面的行动卡片才闭合；正文被并入前一个 HTML 沙盒，浏览器合并了正文空白。
+
+`splitFencedCodeBlocks` 现在仅对无语言或 HTML 围栏、且前方已是完整 HTML 文档的情况恢复这种粘连边界。使用已有文档扫描器排除 script / style / comment 内的伪闭合标签；不按预设名称或 `<game>` 专门分支，普通代码及未闭合文档保持原解析规则。修复在显示层生效，历史回复重新显示即可恢复，无需改动预设、重写聊天或重新生成。
+
+最小回归先复现失败，修复后 `rich-text-renderer-fragment-tests.mjs` 全部通过；原历史显示副本和原文重新套用正则都恢复了正文独立段落，前后 HTML 卡片分开。`dev-rich-joined-fence-cdp-smoke.mjs` 用中性内容在 Windows WebView 验证 1100 / 390px 的三段正文、文本选择、摘要展开及两个独立卡片位置；测试不执行用户预设脚本或写入聊天。

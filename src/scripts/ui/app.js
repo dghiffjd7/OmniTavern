@@ -420,8 +420,10 @@ import {
 } from './chat/format-repair-moment-transaction-utils.js';
 import {
   buildAssistantReasoningEditPatch,
+  buildAssistantBodyReasoningMeta,
   buildUserMessageEditPatch,
   hasDownstreamConversationContext,
+  resolveCreativeMessageRawOriginal,
 } from './chat/message-edit-transaction-utils.js';
 import { registerChatFormatRepairTools } from '../agent/tools/chat-format-tools.js';
 import {
@@ -17366,19 +17368,13 @@ const initApp = async () => {
       ? CHAT_FORMAT_GUARDIAN_TARGETS.groupChat
       : CHAT_FORMAT_GUARDIAN_TARGETS.privateChat;
   };
-  const resolveCreativeFormatRepairRawOriginal = async (message = null, sessionId = '') => {
-    const current = chatStore.findMessage(message?.id, sessionId) || message;
-    const swipes = Array.isArray(current?.meta?.swipes) ? current.meta.swipes : [];
-    const activeBranch = swipes.length ? swipes[resolveActiveSwipeIndex(current)] : null;
-    if (typeof activeBranch?.rawOriginal === 'string' && activeBranch.rawOriginal.length) {
-      return activeBranch.rawOriginal;
-    }
-    if (typeof current?.rawOriginal === 'string' && current.rawOriginal.length) {
-      return current.rawOriginal;
-    }
-    const loaded = await chatStore.loadRawOriginal?.(current, sessionId);
-    return typeof loaded === 'string' ? loaded : '';
-  };
+  const resolveCreativeFormatRepairRawOriginal = async (message = null, sessionId = '') => (
+    await resolveCreativeMessageRawOriginal({
+      message, sessionId,
+      findMessage: (id, sid) => chatStore.findMessage(id, sid),
+      loadRawOriginal: (target, sid) => chatStore.loadRawOriginal?.(target, sid),
+    }) ?? ''
+  );
   const resolveChatFormatRepairTarget = async (message = null, sessionId = '') => (
     resolveLatestFormatRepairTarget({
       message,
@@ -26417,7 +26413,8 @@ const initApp = async () => {
   let lastUserGenerationCancelAt = 0;
   const cancelActiveGeneration = (reason = 'user') => {
     const cancelTargetSessionId = String(activeGeneration?.sessionId || '').trim();
-    const boardCancelled = hopscotchTurnRuntime?.abortSessionTurn(cancelTargetSessionId || chatStore.getCurrent?.(), reason);
+    // Preserve the user partial before aborting a board whose callback may re-enter
+    // cancellation with a different reason. The generation is marked cancelled first.
     const result = runActiveGenerationCancelFlow({
       generation: activeGeneration,
       reason,
@@ -26434,9 +26431,9 @@ const initApp = async () => {
       setStreamingState: value => ui.setStreamingState?.(value),
       setSendingState: value => ui.setSendingState(value),
     });
+    const boardCancelled = hopscotchTurnRuntime?.abortSessionTurn?.(cancelTargetSessionId || chatStore.getCurrent?.(), reason);
     if (!result.cancelled) return Boolean(boardCancelled);
     if (reason === 'user') lastUserGenerationCancelAt = Date.now();
-    hopscotchTurnRuntime?.abortSessionTurn?.(cancelTargetSessionId || chatStore.getCurrent?.(), reason);
     creativeExecutionLaneRuntime?.cancelRun?.(reason);
     if (activeGeneration?.id === result.generation?.id) {
       activeGeneration = null;
@@ -31091,8 +31088,10 @@ const initApp = async () => {
         executorContext: {
           runtimeConfig: { ...config },
           useGlobalVariables: sharedVariables,
-          abortBody: () => {
-            if (activeGeneration?.id === generationId) cancelActiveGeneration('hopscotch_cancelled');
+          abortBody: reason => {
+            if (activeGeneration?.id === generationId) {
+              cancelActiveGeneration((reason?.message || reason) === 'user' ? 'user' : 'hopscotch_cancelled');
+            }
           },
           charName: characterName,
           userName: promptUserName,
@@ -32176,7 +32175,10 @@ const initApp = async () => {
       let raw = '';
       let sourceContext = null;
       if (isRpSessionId(sessionId)) {
-        raw = await resolveCreativeFormatRepairRawOriginal(current, sessionId);
+        raw = await resolveCreativeMessageRawOriginal({
+          message: current, sessionId,
+          loadRawOriginal: (target, sid) => chatStore.loadRawOriginal?.(target, sid),
+        });
         const turnMeta = getMessageFormatRepairTurnMeta(current);
         sourceContext = {
           sourceKind: FORMAT_REPAIR_SOURCE_KINDS.creativeRawOriginal,
@@ -32192,7 +32194,7 @@ const initApp = async () => {
           sourceContext = latestTarget;
         }
       }
-      if (typeof raw !== 'string' || !raw.length) {
+      if (typeof raw !== 'string' || (!raw.length && !isRpSessionId(sessionId))) {
         window.toastr?.warning?.('无法取得这轮完整原始回复，不能安全编辑');
         return true;
       }
@@ -32779,20 +32781,14 @@ const initApp = async () => {
 	          isEdit: regexEditMode,
 	          normalizeText: normalizeCreativeLineBreaksForDisplay,
 	        });
-	        const nextMeta = clearAutoImagePromptEditMeta(
+	        let nextMeta = clearAutoImagePromptEditMeta(
 	          message?.meta && typeof message.meta === 'object' ? { ...message.meta, renderRich: true } : { renderRich: true },
 	        );
 	        if (editAutoImagePromptRawText && editAutoImagePromptPlaceholders.length) {
 	          nextMeta.autoImagePromptRawContent = editAutoImagePromptRawText;
 	          nextMeta.autoImagePromptPlaceholders = editAutoImagePromptPlaceholders;
 	        }
-	        if (reasoningParsed.reasoning) {
-	          nextMeta.reasoning = reasoningParsed.reasoning;
-	          nextMeta.reasoningDisplay = reasoningParsed.reasoningDisplay;
-        } else {
-          delete nextMeta.reasoning;
-          delete nextMeta.reasoningDisplay;
-        }
+        nextMeta = buildAssistantBodyReasoningMeta(nextMeta, reasoningParsed);
         updater = {
           rawOriginal: next,
           rawSource: finalSource,
@@ -32868,6 +32864,10 @@ const initApp = async () => {
 	          raw: typeof updater?.raw === 'string' ? updater.raw : activeBranch.raw,
 	          content: typeof updater?.content === 'string' ? updater.content : activeBranch.content,
 	        };
+        SWIPE_REASONING_KEYS.forEach(key => {
+          if (updater?.meta?.[key] !== undefined) nextBranch[key] = updater.meta[key];
+          else delete nextBranch[key];
+        });
 		        if (hasImageFunctionExecution) {
 		          delete nextBranch.autoImagePromptRawContent;
 		          delete nextBranch.autoImagePromptPlaceholders;
@@ -32883,6 +32883,9 @@ const initApp = async () => {
 	          swipes,
 	          activeSwipe: activeIndex,
 	        };
+        SWIPE_REASONING_KEYS.forEach(key => {
+          if (updater?.meta?.[key] === undefined) delete mergedMeta[key];
+        });
 		        if (hasImageFunctionExecution) {
 		          delete mergedMeta.autoImagePrompt;
 		          delete mergedMeta.autoImagePromptRawContent;

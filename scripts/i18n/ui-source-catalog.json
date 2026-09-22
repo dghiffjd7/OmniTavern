@@ -5176,6 +5176,13 @@
     ]
   },
   {
+    "source": "不使用 API Key",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
+    ]
+  },
+  {
     "source": "不替换",
     "references": [
       "src/scripts/ui/regex-panel.js#html-text",
@@ -13448,6 +13455,41 @@
     ]
   },
   {
+    "source": "附加请求头（JSON）",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
+    ]
+  },
+  {
+    "source": "附加请求头格式无效，或包含不可覆盖的连接字段",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/custom-realtime-config.js#ui-call"
+    ]
+  },
+  {
+    "source": "附加请求头过长",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/custom-realtime-config.js#ui-call"
+    ]
+  },
+  {
+    "source": "附加请求头需要填写 JSON 对象",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/custom-realtime-config.js#ui-call"
+    ]
+  },
+  {
+    "source": "附加请求头与鉴权设置重复，请只保留一处",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/custom-realtime-config.js#ui-call"
+    ]
+  },
+  {
     "source": "附加世界书库",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -14212,6 +14254,7 @@
     "source": "高级设置",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition",
       "src/scripts/ui/world-editor.js#html-text"
     ]
   },
@@ -15033,6 +15076,13 @@
     "source": "工具调用缺少 call_id",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "工具结果回传未通过，尚未确认支持女仆任务",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/custom-realtime-probe.js#ui-call"
     ]
   },
   {
@@ -17130,6 +17180,13 @@
     ]
   },
   {
+    "source": "会话初始化成功；音频与女仆任务尚未验证",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
+    ]
+  },
+  {
     "source": "会话或预设已切换，请重新发起生成",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -18269,6 +18326,13 @@
     ]
   },
   {
+    "source": "兼容协议",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
+    ]
+  },
+  {
     "source": "兼容性预检：{value} 条可运行；{value2} 条需要作为 SillyTavern 外部扩展安装，已保留但不会启用。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -18439,6 +18503,13 @@
     ]
   },
   {
+    "source": "检查连接",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
+    ]
+  },
+  {
     "source": "检查聊天格式问题，或按创意写作会话的格式要求生成修复候选。",
     "references": [
       "src/scripts/agent/agent-feature-settings.js#ui-definition"
@@ -18469,6 +18540,20 @@
     "references": [
       "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
       "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
+    ]
+  },
+  {
+    "source": "检查任务调用",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
+    ]
+  },
+  {
+    "source": "检查使用临时空白会话，不录音、不执行应用任务；服务商可能计费。声音候选以渠道实际支持为准。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
     ]
   },
   {
@@ -18506,6 +18591,13 @@
     "source": "检查同名世界书失败（忽略）",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "检查已取消",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
     ]
   },
   {
@@ -18566,6 +18658,20 @@
     "source": "建议",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "鉴权方式",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
+    ]
+  },
+  {
+    "source": "鉴权请求头名称",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
     ]
   },
   {
@@ -21691,6 +21797,14 @@
     "source": "连接成功！",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "连接地址：{url}",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-call",
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
     ]
   },
   {
@@ -27130,6 +27244,7 @@
   {
     "source": "请填写 API Key / Access Token",
     "references": [
+      "src/scripts/ui/realtime/custom-realtime-config.js#ui-call",
       "src/scripts/ui/realtime/realtime-provider-catalog.js#ui-definition",
       "src/scripts/ui/realtime/realtime-voice-discovery.js#ui-call"
     ]
@@ -27278,6 +27393,27 @@
     ]
   },
   {
+    "source": "请填写有效的鉴权请求头名称",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/custom-realtime-config.js#ui-call"
+    ]
+  },
+  {
+    "source": "请填写有效的模型、声音和转写模型 ID",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/custom-realtime-config.js#ui-call"
+    ]
+  },
+  {
+    "source": "请填写有效的实时服务地址",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/custom-realtime-config.js#ui-call"
+    ]
+  },
+  {
     "source": "请填写有效的推理模型 ID",
     "references": [
       "src/scripts/ui/realtime/openai-live-config.js#ui-call",
@@ -27392,6 +27528,14 @@
     "source": "请先将 Voice ID 登记到当前设置档",
     "references": [
       "src/scripts/ui/realtime/realtime-provider-catalog.js#ui-definition"
+    ]
+  },
+  {
+    "source": "请先结束当前通话，再检查实时连接",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-call",
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
     ]
   },
   {
@@ -27864,6 +28008,13 @@
     ]
   },
   {
+    "source": "请选择鉴权方式",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/custom-realtime-config.js#ui-call"
+    ]
+  },
+  {
     "source": "请选择连接模式",
     "references": [
       "src/scripts/ui/config-panel.js#html-text"
@@ -27907,6 +28058,13 @@
     "references": [
       "src/scripts/ui/realtime/realtime-model-discovery.js#ui-call",
       "src/scripts/ui/realtime/realtime-provider-catalog.js#ui-definition"
+    ]
+  },
+  {
+    "source": "请选择受支持的实时兼容协议",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/custom-realtime-config.js#ui-call"
     ]
   },
   {
@@ -28041,6 +28199,13 @@
     ]
   },
   {
+    "source": "渠道未返回有效工具调用，尚未确认支持女仆任务",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/custom-realtime-probe.js#ui-call"
+    ]
+  },
+  {
     "source": "取得群聊当前成员 ID，避免重复或错误覆盖。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -28148,6 +28313,13 @@
     "source": "取消回复",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "取消检查",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
     ]
   },
   {
@@ -29716,6 +29888,20 @@
     "source": "任务彻底作废或已无意义时删除。",
     "references": [
       "src/scripts/memory/default-template.js#ui-definition"
+    ]
+  },
+  {
+    "source": "任务调用检查超时，尚未确认此渠道支持女仆任务",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/custom-realtime-probe.js#ui-call"
+    ]
+  },
+  {
+    "source": "任务调用与结果回传通过；实际收音与播放请试用通话",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
     ]
   },
   {
@@ -32025,9 +32211,30 @@
     ]
   },
   {
+    "source": "实时服务地址",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
+    ]
+  },
+  {
     "source": "实时服务返回错误",
     "references": [
+      "src/scripts/ui/realtime/custom-realtime-probe.js#ui-call",
       "src/scripts/ui/realtime/native-realtime-session-client.js#ui-call"
+    ]
+  },
+  {
+    "source": "实时服务请使用 WSS 或 HTTPS 地址；本机服务可使用 WS 或 HTTP",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/custom-realtime-config.js#ui-call"
+    ]
+  },
+  {
+    "source": "实时连接检查中，请稍候或取消检查",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -32103,6 +32310,7 @@
   {
     "source": "实时语音连接已关闭",
     "references": [
+      "src/scripts/ui/realtime/custom-realtime-probe.js#ui-call",
       "src/scripts/ui/realtime/native-realtime-session-client.js#ui-call"
     ]
   },
@@ -35054,6 +35262,13 @@
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/scripts/ui/config-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "填写渠道支持的输入转写模型；每轮转写后会更新角色上下文并回复。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
     ]
   },
   {
@@ -40428,6 +40643,13 @@
     ]
   },
   {
+    "source": "需支持 OpenAI Realtime 正式协议；仅兼容文本接口的渠道无法通话。可填完整实时地址，或以 /v1 结尾的 API 地址。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
+    ]
+  },
+  {
     "source": "序",
     "references": [
       "src/index.html#html-text"
@@ -44674,6 +44896,13 @@
     ]
   },
   {
+    "source": "与 API Key 一同加密保存。留空保留已保存的值，填写 {} 清除。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
+    ]
+  },
+  {
     "source": "与记忆模式配合，控制何时使用摘要而不是表格记忆。",
     "references": [
       "src/scripts/ui/agent-center-card-catalog.js#ui-definition"
@@ -48217,6 +48446,20 @@
     ]
   },
   {
+    "source": "正在检查任务调用与结果回传…",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
+    ]
+  },
+  {
+    "source": "正在检查实时连接…",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
+    ]
+  },
+  {
     "source": "正在接收流式内容",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -49958,6 +50201,13 @@
     ]
   },
   {
+    "source": "转写模型",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
+    ]
+  },
+  {
     "source": "转账",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -50279,7 +50529,9 @@
     "source": "自定义",
     "references": [
       "src/scripts/ui/custom-bundle-exporter.js#html-text",
-      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition",
+      "src/scripts/ui/realtime/realtime-provider-catalog.js#ui-definition",
+      "src/scripts/ui/realtime/realtime-provider-catalog.js#ui-property"
     ]
   },
   {
@@ -50374,6 +50626,13 @@
     "source": "自定义格式规范",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "自定义鉴权请求头",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
     ]
   },
   {

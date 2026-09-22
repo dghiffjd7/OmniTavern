@@ -358,7 +358,9 @@ const sanitizeMessageForPersist = (msg, options = {}) => {
   delete out.avatar;
 
   // Many message payloads include huge raw originals; we only keep bounded versions on disk.
-  if (typeof out.rawOriginal === 'string') delete out.rawOriginal;
+  // Keep an explicit empty original: it distinguishes reasoning-only replies from
+  // a missing sidecar, and lets the raw editor safely add a body after reload.
+  if (typeof out.rawOriginal === 'string' && out.rawOriginal.length) delete out.rawOriginal;
   compactDerivedRenderRichContent(out);
   if (!preserveLargeFields) {
     if (typeof out.rawSource === 'string') out.rawSource = clampString(out.rawSource, MAX_PERSIST_RAW_SOURCE_CHARS);
@@ -2082,7 +2084,7 @@ export class ChatStore {
   _persistRawOriginal(msg, sessionId) {
     if (!msg || msg.role !== 'assistant') return;
     const raw = typeof msg.rawOriginal === 'string' ? msg.rawOriginal : '';
-    if (!raw.trim()) return;
+    if (!raw.length) return;
     const ref = this._ensureRawOriginalRef(msg, sessionId);
     if (!ref) return;
     safeInvoke('save_raw_reply', { sessionId: ref.sessionId, messageId: ref.messageId, text: raw }).catch(err => {
@@ -2103,13 +2105,12 @@ export class ChatStore {
     if (!sid) return '';
     const msg = typeof messageOrId === 'object' ? messageOrId : this.findMessage(messageOrId, sid);
     if (!msg) return '';
-    const existing = typeof msg.rawOriginal === 'string' ? msg.rawOriginal : '';
-    if (existing.trim()) return existing;
+    if (typeof msg.rawOriginal === 'string') return msg.rawOriginal;
     const ref = this._ensureRawOriginalRef(msg, sid);
     if (!ref) return '';
     try {
       const loaded = await safeInvoke('load_raw_reply', { sessionId: ref.sessionId, messageId: ref.messageId });
-      if (typeof loaded === 'string' && loaded.trim()) {
+      if (typeof loaded === 'string') {
         msg.rawOriginal = loaded;
         return loaded;
       }
@@ -2130,7 +2131,7 @@ export class ChatStore {
       if (picked.length >= limit) break;
       const m = messages[i];
       if (!isCreativeAssistant(m)) continue;
-      if (typeof m.rawOriginal === 'string' && m.rawOriginal.trim()) continue;
+      if (typeof m.rawOriginal === 'string') continue;
       if (!m?.id) continue;
       this._ensureRawOriginalRef(m, sid);
       picked.push(m);
@@ -2149,7 +2150,7 @@ export class ChatStore {
       if (picked.length >= limit) break;
       const m = list[i];
       if (!isCreativeAssistant(m)) continue;
-      if (typeof m.rawOriginal === 'string' && m.rawOriginal.trim()) continue;
+      if (typeof m.rawOriginal === 'string') continue;
       if (!m?.id) continue;
       this._ensureRawOriginalRef(m, sid);
       picked.push(m);

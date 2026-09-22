@@ -74,7 +74,7 @@ export class RealtimeModelDiscovery {
   }
   async load(profile, credentials, signal) {
     checkSignal(signal);
-    if (profile.provider === 'doubao_realtime' || (isGeminiVertex(profile) && profile.vertexaiAuthMode === 'express')) {
+    if (profile.provider === 'custom' || profile.provider === 'doubao_realtime' || (isGeminiVertex(profile) && profile.vertexaiAuthMode === 'express')) {
       return { models: realtimeModelDefaults(profile), remote: false, message: t('此接入方式暂不支持在线模型列表；已显示内建候选，也可手动填写') };
     }
     validateRealtimeCredentials(profile.provider, credentials, profile);

@@ -15,25 +15,21 @@ const callSafely = (fn, ...args) => {
   }
 };
 
+const firstNonBlankText = (...values) => values
+  .map(value => String(value ?? ''))
+  .find(value => value.trim()) || '';
+
 const getPartialReasoningText = (partial = null) => {
   const meta = normalizeObject(partial?.meta) || {};
-  return String(
-    partial?.reasoningDisplay
-      || partial?.reasoning
-      || meta.reasoningDisplay
-      || meta.reasoning
-      || meta.reasoningSource
-      || '',
-  );
+  return firstNonBlankText(partial?.reasoningDisplay, partial?.reasoning, meta.reasoningDisplay, meta.reasoning);
 };
 
-const getPartialPersistableText = (partial = null) => String(
-  partial?.content
-    || partial?.raw
-    || partial?.rawSource
-    || partial?.rawOriginal
-    || getPartialReasoningText(partial)
-    || '',
+const getPartialPersistableText = (partial = null) => firstNonBlankText(
+  partial?.content,
+  partial?.raw,
+  partial?.rawSource,
+  partial?.rawOriginal,
+  getPartialReasoningText(partial),
 );
 
 const hasPartialContent = (partial = null) => Boolean(getPartialPersistableText(partial).trim());

@@ -618,6 +618,38 @@ tests.push({
 });
 
 tests.push({
+  name: 'display-regex HTML closing fence joined to a prose wrapper keeps paragraphs outside both cards',
+  fn: () => {
+    // Regex replacements can end at the fence, immediately followed by the
+    // model's prose wrapper. Both unlabeled fences and HTML fences are used.
+    for (const lang of ['', 'html']) {
+      const card = `\`\`\`${lang}\n<!doctype html><html><body><details><summary>Card</summary>Notes</details></body></html>\n\`\`\``;
+      const prose = '<game>\nParagraph one\n\nParagraph two\n\nParagraph three\n</game>\n<details><summary>Summary</summary>Text</details>\n';
+      const text = card + prose + card;
+      for (const streaming of [false, true]) {
+        const plan = buildRichTextRenderPlan(text, { streaming });
+        assert.deepEqual(plan.parts.map(p => p.type), ['code', 'text', 'code']);
+        assert.equal(plan.parts[1].text, prose);
+        assert.ok(plan.parts.filter(p => p.type === 'code').every(p => !p.code.includes('Paragraph')));
+      }
+    }
+  },
+});
+
+tests.push({
+  name: 'joined HTML fence recovery leaves script literals and incomplete documents intact',
+  fn: () => {
+    const code = '<!doctype html><html><body>\n<script>\nconst sample = `\n</body></html>\n```<game>\nnot a boundary\n`;\n</script>\n</body></html>';
+    const text = '```html\n' + code + '\n```';
+    assert.deepEqual(splitFencedCodeBlocks(text), [{ type:'code', lang:'html', code }]);
+    for (const [lang, inner] of [['html', '<html><body>partial'], ['js', '<html><body>example</body></html>']]) {
+      const incomplete = inner + '\n```<game>\ntrailing literal';
+      assert.deepEqual(splitFencedCodeBlocks('```' + lang + '\n' + incomplete), [{ type:'code', lang, code:incomplete }]);
+    }
+  },
+});
+
+tests.push({
   name: 'splitFencedCodeBlocks ignores non-line-start fence markers',
   fn: () => {
     const text = 'inline ```notafence``` text without real blocks';

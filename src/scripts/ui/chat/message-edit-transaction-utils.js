@@ -21,6 +21,37 @@ const resolveActiveSwipeIndex = (meta = {}) => {
     : Math.max(0, swipes.length - 1);
 };
 
+// Empty body text is a complete source too. null means the full source is unavailable;
+// never fall back to rendered/regex-processed text when opening the raw editor.
+export const resolveCreativeMessageRawOriginal = async ({
+  message = null,
+  sessionId = '',
+  findMessage = () => null,
+  loadRawOriginal = async () => null,
+} = {}) => {
+  const current = findMessage(message?.id, sessionId) || message;
+  const meta = current?.meta || {};
+  const activeBranch = meta.swipes?.[resolveActiveSwipeIndex(meta)];
+  if (typeof activeBranch?.rawOriginal === 'string') return activeBranch.rawOriginal;
+  if (typeof current?.rawOriginal === 'string') return current.rawOriginal;
+  const loaded = await loadRawOriginal(current, sessionId);
+  if (typeof current?.rawOriginal === 'string') return current.rawOriginal;
+  return typeof loaded === 'string' && loaded.length ? loaded : null;
+};
+
+export const buildAssistantBodyReasoningMeta = (meta = {}, parsed = {}) => {
+  const next = { ...meta };
+  // Provider reasoning is a separate channel, so a body edit cannot remove it.
+  if (String(next.reasoningSource || '').startsWith('native')) return next;
+  if (parsed.reasoning) {
+    next.reasoning = parsed.reasoning;
+    next.reasoningDisplay = parsed.reasoningDisplay;
+  } else {
+    REASONING_META_KEYS.forEach(key => delete next[key]);
+  }
+  return next;
+};
+
 const replaceTaggedReasoningBlock = (value, {
   prefix = '',
   suffix = '',

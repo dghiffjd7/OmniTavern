@@ -130,6 +130,7 @@ export const OPENAI_LIVE_VOICES = [
 
 export const getRealtimeSystemVoices = profile => {
   if (isOpenAiLive(profile)) return OPENAI_LIVE_VOICES;
+  if (profile.provider === 'custom') return REALTIME_SYSTEM_VOICES.openai;
   const list = REALTIME_SYSTEM_VOICES[profile.provider] || [];
   if (profile.provider === 'doubao_realtime') {
     if (String(profile.model).startsWith('2.')) return DOUBAO_SC2_VOICES;

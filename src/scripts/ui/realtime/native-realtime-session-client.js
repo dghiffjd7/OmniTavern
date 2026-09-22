@@ -8,6 +8,8 @@ import { createJsonRealtimeProtocol } from './realtime-json-protocol.js';
 import { createGeminiLiveProtocol } from './realtime-gemini-protocol.js';
 import { createDoubaoRealtimeProtocol } from './realtime-doubao-protocol.js';
 import { createNovaSonicProtocol } from './realtime-nova-protocol.js';
+import { createCustomRealtimeProtocol } from './custom-realtime-protocol.js';
+import { customRealtimeTransportFields } from './custom-realtime-config.js';
 const abortError = () => new DOMException('Realtime connection cancelled', 'AbortError');
 const createVertexAuth = async config => {
   const { VertexAIProvider } = await import('../../api/providers/vertexai.js');
@@ -19,6 +21,7 @@ export class NativeRealtimeSessionClient {
   }
   async connect({ config, sessionConfig, signal } = {}) {
     await this.close(); this.closed = false; this.config = { ...config, maidTools: sessionConfig.tools }; this.instructions = sessionConfig.instructions; this.history = []; this.resumeHandle = ''; this.activeResponse = '';
+    this.sessionConfig = sessionConfig;
     this.authController = new AbortController(); this.vertexAuth = null;
     this.abort = () => { this.rejectReady?.(abortError()); void this.close(); }; this.signal = signal;
     if (signal?.aborted) { await this.close(); throw abortError(); }
@@ -86,9 +89,10 @@ export class NativeRealtimeSessionClient {
     this.rejectReady = rejectReady;
     const transportId = this.id;
     const readyTimer = setTimeout(() => rejectReady(new Error(t('实时语音初始化超时'))), 30000);
-    const factories = { gemini_live: createGeminiLiveProtocol, doubao_realtime: createDoubaoRealtimeProtocol, nova_sonic: createNovaSonicProtocol };
+    const factories = { gemini_live: createGeminiLiveProtocol, doubao_realtime: createDoubaoRealtimeProtocol, nova_sonic: createNovaSonicProtocol, custom: createCustomRealtimeProtocol };
     this.protocol = (factories[this.config.provider] || createJsonRealtimeProtocol)({
       profile: this.config, instructions: this.instructions, history: this.history.slice(-40), resumeHandle: this.resumeHandle,
+      sessionConfig: this.sessionConfig, playbackTime: () => this.audio?.context?.currentTime || 0,
       onResumeHandle: handle => { this.resumeHandle = handle; }, renew: () => this.requestRenew(),
       send: message => this.send({ kind: 'text', data: JSON.stringify(message) }), sendBinary: data => this.send({ kind: 'binary', data }),
       emit: event => this.emit(event), ready: () => { if (generation === this.generation && !this.closed) { this.streaming = true; if (this.config.provider !== 'nova_sonic') resolveReady(); } },
@@ -126,7 +130,9 @@ export class NativeRealtimeSessionClient {
       } else if (isGeminiVertex(config)) credentials = { apiKey: config.credentials.vertexaiApiKey };
       else if (config.provider === 'gemini_live') credentials = { apiKey: config.credentials.apiKey };
       if (this.closed || generation !== this.generation) throw abortError();
-      await this.invoke('realtime_transport_open', { id: transportId, connection: { provider: config.provider, model: config.model, region: config.region || '', workspaceId: config.workspaceId || '', geminiBackend: config.geminiBackend || '', vertexaiAuthMode: config.vertexaiAuthMode || '', credentials }, onEvent: this.channel });
+      await this.invoke('realtime_transport_open', { id: transportId, connection: { provider: config.provider, model: config.model, region: config.region || '', workspaceId: config.workspaceId || '', geminiBackend: config.geminiBackend || '', vertexaiAuthMode: config.vertexaiAuthMode || '', credentials,
+        ...(config.provider === 'custom' ? customRealtimeTransportFields(config, credentials) : {}),
+      }, onEvent: this.channel });
       if (this.closed || generation !== this.generation) {
         await this.invoke('realtime_transport_close', { id: transportId }).catch(() => {}); throw abortError();
       }
@@ -158,7 +164,7 @@ export class NativeRealtimeSessionClient {
       this.emit({ type: 'response.cancelled', response: { ...final.event.response, id, status: 'cancelled' }, response_id: id }, true);
     }
   }
-  sendEvent(event) { if (event.type === 'response.cancel') this.protocol?.cancel(); }
+  sendEvent(event) { if (this.protocol?.sendEvent) this.protocol.sendEvent(event); else if (event.type === 'response.cancel') this.protocol?.cancel(); }
   sendToolResults(results) { if (!this.closed) this.protocol?.toolResults?.(results); }
   sendTaskUpdate(text) {
     if (this.closed) return;

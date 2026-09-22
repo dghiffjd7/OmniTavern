@@ -34,6 +34,7 @@ export class RealtimePcmAudio {
     const source = this.context.createBufferSource(); source.buffer = buffer; source.connect(this.gain); this.sources.add(source);
     source.onended = () => { source.disconnect(); this.sources.delete(source); };
     const start = Math.max(this.context.currentTime + .015, this.nextTime); source.start(start); this.nextTime = start + buffer.duration;
+    return { start, end: this.nextTime };
   }
   clear() { for (const source of this.sources) { try { source.stop(); source.disconnect(); } catch {} } this.sources.clear(); this.nextTime = this.context?.currentTime || 0; }
   setMicrophoneMuted(value) { this.muted = value; this.meter?.setMuted('input', value); return true; }

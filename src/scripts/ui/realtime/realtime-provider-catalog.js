@@ -1,5 +1,6 @@
 import { REALTIME_SYSTEM_VOICES, OPENAI_LIVE_VOICES, getRealtimeSystemVoices } from './realtime-voice-catalog.js';
 import { isOpenAiLive, isOpenAiLiveModel, OPENAI_LIVE_BACKEND_MODEL } from './openai-live-config.js';
+import { CUSTOM_REALTIME_PROTOCOL, validateCustomRealtimeProfile, customRealtimeHeaders } from './custom-realtime-config.js';
 // Presets are deliberately protocol specific. Voice identifiers remain case sensitive.
 const voiceIds = provider => REALTIME_SYSTEM_VOICES[provider].map(voice => voice.id);
 export const REALTIME_PROVIDERS = Object.freeze({
@@ -10,6 +11,7 @@ export const REALTIME_PROVIDERS = Object.freeze({
   step_realtime: { label: 'StepAudio Realtime', models: ['stepaudio-2.5-realtime'], voices: voiceIds('step_realtime'), regions: ['cn', 'global'], regionLabel: 'Step 接入站点', regionLabels: { cn: '中国大陆（stepfun.com）', global: '国际版（stepfun.ai）' }, inputRate: 24000, outputRate: 24000, clone: 'file' },
   xai_voice: { label: 'xAI Grok Voice', models: ['grok-voice-think-fast-2.0'], voices: voiceIds('xai_voice'), inputRate: 24000, outputRate: 24000, clone: 'import' },
   nova_sonic: { label: 'Nova 2 Sonic', models: ['amazon.nova-2-sonic-v1:0'], voices: voiceIds('nova_sonic'), regions: ['us-east-1', 'us-west-2', 'ap-northeast-1'], inputRate: 16000, outputRate: 24000 },
+  custom: { label: '自定义', models: ['gpt-realtime-2.1'], voices: ['marin'], inputRate: 24000, outputRate: 24000, contextMode: 'per_turn' },
 });
 export const isDoubaoSc2 = profile => profile?.provider === 'doubao_realtime' && String(profile.model || '').startsWith('2.');
 export const getRealtimeProvider = id => REALTIME_PROVIDERS[id] || null;
@@ -34,12 +36,14 @@ export const makeRealtimeProfile = (provider = 'gemini_live') => {
   if (!preset) throw new Error('未知实时语音服务商');
   return { id: '', name: preset.label, provider, model: preset.models[0], voice: preset.voices[0], voiceKind: 'system', region: preset.regions?.[0] || '', workspaceId: '', credentialId: '', customVoices: [], idleTimeoutMinutes: 10, replyLanguage: '', transcriptionLanguage: '',
     ...(provider === 'openai' ? { openaiBackend: 'realtime', liveBackendModel: OPENAI_LIVE_BACKEND_MODEL } : {}),
+    ...(provider === 'custom' ? { customProtocol: CUSTOM_REALTIME_PROTOCOL, endpoint: '', authMode: 'bearer', authHeader: 'api-key', transcriptionModel: 'gpt-4o-mini-transcribe' } : {}),
     ...(provider === 'gemini_live' ? { geminiBackend: 'developer', vertexaiAuthMode: 'service_account', vertexaiProjectId: '' } : {}) };
 };
 export const validateRealtimeProfile = profile => {
   const preset = getRealtimeProvider(profile?.provider);
   if (!preset) throw new Error('未知实时语音服务商');
   if (!String(profile.name || '').trim() || !String(profile.model || '').trim()) throw new Error('请填写设置档名称和模型');
+  if (profile.provider === 'custom') validateCustomRealtimeProfile(profile);
   if (profile.provider === 'openai') {
     if (!['realtime', 'live'].includes(profile.openaiBackend || 'realtime')) throw new Error('请选择 OpenAI 语音接入方式');
     if (isOpenAiLive(profile)) {
@@ -79,6 +83,7 @@ export const validateRealtimeProfile = profile => {
   return profile;
 };
 export const validateRealtimeCredentials = (provider, credentials, profile = {}) => {
+  if (provider === 'custom') { customRealtimeHeaders(profile, credentials); return credentials; }
   if (isGeminiVertex({ ...profile, provider })) {
     if (profile.vertexaiAuthMode === 'service_account') parseRealtimeServiceAccount(credentials.vertexaiServiceAccount);
     else if (!credentials.vertexaiApiKey) throw new Error('请填写 Vertex AI Express API Key');

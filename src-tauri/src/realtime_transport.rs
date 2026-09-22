@@ -9,7 +9,7 @@ use std::{
 };
 use tauri::{ipc::Channel, State, WebviewWindow};
 use tokio::sync::mpsc;
-use tokio_tungstenite::tungstenite::{client::IntoClientRequest, http::HeaderValue, Message};
+use tokio_tungstenite::tungstenite::{client::IntoClientRequest, http::{HeaderName, HeaderValue}, Message};
 
 const FRAME_LIMIT: usize = 512 * 1024;
 #[derive(Clone, Serialize)]
@@ -40,12 +40,22 @@ pub struct Credentials {
     session_token: String,
     #[serde(default)]
     access_token: String,
+    #[serde(default)]
+    extra_headers: HashMap<String, String>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Connection {
     provider: String,
     model: String,
+    #[serde(default)]
+    endpoint: String,
+    #[serde(default)]
+    custom_protocol: String,
+    #[serde(default)]
+    auth_mode: String,
+    #[serde(default)]
+    auth_header: String,
     #[serde(default)]
     region: String,
     #[serde(default)]
@@ -83,6 +93,7 @@ fn validate(input: &Connection) -> Result<(), String> {
         return Err("Invalid realtime model".into());
     }
     match input.provider.as_str() {
+        "custom" => { custom_websocket_request(input)?; }
         "gemini_live" if input.gemini_backend == "vertex" => {
             match input.vertexai_auth_mode.as_str() {
                 "service_account" => {
@@ -179,6 +190,7 @@ fn websocket_request(
     input: &Connection,
 ) -> Result<tokio_tungstenite::tungstenite::http::Request<()>, String> {
     validate(input)?;
+    if input.provider == "custom" { return custom_websocket_request(input); }
     let vertex = input.provider == "gemini_live" && input.gemini_backend == "vertex";
     let endpoint = match input.provider.as_str() {
         "gemini_live" if vertex => {
@@ -235,6 +247,48 @@ fn websocket_request(
             &format!("Bearer {}", input.credentials.api_key),
         )?;
     }
+    Ok(request)
+}
+fn custom_header_name(value: &str) -> Result<HeaderName, String> {
+    let name = HeaderName::from_bytes(value.as_bytes()).map_err(|_| "Invalid custom realtime header")?;
+    if matches!(name.as_str(), "host" | "connection" | "upgrade" | "content-length" | "transfer-encoding")
+        || name.as_str().starts_with("proxy-") || name.as_str().starts_with("sec-websocket-") {
+        return Err("Reserved custom realtime header".into());
+    }
+    Ok(name)
+}
+fn custom_websocket_request(input: &Connection) -> Result<tokio_tungstenite::tungstenite::http::Request<()>, String> {
+    if input.custom_protocol != "openai_realtime" { return Err("Unsupported custom realtime protocol".into()); }
+    let mut url = reqwest::Url::parse(&input.endpoint).map_err(|_| "Invalid custom realtime endpoint")?;
+    let local = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
+    if input.endpoint.len() > 4096 || !(url.scheme() == "wss" || (url.scheme() == "ws" && local))
+        || url.host_str().is_none() || !url.username().is_empty() || url.password().is_some() || url.fragment().is_some() {
+        return Err("Custom realtime requires WSS, or WS on localhost".into());
+    }
+    // Keep vendor routing parameters, with exactly one authoritative model ID.
+    let params: Vec<(String, String)> = url.query_pairs().filter(|(name, _)| name != "model").map(|(k, v)| (k.into_owned(), v.into_owned())).collect();
+    url.set_query(None);
+    url.query_pairs_mut().extend_pairs(params).append_pair("model", &input.model);
+    let mut request = url.as_str().into_client_request().map_err(|_| "Invalid custom realtime request")?;
+    let extra = &input.credentials.extra_headers;
+    if extra.len() > 32 || extra.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>() > 16384 { return Err("Custom realtime headers too large".into()); }
+    let mut seen = std::collections::HashSet::new();
+    for (name, value) in extra {
+        let name = custom_header_name(name)?;
+        if !seen.insert(name.clone()) || value.len() > 4096 || value.bytes().any(|b| b < 32 || b == 127) { return Err("Invalid custom realtime header value".into()); }
+        request.headers_mut().insert(name, HeaderValue::from_str(value).map_err(|_| "Invalid custom realtime header value")?);
+    }
+    let name = match input.auth_mode.as_str() {
+        "none" => return Ok(request),
+        "bearer" => custom_header_name("authorization")?,
+        "header" => custom_header_name(&input.auth_header)?,
+        _ => return Err("Invalid custom realtime authentication mode".into()),
+    };
+    if seen.contains(&name) { return Err("Duplicate custom realtime authentication header".into()); }
+    let key = input.credentials.api_key.trim();
+    if key.is_empty() || key.len() > 4096 || key.bytes().any(|b| b < 32 || b == 127) { return Err("Missing or invalid custom realtime API key".into()); }
+    let value = if input.auth_mode == "bearer" { format!("Bearer {key}") } else { key.to_string() };
+    request.headers_mut().insert(name, HeaderValue::from_str(&value).map_err(|_| "Invalid custom realtime credential")?);
     Ok(request)
 }
 async fn run_ws(
@@ -490,6 +544,47 @@ mod tests {
     use super::*;
     fn input(provider: &str) -> Connection {
         serde_json::from_value(serde_json::json!({"provider":provider,"model":"test","region":"cn-beijing","credentials":{"apiKey":"fake-secret","appId":"123"}})).unwrap()
+    }
+    fn custom_input() -> Connection {
+        serde_json::from_value(serde_json::json!({
+            "provider":"custom", "customProtocol":"openai_realtime", "model":"vendor/voice",
+            "endpoint":"wss://voice.example.test/proxy/v1/realtime?route=west&model=old&model=duplicate",
+            "authMode":"bearer", "authHeader":"api-key", "credentials":{"apiKey":"test-key", "extraHeaders":{"X-Route":"regional"}}
+        })).unwrap()
+    }
+    #[test]
+    fn custom_realtime_preserves_endpoint_parameters_and_uses_one_model() {
+        let request = websocket_request(&custom_input()).unwrap();
+        let url = reqwest::Url::parse(&request.uri().to_string()).unwrap();
+        assert_eq!(url.path(), "/proxy/v1/realtime");
+        assert_eq!(url.query_pairs().filter(|(key, _)| key == "model").collect::<Vec<_>>(), vec![("model".into(), "vendor/voice".into())]);
+        assert!(url.query_pairs().any(|(key, value)| key == "route" && value == "west"));
+        assert_eq!(request.headers()["authorization"], "Bearer test-key");
+        assert_eq!(request.headers()["x-route"], "regional");
+        assert!(!request.uri().to_string().contains("test-key"));
+    }
+    #[test]
+    fn custom_realtime_authentication_is_explicit() {
+        let mut item = custom_input(); item.auth_mode = "header".into();
+        let request = websocket_request(&item).unwrap();
+        assert_eq!(request.headers()["api-key"], "test-key"); assert!(!request.headers().contains_key("authorization"));
+        item.auth_mode = "none".into(); item.credentials.api_key.clear();
+        assert!(!websocket_request(&item).unwrap().headers().contains_key("authorization"));
+        item.auth_mode = "bearer".into(); assert!(websocket_request(&item).is_err());
+    }
+    #[test]
+    fn custom_realtime_rejects_connection_header_overrides_and_insecure_remote_urls() {
+        for endpoint in ["ws://voice.example.test/", "file:///C:/secret", "wss://user:pass@voice.example.test/", "wss://voice.example.test/#fragment"] {
+            let mut item = custom_input(); item.endpoint = endpoint.into(); assert!(websocket_request(&item).is_err());
+        }
+        for endpoint in ["ws://127.0.0.1:1234/v1/realtime", "ws://[::1]:1234/v1/realtime"] {
+            let mut item = custom_input(); item.endpoint = endpoint.into(); assert!(websocket_request(&item).is_ok());
+        }
+        for (name, value) in [("Host", "other.test"), ("Sec-WebSocket-Key", "override"), ("Authorization", "duplicate"), ("x-newline", "one\r\ntwo")] {
+            let mut item = custom_input(); item.credentials.extra_headers.insert(name.into(), value.into()); assert!(websocket_request(&item).is_err());
+        }
+        let mut item = custom_input(); item.credentials.extra_headers.insert("x-route".into(), "duplicate".into()); assert!(websocket_request(&item).is_err());
+        let mut item = custom_input(); item.custom_protocol = "unknown".into(); assert!(websocket_request(&item).is_err());
     }
     #[test]
     fn restricts_provider_and_workspace() {

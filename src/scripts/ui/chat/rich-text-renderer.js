@@ -4178,7 +4178,26 @@ export const splitFencedCodeBlocks = (text) => {
         if (blockStart > last) {
             out.push({ type: 'text', text: src.slice(last, blockStart) });
         }
-        out.push({ type: 'code', lang: String(m[2] || '').trim().toLowerCase(), code: String(m[3] || '') });
+        const lang = String(m[2] || '').trim().toLowerCase();
+        let code = String(m[3] || '');
+        // A display-regex replacement may join its closing fence directly to
+        // the model's next tag (```<game>, for example). Recover only after a
+        // complete HTML document, verified outside script/style/comment text.
+        // Generic code fences retain the strict CommonMark boundary above.
+        if (!lang || lang === 'html' || lang === 'htm') {
+            const joinedCloseRe = /\r?\n[ \t]{0,3}```[ \t]*(?=<\/?[a-z][\w:.-]*(?:[ \t][^>\r\n]*)?\/?>)/gi;
+            let joined;
+            while ((joined = joinedCloseRe.exec(code))) {
+                const documentCode = code.slice(0, joined.index);
+                if (!isCompleteHtmlDocumentShell(documentCode)) continue;
+                const documentParts = splitWholeHtmlDocumentParts(documentCode);
+                if (documentParts?.length !== 1 || documentParts[0].type !== 'code') continue;
+                re.lastIndex = src.indexOf('\n', blockStart) + 1 + joined.index + joined[0].length;
+                code = documentCode;
+                break;
+            }
+        }
+        out.push({ type: 'code', lang, code });
         last = re.lastIndex;
         if (m.index === re.lastIndex) re.lastIndex += 1;
     }

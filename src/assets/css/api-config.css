@@ -540,6 +540,11 @@ body #config-panel.api-config-panel :is(.api-config-voice-mode, .api-config-voic
   margin-top: 9px;
 }
 
+#rt-resolved-endpoint {
+  grid-column: 1 / -1;
+  overflow-wrap: anywhere;
+}
+
 .api-config-field-status:empty,
 .api-config-realtime-status:empty { display: none; }
 

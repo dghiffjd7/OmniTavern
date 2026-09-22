@@ -65,7 +65,7 @@ export const normalizeRealtimeVoiceSettings = (value = {}) => {
       transcriptionModel: '', transcriptionLanguage: '', contextMode: 'full_duplex' };
   }
   if (input.provider && input.provider !== 'openai' && getRealtimeProvider(input.provider)) {
-    return { ...normalizeRealtimeVoiceSettings({}), ...input, replyLanguage: normalizeReplyLanguage(input.replyLanguage), voice: String(input.voice || '').trim(), contextMode: 'session_snapshot' };
+    return { ...normalizeRealtimeVoiceSettings({}), ...input, replyLanguage: normalizeReplyLanguage(input.replyLanguage), voice: String(input.voice || '').trim(), contextMode: input.provider === 'custom' ? 'per_turn' : 'session_snapshot' };
   }
   const configRefInput = input.configRef && typeof input.configRef === 'object' ? input.configRef : {};
   const rawScope = String(configRefInput.scope || '').trim().toLowerCase();

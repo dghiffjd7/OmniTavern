@@ -1,6 +1,6 @@
 import { OpenAiLiveSessionClient } from './openai-live-session-client.js';
 import { getRealtimeProfileStore } from '../../storage/realtime-profile-store.js';
-import { registerRealtimeSettingsTarget } from './realtime-settings-target.js';
+import { registerRealtimeSettingsTarget, isRealtimeSettingsCheckActive } from './realtime-settings-target.js';
 import { NativeRealtimeSessionClient } from './native-realtime-session-client.js';
 import { OpenAiRealtimeSessionClient } from './openai-realtime-session-client.js';
 import { createRealtimeCallPanel } from './realtime-call-panel.js';
@@ -168,6 +168,7 @@ export const createRealtimeCallAppRuntime = ({
   };
 
   const startCall = async (target = getCallTarget?.() || {}) => {
+    if (isRealtimeSettingsCheckActive()) { toast?.warning?.('实时连接检查中，请稍候或取消检查'); return false; }
     if (!target?.supported) {
       toast?.warning?.(target?.reason || '当前会话暂不支持实时语音');
       return false;
@@ -205,7 +206,7 @@ export const createRealtimeCallAppRuntime = ({
   const handleButtonClick = () => startCall();
 
   const getSettingsTarget = () => settingsTarget?.uiMode === 'maid' ? settingsTarget : getCallTarget?.();
-  const unregisterSettingsTarget = registerSettingsTarget(getSettingsTarget, () => startCall(getSettingsTarget()));
+  const unregisterSettingsTarget = registerSettingsTarget(getSettingsTarget, () => startCall(getSettingsTarget()), () => startPending || runtime.getState().status !== 'idle');
 
   const endForLifecycle = reason => {
     // Live drains timestamped fragments and final usage before invalidation.
