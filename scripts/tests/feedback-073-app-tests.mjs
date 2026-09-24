@@ -48,7 +48,7 @@ test('creating/opening a normal room while writing renders it in chat mode', asy
     beginChatEnterRequest: noop, document: { getElementById: () => null },
     runSessionEnterFlow: async options => { frames.push({ mode: sandbox.uiMode, sessionId: options.sessionId, messages: messages.get(options.sessionId) }); return {}; },
     recordDebugTraceEvent: noop, uiLog: noop, chatGeneratedImagePreview: { revealPendingForSession: noop },
-    syncRejectedFormatRepairBanner: noop, syncProtocolRevealButtonState: noop, syncRealtimeCallButtonAvailability: noop,
+    syncRejectedFormatRepairBanner: noop, syncAgentSuggestionBanner: noop, syncProtocolRevealButtonState: noop, syncRealtimeCallButtonAvailability: noop,
     maidGuideEmit: noop, window: {}, persistUiMode: () => persistedModes.push(sandbox.uiMode), applyUiModeUI: noop,
     rpToolbar: { style: { display: '' } }, backToListBtn: { style: { display: 'none' } },
     refreshChatAndContacts: noop,

@@ -10,6 +10,7 @@ import {
     settingsStore: {
       getBoundProfileId: () => '',
       getPersonaPrompt: () => 'test persona',
+      listSubAgents: () => [{ id: 'sub', enabled: true }, { id: 'disabled', enabled: false }],
     },
     configManager: {
       ensureStores: async () => {
@@ -23,6 +24,7 @@ import {
   assert.equal(runtime.reason, 'maid_profile_not_bound');
   assert.equal(runtime.maidPrompt, 'test persona');
   assert.equal(runtime.personaPrompt, 'test persona');
+  assert.deepEqual(runtime.subAgents.map(item => item.id), ['sub'], 'voice-only tasks still see independently configured sub-agents');
   console.log('ok - maid runtime config resolver refuses unbound current config fallback');
 }
 
@@ -58,6 +60,7 @@ console.log('ok - maid runtime config resolver uses explicit maid profile');
     settingsStore: {
       getBoundProfileId: () => 'vision-main',
       getFallbackProfileId: () => 'text-fallback',
+      getGenerationSettings: () => ({ reasoningMode: 'on', reasoningEffort: 'low' }),
     },
     configManager: {
       ensureStores: async () => {},
@@ -71,6 +74,7 @@ console.log('ok - maid runtime config resolver uses explicit maid profile');
   const runtime = await resolver();
   assert.equal(runtime.fallbackConfig.provider, 'deepseek');
   assert.equal(runtime.fallbackConfig.model, 'deepseek-chat');
+  assert.deepEqual(runtime.generationSettings, { reasoningMode: 'on', reasoningEffort: 'low' }, 'maid reasoning settings travel with the runtime');
   assert.equal(runtime.fallbackProfileId, 'text-fallback');
   assert.equal(typeof runtime.fallbackClient.chat, 'function');
   console.log('ok - maid runtime config exposes fallback capability metadata');

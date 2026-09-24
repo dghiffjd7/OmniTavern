@@ -1323,6 +1323,7 @@ export class ChatStore {
     this._v2ThreadState = new Map();
     this._recentMessageLoads = new Map();
     this._threadLoadEpochs = new Map();
+    this._messageStructureRevisions = new WeakMap();
     this._pendingThreadResets = new Map();
     this._diskBacked = false;
     this._lsDisabled = false;
@@ -2196,6 +2197,11 @@ export class ChatStore {
     return this.state.sessions[sid]?.messages || [];
   }
 
+  // 配合消息数组引用和长度，用于识别原地更新角色/ID 后的索引失效；正文流式更新不增加版本。
+  getMessageStructureRevision(id = this.currentId) {
+    return this._messageStructureRevisions.get(this.getMessages(id)) || 0;
+  }
+
   getLastMessage(id = this.currentId) {
     const sid = String(id || '').trim();
     if (!sid) return null;
@@ -2871,8 +2877,12 @@ export class ChatStore {
     if (!session || !session.messages) return null;
     const idx = session.messages.findIndex(m => m.id === msgId);
     if (idx === -1) return null;
-    const updated = ensureId({ ...session.messages[idx], ...updater });
+    const previous = session.messages[idx];
+    const updated = ensureId({ ...previous, ...updater });
     session.messages[idx] = updated;
+    if (previous.id !== updated.id || previous.role !== updated.role) {
+      this._messageStructureRevisions.set(session.messages, this.getMessageStructureRevision(sid) + 1);
+    }
     if (typeof updater?.rawOriginal === 'string') {
       this._persistRawOriginal(updated, sid);
     }

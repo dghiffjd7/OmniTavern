@@ -6381,7 +6381,7 @@ export class ScriptRuntime {
     const overrides = sessionId ? this.presets?.getInUsePresetRegexOverrides?.('openai', {
       sessionId, uiMode: sessionId.startsWith('rp:') ? 'rp' : 'chat',
     }) || [] : [];
-    return (regexStore.listLocalSets?.() || []).filter((set) => {
+    const isBoundToPreset = (set) => {
       const bind = set?.bind;
       if (!bind || bind.type !== 'preset' || String(bind.presetType || '').trim() !== 'openai') return false;
       const ids = [
@@ -6389,7 +6389,9 @@ export class ScriptRuntime {
         bind.presetId,
       ].map((value) => String(value || '').trim()).filter(Boolean);
       return ids.includes(id);
-    }).flatMap((set) => (
+    };
+    // 每次脚本事件都会重建上下文：先筛出绑定该预设的规则集再复制，避免整库深拷贝
+    return (regexStore.listLocalSets?.(isBoundToPreset) || []).filter(isBoundToPreset).flatMap((set) => (
       (Array.isArray(set?.rules) ? set.rules : []).map(rule => {
         const override = overrides.find(item => item.__chatappSetId === set.id && item.id === rule.id);
         return toTavernRegex(override ? { ...rule, disabled: override.enabled === false } : rule, set.id);

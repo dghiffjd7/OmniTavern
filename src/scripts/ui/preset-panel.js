@@ -40,6 +40,7 @@ import {
 } from './reasoning-effort-combobox-utils.js';
 import { estimateTokens } from '../memory/memory-prompt-utils.js';
 import { buildLineDiff } from '../utils/line-diff-utils.js';
+import { annotateLineDiffWords, renderWordDiffHtml } from '../utils/word-diff-utils.js';
 import {
     applyPresetBlockHunk,
     buildPresetPreviewBlockMap,
@@ -931,6 +932,14 @@ body[data-reduced-motion='on'] .pp-prev-block.pp-prev-flash {
     box-shadow: inset 2px 0 0 rgba(var(--pp-diff-add-rgb), 0.6);
 }
 .pp-ta-delmark { height: 0; border-top: 2px solid rgba(var(--pp-diff-del-rgb), 0.7); }
+/* 逐词：改写配对的行整行浅底，具体改动的字词深底 */
+.pp-ta-add.is-partial { background: rgba(var(--pp-diff-add-rgb), 0.06); }
+.pp-ta-line .wd-ins { text-decoration: none; color: transparent; border-radius: 3px; background: rgba(var(--pp-diff-add-rgb), 0.3); }
+.pp-diff-ins.is-partial { background: rgba(var(--pp-diff-add-rgb), 0.06); }
+.pp-diff-del.is-partial { background: rgba(var(--pp-diff-del-rgb), 0.05); text-decoration: none; opacity: 1; }
+.pp-diff-ins .wd-ins, .pp-diff-del .wd-del { color: inherit; text-decoration: none; border-radius: 3px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+.pp-diff-ins .wd-ins { background: rgba(var(--pp-diff-add-rgb), 0.26); }
+.pp-diff-del .wd-del { background: rgba(var(--pp-diff-del-rgb), 0.24); text-decoration: line-through; }
 /* 二级卡片上的快捷操作：仅已修改的卡显示 */
 .pp-block .pp-block-quick { display: none; gap: 4px; margin-right: 2px; }
 .pp-block.is-modified .pp-block-quick { display: inline-flex; }
@@ -4976,11 +4985,15 @@ export class PresetPanel {
                 if (!ta.isConnected) return;
                 const baseC = String(this.openaiBlockBase?.get?.(identifier)?.content ?? '');
                 if (String(ta.value ?? '') === baseC) { taMirror.innerHTML = ''; return; }
-                const { rows } = buildLineDiff(baseC, ta.value, { collapseContext: false });
+                const rows = annotateLineDiffWords(buildLineDiff(baseC, ta.value, { collapseContext: false }).rows);
                 let html = '';
                 for (const r of rows) {
                     if (r.type === 'del') { html += '<div class="pp-ta-delmark"></div>'; continue; }
-                    html += `<div class="pp-ta-line${r.type === 'add' ? ' pp-ta-add' : ''}">${escapeHtml(r.text)}</div>`;
+                    // 改写配对的行：透明文字与编辑框逐字对齐，只给改动的字词铺深底
+                    const lineHtml = r.type === 'add' && r.words
+                        ? renderWordDiffHtml(r.words, { side: 'new', escape: escapeHtml })
+                        : escapeHtml(r.text);
+                    html += `<div class="pp-ta-line${r.type === 'add' ? ' pp-ta-add' : ''}${r.words ? ' is-partial' : ''}">${lineHtml}</div>`;
                 }
                 taMirror.style.width = `${ta.clientWidth}px`;
                 taMirror.innerHTML = html;
@@ -6886,7 +6899,7 @@ export class PresetPanel {
     /* 区块 diff（红删绿增，行级；复用格式修复的 line-diff-utils）。
        连续变更行为一个 hunk，hunk 末行右侧紧跟小型 SVG 操作（hunk 级接受/回滚）。 */
     renderBlockDiffHtml(baseText, draftText, blockIdAttr = '') {
-        const { rows } = buildLineDiff(baseText, draftText, { collapseContext: false });
+        const rows = annotateLineDiffWords(buildLineDiff(baseText, draftText, { collapseContext: false }).rows);
         const isChanged = r => r?.type === 'del' || r?.type === 'add';
         let html = '';
         let hunk = -1;
@@ -6895,9 +6908,11 @@ export class PresetPanel {
             const nl = i < rows.length - 1 ? '\n' : '';
             if (!isChanged(r)) { html += `${escapeHtml(r.text)}${nl}`; continue; }
             if (!isChanged(rows[i - 1])) hunk += 1;
+            // 改写配对的行只在行内标出具体改动的字词，文字内容不变
+            const words = r.words ? renderWordDiffHtml(r.words, { side: r.type === 'del' ? 'old' : 'new', escape: escapeHtml }) : '';
             const body = r.type === 'del'
-                ? `<del class="pp-diff-del">${escapeHtml(r.text)}</del>`
-                : `<ins class="pp-diff-ins">${escapeHtml(r.text)}</ins>`;
+                ? `<del class="pp-diff-del${words ? ' is-partial' : ''}">${words || escapeHtml(r.text)}</del>`
+                : `<ins class="pp-diff-ins${words ? ' is-partial' : ''}">${words || escapeHtml(r.text)}</ins>`;
             // hunk 末行：换行前插紧跟的小型接受/回滚操作
             const actions = !isChanged(rows[i + 1])
                 ? `<span class="pp-diff-actions" contenteditable="false">`

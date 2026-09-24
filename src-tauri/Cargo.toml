@@ -1,6 +1,6 @@
 [package]
 name = "omnitavern"
-version = "0.7.3-diagnose-1"
+version = "0.7.3-diagnose-2"
 description = "A cross-platform chat application"
 authors = ["you"]
 edition = "2021"
@@ -53,3 +53,8 @@ windows = { version = "0.61", features = ["Win32_System_Com", "Win32_System_Com_
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
+
+# dev 构建：第三方依赖（serde_json、rustls、SQLite、image 等）按优化编译，自身代码仍保持可调试。
+# 只影响 `tauri dev`，release 使用默认 release 配置；首次编译会慢一些。
+[profile.dev.package."*"]
+opt-level = 2

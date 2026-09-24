@@ -21,7 +21,7 @@ export const resolveEnabledPreset = (appBridge, presetType, context = {}) => {
   const type = String(presetType || '').trim();
   if (!type) return {};
   try {
-    const enabled = getPresetStore(appBridge)?.getState?.()?.enabled || {};
+    const enabled = getPresetStore(appBridge)?.getSelectionState?.()?.enabled || {};
     if (!enabled?.[type]) return {};
   } catch {
     return {};

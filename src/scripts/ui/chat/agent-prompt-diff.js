@@ -1,4 +1,5 @@
 import { buildLineDiff } from '../../utils/line-diff-utils.js';
+import { annotateLineDiffWords, renderWordDiffHtml } from '../../utils/word-diff-utils.js';
 import { applyPresetBlockHunk, normalizePresetBlockText } from '../preset-preview-utils.js';
 import { t } from '../../i18n/index.js';
 import { promptLineOffsets } from './agent-prompt-selection-model.js';
@@ -20,7 +21,8 @@ export const createAgentPromptDiffCache = () => {
       if (prior?.base === base && prior.draft === draft) return prior;
       const diff = buildLineDiff(base, draft, { collapseContext:false });
       let hunk = -1, changing = false;
-      const rows = diff.rows.map(row => {
+      // 改写配对的删行/增行附上字词分组：行结构与文字不变，只在行内标出具体改动
+      const rows = annotateLineDiffWords(diff.rows).map(row => {
         const changed = row.type === 'add' || row.type === 'del';
         if (changed && !changing) hunk++;
         changing = changed;
@@ -43,8 +45,11 @@ export const renderAgentPromptDiff = (diff, fieldId, { busy = false, canSave = t
   const before=promptLineOffsets(diff.base),after=promptLineOffsets(diff.draft);
   const body=diff.rows.map((row,index) => {
     const text = escapeHtml(row.text) || '&#8203;';
-    const body = row.type === 'del' ? `<del class="prompt-diff-del">${text}</del>`
-      : row.type === 'add' ? `<ins class="prompt-diff-add">${text}</ins>` : text;
+    const words = row.words && (row.type === 'del' || row.type === 'add')
+      ? renderWordDiffHtml(row.words, { side: row.type === 'del' ? 'old' : 'new', escape: escapeHtml })
+      : '';
+    const body = row.type === 'del' ? `<del class="prompt-diff-del${words ? ' is-partial' : ''}">${words || text}</del>`
+      : row.type === 'add' ? `<ins class="prompt-diff-add${words ? ' is-partial' : ''}">${words || text}</ins>` : text;
     const last = row.hunk >= 0 && diff.rows[index+1]?.hunk !== row.hunk;
     const action = (mode,label,svg) => `<button type="button" class="prompt-diff-${mode}" data-prompt-diff-action="${mode}" data-prompt-diff-field="${escapeHtml(fieldId)}" data-prompt-diff-hunk="${row.hunk}" data-prompt-diff-version="${diff.version}" aria-label="${escapeHtml(t(label))}" title="${escapeHtml(t(label))}"${busy || (mode==='accept' && !canSave)?' disabled':''}>${svg}</button>`;
     const attrs=[['base',row.oldLine,before],['draft',row.newLine,after]].filter(([,line])=>line!==null).map(([mode,line,offsets])=>` data-prompt-${mode}-start="${offsets[line-1]}" data-prompt-${mode}-end="${offsets[line-1]+row.text.length}"`).join('');

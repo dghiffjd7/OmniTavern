@@ -26,6 +26,8 @@ export const createMaidRuntimeConfigResolver = ({
     : (settingsStore?.listSubAgents?.() || []);
   const subAgents = rawSubAgents.filter(item => item?.enabled !== false);
   const maidPrompt = trim(settingsStore?.getMaidPrompt?.() || settingsStore?.getPersonaPrompt?.());
+  // 女仆思考设置随运行时下发，由各调用按实际模型（主档/降级档/语音档）换成对应参数
+  const generationSettings = settingsStore?.getGenerationSettings?.() || null;
   if (!profileId) {
     return {
       configured: false,
@@ -33,7 +35,9 @@ export const createMaidRuntimeConfigResolver = ({
       profileId: '',
       maidPrompt,
       personaPrompt: maidPrompt,
+      generationSettings,
       reason: 'maid_profile_not_bound',
+      subAgents,
     };
   }
 
@@ -50,7 +54,9 @@ export const createMaidRuntimeConfigResolver = ({
         profileId,
         maidPrompt,
         personaPrompt: maidPrompt,
+        generationSettings,
         reason: 'maid_profile_missing',
+        subAgents,
       };
     }
     const ready = Boolean(isConfigReady(config));
@@ -90,6 +96,7 @@ export const createMaidRuntimeConfigResolver = ({
       profileId,
       maidPrompt,
       personaPrompt: maidPrompt,
+      generationSettings,
       bindingSource: 'maid',
       reason: client ? '' : 'maid_profile_incomplete',
     };
@@ -101,7 +108,9 @@ export const createMaidRuntimeConfigResolver = ({
       profileId,
       maidPrompt,
       personaPrompt: maidPrompt,
+      generationSettings,
       reason: error?.message || 'maid_profile_error',
+      subAgents,
       error,
     };
   }

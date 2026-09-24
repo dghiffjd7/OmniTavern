@@ -108,9 +108,24 @@ export const searchMaidCapabilityConcepts = (
   }
   if (
     hasPositive(/(?:发送|写(?:入)?|发出|send|write).{0,16}(?:消息|message)/iu) ||
-    hasPositive(/(?:给|向).{0,80}(?:后台)?写入.{0,80}(?:triggerreply\s*:\s*false|只写不回|open\s*:\s*false)/iu)
+    hasPositive(/(?:给|向).{0,80}(?:后台)?写入.{0,80}(?:triggerreply\s*:\s*false|只写不回|open\s*:\s*false)/iu) ||
+    // 口语说法：发一条/发个/传讯息、在某聊天室里发、跟某人说一声、转告某人
+    hasPositive(/(?:发|传|送)\s*(?:一|几)?\s*(?:条|句|个|段|封)?.{0,12}(?:消息|讯息|信息|私信|短信)/iu) ||
+    hasPositive(/(?:在|到|往|去).{0,24}(?:聊天室|私聊|群聊|群里|对话框|房间).{0,12}(?:发|说|讲|回)/iu) ||
+    hasPositive(/(?:跟|和|对|向|给)(?!我|你)[^，,。；;！？!?\n]{1,20}?(?:说一声|说句|说一句|说声|讲一声|讲句|打个招呼|问个好|道晚安|道早安|说晚安|说早安)/iu) ||
+    hasPositive(/(?:转告|告诉)(?!我|你)[^，,。；;！？!?\n]{1,20}?(?:说|：|:)/iu)
   ) {
     add('chat.send_message', 100, 'chat_send');
+  }
+  // 改名/改简介（用户、角色卡、聊天室）；提到正则、预设等其他资源时交给对应功能
+  if (
+    !/(?:正则|规则集|预设|世界书|脚本|设置档|连线|模型|分组|存档|模板|变量|文件)/iu.test(positiveText) && (
+      hasPositive(/(?:改名|重命名|更名|rename)/iu) ||
+      hasPositive(/(?:名字|名称|用户名|昵称|群名|称呼|简介).{0,12}(?:改成|改为|换成|修改|更改|改一下|变更|更新)/iu) ||
+      hasPositive(/(?:修改|更改|变更|改一下|改掉).{0,12}(?:名字|名称|用户名|昵称|群名|称呼|简介)/iu)
+    )
+  ) {
+    add('profile.update', 108, 'profile_rename');
   }
   if (
     has(/(?:查询|读取|查看|只读核对|读回确认).{0,40}(?:会话|聊天室|观测站|私聊).{0,32}世界书绑定/iu) ||
@@ -127,6 +142,38 @@ export const searchMaidCapabilityConcepts = (
   }
   if (hasPositive(/(?:打开|弹出|show|open).{0,16}(?:正则|regex|regexp).{0,12}(?:面板|页面|panel|editor)?/iu)) {
     add('regex.open', 100, 'regex_panel');
+  }
+
+  // 预设 / 正则 / 脚本管理：先按名词进入领域，再按动作给出具体工具
+  const presetNoun = /(?:预设|系统提示词|上下文模板|指令模板|推理模板|提示词条目|preset|sysprompt)/iu;
+  const regexNoun = /(?:正则|正规表达式|替换规则|\bregexp?\b)/iu;
+  const scriptNoun = /(?:脚本|酒馆助手|tavern\s*helper|\bscripts?\b)/iu;
+  const toggleIntent = /(?:启用|停用|开启|关闭|关掉|打开|禁用|开关|enable|disable|turn\s*(?:on|off))/iu;
+  const deleteIntent = /(?:批量删除|删除|删掉|移除|清理(?!后)|delete|remove)/iu;
+  const switchIntent = /(?:切换|换成|换用|改用|换个|换一个|用这个|switch|use\s+the)/iu;
+  const writeIntent = /(?:新建|新增|添加|加一条|写(?:一条|个)?|创建|修改|改成|改一下|更新|create|add|update|modify)/iu;
+  if (presetNoun.test(positiveText)) {
+    add('preset.list', 84, 'preset_domain');
+    add(['preset.switch', 'preset.prompt_entries.toggle'], 58, 'preset_domain');
+    if (deleteIntent.test(positiveText)) add(['preset.delete_many', 'preset.list'], 106, 'preset_batch_delete');
+    else if (/(?:条目|entries?|entry)/iu.test(positiveText) && toggleIntent.test(positiveText)) add(['preset.prompt_entries.toggle', 'preset.list'], 108, 'preset_entry_toggle');
+    else if (switchIntent.test(positiveText)) add(['preset.switch', 'preset.list'], 106, 'preset_switch');
+    else if (has(/(?:有哪些|列出|列表|哪个|哪一个|当前|在用|查看|看看|list|which)/iu)) add('preset.list', 100, 'preset_inventory');
+  }
+  if (regexNoun.test(positiveText) && !hasPositive(/(?:打开|弹出|show|open).{0,16}(?:正则|regex|regexp).{0,12}(?:面板|页面|panel|editor)/iu)) {
+    add('regex.list', 84, 'regex_domain');
+    add(['regex.toggle', 'regex.upsert_rules'], 58, 'regex_domain');
+    if (deleteIntent.test(positiveText)) add(['regex.delete_many', 'regex.list'], 106, 'regex_delete');
+    else if (writeIntent.test(positiveText)) add(['regex.upsert_rules', 'regex.list'], 106, 'regex_write');
+    else if (toggleIntent.test(positiveText)) add(['regex.toggle', 'regex.list'], 106, 'regex_toggle');
+    else if (has(/(?:有哪些|列出|列表|哪些|查看|看看|list|which)/iu)) add('regex.list', 100, 'regex_inventory');
+  }
+  if (scriptNoun.test(positiveText)) {
+    add('script.list', 84, 'script_domain');
+    add('script.toggle_many', 58, 'script_domain');
+    if (deleteIntent.test(positiveText)) add(['script.delete_many', 'script.list'], 106, 'script_delete');
+    else if (toggleIntent.test(positiveText) && !/(?:打开|进入|open).{0,6}(?:脚本|script).{0,6}(?:页面|面板|设置|panel|page)/iu.test(positiveText)) add(['script.toggle_many', 'script.list'], 106, 'script_toggle');
+    else if (has(/(?:有哪些|列出|列表|哪些|查看|看看|list|which)/iu)) add('script.list', 100, 'script_inventory');
   }
 
   const profileCreateIntent = /(?:创建|新建|新增|建立|添加|\bcreate\b)/iu;

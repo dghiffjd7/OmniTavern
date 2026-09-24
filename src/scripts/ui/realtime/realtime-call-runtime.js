@@ -78,6 +78,15 @@ export const createRealtimeCallRuntime = ({
   let timeoutTimer = null;
   let lastActivityAt = 0;
   let idleWarned = false;
+  // 分段计时：只记事件类型与时间，连续同类事件合并为一条（首末时间与次数），供耗时诊断读取
+  const eventTimeline = [];
+  const recordTimeline = (type, detail = '') => {
+    const at = Date.now();
+    const last = eventTimeline.at(-1);
+    if (last && last.type === type && !detail) { last.lastAt = at; last.count += 1; return; }
+    eventTimeline.push({ type, at, lastAt: at, count: 1, ...(detail ? { detail: String(detail).slice(0, 80) } : {}) });
+    if (eventTimeline.length > 400) eventTimeline.shift();
+  };
   let durationWarned = false;
   let endingPromise = null;
   let startGeneration = 0;
@@ -242,6 +251,7 @@ export const createRealtimeCallRuntime = ({
   const handleServerEvent = event => {
     const type = String(event?.type || '').trim();
     if (!type || state.status === 'idle') return;
+    recordTimeline(type);
     if (isLive()) { liveEvents?.handle(event); if (state.status !== 'ending') maidTaskSession?.handle(event); return; }
     if (state.status === 'ending') return;
     maidTaskSession?.handle(event);
@@ -420,6 +430,8 @@ export const createRealtimeCallRuntime = ({
     committedMessageIds = new Set();
     activeResponseId = '';
     connection = null;
+    eventTimeline.length = 0;
+    recordTimeline('app.call_start');
     emitState('requesting_permission', { target: { ...target }, error: '', provider: '', openaiBackend: '', sessionId: '' });
     const startedAt = now();
     try {
@@ -576,7 +588,13 @@ export const createRealtimeCallRuntime = ({
     setMicrophoneMuted,
     setOutputMuted,
     checkTimeouts,
-    notifyTaskUpdate: update => maidTaskSession?.notifyTaskUpdate(update) || false,
+    notifyTaskUpdate: (update) => {
+      recordTimeline('app.task_update', `${update?.kind || 'result'}:${update?.status || ''}`);
+      return maidTaskSession?.notifyTaskUpdate(update) || false;
+    },
+    getEventTimeline: () => eventTimeline.map(item => ({ ...item })),
+    // 语音执行模式下交办任务时读取当前连接（设置档与账号），只在通话进行中可用
+    getConnection: () => (connection && state.status !== 'idle' ? { config: connection.config, settings: connection.settings } : null),
     getState: () => ({ ...state, target: state.target ? { ...state.target } : null }),
     whenIdle: () => eventQueue,
   };

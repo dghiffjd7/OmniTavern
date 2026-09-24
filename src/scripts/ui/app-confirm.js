@@ -16,6 +16,14 @@ let choiceActionsEl = null;
 let choiceResolve = null;
 let choiceKeyHandler = null;
 let choiceAbortCleanup = null;
+let choiceIconEl = null;
+let choiceBadgeEl = null;
+
+// 权限确认（女仆工具）用的图标：caution = 盾牌，danger = 警示三角
+const CHOICE_TONE_ICONS = Object.freeze({
+  caution: '<svg viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 2.7v5.6c0 4.3-2.9 7.6-7 9.2-4.1-1.6-7-4.9-7-9.2V5.7z"/><path d="M9 12l2.2 2.2L15.2 10"/></g></svg>',
+  danger: '<svg viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5L21.5 20h-19z"/><path d="M12 10v4.2M12 17.2h.01"/></g></svg>',
+});
 
 const trimConfirmText = (value, fallback = '') => {
   const text = String(value ?? '').trim();
@@ -57,7 +65,7 @@ const CONFIRM_ITEM_REASON_LABELS = Object.freeze({
   memory_not_active: '当前并非生效记忆',
 });
 
-const renderChoiceBody = (message = '', items = []) => {
+const renderChoiceBody = (message = '', items = [], { hidePlannedStatus = false } = {}) => {
   if (!choiceBodyEl) return;
   choiceBodyEl.replaceChildren();
   const normalizedItems = normalizeAppConfirmItems(items);
@@ -117,10 +125,13 @@ const renderChoiceBody = (message = '', items = []) => {
     }
     rowEl.appendChild(copyEl);
 
-    const statusEl = document.createElement('div');
-    statusEl.className = 'app-confirm-item-status';
-    statusEl.textContent = CONFIRM_ITEM_STATUS_LABELS[item.status] || item.status;
-    rowEl.appendChild(statusEl);
+    // 权限确认里动作由标题旁的标签说明，计划中的项目不再重复标“将删除”（非删除操作会误导）
+    if (!(hidePlannedStatus && item.status === 'planned')) {
+      const statusEl = document.createElement('div');
+      statusEl.className = 'app-confirm-item-status';
+      statusEl.textContent = CONFIRM_ITEM_STATUS_LABELS[item.status] || item.status;
+      rowEl.appendChild(statusEl);
+    }
     listEl.appendChild(rowEl);
   });
   choiceBodyEl.appendChild(listEl);
@@ -185,6 +196,10 @@ const closeChoice = (result) => {
   choiceResolve = null;
   if (choiceOverlay) choiceOverlay.style.display = 'none';
   if (choiceModal) choiceModal.style.display = 'none';
+  choiceModal?.classList.remove('is-permission');
+  if (choiceModal) delete choiceModal.dataset.tone;
+  if (choiceIconEl) choiceIconEl.hidden = true;
+  if (choiceBadgeEl) choiceBadgeEl.hidden = true;
   choiceBodyEl?.replaceChildren();
   choiceBodyEl?.classList.remove('has-confirm-items');
   if (choiceKeyHandler) {
@@ -206,7 +221,9 @@ const ensureChoiceUI = () => {
   choiceModal.style.display = 'none';
   choiceModal.innerHTML = `
     <div class="app-confirm-header">
+      <span class="app-confirm-icon" hidden></span>
       <div class="app-confirm-title">请选择</div>
+      <span class="app-confirm-badge" hidden></span>
       <button type="button" class="app-confirm-close" aria-label="关闭">×</button>
     </div>
     <div class="app-confirm-body"></div>
@@ -214,6 +231,8 @@ const ensureChoiceUI = () => {
   `;
   choiceModal.addEventListener('click', (event) => event.stopPropagation());
 
+  choiceIconEl = choiceModal.querySelector('.app-confirm-icon');
+  choiceBadgeEl = choiceModal.querySelector('.app-confirm-badge');
   choiceTitleEl = choiceModal.querySelector('.app-confirm-title');
   choiceBodyEl = choiceModal.querySelector('.app-confirm-body');
   choiceActionsEl = choiceModal.querySelector('.app-confirm-actions');
@@ -284,6 +303,9 @@ export const appChoice = (options = {}) => {
     defaultActionId = '',
     danger = false,
     signal = null,
+    // 权限确认样式：tone 为 caution / danger 时横排按钮、显示图标与动作标签（badge）
+    tone = '',
+    badge = '',
   } = options || {};
 
   return new Promise((resolve) => {
@@ -301,7 +323,7 @@ export const appChoice = (options = {}) => {
     }
 
     if (choiceTitleEl) choiceTitleEl.textContent = String(title || '请选择');
-    renderChoiceBody(message, items);
+    renderChoiceBody(message, items, { hidePlannedStatus: tone === 'danger' || tone === 'caution' });
     if (choiceActionsEl) {
       choiceActionsEl.innerHTML = '';
       choiceActionsEl.scrollTop = 0;
@@ -328,6 +350,17 @@ export const appChoice = (options = {}) => {
     }
     choiceModal?.classList.add('is-choice');
     choiceModal?.classList.toggle('is-danger', danger);
+    const permissionTone = tone === 'danger' || tone === 'caution' ? tone : '';
+    choiceModal?.classList.toggle('is-permission', Boolean(permissionTone));
+    if (choiceModal && permissionTone) choiceModal.dataset.tone = permissionTone;
+    if (choiceIconEl) {
+      choiceIconEl.innerHTML = permissionTone ? CHOICE_TONE_ICONS[permissionTone] : '';
+      choiceIconEl.hidden = !permissionTone;
+    }
+    if (choiceBadgeEl) {
+      choiceBadgeEl.textContent = permissionTone ? String(badge || '') : '';
+      choiceBadgeEl.hidden = !permissionTone || !badge;
+    }
 
     choiceKeyHandler = (event) => {
       if (event.key === 'Escape') {

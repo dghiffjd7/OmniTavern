@@ -38,7 +38,8 @@ export const createFormatReviewExecutor = ({
     baseRevision: createRevision(), sourceSnapshot: repairTarget.sourceText,
     repairTarget: { ...repairTarget, sessionId: repairTarget.targetSessionId || sid },
     sourceMessageId: mid,
-    modelReview: { ...base.modelReview, autoApplyRepair: false,
+    // 每次检查都记入活动记录，包括“无需修改”的结论
+    modelReview: { ...base.modelReview, autoApplyRepair: false, recordSucceededRun: true,
       requestOptions: { ...(base.modelReview.requestOptions || {}), ...(signal ? { signal } : {}) } },
   };
   let settle;
@@ -53,7 +54,10 @@ export const createFormatReviewExecutor = ({
       }
     },
     onChatFormatGuardianModelReviewQueued: payload => { if (canCommit()) onQueued({ ...payload, quiet: automatic }); },
-    onChatFormatGuardianModelReviewCompleted: payload => { onCompleted(sid, payload); settle(payload || {}); },
+    onChatFormatGuardianModelReviewCompleted: payload => {
+      onCompleted(sid, payload, { automatic, messageId: mid, current: canCommit() });
+      settle(payload || {});
+    },
     logger,
   });
   if (!preview) return { status: 'skipped', reason: 'no_source' };

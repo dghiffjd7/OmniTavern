@@ -14,6 +14,7 @@ import { registerGuideStartFlowTools } from '../../src/scripts/agent/tools/guide
 import { registerChatFormatRepairTools } from '../../src/scripts/agent/tools/chat-format-tools.js';
 import { registerWebSearchAgentTools } from '../../src/scripts/agent/tools/web-search-tools.js';
 import { registerMomentsAgentTools } from '../../src/scripts/agent/tools/moments-tools.js';
+import { registerPresetRegexScriptAgentTools } from '../../src/scripts/agent/tools/preset-regex-script-tools.js';
 
 // 已注册但不进入功能目录的元工具/本地工具。
 // 新工具默认必须进目录；确需豁免时在这里登记并写明原因。
@@ -35,6 +36,7 @@ registerGuideStartFlowTools(registry, {});
 registerChatFormatRepairTools(registry, {});
 registerWebSearchAgentTools(registry, {});
 registerMomentsAgentTools(registry, {});
+registerPresetRegexScriptAgentTools(registry, {});
 
 const registeredNames = new Set(registry.listTools().map(tool => tool.name));
 const features = listAppFeatures();

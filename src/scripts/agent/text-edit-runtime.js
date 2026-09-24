@@ -34,7 +34,7 @@ export const createTextEditRuntime = ({ getContext, getMessage, getMessages, get
   const identity = agentToolMessageIdentity;
   const emit = () => onChange(list());
   const list = () => [...jobs.values()].map(j => ({ id: j.id, agentId: j.agentId, title: j.config.title, sessionId: j.sessionId,
-    invocation: j.invocation, outputMode: j.config.outputMode || 'edit', text: j.text || '', trace: j.trace || null, reference: j.reference || null, status: j.status, message: j.message || '', createdAt: j.createdAt, messageId: j.messageId, context: j.context }));
+    invocation: j.invocation, outputMode: j.config.outputMode || 'edit', text: j.text || '', trace: j.trace || null, reference: j.reference || null, status: j.status, message: j.message || '', changeCount: j.result?.linePatches?.length || 0, createdAt: j.createdAt, messageId: j.messageId, context: j.context }));
   const stillCurrent = job => !job.controller.signal.aborted && contextKey(getContext(job.sessionId)) === contextKey(job.context)
     && getConfig(job.agentId, job.sessionId)?.enabled === true
     && (job.expectedConfigVersion === undefined || getConfig(job.agentId, job.sessionId)?.updatedAt === job.expectedConfigVersion)
@@ -90,7 +90,7 @@ export const createTextEditRuntime = ({ getContext, getMessage, getMessages, get
       if (job.config.outputMode === 'note') {
         job.text = String(typeof raw === 'string' ? raw : raw?.content || raw?.text || '').trim().slice(0, 24000);
         setStatus(job, job.text ? 'ready' : 'unchanged');
-        if (job.text) notify({ title: config.title, text: 'Agent 结果待查看', runId: job.id, sessionId });
+        if (job.text) notify({ title: config.title, text: 'Agent 结果待查看', runId: job.id, sessionId, invocation: job.invocation });
         return { status: 'succeeded', artifact: { kind: 'agent_note', runId: job.id } };
       }
       const result = normalizeTextEditModelResult(raw, { originalText: job.target.text, baseRevision: job.request.baseRevision });
@@ -99,7 +99,7 @@ export const createTextEditRuntime = ({ getContext, getMessage, getMessages, get
       const validation = validateTextEditCandidate(source, spliceAgentTextTarget(job.target, result.candidateText));
       if (!validation.ok) throw new Error(validation.message);
       job.result = result; setStatus(job, 'ready', result.repairSummary);
-      notify({ title: config.title, text: '修改建议待查看', runId: job.id, sessionId });
+      notify({ title: config.title, text: '修改建议待查看', runId: job.id, sessionId, invocation: job.invocation });
       return { status: 'succeeded', artifact: { kind: 'text_edit_candidate', runId: job.id } };
     } catch (error) {
       const cancelled = controller.signal.aborted || error.name === 'AbortError';

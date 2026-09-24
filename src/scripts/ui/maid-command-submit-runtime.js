@@ -26,9 +26,10 @@ export const createMaidCommandSubmit = ({
           })),
         };
       }
+      const maidTurnContext = { ...getAppContext?.(), ...controls.context, submissionId: controls.submissionId, source: controls.source, voiceCallId: controls.voiceCallId, voiceRequestId: controls.voiceRequestId };
       let runtimeConfig = null;
       try {
-        runtimeConfig = await resolveMaidRuntimeConfig();
+        runtimeConfig = await resolveMaidRuntimeConfig(maidTurnContext);
       } catch (error) {
         logger.debug('maid runtime config unavailable for command input', error);
       }
@@ -44,7 +45,7 @@ export const createMaidCommandSubmit = ({
         };
       }
       const attachments = Array.isArray(controls?.attachments) ? controls.attachments : [];
-      const visionCheck = await checkMaidVisionInput(attachments);
+      const visionCheck = await checkMaidVisionInput(attachments, maidTurnContext, runtimeConfig);
       if (!visionCheck.ok) {
         return {
           ok: false,
@@ -59,7 +60,6 @@ export const createMaidCommandSubmit = ({
         fullResponse: '',
         source: 'pending',
       });
-      const maidTurnContext = { ...getAppContext(), ...controls.context, submissionId: controls.submissionId, source: controls.source, voiceCallId: controls.voiceCallId, voiceRequestId: controls.voiceRequestId };
       const result = await maidAssistantAgent.runPrompt(text, {
         ...maidTurnContext,
         maidAttachments: attachments,

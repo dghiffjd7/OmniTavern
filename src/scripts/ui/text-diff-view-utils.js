@@ -1,4 +1,5 @@
 import { buildLineDiff } from '../utils/line-diff-utils.js';
+import { annotateLineDiffWords, renderWordDiffHtml } from '../utils/word-diff-utils.js';
 
 // 正文变更的行级 diff 预览与确认对话框（Claude Code 式绿增红删）。
 // 供格式修复、正文优化等“覆盖已有正文”的动作在写回前展示变更并等待用户确认。
@@ -149,6 +150,13 @@ const injectStyle = (documentRef) => {
   color: #2563eb;
   font-weight: 700;
 }
+/* 改写配对的行：整行浅底，具体改动的字词深底 */
+.text-diff-row.has-words.is-add { background: rgba(16, 185, 129, 0.06); }
+.text-diff-row.has-words.is-del { background: rgba(239, 68, 68, 0.05); }
+.text-diff-row.has-words.is-del .text-diff-text { text-decoration: none; }
+.text-diff-text .wd-del, .text-diff-text .wd-ins { text-decoration: none; border-radius: 3px; padding: 0 1px; }
+.text-diff-text .wd-del { background: rgba(var(--app-danger-rgb, 220, 38, 38), 0.2); text-decoration: line-through; }
+.text-diff-text .wd-ins { background: rgba(var(--app-success-rgb, 22, 163, 74), 0.22); }
 @media (prefers-color-scheme: dark) {
   .text-diff-row.is-add {
     background: rgba(16, 185, 129, 0.18);
@@ -165,7 +173,7 @@ export const renderLineDiffElement = (documentRef, diff = {}) => {
   if (!documentRef?.createElement) return null;
   const container = documentRef.createElement('div');
   container.className = 'text-diff-body';
-  const rows = Array.isArray(diff.rows) ? diff.rows : [];
+  const rows = annotateLineDiffWords(Array.isArray(diff.rows) ? diff.rows : []);
   rows.forEach((row) => {
     const rowEl = documentRef.createElement('div');
     if (row.type === 'skip') {
@@ -174,7 +182,7 @@ export const renderLineDiffElement = (documentRef, diff = {}) => {
       container.appendChild(rowEl);
       return;
     }
-    rowEl.className = `text-diff-row is-${row.type}`;
+    rowEl.className = `text-diff-row is-${row.type}${row.words ? ' has-words' : ''}`;
     const lineno = documentRef.createElement('span');
     lineno.className = 'text-diff-lineno';
     lineno.textContent = String(row.type === 'add' ? (row.newLine ?? '') : (row.oldLine ?? ''));
@@ -183,7 +191,8 @@ export const renderLineDiffElement = (documentRef, diff = {}) => {
     sign.textContent = row.type === 'add' ? '+' : (row.type === 'del' ? '-' : '');
     const text = documentRef.createElement('span');
     text.className = 'text-diff-text';
-    text.textContent = String(row.text ?? '');
+    if (row.words) text.innerHTML = renderWordDiffHtml(row.words, { side: row.type === 'del' ? 'old' : 'new' });
+    else text.textContent = String(row.text ?? '');
     rowEl.append(lineno, sign, text);
     container.appendChild(rowEl);
   });

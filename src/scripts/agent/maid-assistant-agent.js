@@ -26,6 +26,22 @@ import {
 } from './maid-imported-card-workflow.js';
 import { buildMaidSourceGroundingContext } from './maid-source-grounding.js';
 import {
+  buildConfirmedPendingActionPlan,
+  cancelPendingMaidAction,
+  buildMaidPendingActionFromSteps,
+  classifyMaidPendingActionReply,
+  resolvePendingMaidAction,
+} from './maid-pending-action.js';
+import {
+  ALREADY_DELETED_REASON,
+  appendAlreadyDeletedResults,
+  buildAlreadyDeletedExecution,
+  countConsecutiveSameAction,
+  findAlreadyDeletedTargets,
+  resolveMaidRunOutcome,
+  stripAlreadyDeletedTargets,
+} from './maid-run-target-ledger.js';
+import {
   createMaidVisualSpecLedger,
   normalizeMaidVisualSpecLedger,
 } from './maid-visual-spec.js';
@@ -394,7 +410,21 @@ const resolveTrackedToolStepStatus = (output = {}) => {
 
 // 一次 runPrompt 对应一个持久 run：目标、每个工具步骤、最终状态和 continueHint
 // 都写入 agent run store；没有执行任何工具的纯聊天回应不建 run。
-const createMaidRunTracker = ({ agentTaskRuntime = null, input = '', context = {} } = {}) => {
+// 每次模型调用的分段计时（相对本次请求开始，毫秒），写入 run.metadata.timing 供耗时诊断
+const summarizeMaidModelCallTiming = (usage = [], promptStartedAt = 0) => (Array.isArray(usage) ? usage : [])
+  .filter(entry => Number.isFinite(Number(entry?.endedAt)) && promptStartedAt)
+  .map(entry => ({
+    phase: trim(entry.phase) || 'other',
+    startMs: Math.max(0, Number(entry.endedAt) - (Number(entry.latencyMs) || 0) - promptStartedAt),
+    latencyMs: Number(entry.latencyMs) || 0,
+    promptTokens: Number.isFinite(Number(entry.promptTokens)) ? Number(entry.promptTokens) : null,
+    completionTokens: Number.isFinite(Number(entry.completionTokens)) ? Number(entry.completionTokens) : null,
+    ...(trim(entry.transport) ? { transport: trim(entry.transport) } : {}),
+    ...(trim(entry.outcome) ? { outcome: trim(entry.outcome) } : {}),
+    ...(trim(entry.error) ? { error: trim(entry.error).slice(0, 160) } : {}),
+  }));
+
+const createMaidRunTracker = ({ agentTaskRuntime = null, input = '', context = {}, promptStartedAt = 0 } = {}) => {
   const canTrack = Boolean(
     agentTaskRuntime &&
     typeof agentTaskRuntime.startRun === 'function' &&
@@ -403,6 +433,8 @@ const createMaidRunTracker = ({ agentTaskRuntime = null, input = '', context = {
     typeof agentTaskRuntime.finishStep === 'function',
   );
   let run = null;
+  // 实际执行的模型：首次模型调用返回时记下，任务卡显示“由哪个模型执行”
+  let executionModel = '';
   const continuation = isPlainObject(context?.runContinuation) ? context.runContinuation : null;
   const trackedGoal = trim(continuation?.goal || input);
   const ensureRun = () => {
@@ -416,6 +448,7 @@ const createMaidRunTracker = ({ agentTaskRuntime = null, input = '', context = {
       summary: truncateForRun(trackedGoal, 200),
       metadata: {
         goal: trackedGoal,
+        ...(executionModel ? { executionModel } : {}),
         ...(context.source === 'maid_realtime' ? { submissionSource: context.source, submissionId: context.submissionId, voiceCallId: context.voiceCallId } : {}),
         ...(trim(continuation?.sourceRunId) ? {
           resumedFromRunId: trim(continuation.sourceRunId),
@@ -438,6 +471,14 @@ const createMaidRunTracker = ({ agentTaskRuntime = null, input = '', context = {
         ...buildCapabilityPlanTrace(plan),
       },
     });
+  };
+  const noteModel = (model = '') => {
+    const name = trim(model);
+    if (!name || name === executionModel) return;
+    executionModel = name;
+    if (run && typeof agentTaskRuntime?.updateRun === 'function') {
+      agentTaskRuntime.updateRun(run.id, { metadata: { executionModel } });
+    }
   };
   const finishToolStep = (step = null, patch = {}) => {
     if (!run || !step?.id) return;
@@ -470,6 +511,7 @@ const createMaidRunTracker = ({ agentTaskRuntime = null, input = '', context = {
     );
     const metadata = {
       goal: trackedGoal,
+      ...(executionModel ? { executionModel } : {}),
       ...(trim(continuation?.sourceRunId) ? {
         resumedFromRunId: trim(continuation.sourceRunId),
         continuationVersion: trim(continuation.version),
@@ -492,6 +534,10 @@ const createMaidRunTracker = ({ agentTaskRuntime = null, input = '', context = {
       candidateAllCovered: result?.capabilityRouting?.validSelectionCount > 0
         ? result?.capabilityRouting?.allValidSelectionsCovered === true
         : null,
+      timing: {
+        promptStartedAt,
+        modelCalls: summarizeMaidModelCallTiming(usage, promptStartedAt),
+      },
       maidContextVersion: trim(maidContext?.maidContextVersion),
       maidContextTokenCount: Number(maidContext?.tokenCount || 0) || 0,
       maidContextHistoryTokenCount: Number(maidContext?.historyTokenCount || 0) || 0,
@@ -542,6 +588,7 @@ const createMaidRunTracker = ({ agentTaskRuntime = null, input = '', context = {
     startToolStep,
     finishToolStep,
     finish,
+    noteModel,
     markWaitingPermission,
     getRunId: () => trim(run?.id),
   };
@@ -703,36 +750,12 @@ const resolveReactStepBudget = ({
   };
 };
 
-const getConsecutiveRepeatedFailure = (steps = []) => {
-  const list = Array.isArray(steps) ? steps : [];
-  const last = list.at(-1);
-  if (!last || last.status !== 'failed') return { count: 0, key: '' };
-  const key = `${trim(last.toolName)}:${stableJsonStringify(last.args || {})}`;
-  let count = 0;
-  for (let index = list.length - 1; index >= 0; index -= 1) {
-    const step = list[index];
-    const stepKey = `${trim(step?.toolName)}:${stableJsonStringify(step?.args || {})}`;
-    if (step?.status !== 'failed' || stepKey !== key) break;
-    count += 1;
-  }
-  return { count, key, toolName: trim(last.toolName), args: clone(last.args || {}) };
-};
+// 重复检测按目标比较：参数里的名称与 ID 先统一成同一目标（见 maid-run-target-ledger.js），
+// 按名称删和按 ID 删、按名称停用和按 ID 停用都算同一操作。
+const getConsecutiveRepeatedFailure = (steps = []) => countConsecutiveSameAction(steps, 'failed');
 
-// 同一工具同参数连续成功调用（如反复 maid.todo.read）说明模型在原地转圈，不产出实际进展。
-const getConsecutiveRepeatedSuccess = (steps = []) => {
-  const list = Array.isArray(steps) ? steps : [];
-  const last = list.at(-1);
-  if (!last || last.status !== 'succeeded') return { count: 0, key: '' };
-  const key = `${trim(last.toolName)}:${stableJsonStringify(last.args || {})}`;
-  let count = 0;
-  for (let index = list.length - 1; index >= 0; index -= 1) {
-    const step = list[index];
-    const stepKey = `${trim(step?.toolName)}:${stableJsonStringify(step?.args || {})}`;
-    if (step?.status !== 'succeeded' || stepKey !== key) break;
-    count += 1;
-  }
-  return { count, key, toolName: trim(last.toolName), args: clone(last.args || {}) };
-};
+// 同一工具同一目标连续成功调用（如反复 maid.todo.read）说明模型在原地转圈，不产出实际进展。
+const getConsecutiveRepeatedSuccess = (steps = []) => countConsecutiveSameAction(steps, 'succeeded');
 
 // 同一工具连续调用（参数可不同）超过上限 = 在单一工具上打转（如反复换词搜索），无编排进展。
 const getConsecutiveSameToolCount = (steps = []) => {
@@ -2907,6 +2930,9 @@ export const createMaidAssistantAgent = ({
 
   const executePlan = async (plan, context = {}, tracker = null) => {
     throwIfMaidAborted(context?.signal);
+    if (plan.source === 'confirmed_pending_action' && plan.metadata?.confirmedDelete) {
+      context = { ...context, maidConfirmedDelete: plan.metadata.confirmedDelete };
+    }
     // Voice work can wait in the queue while the user switches rooms. Bind an
     // omitted session target before validation, confirmation and execution.
     if (context.voiceCallId && trim(context.sessionId)
@@ -4020,6 +4046,10 @@ export const createMaidAssistantAgent = ({
         ...context,
         ...(isPlainObject(extraContext) ? extraContext : {}),
       };
+      if (typeof context?.onModelUsage === 'function') {
+        // 标出这次调用属于规划还是 ReAct，并记下结束时间，供分段计时
+        decisionContext.onModelUsage = usage => context.onModelUsage({ ...usage, phase: label, endedAt: Date.now() });
+      }
       let snapshot = null;
       if (capabilityRoutingRuntime && typeof capabilityRoutingRuntime.prepareDecision === 'function') {
         try {
@@ -4108,6 +4138,7 @@ export const createMaidAssistantAgent = ({
       try {
         pendingImportedCardWorkflow = resolvePendingMaidImportedCardWorkflow(
           agentTaskRuntime.listRuns({ kind: 'maid_assistant', limit: 20 }),
+          { context },
         );
       } catch (error) {
         logger?.debug?.('maid imported-card pending workflow lookup skipped', error);
@@ -4169,7 +4200,78 @@ export const createMaidAssistantAgent = ({
       });
     }
 
-    let plan = await callRoutedPlanner({ plannerFn: planner, phase: 'planner', label: 'maid_planner' });
+    // 上一轮留下的“待确认删除清单”：明确确认则原样执行，取消则作废，说了别的就视为放弃
+    let confirmedPendingPlan = null;
+    if (typeof agentTaskRuntime?.listRuns === 'function') {
+      let pendingAction = null;
+      try {
+        pendingAction = resolvePendingMaidAction(agentTaskRuntime.listRuns({ kind: 'maid_assistant', limit: 100 }), { context });
+      } catch (error) {
+        logger?.debug?.('maid pending action lookup skipped', error);
+      }
+      if (context.pendingActionSubmissionId && !pendingAction) {
+        return { ok: false, status: 'cancelled', reason: 'pending_action_unavailable', message: '这份待确认清单已结束或过期，没有执行任何操作。' };
+      }
+      if (pendingAction) {
+        const reply = classifyMaidPendingActionReply(input, { voice: Boolean(trim(context.voiceCallId)) });
+        const closePending = (state, status, summary) => {
+          try {
+            agentTaskRuntime.finishRun?.(pendingAction.runId, {
+              status,
+              summary,
+              ...(status === 'cancelled' ? { cancelReason: 'user_cancelled_pending_action' } : {}),
+              metadata: { maidStatus: status, pendingWorkflow: { ...pendingAction.snapshot, state, closedAt: Date.now() } },
+            });
+          } catch {}
+        };
+        if (reply === 'cancel') {
+          closePending('cancelled', 'cancelled', '用户取消了待确认的删除清单。');
+          return {
+            ok: true,
+            status: 'cancelled',
+            responseType: 'workflow',
+            input: trim(input),
+            message: '好的，已取消上一份待确认的删除清单，没有删除任何内容。',
+          };
+        }
+        if (reply === 'ambiguous') {
+          // 语音里的“好 / 可以”不算确认：清单保留，请用户明确回答。
+          // 这一轮不标记为待确认，之后的“允许”仍指向原来那份清单所属的任务。
+          return {
+            ok: true,
+            status: 'responded',
+            responseType: 'workflow',
+            input: trim(input),
+            message: '要执行这份删除清单，请明确说「允许」；不需要的话说「取消」。',
+          };
+        }
+        if (reply === 'confirm') {
+          if (pendingAction.snapshot.version !== 2 || !pendingAction.snapshot.targets?.length) {
+            closePending('superseded', 'cancelled', '旧版删除预览缺少目标快照，需要重新预览。');
+            return { ok: false, status: 'failed', reason: 'pending_action_needs_preview', message: '这份删除预览没有完整的目标记录，请重新预览后再确认。' };
+          }
+          closePending('consumed', 'succeeded', '用户已确认，按清单执行。');
+          confirmedPendingPlan = authorizeDeterministicWorkflowPlan(buildConfirmedPendingActionPlan(pendingAction), []);
+          Object.assign(context, pendingAction.snapshot.context);
+          // 用户确认的正是这份写入清单：本轮按允许写入处理，不再额外弹“只读请求要不要写入”（删除本身的确认照常）
+          context.operationIntentPolicy = { mode: 'write_allowed', source: 'confirmed_pending_action', reason: 'user_confirmed_pending_action' };
+        } else {
+          closePending('superseded', 'cancelled', '用户改说其他事，待确认的删除清单已作废。');
+          // 这句可能是对清单的修改（“确认，但保留乙”）：含义交给模型判断。本次任务允许使用原清单的删除功能，
+          // 不因这句话没写“删除”二字被高风险检查挡掉；真正删除时 APP 的删除确认照常弹出。
+          context.pendingActionRevision = {
+            featureId: trim(pendingAction.snapshot.featureId, pendingAction.snapshot.toolName),
+            toolName: trim(pendingAction.snapshot.toolName),
+          };
+          // 回复待确认的写入清单不是只读查询（“确认”一词会被当成“确认一下”）
+          if (context.operationIntentPolicy?.mode === 'read_only') {
+            context.operationIntentPolicy = { mode: 'unspecified', source: 'pending_action_revision', reason: 'reply_to_pending_write_list' };
+          }
+        }
+      }
+    }
+
+    let plan = confirmedPendingPlan || await callRoutedPlanner({ plannerFn: planner, phase: 'planner', label: 'maid_planner' });
     if (
       plan?.ok === true &&
       plan?.action === 'final' &&
@@ -4400,6 +4502,8 @@ export const createMaidAssistantAgent = ({
           plan: currentPlan,
           steps,
         });
+        // 删除幂等：本轮已删除的目标不再交给工具，全部已删则整步跳过
+        const alreadyDeleted = findAlreadyDeletedTargets(currentPlan, steps);
         if (crossRunResumeMatch?.status === 'verified') {
           execution = buildReusedCrossRunExecution(crossRunResumeMatch);
         } else if (reusableSessionCreate) {
@@ -4408,11 +4512,22 @@ export const createMaidAssistantAgent = ({
           execution = buildReusedGeneratedMediaExecution(reusableGeneratedMedia);
         } else if (isRepeatedSuccessfulTodoWrite(currentPlan, steps)) {
           execution = buildUnchangedTodoExecution();
+        } else if (alreadyDeleted && !alreadyDeleted.remaining.length) {
+          execution = buildAlreadyDeletedExecution(alreadyDeleted);
         } else {
           try {
             loopProbe(`step-${stepIndex}:tool-exec`);
             throwIfMaidAborted(context?.signal);
-            execution = await executePlan(currentPlan, context, tracker);
+            execution = await executePlan(
+              alreadyDeleted ? stripAlreadyDeletedTargets(currentPlan, alreadyDeleted) : currentPlan,
+              context,
+              tracker,
+            );
+            if (alreadyDeleted) {
+              execution = execution && hasOwn(execution, 'output')
+                ? { ...execution, output: appendAlreadyDeletedResults(execution.output, alreadyDeleted) }
+                : appendAlreadyDeletedResults(execution, alreadyDeleted);
+            }
             loopProbe(`step-${stepIndex}:tool-done`);
           } catch (error) {
             if (isMaidAbortError(error, context?.signal)) throw error;
@@ -4696,6 +4811,23 @@ export const createMaidAssistantAgent = ({
           };
         }
         const repeatedSuccess = getConsecutiveRepeatedSuccess(steps);
+        if (repeatedSuccess.count >= 3 && trim(steps.at(-1)?.output?.reason) === ALREADY_DELETED_REASON) {
+          const message = `${trim(steps.at(-1)?.summary) || '目标已在本轮删除'}；已停止重复删除。`;
+          return {
+            ok: true,
+            status: 'succeeded',
+            responseType: 'react',
+            input: trim(input),
+            plan: clone(plan),
+            finalDecision: { ok: true, action: 'final', message, source: 'already_deleted_guard' },
+            output: clone(observedOutput),
+            steps: clone(steps),
+            guided: false,
+            guide: null,
+            reason: '',
+            message,
+          };
+        }
         if (repeatedSuccess.count >= 3) {
           const reason = 'repeated_tool_loop';
           const message = `同一工具「${repeatedSuccess.toolName || '未知工具'}」用相同参数连续调用 ${repeatedSuccess.count} 次没有产生新进展，已停止；说“继续”时请直接执行清单上的具体任务。`;
@@ -4888,9 +5020,36 @@ export const createMaidAssistantAgent = ({
             expandStepBudget(currentPlan);
             continue;
           }
+          // 删除预览后收尾：本轮结束为“待确认”，冻结清单等用户下一句确认
+          const pendingAction = buildMaidPendingActionFromSteps(steps, { context });
+          if (pendingAction) {
+            return {
+              ok: true,
+              status: 'awaiting_confirmation',
+              responseType: 'react',
+              input: trim(input),
+              plan: clone(plan),
+              finalDecision: clone(decision),
+              output: clone(observedOutput),
+              steps: clone(steps),
+              pendingWorkflow: pendingAction,
+              reason: '',
+              message: trim(decision.message),
+            };
+          }
+          // 成败看目标的最终状态，而不是只看最后一步：对已完成目标的多余重复、
+          // 或写入都已达成后的收尾读取失败，不把整次任务判为失败。
+          const outcome = resolveMaidRunOutcome({
+            lastOk: ok,
+            steps,
+            isWriteTool: (toolName) => {
+              const writes = findAppFeature(toolName)?.writes;
+              return typeof writes === 'boolean' ? writes : undefined;
+            },
+          });
           return {
-            ok,
-            status: ok ? 'succeeded' : 'failed',
+            ok: outcome.ok,
+            status: outcome.ok ? 'succeeded' : 'failed',
             responseType: 'react',
             input: trim(input),
             plan: clone(plan),
@@ -4899,7 +5058,8 @@ export const createMaidAssistantAgent = ({
             steps: clone(steps),
             guided: Boolean(observedExecution?.guided),
             guide: clone(observedExecution?.guide || null),
-            reason: ok ? '' : summarizeToolFailure(observedOutput),
+            reason: outcome.ok ? '' : summarizeToolFailure(observedOutput),
+            ...(outcome.reason ? { outcomeReason: outcome.reason } : {}),
             message: trim(decision.message),
           };
         }
@@ -5046,6 +5206,7 @@ export const createMaidAssistantAgent = ({
   };
 
   const runPrompt = async (input = '', context = {}) => {
+    const promptStartedAt = Date.now();
     try {
       throwIfMaidAborted(context?.signal);
     } catch {
@@ -5108,12 +5269,17 @@ export const createMaidAssistantAgent = ({
     }
     // Phase B 计量：run 级 usage 收集器，经 context 穿透到 planner 的 chatWithFallback（按引用累加）。
     const modelUsageEntries = [];
+    let tracker = null;
     const routedContext = {
       ...requestContext,
       ...(capabilityRequest?.id ? { capabilityRequestId: capabilityRequest.id } : {}),
-      onModelUsage: (usage) => { if (usage && typeof usage === 'object') modelUsageEntries.push(usage); },
+      onModelUsage: (usage) => {
+        if (!usage || typeof usage !== 'object') return;
+        modelUsageEntries.push({ endedAt: Date.now(), ...usage });
+        if (usage.outcome !== 'provider_request_failed') tracker?.noteModel?.(usage.model);
+      },
     };
-    const tracker = createMaidRunTracker({ agentTaskRuntime, input, context: routedContext });
+    tracker = createMaidRunTracker({ agentTaskRuntime, input, context: routedContext, promptStartedAt });
     try {
       const result = await runPromptWithTracker(input, routedContext, tracker);
       let capabilityRouting = null;
@@ -5157,6 +5323,18 @@ export const createMaidAssistantAgent = ({
   return {
     plan: planner,
     runPrompt,
+    cancelPendingAction: (options = {}) => {
+      if (cancelPendingMaidAction(agentTaskRuntime, options)) return true;
+      if (!trim(options.submissionId) || !trim(options.voiceCallId)) return false;
+      const pending = resolvePendingMaidImportedCardWorkflow(agentTaskRuntime?.listRuns?.({ kind: 'maid_assistant', limit: 100 }), {
+        context: { voiceCallId: options.voiceCallId, pendingActionSubmissionId: options.submissionId },
+      });
+      if (!pending || typeof agentTaskRuntime?.finishRun !== 'function') return false;
+      return Boolean(agentTaskRuntime.finishRun(pending.runId, {
+        status: 'cancelled', cancelReason: 'user_cancelled_pending_workflow',
+        metadata: { maidStatus: 'cancelled', pendingWorkflow: { ...pending.snapshot, state: 'cancelled', cancelledAt: Date.now() } },
+      }));
+    },
     getFeature: findAppFeature,
   };
 };

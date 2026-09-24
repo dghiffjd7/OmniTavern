@@ -1,5 +1,6 @@
 import { safeInvoke } from '../utils/tauri.js';
 import { estimateTokens } from '../memory/memory-prompt-utils.js';
+import { formatMaidMemoryDate } from '../agent/maid-memory-prompt.js';
 
 export const MAID_CONVERSATION_STORE_KEY = 'maid_conversation_store_v1';
 export const MAID_CONVERSATION_STORE_VERSION = 1;
@@ -129,6 +130,12 @@ const truncateToTokenBudget = (value = '', maxTokens = 0) => {
   return best || truncate(text, Math.max(1, Math.min(text.length, budget)));
 };
 
+// 记忆条目带上记录日期（本地日期），让模型能判断记忆新旧、知道它可能已过时
+const memoryDateSuffix = value => {
+  const date = formatMaidMemoryDate(value);
+  return date ? `；记于: ${date}` : '';
+};
+
 const formatMaidHistoryTurn = (turn = {}) => [
   `- 时间: ${new Date(Number(turn.at || 0) || Date.now()).toISOString()}`,
   (turn.responseType === 'realtime' || turn.context?.voiceCallId) && !turn.input ? '' : `  用户: ${trim(turn.input, '-')}`,
@@ -244,7 +251,7 @@ const formatMaidMemoryRowLine = (
   const tokenLimit = Math.max(24, Math.trunc(Number(maxTokens)) || MAID_CONTEXT_MEMORY_ROW_TOKEN_LIMIT);
   const title = trim(row?.title, '上下文记忆');
   const content = trim(row?.content, '-').replace(/\s*\r?\n\s*/g, ' / ');
-  const tags = Array.isArray(row?.tags) && row.tags.length ? `；标签: ${row.tags.join(', ')}` : '';
+  const tags = `${Array.isArray(row?.tags) && row.tags.length ? `；标签: ${row.tags.join(', ')}` : ''}${memoryDateSuffix(row?.updatedAt || row?.createdAt || row?.at)}`;
   const source = trim(sourcePrefix);
   const linePrefix = source ? `- [${source}] 标题: ${title}；内容: ` : `- 标题: ${title}；内容: `;
   const fullLine = `${linePrefix}${content}${tags}`;
@@ -346,7 +353,8 @@ const formatMaidWorkingItemLine = (item = {}, maxTokens = 320) => {
   const tokenLimit = Math.max(24, Math.trunc(Number(maxTokens)) || 320);
   const label = trim(item?.label, '待处理');
   const content = trim(item?.content, '-').replace(/\s*\r?\n\s*/g, ' / ');
-  return truncateToTokenBudget(`- ${label}: ${content}`, tokenLimit);
+  const date = formatMaidMemoryDate(item?.at);
+  return truncateToTokenBudget(`- ${label}${date ? `（${date}）` : ''}: ${content}`, tokenLimit);
 };
 
 const buildMaidWorkingContextPlan = ({
@@ -432,7 +440,7 @@ const formatMaidSemanticMemoryLine = (
     : '';
   const validation = unverified ? '；资源校验: 暂不可用，未验证' : '';
   const prefix = `- [${trim(memory?.kind, 'memory')}] key: ${trim(memory?.key, '-')}；内容: `;
-  const suffix = `；置信度: ${trim(memory?.confidence, 'inferred')}${tags}${resource}${validation}`;
+  const suffix = `；置信度: ${trim(memory?.confidence, 'inferred')}${tags}${resource}${validation}${memoryDateSuffix(memory?.updatedAt || memory?.createdAt)}`;
   const projectedContent = truncateToTokenBudget(
     content,
     Math.max(1, tokenLimit - estimateTokens(`${prefix}${suffix}`, 'rough')),
@@ -1772,11 +1780,12 @@ export class MaidConversationStore {
     return batch.sourceTurnIds.map(id => byId.get(id)).filter(Boolean);
   }
 
-  async upsertStructuredMemoriesForBatch(batch = {}, turns = []) {
+  async upsertStructuredMemoriesForBatch(batch = {}, turns = [], { shouldWrite = () => true } = {}) {
     if (!this.semanticMemoryStore || typeof this.semanticMemoryStore.upsertMemory !== 'function') return 0;
     let count = 0;
     for (const turn of turns) {
       for (const signal of Array.isArray(turn?.structuredMemories) ? turn.structuredMemories : []) {
+        if (!shouldWrite()) return count;
         const sourceTurnIds = Array.from(new Set([
           ...(Array.isArray(signal?.sourceTurnIds) ? signal.sourceTurnIds : []),
           turn.id,
@@ -1791,14 +1800,14 @@ export class MaidConversationStore {
           ...clone(signal),
           scopeId: trim(this.semanticMemoryStore.scopeId, 'maid_default'),
           sourceTurnIds,
-        });
+        }, { shouldWrite });
         if (result?.ok) count += 1;
       }
     }
     return count;
   }
 
-  async upsertExtractedMemoriesForBatch(batch = {}, extractionResult = {}) {
+  async upsertExtractedMemoriesForBatch(batch = {}, extractionResult = {}, { shouldWrite = () => true } = {}) {
     if (!this.semanticMemoryStore || typeof this.semanticMemoryStore.upsertMemory !== 'function') return 0;
     const allowedSources = new Set(Array.isArray(batch?.sourceTurnIds) ? batch.sourceTurnIds : []);
     const candidateKeys = Array.isArray(extractionResult?.candidateKeys)
@@ -1808,6 +1817,7 @@ export class MaidConversationStore {
     for (const rawMemory of Array.isArray(extractionResult?.memories)
       ? extractionResult.memories.slice(0, 12)
       : []) {
+      if (!shouldWrite()) break;
       const sourceTurnIds = (Array.isArray(rawMemory?.sourceTurnIds) ? rawMemory.sourceTurnIds : [])
         .map(id => trim(id))
         .filter(id => allowedSources.has(id));
@@ -1817,7 +1827,7 @@ export class MaidConversationStore {
         scopeId: trim(this.semanticMemoryStore.scopeId, 'maid_default'),
         sourceTurnIds,
         keyOrigin: 'candidate',
-      }, { candidateKeys });
+      }, { candidateKeys, shouldWrite });
       if (result?.ok) count += 1;
     }
     return count;
@@ -1833,7 +1843,10 @@ export class MaidConversationStore {
       batch.attempts < MAID_EXTRACTION_MAX_AUTO_ATTEMPTS &&
       Number(batch.nextRetryAt || 0) <= startedAt
     ));
+    // 用户清除历史会连同待提取批次一起移除：已被移除的批次不再处理，进行中的提取结果也不写回
+    const stillQueued = batch => this.state.extractionBatches.includes(batch);
     for (const batch of pending) {
+      if (!stillQueued(batch)) continue;
       const turns = this.resolveExtractionBatchTurns(batch);
       if (!turns.length) {
         batch.status = 'paused';
@@ -1846,12 +1859,15 @@ export class MaidConversationStore {
         continue;
       }
       try {
+        const writeOptions = { shouldWrite: () => stillQueued(batch) };
         if (!batch.deterministicComplete) {
-          await this.upsertStructuredMemoriesForBatch(batch, turns);
+          await this.upsertStructuredMemoriesForBatch(batch, turns, writeOptions);
+          if (!stillQueued(batch)) continue;
           batch.deterministicComplete = true;
           batch.updatedAt = safeNow(this.now);
           await this.write();
         }
+        if (!stillQueued(batch)) continue;
         if (typeof this.extractSemanticMemories !== 'function') {
           batch.lastError = 'extractor_unavailable';
           batch.nextRetryAt = safeNow(this.now) + MAID_EXTRACTION_RETRY_DELAYS_MS[0];
@@ -1868,8 +1884,10 @@ export class MaidConversationStore {
           scopeId: trim(this.semanticMemoryStore.scopeId, 'maid_default'),
           batch: clone(batch),
         });
+        if (!stillQueued(batch)) continue;
         appendExtractionUsage(batch, extractionResult?.usageEntries);
-        const extractedCount = await this.upsertExtractedMemoriesForBatch(batch, extractionResult);
+        const extractedCount = await this.upsertExtractedMemoriesForBatch(batch, extractionResult, writeOptions);
+        if (!stillQueued(batch)) continue;
         batch.status = 'completed';
         batch.extractedCount = extractedCount;
         batch.modelSource = truncate(extractionResult?.modelSource, 40);
@@ -1946,6 +1964,25 @@ export class MaidConversationStore {
       if (this.extractionPromise === pending) break;
     }
     return output;
+  }
+
+  // 设置面板的记忆管理：清除最近对话（连同由它们产生、尚未提取的批次）与轮次归档
+  async clearHistory() {
+    this.ensureLoaded();
+    const cleared = { turns: this.state.turns.length, extractionBatches: this.state.extractionBatches.length };
+    this.state.turns = [];
+    this.state.extractionBatches = [];
+    this.state.pendingInjectedTokens = 0;
+    await this.write();
+    return cleared;
+  }
+
+  async clearMemoryRows() {
+    this.ensureLoaded();
+    const cleared = this.state.memoryRows.length;
+    this.state.memoryRows = [];
+    await this.write();
+    return cleared;
   }
 
   getLegacyArchive() {

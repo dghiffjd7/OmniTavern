@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
+import { listAppFeatures } from '../../src/scripts/agent/app-feature-catalog.js';
 
 import {
   buildMaidImportedCardClassificationMessages,
+  buildMaidFeatureCatalogPrompt,
+  stringifyRecentStepsForPrompt,
+  compactJsonForPrompt,
   buildMaidModelPlannerFeatureList,
   buildMaidModelPlannerMessages,
   buildMaidModelReActMessages,
@@ -152,9 +156,88 @@ const cloneJson = value => JSON.parse(JSON.stringify(value));
   assert.match(messages[0].content, /完整、具体、可直接执行的 JSON/);
   assert.match(messages[0].content, /__keep_existing/);
   assert.match(messages[1].content, /世界书在哪里/);
-  assert.match(messages[1].content, /相关功能检索/);
-  assert.match(messages[1].content, /worldbook\.open/);
+  assert.doesNotMatch(messages[1].content, /相关功能检索/, '检索结果已体现在功能目录里，不再重复注入');
+  assert.match(messages[0].content, /worldbook\.open/);
   console.log('ok - maid model planner builds constrained prompt messages');
+}
+
+{
+  // 分层目录：排名前 4 的功能给完整参数（放在用户消息开头）；索引列出全部功能且顺序固定，属于不变的系统提示
+  const all = listAppFeatures();
+  const ranked = ['regex.list', 'regex.upsert_rules', 'regex.toggle', 'regex.delete_many', 'regex.open', 'preset.list', 'app.capabilities.search']
+    .map(id => all.find(feature => feature.id === id)).filter(Boolean);
+  const catalog = buildMaidFeatureCatalogPrompt({ features: ranked, featureIndex: all });
+  assert.deepEqual(catalog.detailedIds, ['regex.list', 'regex.upsert_rules', 'regex.toggle', 'regex.delete_many', 'app.capabilities.search']);
+  assert.doesNotMatch(catalog.detailText, /- id: regex\.open/, '排名第 5 的功能不给详情');
+  assert.doesNotMatch(catalog.detailText, /aliases:/, '详情不带检索别名');
+  assert.match(catalog.staticText, /^- regex\.open: /m);
+  assert.match(catalog.staticText, /^- regex\.list: /m, '索引包含全部功能，不随候选变化');
+  assert.equal((catalog.staticText.match(/^- /gm) || []).length, all.filter(feature => feature.tools?.length).length, 'every feature with tools is indexed');
+  assert.match(catalog.staticText, /app\.read_feature_doc/);
+  const messages = buildMaidModelPlannerMessages({ input: '看看正则', features: ranked, featureIndex: all });
+  const other = buildMaidModelPlannerMessages({ input: '帮我新建一个角色卡', features: all.filter(f => /^persona\./.test(f.id)), featureIndex: all });
+  assert.equal(messages[0].content, other[0].content, 'the system prompt is identical across requests so provider prompt caching can hit');
+  assert.match(messages.at(-1).content, /^<app_features>\n- id: regex\.list/, 'candidate details lead the dynamic user message');
+  const react = buildMaidModelReActMessages({ input: '看看正则', features: ranked, featureIndex: all, steps: [] });
+  const reactOther = buildMaidModelReActMessages({ input: '别的', features: all.slice(0, 3), featureIndex: all, steps: [{ index: 1, toolName: 'regex.list', status: 'succeeded', output: {} }] });
+  assert.equal(react[0].content, reactOther[0].content, 'ReAct system prompt is stable across steps');
+  const fullCatalog = buildMaidModelPlannerFeatureList(all);
+  assert.ok(messages[0].content.length + catalog.detailText.length < fullCatalog.length, 'layered prompt stays smaller than the old full catalog');
+  console.log('ok - feature catalog details only the top-ranked features and indexes the rest');
+}
+
+{
+  // 一次很大的读取不能挤掉最新一步：刚完成的写入与读回必须完整可见，否则模型会重复写入
+  const bigRead = { index: 1, toolName: 'regex.list', args: { includeRules: true }, status: 'succeeded', summary: 'listed regex: 48 set(s)', output: { sets: Array.from({ length: 48 }, (_, i) => ({ id: `set-${i}`, name: `规则集${i}`, rules: Array.from({ length: 10 }, (__, j) => ({ id: `r-${i}-${j}`, findRegex: 'x'.repeat(40) })) })) } };
+  const write = { index: 2, toolName: 'regex.upsert_rules', args: { newSetName: '计时测试甲' }, status: 'succeeded', summary: 'regex rules write completed; 1 succeeded', output: { ok: true, target: 'set-new', results: [{ name: '替换', status: 'succeeded' }] } };
+  const readBack = { index: 3, toolName: 'regex.list', args: { container: 'set-new', includeRules: true }, status: 'succeeded', summary: 'listed regex: 1 set(s)', output: { sets: [{ id: 'set-new', name: '计时测试甲', rules: [{ id: 'r1', findRegex: '测试丙' }] }] } };
+  const text = stringifyRecentStepsForPrompt([bigRead, write, readBack], 12000);
+  assert.ok(text.length <= 12200, `bounded: ${text.length}`);
+  assert.match(text, /regex rules write completed; 1 succeeded/, 'the write stays visible');
+  assert.match(text, /"container":"set-new"/);
+  assert.match(text, /测试丙/, 'the newest observation is complete');
+  assert.ok(text.indexOf('regex.upsert_rules') > text.indexOf('规则集0'), 'chronological order is kept');
+  const many = stringifyRecentStepsForPrompt(Array.from({ length: 6 }, (_, i) => ({ ...bigRead, index: i + 1 })), 12000);
+  assert.ok(many.length <= 12400);
+  assert.match(many, /"index":6/);
+  // 只有一步时可用满预算：48 个规则集的精简清单不该被缩到 30 项
+  const single = stringifyRecentStepsForPrompt([{ index: 1, toolName: 'regex.list', status: 'succeeded', output: { sets: Array.from({ length: 48 }, (_, i) => ({ id: `re-set-${i}-abcdef`, name: `规则集名称${i}`, enabled: true, activeNow: false, bind: '绑定预设：某个预设', ruleCount: 3 })) } }], 12000);
+  assert.doesNotMatch(single, /项未显示/);
+  assert.match(single, /规则集名称47/);
+  console.log('ok - recent step observations give the newest step its budget first');
+}
+
+{
+  // 同参数、同结果的重复读取：旧的一次只留指向最新一次的短句；结果变了（中间有写入）或是写入工具时照常完整显示
+  const listed = { sets: [{ id: 'a', name: '规则集甲' }, { id: 'b', name: '规则集乙' }] };
+  const read = index => ({ index, toolName: 'regex.list', args: { includeRules: false }, status: 'succeeded', output: listed });
+  const text = stringifyRecentStepsForPrompt([read(1), read(2), read(3)], 12000);
+  assert.equal((text.match(/规则集甲/g) || []).length, 1, 'the data appears once');
+  assert.match(text, /"index": 1, "toolName": "regex\.list", "status": "succeeded", "output": "与第 3 步的参数和结果完全相同/);
+  assert.match(text, /"index": 2,[^\n]*与第 3 步/);
+  const changed = stringifyRecentStepsForPrompt([read(1), { ...read(2), output: { sets: [{ id: 'a', name: '规则集甲' }] } }], 12000);
+  assert.doesNotMatch(changed, /重复读取/, 'a changed result is a new observation');
+  const writes = stringifyRecentStepsForPrompt([1, 2].map(index => ({ index, toolName: 'regex.toggle', args: { id: 'a' }, status: 'succeeded', output: { ok: true } })), 12000);
+  assert.doesNotMatch(writes, /重复读取/, 'repeated writes are never folded');
+  console.log('ok - identical repeated reads collapse to a pointer at the newest copy');
+}
+
+{
+  // 超长观察按结构精简：数量与顶层字段保留，长数组注明省略数，结果仍是可读的 JSON 形状
+  const value = { ok: true, counts: { openai: 130 }, presets: { openai: { count: 130, presets: Array.from({ length: 130 }, (_, i) => ({ id: `p-${i}`, name: `预设${i}`, note: 'x'.repeat(500) })) } } };
+  const text = compactJsonForPrompt(value, 3000);
+  assert.ok(text.length <= 3000, `bounded: ${text.length}`);
+  assert.match(text, /"openai":130/);
+  assert.match(text, /"count":130/);
+  assert.match(text, /还有 \d+ 项未显示/);
+  assert.doesNotThrow(() => JSON.parse(text), 'still valid JSON when shrinking suffices');
+  assert.equal(compactJsonForPrompt({ a: 1 }, 100), JSON.stringify({ a: 1 }));
+  // 能放下多少就保留多少：不应一刀缩到很少的几项
+  const sets = { sets: Array.from({ length: 48 }, (_, i) => ({ id: `re-set-${i}-abcdef`, name: `规则集名称${i}`, ruleCount: 3 })) };
+  const fitted = compactJsonForPrompt(sets, Math.floor(JSON.stringify(sets).length * 0.8));
+  const kept = (fitted.match(/规则集名称/g) || []).length;
+  assert.ok(kept >= 35, `keeps as many items as fit (${kept})`);
+  console.log('ok - oversized observations shrink by structure and keep counts visible');
 }
 
 {
@@ -179,9 +262,12 @@ const cloneJson = value => JSON.parse(JSON.stringify(value));
     },
   });
   assert.match(messages[0].content, /历史上下文和记忆表格/);
-  assert.match(messages[1].content, /女仆分层记忆/);
+  assert.match(messages[1].content, /<maid_memory today="\d{4}-\d{2}-\d{2}">\n\| 1 \| 摘要/, 'memory is wrapped and dated');
+  assert.match(messages[1].content, /<\/maid_memory>\n<maid_history>/);
+  assert.match(messages[0].content, /仅供参考/);
+  assert.match(messages[0].content, /先用工具重新读取/, 'changeable app state must be re-read');
   assert.match(messages[1].content, /用户创建了角色卡 A/);
-  assert.match(messages[1].content, /女仆历史上下文/);
+  assert.match(messages[1].content, /<\/maid_history>/);
   assert.match(messages[1].content, /persona\.create/);
   console.log('ok - maid model planner injects history and memory context');
 }
@@ -701,11 +787,13 @@ const cloneJson = value => JSON.parse(JSON.stringify(value));
   assert.equal(context.capabilitySnapshot.cohort.profileId, 'fallback-profile');
   assert.equal(context.capabilitySnapshot.cohort.provider, 'deepseek');
   assert.equal(context.capabilitySnapshot.cohort.model, 'fallback-model');
-  assert.equal(usageEntries.length, 1);
-  assert.equal(usageEntries[0].provider, 'deepseek');
-  assert.equal(usageEntries[0].promptTokens, 500);
-  assert.equal(usageEntries[0].modelCallCount, 2);
-  assert.equal(usageEntries[0].degraded, true);
+  assert.equal(usageEntries.length, 2);
+  assert.equal(usageEntries[0].model, 'primary-model');
+  assert.equal(usageEntries[0].outcome, 'provider_request_failed');
+  assert.equal(usageEntries[1].provider, 'deepseek');
+  assert.equal(usageEntries[1].promptTokens, 500);
+  assert.equal(usageEntries.reduce((sum, entry) => sum + entry.modelCallCount, 0), 2);
+  assert.equal(usageEntries[1].degraded, true);
   console.log('ok - fallback model decisions are attributed to the actual cohort');
 }
 
@@ -871,9 +959,9 @@ const cloneJson = value => JSON.parse(JSON.stringify(value));
   assert.match(yaml, /^  tools: \[session\.create, session\.list\]$/m);
   assert.match(yaml, /^  path: 顶部 \+ -> 添加$/m);
   const messages = buildMaidModelPlannerMessages({ input: '测试', features });
-  const system = messages[0].content;
-  assert.match(system, /<app_features>\n- id: session\.create/);
-  assert.match(system, /<\/app_features>/);
+  const user = messages.at(-1).content;
+  assert.match(user, /<app_features>\n- id: session\.create/);
+  assert.match(user, /<\/app_features>/);
   console.log('ok - 功能目录以 YAML 列表呈现并用 app_features 标签分隔');
 }
 
@@ -974,7 +1062,7 @@ const cloneJson = value => JSON.parse(JSON.stringify(value));
       config: { provider: 'custom', model: 'weak-model' },
       client: {
         chat: async (messages) => {
-          systemPrompt = messages[0].content;
+          systemPrompt = messages.map(message => message.content).join('\n');
           return JSON.stringify({
             ok: true,
             featureId: 'app.state.reed',
@@ -998,7 +1086,11 @@ const cloneJson = value => JSON.parse(JSON.stringify(value));
   assert.equal(result.candidateSnapshotId, 'candidate-snapshot');
   assert.equal(result.capabilityCorrection.rule, 'unique_tool_owner');
   assert.match(systemPrompt, /schemas:/);
-  assert.doesNotMatch(systemPrompt, /outside\.feature/);
+  // 候选外的功能只以名称进入索引（需先读说明才能用），不带工具与参数
+  const detailPart = systemPrompt.slice(systemPrompt.indexOf('<app_features>\n'), systemPrompt.indexOf('</app_features>'));
+  assert.doesNotMatch(detailPart, /outside\.feature|outside\.tool/);
+  assert.match(systemPrompt, /<app_feature_index>\n- outside\.feature: 不应出现\n<\/app_feature_index>/);
+  assert.doesNotMatch(systemPrompt, /outside\.tool/);
   console.log('ok - candidate mode injects only hydrated schemas and corrects IDs inside the snapshot');
 }
 
@@ -1324,4 +1416,145 @@ const cloneJson = value => JSON.parse(JSON.stringify(value));
   assert.equal(fallbackCalls, 1);
   assert.equal(result.reason, 'fallback_used');
   console.log('ok - provider AbortError with a live caller signal remains a failure and may use fallback');
+}
+
+{
+  // 临时故障先对同一模型重试（最多 2 次），仍失败才转备用档或报错；参数类错误不重试
+  const { configureMaidModelRetry, isMaidTransientModelError, createMaidModelBackedPlanner: createPlanner } = await import('../../src/scripts/agent/maid-model-planner.js');
+  const previous = configureMaidModelRetry();
+  configureMaidModelRetry({ delaysMs: [0, 0] });
+  const okPlan = JSON.stringify({ ok: true, toolName: 'regex.list', args: {}, featureId: 'regex.list', title: '查看正则', response: '好的' });
+  const makePlanner = (client, fallbackClient = null) => createPlanner({
+    resolveRuntimeConfig: async () => ({ configured: true, config: { provider: 'custom', model: 'm' }, client, fallbackClient }),
+    logger: { warn() {}, debug() {} },
+  });
+  for (const message of ['Vertex AI Error: 429 - Resource exhausted.', 'Empty response from Vertex AI', 'Failed to authenticate with Service Account: undefined', 'HTTP 503 Service Unavailable']) {
+    assert.equal(isMaidTransientModelError(new Error(message)), true, message);
+  }
+  for (const message of ['Vertex AI Error: 400 - Request contains an invalid argument.', 'HTTP 401 Unauthorized']) {
+    assert.equal(isMaidTransientModelError(new Error(message)), false, message);
+  }
+
+  let calls = 0;
+  const flaky = { chat: async () => { calls += 1; if (calls < 3) throw new Error('Vertex AI Error: 429 - Resource exhausted.'); return okPlan; } };
+  const recovered = await makePlanner(flaky)('看看正则', {});
+  assert.equal(recovered.ok, true);
+  assert.equal(calls, 3, 'two retries on the same model');
+
+  let primaryCalls = 0;
+  let fallbackCalls = 0;
+  const rejected = { chat: async () => { primaryCalls += 1; throw new Error('Vertex AI Error: 400 - Request contains an invalid argument.'); } };
+  const fallback = { chat: async () => { fallbackCalls += 1; return okPlan; } };
+  const viaFallback = await makePlanner(rejected, fallback)('看看正则', {});
+  assert.equal(viaFallback.ok, true);
+  assert.equal(primaryCalls, 1, 'a rejected request is not retried');
+  assert.equal(fallbackCalls, 1);
+
+  let stubbornCalls = 0;
+  const stubborn = { chat: async () => { stubbornCalls += 1; throw new Error('Vertex AI Error: 429 - Resource exhausted.'); } };
+  const failed = await makePlanner(stubborn)('看看正则', {});
+  assert.equal(failed.ok, false, 'without a fallback profile the error is reported');
+  assert.equal(stubbornCalls, 3);
+
+  let emptyCalls = 0, emptyFallbackCalls = 0;
+  const emptyFallback = { chat: async () => { emptyFallbackCalls++; return okPlan; } };
+  const emptyThenReady = await makePlanner({ chat: async () => ++emptyCalls === 1 ? '  \n' : okPlan }, emptyFallback)('看看正则', {});
+  assert.equal(emptyThenReady.ok, true);
+  assert.equal(emptyCalls, 2);
+  assert.equal(emptyFallbackCalls, 0, 'blank text retries the same client before fallback');
+  emptyCalls = 0;
+  const emptyThenFallback = await makePlanner({ chat: async () => { emptyCalls++; return ''; } }, emptyFallback)('看看正则', {});
+  assert.equal(emptyThenFallback.ok, true);
+  assert.equal(emptyCalls, 3);
+  assert.equal(emptyFallbackCalls, 1, 'persistent empty text uses fallback after two retries');
+  const allEmpty = await makePlanner({ chat: async () => '' }, { chat: async () => '' })('看看正则', {});
+  assert.equal(allEmpty.ok, false);
+  assert.notEqual(allEmpty.reason, 'invalid_model_plan', 'empty provider output is a request failure, not a malformed plan');
+
+  const usage = [];
+  const metered = createPlanner({
+    getProviderFcExperimentStatus: () => ({ enabled: false }),
+    resolveRuntimeConfig: async () => ({ configured: true,
+      config: { provider: 'custom', model: 'primary' }, fallbackConfig: { provider: 'custom', model: 'fallback' },
+      client: { chat: async (_messages, options) => {
+        options.onProviderUsage({ promptTokens: 50, completionTokens: 5, totalTokens: 55 });
+        options.onProviderUsage({ promptTokens: 100, completionTokens: 10, totalTokens: 110 });
+        return '';
+      } },
+      fallbackClient: { chat: async (_messages, options) => {
+        options.onProviderUsage({ promptTokens: 200, completionTokens: 20, totalTokens: 220 });
+        return okPlan;
+      } },
+    }), logger: { warn() {}, debug() {} },
+  });
+  assert.equal((await metered('看看正则', { onModelUsage: entry => usage.push(entry) })).ok, true);
+  assert.equal(usage.length, 4);
+  assert.equal(usage.reduce((sum, entry) => sum + entry.totalTokens, 0), 550, 'every charged attempt counts, cumulative callbacks count once');
+  assert.equal(usage.reduce((sum, entry) => sum + entry.modelCallCount, 0), 4);
+  assert.deepEqual(usage.map(entry => entry.model), ['primary', 'primary', 'primary', 'fallback']);
+  assert.deepEqual(usage.map(entry => entry.degraded), [false, false, false, true]);
+
+  configureMaidModelRetry({ delaysMs: [60000] });
+  const controller = new AbortController();
+  const waiting = makePlanner(stubborn)('看看正则', { signal: controller.signal });
+  setTimeout(() => controller.abort(), 20);
+  const started = Date.now();
+  await waiting.catch(() => null);
+  assert.ok(Date.now() - started < 5000, 'cancelling stops the backoff wait');
+  configureMaidModelRetry({ delaysMs: previous });
+  console.log('ok - transient model failures retry on the same model before falling back or failing');
+}
+
+{
+  // 女仆思考设置：按实际调用的模型换成对应参数；降级档用自己的映射，不会收到主档的参数；模型默认不改动请求
+  const { createMaidModelBackedPlanner: createPlanner } = await import('../../src/scripts/agent/maid-model-planner.js');
+  const okPlan = JSON.stringify({ ok: true, toolName: 'regex.list', args: {}, featureId: 'regex.list', title: '查看正则', response: '好的' });
+  const seen = [];
+  const run = async (generationSettings, { failPrimary = false } = {}) => {
+    seen.length = 0;
+    const planner = createPlanner({
+      resolveRuntimeConfig: async () => ({
+        configured: true,
+        config: { provider: 'vertexai', model: 'gemini-3.8-flash' },
+        client: { chat: async (_messages, options) => { seen.push(['primary', options]); if (failPrimary) throw new Error('HTTP 400 bad'); return okPlan; } },
+        fallbackConfig: { provider: 'deepseek', model: 'deepseek-flash' },
+        fallbackClient: { chat: async (_messages, options) => { seen.push(['fallback', options]); return okPlan; } },
+        generationSettings,
+      }),
+      logger: { warn() {}, debug() {} },
+    });
+    assert.equal((await planner('看看正则', {})).ok, true);
+    return seen.map(([who, options]) => [who, options]);
+  };
+  const [[, offPrimary]] = await run({ reasoningMode: 'off', reasoningEffort: 'low' });
+  assert.equal(offPrimary.thinkingLevel, undefined, 'models that cannot turn thinking off get no extra request');
+  assert.equal(offPrimary.maxTokens, 8000);
+  const [[, onPrimary]] = await run({ reasoningMode: 'on', reasoningEffort: 'low' });
+  assert.equal(onPrimary.thinkingLevel, 'low');
+  assert.equal(onPrimary.maxTokens, 8000, 'the call keeps its own output budget');
+  assert.equal(onPrimary.max_tokens, 8000);
+  const calls = await run({ reasoningMode: 'off', reasoningEffort: 'low' }, { failPrimary: true });
+  const fallbackOptions = calls.find(([who]) => who === 'fallback')[1];
+  assert.deepEqual(fallbackOptions.thinking, { type: 'disabled' }, 'DeepSeek fallback turns thinking off with its own parameter');
+  assert.equal(fallbackOptions.thinkingLevel, undefined);
+  const [[, untouched]] = await run({ reasoningMode: 'default' });
+  assert.equal(untouched.thinking, undefined);
+  assert.equal(untouched.thinkingLevel, undefined);
+  console.log('ok - maid reasoning settings map per model, including the fallback profile');
+}
+
+{
+  // 文本 JSON 路径的最终答复与函数调用路径同一上限（6000），长清单不在 1200 处截断
+  const { createMaidModelBackedReActPlanner: createMaidModelReActPlanner } = await import('../../src/scripts/agent/maid-model-planner.js');
+  const longMessage = `${'规则集名称，'.repeat(400)}FINAL_ENTRY`;
+  for (const reply of [JSON.stringify({ ok: true, action: 'final', message: longMessage }), longMessage]) {
+    const reactPlanner = createMaidModelReActPlanner({
+      resolveRuntimeConfig: async () => ({ configured: true, config: { provider: 'custom', model: 'm' }, client: { chat: async () => reply } }),
+      logger: { warn() {}, debug() {} },
+    });
+    const decision = await reactPlanner('列出所有规则集', { maidReactSteps: [{ index: 1, toolName: 'regex.list', status: 'succeeded', output: {} }] });
+    assert.equal(decision.ok, true);
+    assert.match(decision.message, /FINAL_ENTRY$/, 'the end of a long list survives the text path');
+  }
+  console.log('ok - long final answers on the text JSON path are not cut at 1200 characters');
 }

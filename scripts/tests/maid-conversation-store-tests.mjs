@@ -19,6 +19,43 @@ import {
   MaidSemanticMemoryStore,
 } from '../../src/scripts/storage/maid-semantic-memory-store.js';
 
+// 清历史时已经排队、但尚未写入的结构化/模型提取结果都必须失效。
+for (const mode of ['structured', 'extracted']) {
+  const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
+  const persistGate = deferred(), persistEntered = deferred(), extractionQueued = deferred();
+  let saveCount = 0, extractorCalls = 0;
+  const semantic = new MaidSemanticMemoryStore({ storage: null, loadKv: async () => null,
+    saveKv: async () => { if (++saveCount === 1) { persistEntered.resolve(); await persistGate.promise; } },
+  });
+  await semantic.load();
+  const seed = semantic.upsertMemory({ kind: 'important_event', key: 'event.offline_seed', content: 'Existing memory holds the persistence queue.' });
+  await persistEntered.promise;
+  const originalUpsert = semantic.upsertMemory.bind(semantic);
+  semantic.upsertMemory = (...args) => { const operation = originalUpsert(...args); extractionQueued.resolve(); return operation; };
+  const memory = { kind: 'preference', key: 'presentation.default', content: 'Preference extracted from old history.', sourceTurnIds: ['old-turn'] };
+  const conversation = new MaidConversationStore({ storage: null,
+    loadKv: async key => key === MAID_CONVERSATION_STORE_KEY ? {
+      turns: [{ id: 'old-turn', input: 'Old preference.', message: 'Acknowledged', status: 'succeeded', at: Date.now(), structuredMemories: mode === 'structured' ? [memory] : [] }],
+      extractionBatches: [{ id: 'batch', sourceTurnIds: ['old-turn'], status: 'pending', deterministicComplete: mode === 'extracted' }],
+    } : null,
+    saveKv: async () => {}, semanticMemoryStore: semantic,
+    extractSemanticMemories: async () => { extractorCalls++; return { memories: [memory], candidateKeys: ['presentation.default'] }; },
+    logger: { warn() {}, debug() {} },
+  });
+  await conversation.load();
+  const processing = conversation.processPendingExtractions();
+  await extractionQueued.promise;
+  await conversation.clearHistory();
+  persistGate.resolve();
+  await Promise.all([seed, processing]);
+  assert.equal(conversation.exportState().turns.length, 0);
+  assert.equal(conversation.exportState().extractionBatches.length, 0);
+  assert.equal(semantic.listMemories().some(item => item.sourceTurnIds.includes('old-turn')), false, `${mode}: invalidated writes cannot return after clearing history`);
+  assert.equal(semantic.listMemories().length, 1, 'previously committed long-term memories are retained');
+  if (mode === 'structured') assert.equal(extractorCalls, 0, 'clearing during the deterministic write also prevents a subsequent extraction request');
+}
+console.log('ok - clearing history invalidates extraction writes already queued in the semantic store');
+
 const createStorage = () => {
   const data = new Map();
   return {
@@ -451,6 +488,7 @@ const createStorage = () => {
   });
   assert.doesNotMatch(snapshot.historyText, /雾港规则原句/, '原句应已跨出近期窗口');
   assert.match(snapshot.semanticMemoryText, /精灵世界书的人物条目统一使用第三人称/);
+  assert.match(snapshot.semanticMemoryText, /；记于: \d{4}-\d{2}-\d{2}/, 'memory lines carry the date they were recorded');
   assert.match(snapshot.memoryText, /\[长期记忆\]/);
   assert.equal(snapshot.selectedSemanticMemoryIds.includes(semanticFact.memory.id), true);
   assert.equal(semanticStore.getMemory(semanticFact.memory.id).lastUsedAt > 0, true);
@@ -834,4 +872,49 @@ const createStorage = () => {
     }
   }
   console.log('ok - dropped memory sections never report selected memory IDs');
+}
+
+{
+  // 清除最近对话连同待提取批次；进行中的提取结果不再写回；轮次归档可单独清除
+  const upserts = [];
+  let releaseExtraction = null;
+  const kv = new Map();
+  const store = new MaidConversationStore({
+    storage: createStorage(),
+    loadKv: async key => kv.get(key) || null,
+    saveKv: async (key, value) => { kv.set(key, JSON.parse(JSON.stringify(value))); return true; },
+    now: (() => { let clock = 50_000; return () => ++clock; })(),
+    compactionTurnThreshold: 8,
+    compactionHistoryTokenThreshold: 100000,
+    semanticMemoryStore: {
+      scopeId: 'maid_default',
+      listMemories: () => [],
+      upsertMemory: async (memory) => { upserts.push(memory); return { ok: true, action: 'created', memory }; },
+    },
+    extractSemanticMemories: () => new Promise((resolve) => {
+      releaseExtraction = () => resolve({ memories: [{ kind: 'preference', key: 'presentation.default', content: '来自已清除对话的记忆', sourceTurnIds: ['clear-turn-1'] }], candidateKeys: ['presentation.default'] });
+    }),
+    logger: { warn() {}, debug() {} },
+  });
+  await store.load();
+  for (let index = 0; index < 9; index += 1) {
+    await store.appendTurn({ id: `clear-turn-${index + 1}`, input: `测试轮次 ${index + 1}`, status: 'succeeded', message: '已完成' });
+  }
+  assert.ok(store.exportState().memoryRows.length > 0, 'compaction produced an archive row');
+  assert.ok(store.exportState().extractionBatches.length > 0);
+  while (!releaseExtraction) await new Promise(resolve => setTimeout(resolve, 5));
+  const cleared = await store.clearHistory();
+  assert.ok(cleared.turns > 0);
+  releaseExtraction();
+  await store.flushPendingExtractions();
+  assert.equal(upserts.length, 0, 'an extraction that finishes after clearing writes nothing back');
+  assert.equal(store.exportState().turns.length, 0);
+  assert.equal(store.exportState().extractionBatches.length, 0);
+  assert.match(store.getHistoryContextText(), /尚未记录/);
+  assert.equal(kv.get(MAID_CONVERSATION_STORE_KEY).turns.length, 0, 'persisted');
+  assert.ok(store.exportState().memoryRows.length > 0, 'clearing history keeps the archive rows');
+  assert.ok(await store.clearMemoryRows() > 0);
+  assert.equal(store.exportState().memoryRows.length, 0);
+  assert.match(store.getMemoryTableDisplayText(), /尚未生成/);
+  console.log('ok - maid history and archive rows can be cleared without late extraction write-back');
 }

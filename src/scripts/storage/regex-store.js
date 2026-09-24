@@ -394,10 +394,12 @@ export class RegexStore {
     }
 
     /* ---------------- Local sets ---------------- */
-    listLocalSets() {
+    // filter 在复制前以只读方式筛选（不得修改传入的 set），只复制命中的规则集
+    listLocalSets(filter = null) {
         const order = ensureArr(this.state?.local?.order);
         const sets = ensureObj(this.state?.local?.sets, {});
-        return order.map(id => sets[id]).filter(Boolean).map(clone);
+        const list = order.map(id => sets[id]).filter(Boolean);
+        return (typeof filter === 'function' ? list.filter(set => filter(set)) : list).map(clone);
     }
 
     listLocalSetSummaries() {

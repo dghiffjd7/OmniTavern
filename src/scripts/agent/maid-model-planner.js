@@ -1,5 +1,4 @@
 import {
-  buildAppFeatureSearchContextText,
   findAppFeature,
   getMaidModelFeatureContext,
   listAppFeatures,
@@ -18,9 +17,12 @@ import { buildMaidRunContinuationPromptBlock } from './maid-run-continuation.js'
 import { buildMaidSourceGroundingPromptBlock } from './maid-source-grounding.js';
 import { buildMaidVisualSpecPromptBlock } from './maid-visual-spec.js';
 import { isMaidUserAbort } from './maid-failure-codes.js';
+import { buildMaidGenerationOptions } from './maid-generation-settings.js';
+import { MAID_MEMORY_REFERENCE_RULE, buildMaidMemoryPromptBlock } from './maid-memory-prompt.js';
 import {
   MAID_PROMPTED_JSON_MODE,
   MAID_PROVIDER_FC_MODE,
+  MAID_PROVIDER_FC_MESSAGE_MAX_LENGTH,
   runMaidProviderFcAttempt,
 } from './maid-provider-fc-planner.js';
 import {
@@ -84,6 +86,30 @@ const emitDebugSnapshot = (callback, payload = {}, logger = console) => {
 };
 
 // 主档故障降级：主模型请求失败（网络/5xx/403 等）时用备用档重试一次
+/* 临时故障（限流、5xx、超时/网络、空响应、鉴权令牌获取失败）先对同一模型退避重试，再转备用档；
+   没配备用档就报错。参数错误、无权限等不会因重试而改变的错误不重试。 */
+let maidModelRetryDelaysMs = [1200, 3000];
+export const configureMaidModelRetry = ({ delaysMs } = {}) => {
+  if (Array.isArray(delaysMs)) maidModelRetryDelaysMs = delaysMs.map(value => Math.max(0, Number(value) || 0));
+  return [...maidModelRetryDelaysMs];
+};
+
+export const isMaidTransientModelError = (error = null) => {
+  const status = Number(error?.status || error?.statusCode || 0);
+  if ([408, 409, 425, 429].includes(status) || (status >= 500 && status < 600)) return true;
+  if (status >= 400 && status < 500) return false;
+  const text = String(error?.message || error || '');
+  if (/\b(?:400|401|403|404|422)\b/.test(text) && !/\b(?:429|5\d\d)\b/.test(text)) return false;
+  return /\b(?:429|5\d\d)\b|resource (?:has been )?exhausted|rate.?limit|overloaded|temporarily|unavailable|timed? ?out|timeout|network|fetch failed|ECONN|socket|empty response|failed to authenticate with service account/i.test(text);
+};
+
+const waitWithSignal = (ms, signal) => new Promise((resolve, reject) => {
+  if (signal?.aborted) { reject(signal.reason || Object.assign(new Error('Aborted'), { name: 'AbortError' })); return; }
+  const timer = setTimeout(() => { signal?.removeEventListener?.('abort', onAbort); resolve(); }, ms);
+  const onAbort = () => { clearTimeout(timer); reject(signal.reason || Object.assign(new Error('Aborted'), { name: 'AbortError' })); };
+  signal?.addEventListener?.('abort', onAbort, { once: true });
+});
+
 const chatWithFallback = async (
   client,
   fallbackClient,
@@ -99,32 +125,56 @@ const chatWithFallback = async (
   try { globalThis.__maidModelProbe = probe; } catch {}
   // Phase B 计量：out-of-band 采集 provider usage，不改 client.chat 返回契约（仍返回文本）。
   const wantUsage = typeof onModelUsage === 'function';
-  let capturedUsage = null;
-  let modelCallCount = 0;
-  let usageReported = false;
-  const chatOptions = wantUsage
-    ? { ...options, onProviderUsage: (u) => { capturedUsage = u; } }
-    : options;
-  const reportUsage = (degraded) => {
-    if (!wantUsage || usageReported) return;
-    usageReported = true;
+  // maidGeneration = { settings, primaryModel, fallbackModel }：思考参数按实际调用的模型分别生成，降级档不会收到主档的参数
+  const { maidGeneration = null, ...requestOptions } = options || {};
+  const requireText = response => {
+    if (!trim(response)) throw new Error('Empty response from maid model');
+    return response;
+  };
+  // 每次尝试独立记账；一次请求内的 usage 回调可能是累计值，只保留该次最后一份。
+  const callAttempt = async (targetClient, model, degraded) => {
+    const attemptStartedAt = Date.now();
+    let capturedUsage = null;
+    let failed = false;
+    const baseOptions = wantUsage
+      ? { ...requestOptions, onProviderUsage: usage => { capturedUsage = usage; } }
+      : requestOptions;
     try {
-      onModelUsage({
-        ...(capturedUsage || {}),
-        latencyMs: Date.now() - startedAt,
-        modelCallCount,
-        degraded,
-      });
-    } catch {}
+      return requireText(await targetClient.chat(messages, buildMaidGenerationOptions(baseOptions, model, maidGeneration?.settings)));
+    } catch (error) {
+      failed = true;
+      throw error;
+    } finally {
+      if (wantUsage) {
+        try {
+          onModelUsage({
+            provider: model?.provider, model: model?.model,
+            ...(capturedUsage || {}),
+            latencyMs: Date.now() - attemptStartedAt, modelCallCount: 1, degraded,
+            ...(failed ? { outcome: 'provider_request_failed' } : {}),
+          });
+        } catch {}
+      }
+    }
+  };
+  const callPrimaryWithRetry = async () => {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await callAttempt(client, maidGeneration?.primaryModel, false);
+      } catch (error) {
+        const delay = maidModelRetryDelaysMs[attempt];
+        if (isMaidUserAbort(error, options?.signal) || delay === undefined || !isMaidTransientModelError(error)) throw error;
+        logger?.warn?.(`[maid-model] transient failure, retry ${attempt + 1} in ${delay}ms: ${String(error?.message || error).slice(0, 120)}`);
+        await waitWithSignal(delay, options?.signal);
+      }
+    }
   };
   try {
-    modelCallCount += 1;
-    const text = await client.chat(messages, chatOptions);
+    const text = await callPrimaryWithRetry();
     probe.phase = 'done';
     probe.doneAt = Date.now();
     probe.elapsedMs = probe.doneAt - startedAt;
     try { onClientUsed?.('primary'); } catch {}
-    reportUsage(false);
     return text;
   } catch (error) {
     probe.phase = 'failed';
@@ -133,33 +183,33 @@ const chatWithFallback = async (
     logger?.warn?.(`[maid-model] chat failed after ${probe.elapsedMs}ms: ${probe.error}`);
     // 用户取消不属于主档故障，绝不转 fallback 重试（会多计费一次）
     if (isMaidUserAbort(error, options?.signal)) {
-      reportUsage(false);
       throw error;
     }
     if (!fallbackClient || typeof fallbackClient.chat !== 'function') {
-      reportUsage(false);
       throw error;
     }
     probe.phase = 'fallback-calling';
     logger?.warn?.('maid main model failed, retrying with fallback profile');
-    capturedUsage = null;
     try {
       try { onClientUsed?.('fallback'); } catch {}
-      modelCallCount += 1;
-      const text = await fallbackClient.chat(messages, chatOptions);
+      const text = await callAttempt(fallbackClient, maidGeneration?.fallbackModel, true);
       probe.phase = 'fallback-done';
       probe.elapsedMs = Date.now() - startedAt;
-      reportUsage(true);
       return text;
     } catch (err2) {
       probe.phase = 'fallback-failed';
       probe.error = String(err2?.message || err2).slice(0, 120);
       probe.elapsedMs = Date.now() - startedAt;
-      reportUsage(true);
       throw err2;
     }
   }
 };
+
+const maidGenerationFor = (runtime = {}, config = {}) => ({
+  settings: runtime?.generationSettings || null,
+  primaryModel: config,
+  fallbackModel: isPlainObject(runtime?.fallbackConfig) ? runtime.fallbackConfig : {},
+});
 
 const hasImageParts = (messages = []) => (Array.isArray(messages) ? messages : []).some(message => (
   Array.isArray(message?.content) && message.content.some(part => part?.type === 'image_url')
@@ -197,6 +247,84 @@ const stringifyForPrompt = (value, max = 10000) => {
   } catch {
     return truncate(String(value ?? ''), max);
   }
+};
+
+/* 最近步骤的观察按“新的优先”分配字数：整段序列化后从尾部截断会先截掉最新一步，
+   一次很大的读取就会让模型看不到刚完成的写入，于是重复执行。每步单独序列化，
+   最新一步至少 7000 字（前面步骤少时可用到剩余预算）、更早的每步最多 3000 字，总量不超过 budget；步骤头（工具、参数、状态、摘要）在前，截断只削减输出。 */
+/* 超出字数时按结构精简而不是从尾部硬切：逐级缩短长数组（保留开头几项并注明省略数）、截短长字符串，
+   让数量、摘要等顶层字段始终可见；仍放不下才退回硬截断。 */
+const shrinkForPrompt = (value, maxItems, maxString) => {
+  if (typeof value === 'string') return value.length > maxString ? `${value.slice(0, maxString)}…` : value;
+  if (Array.isArray(value)) {
+    const kept = value.slice(0, maxItems).map(item => shrinkForPrompt(item, maxItems, maxString));
+    return value.length > maxItems ? [...kept, `…还有 ${value.length - maxItems} 项未显示`] : kept;
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, shrinkForPrompt(item, maxItems, maxString)]));
+  }
+  return value;
+};
+
+export const compactJsonForPrompt = (value, max = 10000) => {
+  // 观察用紧凑 JSON（缩进只占字数与 token，不增加信息）
+  const toText = (item) => { try { return JSON.stringify(item); } catch { return null; } };
+  let text = toText(value);
+  if (text === null) return truncate(String(value ?? ''), max);
+  if (text.length <= max) return text;
+  // 先截短长字符串，再二分出能放下的最多数组项数，尽量少省略
+  for (const maxString of [600, 240, 120, 60]) {
+    let low = 1;
+    let high = 200;
+    let best = null;
+    while (low <= high) {
+      const mid = Math.floor((low + high) / 2);
+      const candidate = toText(shrinkForPrompt(value, mid, maxString));
+      if (candidate !== null && candidate.length <= max) { best = candidate; low = mid + 1; } else high = mid - 1;
+    }
+    if (best) return best;
+  }
+  return truncate(text, max);
+};
+
+const isReadLikeStepTool = (toolName = '') => /^(?:list|read|get|search|find|inspect|query|describe|view)(?:_|$)/
+  .test(trim(toolName).split('.').pop() || '');
+
+// 同一轮里用相同参数重复读取、结果也完全相同时，旧的那次只留一句指向最新一次（最新一步预算最大，信息不丢）
+const findLaterIdenticalReads = (list = []) => {
+  const latestByKey = new Map();
+  const laterIndex = new Map();
+  for (let index = list.length - 1; index >= 0; index -= 1) {
+    const step = list[index];
+    if (!isReadLikeStepTool(step?.toolName) || trim(step?.status) !== 'succeeded' || step?.output === undefined) continue;
+    let key = '';
+    try { key = `${trim(step.toolName)}\u0000${JSON.stringify(step.args ?? {})}\u0000${JSON.stringify(step.output)}`; } catch { continue; }
+    if (latestByKey.has(key)) laterIndex.set(index, latestByKey.get(key));
+    else latestByKey.set(key, Number(step?.index) || index + 1);
+  }
+  return laterIndex;
+};
+
+export const stringifyRecentStepsForPrompt = (steps = [], budget = 12000, { latestMax = 7000, olderMax = 3000 } = {}) => {
+  const list = Array.isArray(steps) ? steps : [];
+  if (!list.length) return '';
+  const parts = [];
+  let remaining = Math.max(0, budget);
+  // 最新一步至少 latestMax；前面步骤少时把省下的预算也给它（只有一步时可用满预算）
+  const latestCap = Math.max(latestMax, budget - (list.length - 1) * olderMax);
+  const repeatedLater = findLaterIdenticalReads(list);
+  for (let index = list.length - 1; index >= 0; index -= 1) {
+    const step = list[index];
+    const cap = Math.min(remaining, index === list.length - 1 ? latestCap : olderMax);
+    const text = repeatedLater.has(index)
+      ? `{ "index": ${Number(step?.index) || index + 1}, "toolName": ${JSON.stringify(trim(step?.toolName))}, "status": "succeeded", "output": ${JSON.stringify(`与第 ${repeatedLater.get(index)} 步的参数和结果完全相同（重复读取），见该步`)} }`
+      : cap >= 300
+      ? compactJsonForPrompt(step, cap)
+      : `{ "index": ${Number(step?.index) || index + 1}, "toolName": ${JSON.stringify(trim(step?.toolName))}, "status": ${JSON.stringify(trim(step?.status))}, "summary": ${JSON.stringify(truncate(trim(step?.summary), 90))} }`;
+    parts.unshift(text);
+    remaining = Math.max(0, remaining - text.length);
+  }
+  return `[\n${parts.join(',\n')}\n]`;
 };
 
 const MAID_READ_LEDGER_TOOLS = new Set([
@@ -311,6 +439,7 @@ const yamlText = (value = '') => {
 
 export const buildMaidModelPlannerFeatureList = (features = listAppFeatures(), {
   includeSchemas = true,
+  includeAliases = true,
 } = {}) => (
   getMaidModelFeatureContext(features).features
     .map(feature => [
@@ -324,11 +453,50 @@ export const buildMaidModelPlannerFeatureList = (features = listAppFeatures(), {
       feature.writes === true ? '  writes: true' : '',
       trim(feature.riskLevel, 'low') !== 'low' ? `  risk: ${yamlText(feature.riskLevel)}` : '',
       trim(feature.panel) ? `  panel: ${yamlText(feature.panel)}` : '',
-      list(feature.aliases).length ? `  aliases: [${list(feature.aliases).slice(0, 8).map(yamlText).join(', ')}]` : '',
+      includeAliases && list(feature.aliases).length ? `  aliases: [${list(feature.aliases).slice(0, 8).map(yamlText).join(', ')}]` : '',
       list(feature.uiPath).length ? `  path: ${yamlText(list(feature.uiPath).join(' -> '))}` : '',
     ].filter(Boolean).join('\n'))
     .join('\n')
 );
+
+// 需要先让用户确认删除清单时（例如用户记忆里有“删除前先确认”的偏好），必须用 preview 生成结构化清单，
+// 用户下一句确认后 APP 按该清单原样执行；只用文字询问会让确认后无法执行
+const MAID_DELETE_PREVIEW_RULE = '如果需要先让用户确认要删除的清单（例如用户偏好要求删除前先确认），调用对应的删除工具并传 preview:true 生成待确认清单（不会删除），再在回复里请用户确认；用户确认后 APP 会按这份清单执行。不要只用文字询问。';
+
+/* 功能目录分层注入：本地检索排名最靠前的少数功能给完整参数，其余全部功能只列“id: 名称”索引。
+   模型需要索引里的功能时先用 app.read_feature_doc 读取说明（下一步该功能会进入候选），
+   避免每次调用都带上整本功能目录。 */
+export const MAID_PROMPT_FEATURE_DETAIL_LIMIT = 4;
+const ALWAYS_DETAILED_FEATURE_IDS = new Set(['app.capabilities.search']);
+
+export const buildMaidFeatureCatalogPrompt = ({
+  features = [],
+  featureIndex = null,
+  includeSchemas = true,
+  detailLimit = MAID_PROMPT_FEATURE_DETAIL_LIMIT,
+} = {}) => {
+  const ranked = getMaidModelFeatureContext(features).features;
+  const top = ranked.filter(feature => !ALWAYS_DETAILED_FEATURE_IDS.has(feature.id)).slice(0, Math.max(1, detailLimit));
+  const detailed = [...top, ...ranked.filter(feature => ALWAYS_DETAILED_FEATURE_IDS.has(feature.id))];
+  const detailedIds = new Set(detailed.map(feature => feature.id));
+  // 索引列出全部功能且顺序固定：它属于不变的提示词前缀，不能随本次候选变化，否则服务商的提示词缓存命中不了
+  const indexSource = getMaidModelFeatureContext(Array.isArray(featureIndex) && featureIndex.length ? featureIndex : features).features;
+  const indexLines = indexSource.map(feature => `- ${feature.id}: ${trim(feature.title, feature.id)}`);
+  const staticText = [
+    '## APP 功能目录',
+    '<app_feature_index> 列出全部功能的名称；用户消息开头的 <app_features> 给出与本次请求最相关功能的完整参数，可以直接选用。',
+    '需要不在 <app_features> 里的功能时，先调用 app.read_feature_doc 并传 featureId 读取它的工具与参数，下一步再使用；不要凭名称猜测工具名或参数。',
+    indexLines.length ? `<app_feature_index>\n${indexLines.join('\n')}\n</app_feature_index>` : '',
+  ].filter(Boolean).join('\n');
+  // 别名只服务于本地检索匹配，模型选择工具用不到
+  const detailText = `<app_features>\n${buildMaidModelPlannerFeatureList(detailed, { includeSchemas, includeAliases: false })}\n</app_features>`;
+  return {
+    detailedIds: [...detailedIds],
+    staticText,
+    detailText,
+    text: `${staticText}\n${detailText}`,
+  };
+};
 
 export const buildMaidModelPlannerMessages = ({
   input = '',
@@ -338,16 +506,11 @@ export const buildMaidModelPlannerMessages = ({
   maidPrompt = DEFAULT_MAID_PROMPT,
   transportMode = MAID_PROMPTED_JSON_MODE,
   globalSemanticPromptPlan = null,
+  featureIndex = null,
 } = {}) => {
   const modelFeatureContext = getMaidModelFeatureContext(features);
   const providerFc = trim(transportMode).toLowerCase() === MAID_PROVIDER_FC_MODE;
-  const featureList = buildMaidModelPlannerFeatureList(modelFeatureContext.features, {
-    includeSchemas: !providerFc,
-  });
-  const searchContext = buildAppFeatureSearchContextText(input, {
-    features: modelFeatureContext.features,
-    limit: 5,
-  });
+  const featureCatalog = buildMaidFeatureCatalogPrompt({ features, featureIndex, includeSchemas: !providerFc });
   const prompt = getLocalizedMaidPrompt(trim(maidPrompt, DEFAULT_MAID_PROMPT));
   const memoryText = trim(conversationContext?.memoryText);
   const historyText = trim(conversationContext?.historyText);
@@ -362,7 +525,9 @@ export const buildMaidModelPlannerMessages = ({
     steps: context?.maidReactSteps,
   });
   const visualSpecBlock = buildMaidVisualSpecPromptBlock(context?.maidVisualSpecLedger);
+  // 会变的内容（本次候选的完整参数）放在用户消息开头，系统提示保持不变以命中服务商的提示词缓存
   const userText = [
+    featureCatalog.detailText,
     `用户请求：${trim(input)}`,
     runContinuationBlock,
     sourceGroundingBlock,
@@ -375,9 +540,7 @@ export const buildMaidModelPlannerMessages = ({
     `UI 模式：${trim(context?.uiMode, '-')}`,
     `当前页面：${trim(context?.activePage, '-')}`,
     `界面呈现意图：${trim(context?.presentationIntent?.mode, 'background')}`,
-    `女仆分层记忆：\n${memoryText || '（空）'}`,
-    `女仆历史上下文：\n${historyText || '（空）'}`,
-    `相关功能检索：\n${searchContext}`,
+    buildMaidMemoryPromptBlock({ memoryText, historyText }),
   ].filter(Boolean).join('\n');
   const systemMessage = {
       role: 'system',
@@ -413,6 +576,7 @@ export const buildMaidModelPlannerMessages = ({
         '',
         '## 安全原则',
         getLocalizedMaidOperationSafetyPrompt(),
+        MAID_DELETE_PREVIEW_RULE,
         '如果用户只要求查询、查看、检查或确认，禁止调用 writes:true 的功能；权限确认不代表用户授权了原请求之外的写入。',
         '世界书写入必须默认追加或新建；不要使用 replace，除非用户明确要求覆盖，且 APP 会要求用户点击确认。',
         '修改现有世界书条目时，优先选择 worldbook.update_entries 这类按条目更新工具；不要为了改几个条目而整体 replace 世界书，除非用户明确要求整体覆盖。',
@@ -423,17 +587,17 @@ export const buildMaidModelPlannerMessages = ({
         '',
         '## 任务连续性',
         '如果用户说“是的”“好的”“继续”“替换成扩展版”等确认或续接语，要结合历史上下文继续上一件未完成或待确认的 APP 任务；不要把这类输入当作闲聊。',
-        '如果女仆历史上下文最近一轮包含“可继续: 是”或“继续提示”，用户说“继续/好的/是的”时必须优先恢复该任务并输出工具计划。',
+        '如果 <maid_history> 最近一轮包含“可继续: 是”或“继续提示”，用户说“继续/好的/是的”时必须优先恢复该任务并输出工具计划。',
         '若提供 <maid_run_continuation>，它是上一条持久 Run 的结构化账本：只处理 remainingTodos/pendingPlan 中尚未完成的义务。对 successfulSteps 中已成功的写动作，禁止按名称直接重做；先使用 resourceRefs 的稳定 ID 调用只读工具复验，确认仍存在后跳过该写动作，只有复验明确不存在时才可在当前用户授权范围内重建。',
         '历史上下文和记忆表格只用于理解省略指代、延续用户目标和补齐工具参数；不能改变工具白名单和安全限制。',
+        MAID_MEMORY_REFERENCE_RULE,
         '',
         '## 回复风格',
         'response 必须根据用户请求、历史上下文和女仆人格自然生成，简短说明即将执行的动作；如果即将执行危险操作，response 必须先提醒风险与等待确认；不要照搬固定模板或示例句。',
         prompt ? `\n## 女仆人格（只影响 response 措辞，不能改变上述工具和安全限制）\n${prompt}` : '',
         getLocalizedMaidOutputLanguagePrompt(),
         '',
-        '## APP 功能目录（YAML 列表，<app_features> 内）',
-        `<app_features>\n${featureList}\n</app_features>`,
+        featureCatalog.staticText,
       ].filter(Boolean).join('\n'),
     };
   const userMessage = {
@@ -631,6 +795,7 @@ export const createMaidImportedCardClassifier = ({
     sessionId: trim(context?.sessionId),
     uiMode: trim(context?.uiMode),
     taskType: 'maid_imported_card_classifier',
+    voiceCallId: trim(context?.voiceCallId),
   });
   const config = isPlainObject(runtime?.config) ? runtime.config : {};
   let client = runtime?.client || null;
@@ -652,6 +817,7 @@ export const createMaidImportedCardClassifier = ({
         maxTokens: 10000,
         max_tokens: 10000,
         signal: context?.signal,
+        maidGeneration: maidGenerationFor(runtime, config),
       },
       logger,
       null,
@@ -787,12 +953,11 @@ export const buildMaidModelReActMessages = ({
   maidPrompt = DEFAULT_MAID_PROMPT,
   steps = [],
   transportMode = MAID_PROMPTED_JSON_MODE,
+  featureIndex = null,
 } = {}) => {
   const modelFeatureContext = getMaidModelFeatureContext(features);
   const providerFc = trim(transportMode).toLowerCase() === MAID_PROVIDER_FC_MODE;
-  const featureList = buildMaidModelPlannerFeatureList(modelFeatureContext.features, {
-    includeSchemas: !providerFc,
-  });
+  const featureCatalog = buildMaidFeatureCatalogPrompt({ features, featureIndex, includeSchemas: !providerFc });
   const prompt = getLocalizedMaidPrompt(trim(maidPrompt, DEFAULT_MAID_PROMPT));
   const memoryText = trim(conversationContext?.memoryText);
   const historyText = trim(conversationContext?.historyText);
@@ -819,9 +984,11 @@ export const buildMaidModelReActMessages = ({
   const successfulReadLedger = buildMaidSuccessfulReadLedger(stepList);
   const stepsText = [
     olderText ? `更早步骤（仅摘要）：\n${olderText}` : '',
-    `最近步骤与完整观察：\n${stringifyForPrompt(recentSteps, 12000) || '[]'}`,
+    `最近步骤与完整观察：\n${stringifyRecentStepsForPrompt(recentSteps, 12000) || '[]'}`,
   ].filter(Boolean).join('\n');
+  // 会变的内容（本次候选的完整参数）放在用户消息开头，系统提示保持不变以命中服务商的提示词缓存
   const userText = [
+    featureCatalog.detailText,
     `用户请求：${trim(input)}`,
     runContinuationBlock,
     sourceGroundingBlock,
@@ -834,8 +1001,7 @@ export const buildMaidModelReActMessages = ({
     `UI 模式：${trim(context?.uiMode, '-')}`,
     `当前页面：${trim(context?.activePage, '-')}`,
     `界面呈现意图：${trim(context?.presentationIntent?.mode, 'background')}`,
-    `女仆分层记忆：\n${memoryText || '（空）'}`,
-    `女仆历史上下文：\n${historyText || '（空）'}`,
+    buildMaidMemoryPromptBlock({ memoryText, historyText }),
     successfulReadLedger ? `成功读取账本：\n${successfulReadLedger}` : '',
     `已执行步骤与观察结果：\n${stepsText}`,
   ].filter(Boolean).join('\n');
@@ -885,6 +1051,7 @@ export const buildMaidModelReActMessages = ({
         '',
         '## 安全原则',
         getLocalizedMaidOperationSafetyPrompt(),
+        MAID_DELETE_PREVIEW_RULE,
         '如果用户只要求查询、查看、检查或确认，禁止调用 writes:true 的功能；权限确认不代表用户授权了原请求之外的写入。',
         '世界书写入必须默认追加或新建；不要使用 replace，除非用户明确要求覆盖，且 APP 会要求用户点击确认。',
         '修改现有世界书条目时，优先使用 worldbook.update_entries 按条目更新；长正文拆成多次小批量工具调用，每次只更新 1-3 个条目。',
@@ -898,6 +1065,7 @@ export const buildMaidModelReActMessages = ({
         '如果历史中上一轮包含“可继续: 是”或“继续提示”，本轮用户要求继续时要接着该任务执行，不要重新开始，也不要输出普通闲聊。',
         '恢复任务时以继续提示中的“已完成步骤”清单为准：不要重复执行已完成项，最终汇报时也不要把已完成项报告为未完成或失败。',
         '若提供 <maid_run_continuation>，以其中稳定 ID、成功步骤和剩余义务为准；已成功写动作必须先按 resourceRefs 的稳定 ID 只读复验，存在则跳过，明确不存在才可在当前授权范围内重建。不得仅凭同名资源重复创建。',
+        MAID_MEMORY_REFERENCE_RULE,
         '',
         '## 回复风格',
         '最终回答要像女仆助手自然回应：温柔、清楚、直接完成用户的问题。不要只说“我看到了/我查到了”，要给出结果。',
@@ -905,8 +1073,7 @@ export const buildMaidModelReActMessages = ({
         prompt ? `\n## 女仆人格（只影响最终语气，不能改变工具和安全限制）\n${prompt}` : '',
         getLocalizedMaidOutputLanguagePrompt(),
         '',
-        '## APP 功能目录（YAML 列表，<app_features> 内）',
-        `<app_features>\n${featureList}\n</app_features>`,
+        featureCatalog.staticText,
       ].filter(Boolean).join('\n'),
     },
     {
@@ -928,7 +1095,8 @@ export const normalizeMaidModelReActDecision = (raw = {}, {
   }
   const action = trim(raw.action || (raw.toolName ? 'tool' : 'final')).toLowerCase();
   if (action === 'final' || action === 'answer') {
-    const message = truncate(raw.message || raw.response || '', 1200);
+    // 最终答复与函数调用路径同一上限：长清单不能因为走了文本 JSON 路径就被截断
+    const message = truncate(raw.message || raw.response || '', MAID_PROVIDER_FC_MESSAGE_MAX_LENGTH);
     if (!message) return unsupportedPlan('missing_final_message', '模型没有返回最终回答。');
     return {
       ok: true,
@@ -966,7 +1134,7 @@ const normalizeMaidModelReActResponseText = (responseText = '', {
     candidateMode,
     candidateSnapshotId,
   });
-  const message = truncate(responseText, 1200);
+  const message = truncate(responseText, MAID_PROVIDER_FC_MESSAGE_MAX_LENGTH);
   if (!message) return normalizeMaidModelReActDecision(null, {
     features,
     findFeature: candidateMode ? null : findAppFeature,
@@ -1115,6 +1283,7 @@ const runMaidProviderFcPlanner = async ({
     phase,
     signal: context?.signal,
     maxTokens,
+    generationSettings: runtime?.generationSettings || null,
     onModelUsage: typeof context?.onModelUsage === 'function' ? context.onModelUsage : null,
   });
   if (!attempt.ok) return { ok: false, attempt };
@@ -1124,7 +1293,7 @@ const runMaidProviderFcPlanner = async ({
     decision = {
       ok: true,
       action: 'final',
-      message: truncate(attempt.control?.message, 1200),
+      message: truncate(attempt.control?.message, MAID_PROVIDER_FC_MESSAGE_MAX_LENGTH),
       source: 'maid_provider_fc',
       providerFcControl: trim(attempt.control?.action, 'no_tool'),
       ...(trim(attempt.control?.reason) ? { reason: trim(attempt.control.reason) } : {}),
@@ -1221,6 +1390,7 @@ export const createMaidModelBackedPlanner = ({
       sessionId: trim(context?.sessionId),
       uiMode: trim(context?.uiMode),
       taskType: 'maid_assistant',
+      voiceCallId: trim(context?.voiceCallId),
     });
   } catch (error) {
     logger?.debug?.('maid model planner runtime unavailable', error);
@@ -1246,6 +1416,10 @@ export const createMaidModelBackedPlanner = ({
     const promptFeatures = resolveCapabilityDecisionFeatures(context, features);
     const decisionFeatures = getMaidModelFeatureContext(promptFeatures).features;
     const capabilitySnapshot = context?.capabilitySnapshot || null;
+    // 目录详情按检索排名取前几项（即使未进入候选模式也按相关度排序），全部功能只作索引
+    const catalogFeatures = Array.isArray(capabilitySnapshot?.candidateFeatures) && capabilitySnapshot.candidateFeatures.length
+      ? capabilitySnapshot.candidateFeatures
+      : promptFeatures;
     const imageGenerationContext = await resolveImageGenerationContext({
       context,
       promptFeatures,
@@ -1292,7 +1466,8 @@ export const createMaidModelBackedPlanner = ({
         input,
         context: plannerContext,
         conversationContext,
-        features: promptFeatures,
+        features: catalogFeatures,
+        featureIndex: features,
         maidPrompt: runtime?.maidPrompt || runtime?.personaPrompt,
         transportMode: MAID_PROVIDER_FC_MODE,
         globalSemanticPromptPlan,
@@ -1320,7 +1495,8 @@ export const createMaidModelBackedPlanner = ({
       input,
       context: plannerContext,
       conversationContext,
-      features: promptFeatures,
+      features: catalogFeatures,
+        featureIndex: features,
       maidPrompt: runtime?.maidPrompt || runtime?.personaPrompt,
       globalSemanticPromptPlan,
     });
@@ -1334,6 +1510,7 @@ export const createMaidModelBackedPlanner = ({
         maxTokens: 8000,
         max_tokens: 8000,
         signal: context?.signal,
+        maidGeneration: maidGenerationFor(runtime, config),
       },
       logger,
       (source) => {
@@ -1416,6 +1593,7 @@ export const createMaidModelBackedReActPlanner = ({
       sessionId: trim(context?.sessionId),
       uiMode: trim(context?.uiMode),
       taskType: 'maid_react',
+      voiceCallId: trim(context?.voiceCallId),
     });
   } catch (error) {
     logger?.debug?.('maid react runtime unavailable', error);
@@ -1441,6 +1619,10 @@ export const createMaidModelBackedReActPlanner = ({
     const promptFeatures = resolveCapabilityDecisionFeatures(context, features);
     const decisionFeatures = getMaidModelFeatureContext(promptFeatures).features;
     const capabilitySnapshot = context?.capabilitySnapshot || null;
+    // 目录详情按检索排名取前几项（即使未进入候选模式也按相关度排序），全部功能只作索引
+    const catalogFeatures = Array.isArray(capabilitySnapshot?.candidateFeatures) && capabilitySnapshot.candidateFeatures.length
+      ? capabilitySnapshot.candidateFeatures
+      : promptFeatures;
     const imageGenerationContext = await resolveImageGenerationContext({
       context,
       promptFeatures,
@@ -1475,7 +1657,8 @@ export const createMaidModelBackedReActPlanner = ({
         input,
         context: plannerContext,
         conversationContext,
-        features: promptFeatures,
+        features: catalogFeatures,
+        featureIndex: features,
         maidPrompt: runtime?.maidPrompt || runtime?.personaPrompt,
         steps,
         transportMode: MAID_PROVIDER_FC_MODE,
@@ -1503,7 +1686,8 @@ export const createMaidModelBackedReActPlanner = ({
       input,
       context: plannerContext,
       conversationContext,
-      features: promptFeatures,
+      features: catalogFeatures,
+        featureIndex: features,
       maidPrompt: runtime?.maidPrompt || runtime?.personaPrompt,
       steps,
     });
@@ -1517,6 +1701,7 @@ export const createMaidModelBackedReActPlanner = ({
         maxTokens: 12000,
         max_tokens: 12000,
         signal: context?.signal,
+        maidGeneration: maidGenerationFor(runtime, config),
       },
       logger,
       (source) => {

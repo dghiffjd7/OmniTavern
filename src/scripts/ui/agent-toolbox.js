@@ -480,6 +480,7 @@ export const createAgentToolbox = ({ input, actions, getContext, getMessages, ge
   if (targetEventRoot) targetObserver.observe(targetEventRoot, { childList: true, subtree: true, characterData: true });
   readCatalog(); render();
   return { open, close, back, refresh, trigger, panel, listRuns: runs, useSelection,
+    openRun: (id, runId) => { open(); showTool(id, runId); },
     captureSelectionIdentity: messageId => actions.captureAgentToolSelectionIdentity?.({ messageId }),
     setSelectionController: value => { controller = value; },
     hasSelectionTools: () => catalog.some(config => !isInputAgent(config) && config.enabled),

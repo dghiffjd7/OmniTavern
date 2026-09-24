@@ -283,11 +283,17 @@ const ensureStickerAnimObserver = () => {
         clearInterval(data.timer);
         data.timer = null;
       }
+      // 已从页面移除的贴纸不再观察，避免残留引用
+      if (!entry.target.isConnected) {
+        stickerAnimObserver?.unobserve?.(entry.target);
+        stickerAnimEntries.delete(entry.target);
+      }
     });
   });
   return stickerAnimObserver;
 };
-const registerStickerAnimation = (img, frames, fps) => {
+// 看得见才换帧（聊天气泡与贴纸面板共用）：display:none 或滚出视口时暂停
+export const registerStickerAnimation = (img, frames, fps) => {
   if (!img) return false;
   const list = Array.isArray(frames) ? frames.filter(Boolean) : [];
   if (list.length < 2) {

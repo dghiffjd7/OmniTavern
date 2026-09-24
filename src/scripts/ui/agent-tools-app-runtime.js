@@ -4,6 +4,7 @@ import { bindInputAgentComposer } from './chat/input-agent-composer.js';
 import { createRenderedAgentTargetResolver } from './chat/agent-rendered-body.js';
 import { createAgentToolbox } from './agent-toolbox.js';
 import { createFormatRepairToolRuntime } from '../agent/format-repair-tool-runtime.js';
+import { createAgentSuggestionBanner } from './chat/agent-suggestion-banner.js';
 import { t } from '../i18n/index.js';
 
 // Agent 配置、输入候选、回复修改与工具箱的装配及生命周期；app.js 提供模型和持久化能力。
@@ -46,10 +47,13 @@ export const createAgentToolsAppRuntime = ({ ui, store, getContext, getMessages,
   });
   const toolbox = createAgentToolbox({input:ui.inputEl,actions,getContext,getMessages,getInputSnapshot:inputAgents.snapshot,openAgent,openCenter,
     triggerContainer:toolboxContainer,anchorEl:toolboxAnchor,targetEventRoot:ui.scrollEl,beforeOpen:onToolboxOpen,documentRef,storage});
+  const inputContainer = ui.inputEl?.closest?.('.chat-input-container') || null;
+  const suggestionBanner = createAgentSuggestionBanner({ container: inputContainer, before: inputContainer?.querySelector('#composer-attachments'),
+    runtime: textEditRuntime, openRun: (agentId, runId) => toolbox.openRun(agentId, runId), documentRef });
   const reconcile = () => {textEditRuntime.reconcile();inputAgents.reconcile();runFormat?.reconcile?.();formatRuntime?.reconcile();};
   win.addEventListener('agent-feature-settings-changed',reconcile);
   win.addEventListener('session-changed',reconcile);
-  return {actions,textEditRuntime,inputAgents,formatRuntime,toolbox,
-    dispose:()=>{win.removeEventListener('agent-feature-settings-changed',reconcile);win.removeEventListener('session-changed',reconcile);toolbox.dispose();inputAgents.dispose();textEditRuntime.dispose();formatRuntime?.dispose();},
+  return {actions,textEditRuntime,inputAgents,formatRuntime,toolbox,suggestionBanner,
+    dispose:()=>{suggestionBanner.dispose();win.removeEventListener('agent-feature-settings-changed',reconcile);win.removeEventListener('session-changed',reconcile);toolbox.dispose();inputAgents.dispose();textEditRuntime.dispose();formatRuntime?.dispose();},
   };
 };

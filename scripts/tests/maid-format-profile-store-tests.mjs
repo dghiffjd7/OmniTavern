@@ -238,4 +238,46 @@ const createFakeStorage = () => {
   console.log('ok - APP 来源解析器纳入实际预设、世界书、正则上下文与角色 revision');
 }
 
+
+{
+  // 大预设指纹缓存：走只读窥视接口时与复制路径指纹一致；同一对象同一 revision 只序列化一次；revision 变化重新计算
+  let reads = 0;
+  const makePreset = rule => {
+    const preset = { name: '大预设', prompts: [{ identifier: 'main', content: rule }] };
+    Object.defineProperty(preset, 'outputRules', { enumerable: true, get: () => { reads += 1; return rule; } });
+    return preset;
+  };
+  let preset = makePreset('A');
+  let revision = 1;
+  const baseStore = {
+    getEnabled: type => type === 'openai',
+    list: () => [],
+  };
+  const common = {
+    regexStore: { computeActiveRules: () => [] },
+    personaStore: { getActive: () => null },
+    contactsStore: { getContact: () => null },
+    getUiMode: () => 'rp',
+  };
+  const cloning = createMaidFormatProfileSourceStateResolver({
+    ...common,
+    presetStore: { ...baseStore, getResolvedActive: () => ({ presetId: 'big', source: 'global', preset: structuredClone({ ...preset }) }) },
+  });
+  const peeking = createMaidFormatProfileSourceStateResolver({
+    ...common,
+    presetStore: { ...baseStore, peekResolvedActive: () => ({ presetId: 'big', source: 'global', preset, revision }) },
+  });
+  const expected = cloning({ sessionId: 's1' }).fingerprint;
+  reads = 0;
+  assert.equal(peeking({ sessionId: 's1' }).fingerprint, expected, '窥视路径与复制路径指纹一致');
+  assert.equal(peeking({ sessionId: 's1' }).fingerprint, expected);
+  assert.equal(reads, 1, '同一预设对象、同一 revision 只序列化一次');
+  revision = 2;
+  peeking({ sessionId: 's1' });
+  assert.equal(reads, 2, 'revision 变化后重新计算');
+  preset = makePreset('B');
+  assert.notEqual(peeking({ sessionId: 's1' }).fingerprint, expected, '预设换成新对象时指纹随内容变化');
+  console.log('ok - 大预设内容指纹按对象与 revision 缓存，结果与复制路径一致');
+}
+
 console.log('maid-format-profile-store-tests passed');

@@ -1,17 +1,22 @@
+/* 输入框上方的回复处理横幅：格式修复（#rejected-format-repair-banner）与 Agent 修改建议（.agent-suggestion-banner）共用。
+   结构与权限确认卡同一语气：左侧图标块，标题 + 类型标签，一到两行说明，右侧实心主按钮与轻量次按钮。
+   颜色随状态：待检查/检查中 琥珀，方案就绪 绿，失败 红，Agent 建议 强调色。 */
 .format-repair-banner {
-  --format-repair-accent: var(--app-accent-primary);
+  --format-repair-accent: var(--app-warning-text);
+  position: relative;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
+  gap: 11px;
   width: 100%;
-  padding: 9px 10px;
-  border: 1px solid color-mix(in srgb, var(--format-repair-accent) 32%, var(--app-border-subtle));
-  border-radius: 13px;
-  background: color-mix(in srgb, var(--app-surface-card) 93%, var(--format-repair-accent) 7%);
+  box-sizing: border-box;
+  padding: 10px 10px 10px 11px;
+  border: 1px solid color-mix(in srgb, var(--format-repair-accent) 26%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--app-surface-card) 94%, var(--format-repair-accent) 6%);
   color: var(--app-text-primary);
-  box-shadow: 0 6px 18px color-mix(in srgb, var(--format-repair-accent) 10%, transparent);
-  animation: format-repair-banner-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  box-shadow: 0 8px 22px -12px color-mix(in srgb, var(--format-repair-accent) 45%, transparent);
+  animation: format-repair-banner-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
 .format-repair-banner[hidden] {
@@ -22,32 +27,46 @@
   --format-repair-accent: var(--app-success-text, var(--app-accent-strong));
 }
 
-.format-repair-banner[data-status='check_failed'] {
+.format-repair-banner[data-status='check_failed'],
+.format-repair-banner[data-status='dispatcher_unavailable'] {
   --format-repair-accent: var(--app-danger-text);
 }
 
-.format-repair-banner[data-status='guardian_unavailable'] {
-  --format-repair-accent: var(--app-warning-text);
+.format-repair-banner.agent-suggestion-banner {
+  --format-repair-accent: var(--app-accent-primary);
 }
 
 .format-repair-banner-mark {
-  width: 30px;
-  height: 30px;
+  position: relative;
+  width: 32px;
+  height: 32px;
   display: grid;
   place-items: center;
   border-radius: 10px;
   color: var(--format-repair-accent);
-  background: color-mix(in srgb, var(--format-repair-accent) 11%, transparent);
+  background: color-mix(in srgb, var(--format-repair-accent) 13%, transparent);
 }
 
 .format-repair-banner-mark svg {
-  width: 19px;
-  height: 19px;
+  width: 18px;
+  height: 18px;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.8;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+/* 检查中：图标块外圈转动的弧（只动 transform，走合成线程） */
+.format-repair-banner[data-status='checking'] .format-repair-banner-mark::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 12px;
+  border: 2px solid transparent;
+  border-top-color: var(--format-repair-accent);
+  border-right-color: color-mix(in srgb, var(--format-repair-accent) 35%, transparent);
+  animation: format-repair-banner-spin 900ms linear infinite;
 }
 
 .format-repair-banner-copy {
@@ -57,47 +76,83 @@
   gap: 2px;
 }
 
-.format-repair-banner-copy strong {
-  font-size: 12.5px;
-  line-height: 1.35;
-  font-weight: 750;
+.format-repair-banner-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
 }
 
-.format-repair-banner-copy span {
-  color: var(--app-text-muted);
-  font-size: 11.5px;
-  line-height: 1.4;
+.format-repair-banner-copy strong {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 13px;
+  line-height: 1.35;
+  font-weight: 700;
+}
+
+.format-repair-banner-chip {
+  flex: 0 0 auto;
+  font-style: normal;
+  padding: 1px 7px;
+  border-radius: 999px;
+  color: color-mix(in srgb, var(--format-repair-accent) 85%, var(--app-text-primary));
+  background: color-mix(in srgb, var(--format-repair-accent) 13%, transparent);
+  font-size: 10.5px;
+  font-weight: 650;
+  line-height: 1.6;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.format-repair-banner-chip:empty {
+  display: none;
+}
+
+.format-repair-banner-copy > span {
+  color: var(--app-text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
 }
 
 .format-repair-banner-actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 5px;
+  gap: 4px;
 }
 
 .format-repair-banner-actions button {
-  min-height: 28px;
-  padding: 0 9px;
-  border: 1px solid var(--app-border-subtle);
-  border-radius: 9px;
-  background: var(--app-surface-card);
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
   color: var(--app-text-secondary);
   font: inherit;
-  font-size: 11.5px;
-  font-weight: 650;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
   cursor: pointer;
-  transition: border-color 140ms ease, color 140ms ease, background-color 140ms ease, transform 140ms ease;
+  transition: color 140ms ease, background-color 140ms ease, border-color 140ms ease, transform 140ms ease;
 }
 
 .format-repair-banner-actions button:hover,
 .format-repair-banner-actions button:focus-visible {
-  border-color: color-mix(in srgb, var(--format-repair-accent) 42%, var(--app-border-default));
   color: var(--format-repair-accent);
-  background: color-mix(in srgb, var(--format-repair-accent) 8%, var(--app-surface-card));
+  background: color-mix(in srgb, var(--format-repair-accent) 10%, transparent);
+}
+
+.format-repair-banner-actions button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--format-repair-accent) 50%, transparent);
+  outline-offset: 1px;
 }
 
 .format-repair-banner-actions button:active {
@@ -110,25 +165,30 @@
   transform: none;
 }
 
-.format-repair-banner-actions [data-format-repair-banner-action='apply']:not(:disabled) {
-  border-color: transparent;
+/* 主操作：应用修复 / 查看修改 */
+.format-repair-banner-actions [data-format-repair-banner-action='apply']:not(:disabled),
+.format-repair-banner-actions [data-agent-suggestion-action='open'] {
+  padding: 0 13px;
   background: var(--format-repair-accent);
   color: var(--app-text-inverse);
 }
 
+.format-repair-banner-actions [data-format-repair-banner-action='apply']:not(:disabled):hover,
+.format-repair-banner-actions [data-agent-suggestion-action='open']:hover {
+  background: color-mix(in srgb, var(--format-repair-accent) 86%, var(--app-text-primary));
+  color: var(--app-text-inverse);
+}
+
 .format-repair-banner-actions [data-format-repair-banner-action='settings']:not([hidden]) {
-  border-color: transparent;
-  background: var(--format-repair-accent);
-  color: var(--app-text-on-accent, var(--app-text-inverse));
+  border-color: color-mix(in srgb, var(--format-repair-accent) 40%, transparent);
+  color: var(--format-repair-accent);
 }
 
 .format-repair-banner-actions .format-repair-banner-dismiss {
-  width: 28px;
+  width: 30px;
   padding: 0;
   display: grid;
   place-items: center;
-  border-color: transparent;
-  background: transparent;
   color: var(--app-text-muted);
 }
 
@@ -142,58 +202,54 @@
 }
 
 body[data-theme-mode='dark'] .format-repair-banner {
-  border-color: color-mix(in srgb, var(--format-repair-accent) 38%, var(--app-border-subtle));
-  background: color-mix(in srgb, var(--app-surface-card) 88%, var(--format-repair-accent) 12%);
-  box-shadow: 0 7px 22px color-mix(in srgb, var(--format-repair-accent) 14%, transparent);
-}
-
-body[data-theme-mode='dark'] .format-repair-banner-actions button {
-  background: color-mix(in srgb, var(--app-surface-card) 86%, var(--format-repair-accent) 14%);
-}
-
-body[data-theme-mode='dark'] .format-repair-banner-actions [data-format-repair-banner-action='apply']:not(:disabled) {
-  background: var(--format-repair-accent);
+  border-color: color-mix(in srgb, var(--format-repair-accent) 34%, transparent);
+  background: color-mix(in srgb, var(--app-surface-card) 90%, var(--format-repair-accent) 10%);
+  box-shadow: 0 10px 26px -14px color-mix(in srgb, var(--format-repair-accent) 55%, transparent);
 }
 
 @keyframes format-repair-banner-in {
-  from { opacity: 0; transform: translateY(5px); }
+  from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes format-repair-banner-spin {
+  to { transform: rotate(360deg); }
 }
 
 @media (max-width: 720px) {
   .format-repair-banner {
     grid-template-columns: auto minmax(0, 1fr);
+    row-gap: 8px;
   }
 
   .format-repair-banner-actions {
     grid-column: 1 / -1;
-    justify-content: flex-start;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-
-  .format-repair-banner-actions::-webkit-scrollbar {
-    display: none;
+    justify-content: flex-end;
+    flex-wrap: wrap;
   }
 
   .format-repair-banner-actions button {
     flex: 0 0 auto;
+    min-height: 34px;
   }
 
   .format-repair-banner-actions .format-repair-banner-dismiss {
-    margin-left: auto;
+    order: -1;
+    margin-right: auto;
   }
 }
 
 body[data-reduced-motion='on'] .format-repair-banner,
-body[data-reduced-motion='on'] .format-repair-banner-actions button {
+body[data-reduced-motion='on'] .format-repair-banner-actions button,
+body[data-reduced-motion='on'] .format-repair-banner-mark::after {
   animation: none !important;
   transition: none !important;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .format-repair-banner,
-  .format-repair-banner-actions button {
+  .format-repair-banner-actions button,
+  .format-repair-banner-mark::after {
     animation: none !important;
     transition: none !important;
   }

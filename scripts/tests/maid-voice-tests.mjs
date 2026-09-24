@@ -91,6 +91,32 @@ for (const [state, expected] of [
   assert.equal(store.state.turns.length, 3);
 }
 
+// 首次实时通话先说明任务执行方式；关掉不选按语音执行且不再重复询问，之后可从默认语音模式里改
+{
+  const store = new MaidConversationStore(noStorage); await store.load();
+  const settings = new MaidSettingsStore(noStorage); await settings.load();
+  const asked = [];
+  let answer = null, started = 0;
+  const voice = createMaidVoiceRuntime({ settingsStore: settings, conversationStore: store,
+    getCommandRuntime: () => ({ syncVoiceState() {}, collapse() {} }),
+    getCallAppRuntime: () => ({ startCall: async () => { started++; return true; }, runtime: { getState: () => ({ status: 'listening' }) } }),
+    choose: async (options) => { asked.push(options); return typeof answer === 'function' ? answer(options) : answer; },
+  });
+  await voice.action('realtime');
+  assert.equal(asked.length, 1);
+  assert.match(asked[0].title, /由谁执行/);
+  assert.deepEqual(asked[0].actions.map(action => action.id), ['maid', 'voice']);
+  assert.equal(asked[0].actions[0].primary, true, '推荐交给女仆');
+  assert.equal(settings.getVoiceTaskExecutor(), 'voice', '关掉不选：由语音模型执行');
+  assert.equal(settings.hasChosenVoiceTaskExecutor(), true);
+  assert.equal(started, 1);
+  await voice.action('realtime');
+  assert.equal(asked.length, 1, '不再重复询问');
+  answer = options => (options.actions.some(action => action.id === 'executor') ? 'executor' : 'maid');
+  await voice.chooseMode();
+  assert.equal(settings.getVoiceTaskExecutor(), 'maid', '默认语音模式里可改为交给女仆');
+}
+
 // A permission result arriving after cancellation must release its own stream,
 // without interfering with a later recorder or inserting any transcript.
 {
@@ -107,6 +133,13 @@ for (const [state, expected] of [
 }
 
 assert.ok(buildMaidVoiceSnapshot({ conversationContext: {} }).instructions.length > 0);
+{
+  // 语音模型直接交办、不自行先确认（授权由 APP 权限请求发起）；汇报只依据本次任务的实际结果，不沿用历史里的旧结果
+  const { instructions } = buildMaidVoiceSnapshot({ conversationContext: {} });
+  assert.match(instructions, /不要在交给女仆前自己先问用户要不要执行/);
+  assert.match(instructions, /需要授权时 APP 会发来权限请求/);
+  assert.match(instructions, /不能沿用历史里相似的结果/);
+}
 
 {
   const store = new MaidConversationStore(noStorage); await store.load();

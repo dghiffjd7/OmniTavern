@@ -1,3 +1,5 @@
+import { classifyMaidPendingActionReply, isPendingRunInContext } from './maid-pending-action.js';
+
 export const MAID_IMPORTED_CARD_WORKFLOW_KIND = 'imported_card_session_setup';
 export const MAID_IMPORTED_CARD_WORKFLOW_VERSION = 1;
 
@@ -107,14 +109,15 @@ export const classifyMaidImportedCardWorkflowIntent = (input = '') => {
   };
 };
 
+// 建房清单是低风险写入，确认比删除宽松：短答复（含“好 / 可以 / ok / 嗯”，与语音侧同一套词）即可确认。
+// 仅完整短答复走快捷入口；自然语言原话交给现有 planner，不用否定/条件关键词表抢先决定整单执行。
 export const classifyMaidImportedCardConfirmation = (input = '') => {
   const text = String(input ?? '').normalize('NFKC').trim();
   if (!text || text.length > 120) return 'none';
-  if (/(?:取消|算了|不要了|先不做|先别做|先別做|停止|作废|作廢)/iu.test(text)) return 'cancel';
-  if (
-    /^(?:好(?:的)?|可以|行|没问题|沒問題|确认|確認|我确认|我確認|开始|開始|执行|執行|继续|繼續|就这样|就這樣|就按(?:这|這)(?:份|个|個)?(?:清单|清單|方案)?(?:来|來)?|照(?:这|這)(?:份|个|個)?(?:清单|清單|方案)?(?:来|來)?)[。.!！\s]*$/iu.test(text) ||
-    /(?:确认|確認|同意|批准|就按|照这个|照這個).{0,24}(?:执行|執行|来|來|做|创建|建立)?/iu.test(text)
-  ) return 'confirm';
+  const shortReply = classifyMaidPendingActionReply(text);
+  if (shortReply === 'confirm' || shortReply === 'cancel') return shortReply;
+  if (/^(?:我)?(?:不同意|不确认|不確認|不批准|不要(?:执行|執行|创建|建立|建)|不(?:执行|執行|用了))[。.!！\s]*$/iu.test(text)) return 'cancel';
+  if (/^(?:我确认|我確認|开始|開始|继续|繼續|就这样|就這樣|就按(?:这|這)(?:份|个|個)?(?:清单|清單|方案)?(?:来|來)?|照(?:这|這)(?:份|个|個)?(?:清单|清單|方案)?(?:来|來)?)[。.!！\s]*$/iu.test(text)) return 'confirm';
   return 'none';
 };
 
@@ -320,8 +323,10 @@ export const validateMaidImportedCardWorkflowSnapshot = (value = {}, {
 
 export const resolvePendingMaidImportedCardWorkflow = (runs = [], {
   now = Date.now(),
+  context = {},
 } = {}) => {
   for (const run of Array.isArray(runs) ? runs : []) {
+    if (!isPendingRunInContext(run, context)) continue;
     const pending = run?.metadata?.pendingWorkflow;
     const validation = validateMaidImportedCardWorkflowSnapshot(pending, { now });
     if (!validation.ok) continue;

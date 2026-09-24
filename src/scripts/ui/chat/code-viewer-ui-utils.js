@@ -4,6 +4,7 @@ import {
   updateFormatPatchReviewSelection,
 } from './format-patch-review-utils.js';
 import { bindBackdropActivation } from '../backdrop-activation-utils.js';
+import { alignLinesWithWords, renderWordDiffHtml } from '../../utils/word-diff-utils.js';
 import { t } from '../../i18n/index.js';
 
 const FORMAT_SOURCE_LABELS = Object.freeze({
@@ -169,7 +170,32 @@ export const createCodeViewerUiRuntime = ({
     const overlay = documentLike.createElement('div');
     overlay.id = 'code-viewer-modal';
     const reviewStyle = documentLike.createElement('style');
-    reviewStyle.textContent = '.format-review-columns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.format-review-columns>div{min-width:0}.format-review-column-label{padding:8px 14px;font:12px/1.6 var(--app-font-family,inherit);color:var(--app-text-muted);background:var(--app-surface-subtle)}@media(max-width:600px){.format-review-columns{grid-template-columns:minmax(0,1fr)}}';
+    reviewStyle.textContent = [
+      '.format-review-columns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.format-review-columns>div{min-width:0}',
+      '.format-review-column-label{padding:8px 14px;font:12px/1.6 var(--app-font-family,inherit);color:var(--app-text-muted);background:var(--app-surface-subtle)}',
+      '@media(max-width:600px){.format-review-columns{grid-template-columns:minmax(0,1fr)}}',
+      // 逐词审阅：改动行浅底，具体改动的字词深底；删除划线、红，新增绿
+      '.format-review-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:0 14px 10px;font:13px/1.4 var(--app-font-family,inherit)}',
+      '.format-review-seg{display:inline-flex;gap:2px;padding:2px;border:1px solid var(--app-border-subtle);border-radius:999px;background:var(--app-surface-card)}',
+      '.format-review-seg button{border:0;border-radius:999px;padding:5px 11px;background:transparent;color:var(--app-text-secondary);font:500 12.5px/1 var(--app-font-family,inherit);cursor:pointer}',
+      '.format-review-seg button[aria-pressed=true]{background:var(--app-surface-subtle);color:var(--app-text-primary);box-shadow:0 1px 2px rgba(0,0,0,.08)}',
+      '.format-review-nav{display:inline-flex;align-items:center;gap:6px;margin-left:auto;color:var(--app-text-secondary);font-variant-numeric:tabular-nums}',
+      '.format-review-nav button{width:28px;height:28px;border:1px solid var(--app-border-subtle);border-radius:8px;background:var(--app-surface-card);color:var(--app-text-primary);cursor:pointer}',
+      '.format-review-nav button:disabled{opacity:.4;cursor:default}',
+      '.format-review-lines{font:14.5px/1.85 var(--app-font-family,inherit)}',
+      '.format-review-row{display:grid;grid-template-columns:44px minmax(0,1fr)}',
+      '.format-review-row.is-split{grid-template-columns:40px minmax(0,1fr) 40px minmax(0,1fr)}',
+      '.format-review-no{padding:2px 8px 2px 0;text-align:right;color:var(--app-text-muted);font:12px/2.2 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;user-select:none}',
+      '.format-review-text{min-width:0;padding:2px 12px 2px 6px;white-space:pre-wrap;overflow-wrap:anywhere}',
+      '.format-review-row.is-changed{background:color-mix(in srgb,var(--app-surface-subtle) 55%,transparent)}',
+      '.format-review-row.is-split .format-review-text + .format-review-no{border-left:1px solid var(--app-border-subtle)}',
+      '.format-review-row .is-empty{background:repeating-linear-gradient(135deg,transparent 0 6px,var(--app-border-subtle) 6px 7px)}',
+      '.wd-del,.wd-ins{text-decoration:none;border-radius:3px;padding:0 1px;box-decoration-break:clone;-webkit-box-decoration-break:clone}',
+      '.wd-del{background:rgba(var(--app-danger-rgb,220,38,38),.15);color:var(--app-danger-text,#b91c1c);text-decoration:line-through;text-decoration-thickness:1px}',
+      '.wd-ins{background:rgba(var(--app-success-rgb,22,163,74),.18);color:var(--app-success-text,#15803d)}',
+      '.wd-change{border-radius:4px;scroll-margin:80px;transition:box-shadow .18s}',
+      '.wd-change.is-current,.wd-gap.is-current{box-shadow:0 0 0 2px rgba(var(--app-accent-rgb,59,130,246),.55)}',
+    ].join('');
     overlay.appendChild(reviewStyle);
     overlay.style.cssText = `
       position: fixed;
@@ -313,7 +339,54 @@ export const createCodeViewerUiRuntime = ({
     reviewSummary.style.cssText = 'padding:0 14px 10px; color:var(--app-text-secondary); white-space:pre-wrap;';
     const reviewHunks = documentLike.createElement('div');
     reviewHunks.dataset.role = 'review-hunks';
+    // 显示方式与逐处跳转：逐词（删改合并在一行）/ 左右对照
+    const reviewToolbar = documentLike.createElement('div');
+    reviewToolbar.dataset.role = 'review-toolbar';
+    reviewToolbar.className = 'format-review-toolbar';
+    const reviewModeGroup = documentLike.createElement('div');
+    reviewModeGroup.className = 'format-review-seg';
+    reviewModeGroup.setAttribute?.('role', 'group');
+    reviewModeGroup.setAttribute?.('aria-label', t('显示方式'));
+    const reviewModeButtons = [['merged', t('逐词')], ['split', t('左右对照')]].map(([mode, label]) => {
+      const btn = documentLike.createElement('button');
+      btn.type = 'button';
+      btn.dataset.reviewMode = mode;
+      btn.textContent = label;
+      btn.addEventListener('click', () => {
+        const state = overlay.__chatappReviewState;
+        if (!state || state.viewMode === mode) return;
+        state.viewMode = mode;
+        overlay.__chatappRenderReview?.();
+      });
+      reviewModeGroup.appendChild(btn);
+      return btn;
+    });
+    const reviewNav = documentLike.createElement('div');
+    reviewNav.className = 'format-review-nav';
+    const reviewPrevBtn = documentLike.createElement('button');
+    reviewPrevBtn.type = 'button';
+    reviewPrevBtn.textContent = '↑';
+    reviewPrevBtn.setAttribute?.('aria-label', t('上一处改动'));
+    const reviewNavCount = documentLike.createElement('span');
+    const reviewNextBtn = documentLike.createElement('button');
+    reviewNextBtn.type = 'button';
+    reviewNextBtn.textContent = '↓';
+    reviewNextBtn.setAttribute?.('aria-label', t('下一处改动'));
+    reviewNav.appendChild(reviewPrevBtn);
+    reviewNav.appendChild(reviewNavCount);
+    reviewNav.appendChild(reviewNextBtn);
+    reviewToolbar.appendChild(reviewModeGroup);
+    reviewToolbar.appendChild(reviewNav);
+    const stepReviewChange = (delta) => {
+      const state = overlay.__chatappReviewState;
+      if (!state || !state.changeCount) return;
+      state.currentChange = (Math.max(0, state.currentChange) + delta + state.changeCount) % state.changeCount;
+      overlay.__chatappFocusReviewChange?.();
+    };
+    reviewPrevBtn.addEventListener('click', () => stepReviewChange(-1));
+    reviewNextBtn.addEventListener('click', () => stepReviewChange(1));
     reviewBody.appendChild(reviewSummary);
+    reviewBody.appendChild(reviewToolbar);
     reviewBody.appendChild(reviewHunks);
 
     const reviewFooter = documentLike.createElement('div');
@@ -363,6 +436,11 @@ export const createCodeViewerUiRuntime = ({
       codeEl: textarea,
       reviewBody,
       reviewSummary,
+      reviewToolbar,
+      reviewModeButtons,
+      reviewPrevBtn,
+      reviewNextBtn,
+      reviewNavCount,
       reviewHunks,
       reviewFooter,
       reviewStatus,
@@ -371,11 +449,30 @@ export const createCodeViewerUiRuntime = ({
       applyReviewBtn,
     };
 
+    overlay.__chatappFocusReviewChange = ({ scroll = true } = {}) => {
+      const state = overlay.__chatappReviewState;
+      const refs = overlay.__chatappRefs;
+      if (!state || !refs) return;
+      const total = Number(state.changeCount) || 0;
+      if (refs.reviewNavCount) {
+        refs.reviewNavCount.textContent = total
+          ? t('{current} / {total} 处改动', { current: Math.max(0, state.currentChange) + 1, total })
+          : t('没有改动');
+      }
+      const hunksEl = refs.reviewHunks;
+      if (!hunksEl?.querySelectorAll) return;
+      hunksEl.querySelectorAll('.is-current').forEach(el => el.classList.remove('is-current'));
+      const targets = [...hunksEl.querySelectorAll(`[data-wd-change="${state.currentChange}"]`)];
+      targets.forEach(el => el.classList.add('is-current'));
+      if (scroll) targets[0]?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+    };
+
     const renderReview = async () => {
       const state = overlay.__chatappReviewState;
       const refs = overlay.__chatappRefs;
       if (!state || state.finished) return;
       clearChildren(refs.reviewHunks);
+      let changeOffset = 0;
       state.linePatches.forEach((patch, patchIndex) => {
         const accepted = state.selection.has(patchIndex);
         const hunk = documentLike.createElement('section');
@@ -421,40 +518,58 @@ export const createCodeViewerUiRuntime = ({
         hunkHeader.appendChild(hunkTitle);
         if (!state.wholeChange) { hunkHeader.appendChild(rejectBtn); hunkHeader.appendChild(acceptBtn); }
         hunk.appendChild(hunkHeader);
-        const columns = documentLike.createElement('div'), beforeColumn = documentLike.createElement('div'), afterColumn = documentLike.createElement('div');
-        columns.className = state.wholeChange ? 'format-review-columns' : '';
-        if (state.wholeChange) for (const [column, label] of [[beforeColumn, '原文'], [afterColumn, '修改后']]) {
-          const heading = documentLike.createElement('div'); heading.className = 'format-review-column-label'; heading.textContent = label; column.appendChild(heading);
+        // 原文行与替换行先按行对齐，改写的行再逐词标出具体改动；左右对照时两侧各显示一边
+        const split = state.viewMode === 'split';
+        const startLine = Number(patch.startLine || 1);
+        const lineRows = alignLinesWithWords(patch.originalLines, patch.replacementLines);
+        const escapeText = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
+        const cell = (content, extra = '') => `<span class="format-review-text${extra}">${content || '&#8203;'}</span>`;
+        const numberCell = value => `<span class="format-review-no">${value ?? ''}</span>`;
+        const html = lineRows.map((row) => {
+          const oldNo = row.oldIndex === null ? '' : String(startLine + row.oldIndex);
+          const newNo = row.newIndex === null ? '' : String(startLine + row.newIndex);
+          if (row.type === 'equal') {
+            const text = escapeText(row.oldText);
+            return split
+              ? `<div class="format-review-row is-split">${numberCell(oldNo)}${cell(text)}${numberCell(newNo)}${cell(text)}</div>`
+              : `<div class="format-review-row">${numberCell(oldNo)}${cell(text)}</div>`;
+          }
+          const groups = row.words || [
+            ...(row.oldText !== null ? [{ type: 'change', del: row.oldText, ins: '' }] : []),
+            ...(row.newText !== null ? [{ type: 'change', del: '', ins: row.newText }] : []),
+          ];
+          const base = changeOffset;
+          changeOffset += groups.filter(group => group.type === 'change').length;
+          if (split) {
+            const left = row.oldText === null ? cell('', ' is-empty') : cell(renderWordDiffHtml(groups, { side: 'old', escape: escapeText, changeOffset: base }));
+            const right = row.newText === null ? cell('', ' is-empty') : cell(renderWordDiffHtml(groups, { side: 'new', escape: escapeText, changeOffset: base }));
+            return `<div class="format-review-row is-split is-changed">${numberCell(oldNo)}${left}${numberCell(newNo)}${right}</div>`;
+          }
+          if (!row.words && row.oldText !== null && row.newText !== null) {
+            // 相似度过低的整行改写：旧行、新行分两行显示
+            return `<div class="format-review-row is-changed">${numberCell(oldNo)}${cell(renderWordDiffHtml([groups[0]], { escape: escapeText, changeOffset: base }))}</div>`
+              + `<div class="format-review-row is-changed">${numberCell(newNo ? `+${newNo}` : '+')}${cell(renderWordDiffHtml([groups[1]], { escape: escapeText, changeOffset: base + 1 }))}</div>`;
+          }
+          return `<div class="format-review-row is-changed">${numberCell(row.oldIndex === null ? `+${newNo}` : oldNo)}${cell(renderWordDiffHtml(groups, { escape: escapeText, changeOffset: base }))}</div>`;
+        }).join('');
+        if (split) {
+          const heading = documentLike.createElement('div');
+          heading.className = 'format-review-columns';
+          heading.innerHTML = `<div class="format-review-column-label">${escapeText(t('原文'))}</div><div class="format-review-column-label">${escapeText(t('修改后'))}</div>`;
+          hunk.appendChild(heading);
         }
-        columns.appendChild(beforeColumn); columns.appendChild(afterColumn); hunk.appendChild(columns);
-        (Array.isArray(patch.originalLines) ? patch.originalLines : []).forEach((line, lineIndex) => {
-          const row = documentLike.createElement('div');
-          row.style.cssText = 'display:flex; background:var(--app-danger-soft,rgba(239,68,68,.1)); color:var(--app-text-primary);';
-          const number = documentLike.createElement('span');
-          number.style.cssText = 'flex:0 0 46px; padding:1px 8px; text-align:right; color:var(--app-danger-text); user-select:none;';
-          number.textContent = String(Number(patch.startLine || 1) + lineIndex);
-          const content = documentLike.createElement('span');
-          content.style.cssText = 'flex:1; min-width:0; padding:1px 10px; white-space:pre-wrap; overflow-wrap:anywhere; text-decoration:line-through;';
-          content.textContent = `- ${String(line ?? '')}`;
-          row.appendChild(number);
-          row.appendChild(content);
-          beforeColumn.appendChild(row);
-        });
-        (Array.isArray(patch.replacementLines) ? patch.replacementLines : []).forEach((line, lineIndex) => {
-          const row = documentLike.createElement('div');
-          row.style.cssText = 'display:flex; background:var(--app-success-soft,rgba(16,185,129,.1)); color:var(--app-text-primary);';
-          const number = documentLike.createElement('span');
-          number.style.cssText = 'flex:0 0 46px; padding:1px 8px; text-align:right; color:var(--app-success-text); user-select:none;';
-          number.textContent = String(Number(patch.startLine || 1) + lineIndex);
-          const content = documentLike.createElement('span');
-          content.style.cssText = 'flex:1; min-width:0; padding:1px 10px; white-space:pre-wrap; overflow-wrap:anywhere;';
-          content.textContent = `+ ${String(line ?? '')}`;
-          row.appendChild(number);
-          row.appendChild(content);
-          afterColumn.appendChild(row);
-        });
+        const lines = documentLike.createElement('div');
+        lines.className = 'format-review-lines';
+        lines.innerHTML = html;
+        hunk.appendChild(lines);
         refs.reviewHunks.appendChild(hunk);
       });
+      state.changeCount = changeOffset;
+      if (!(state.currentChange >= 0 && state.currentChange < changeOffset)) state.currentChange = changeOffset ? 0 : -1;
+      (refs.reviewModeButtons || []).forEach(btn => btn.setAttribute?.('aria-pressed', String(btn.dataset.reviewMode === state.viewMode)));
+      if (refs.reviewPrevBtn) refs.reviewPrevBtn.disabled = changeOffset < 2;
+      if (refs.reviewNextBtn) refs.reviewNextBtn.disabled = changeOffset < 2;
+      overlay.__chatappFocusReviewChange?.({ scroll: false });
 
       const candidate = buildFormatPatchReviewCandidate({
         originalText: state.originalText,
@@ -646,13 +761,16 @@ export const createCodeViewerUiRuntime = ({
         selection: createFormatPatchReviewSelection(patches),
         validateCandidate,
         wholeChange,
+        viewMode: 'merged',
+        changeCount: 0,
+        currentChange: -1,
         validation: null,
         validationId: 0,
         finished: false,
         resolve: resolveResult,
       };
       if (refs.title) refs.title.textContent = String(title || '审阅格式修复');
-      if (refs.hint) refs.hint.textContent = `${patches.length} 处补丁`;
+      if (refs.hint) refs.hint.textContent = t('{count} 处修改', { count: patches.length });
       if (refs.saveBtn) refs.saveBtn.style.display = 'none';
       if (refs.maximizeBtn) refs.maximizeBtn.style.display = 'none';
       if (refs.editBody) refs.editBody.style.display = 'none';

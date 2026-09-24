@@ -1,9 +1,11 @@
 /* 执行流面板（Phase 1/2：女仆 ReAct + 创意写作泳道双投影）
    贴靠模式切换悬浮球（女仆位置，可拖拽不遮挡固定区域），订阅 agentTaskRuntime 事件流，
    把女仆 run 的规划/工具步骤/终态投影成卡式轨迹流，实时追加。
-   审美取自参考稿 autonomous-agent-architecture-design（卡式时间轴/汉字铭牌/mono 小标签/轨迹线），
+   女仆投影与输入胶囊共用运行卡（maid-run-card-dom.js）：一次任务一张卡，状态用图标表达。
    颜色全部映射 --app-* token，明暗双主题与 reduced-motion 均成立。
    两者数据模型不合并，只共享贴球外壳、状态色语义与投影仲裁。 */
+
+import { createMaidRunCardView } from '../maid-run-card-dom.js';
 
 const STYLE_ID = 'execution-flow-runtime-style';
 const MAID_RUN_KIND = 'maid_assistant';
@@ -19,12 +21,6 @@ const trim = (value, fallback = '') => {
 };
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
-
-const escapeHtml = (value) => String(value ?? '')
-  .replace(/&/g, '&amp;')
-  .replace(/</g, '&lt;')
-  .replace(/>/g, '&gt;')
-  .replace(/"/g, '&quot;');
 
 /* 状态语义（与泳道六态同一色系；waiting_permission 归入等待色） */
 export const EXEC_FLOW_STATUS_META = Object.freeze({
@@ -70,6 +66,7 @@ export const projectMaidRunToTraceView = (run = null) => {
   const steps = (Array.isArray(run.steps) ? run.steps : []).map((step, index) => {
     const stepStatus = trim(step?.status, 'running');
     const stepMeta = statusMeta(stepStatus);
+    const args = step?.input?.args;
     return {
       id: trim(step?.id, `step_${index}`),
       seq: index + 1,
@@ -78,8 +75,11 @@ export const projectMaidRunToTraceView = (run = null) => {
       status: stepStatus,
       statusLabel: stepMeta.label,
       tone: stepMeta.tone,
-      glyph: stepStatus === 'failed' ? '败' : stepStatus === 'succeeded' ? '成' : stepStatus === 'cancelled' ? '止' : '行',
       error: trim(step?.errorMessage),
+      args: args && typeof args === 'object' && !Array.isArray(args) ? args : null,
+      resultSummary: trim(step?.output?.summary || step?.output?.message),
+      startedAt: Number(step?.startedAt) || 0,
+      finishedAt: Number(step?.finishedAt) || 0,
     };
   });
   const terminal = ['succeeded', 'failed', 'cancelled'].includes(status);
@@ -89,6 +89,7 @@ export const projectMaidRunToTraceView = (run = null) => {
     source: trim(run.metadata?.submissionSource),
     submissionId: trim(run.metadata?.submissionId),
     title: trim(run.metadata?.goal, trim(run.title, '女仆任务')),
+    executionModel: trim(run.metadata?.executionModel || run.usage?.model),
     status,
     statusLabel: statusMeta(status).label,
     tone: statusMeta(status).tone,
@@ -100,6 +101,7 @@ export const projectMaidRunToTraceView = (run = null) => {
     failureCode: trim(run.metadata?.failureCode),
     startedAt: Number(run.createdAt || run.startedAt || run.metadata?.startedAt) || 0,
     updatedAt: Number(run.updatedAt || run.finishedAt || run.createdAt) || 0,
+    finishedAt: Number(run.finishedAt) || 0,
   };
 };
 
@@ -333,14 +335,6 @@ const injectStyle = (documentRef) => {
   min-width: 0;
   flex: 1;
 }
-.exec-flow-kicker-label {
-  font-family: ui-monospace, 'IBM Plex Mono', 'JetBrains Mono', Menlo, monospace;
-  font-size: 9px;
-  letter-spacing: 0.28em;
-  text-transform: uppercase;
-  color: var(--ef-muted);
-  flex: 0 0 auto;
-}
 .exec-flow-title {
   min-width: 0;
   overflow: hidden;
@@ -348,14 +342,6 @@ const injectStyle = (documentRef) => {
   text-overflow: ellipsis;
   font-size: 12px;
   font-weight: 700;
-}
-.exec-flow-status {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11px;
-  color: var(--ef-text-2);
 }
 .exec-flow-btn {
   flex: 0 0 auto;
@@ -372,116 +358,22 @@ const injectStyle = (documentRef) => {
   cursor: pointer;
 }
 .exec-flow-btn:hover { background: var(--ef-subtle); color: var(--ef-text); }
-.exec-flow-btn.is-stop { color: rgb(var(--ef-danger-rgb)); }
-.exec-flow-btn.is-stop svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; }
-.exec-flow-btn.is-stop:hover { background: rgba(var(--ef-danger-rgb), 0.10); }
 .exec-flow-btn[hidden] { display: none !important; }
 .exec-flow-stream {
   overflow-y: auto;
-  padding: 10px 12px 12px 20px;
+  padding: 8px;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  position: relative;
   scrollbar-width: thin;
+  overscroll-behavior: contain;
 }
-.exec-flow-stream::before {
-  content: '';
-  position: absolute;
-  left: 11px;
-  top: 8px;
-  bottom: 8px;
-  width: 2px;
-  border-radius: 2px;
-  background: rgba(var(--ef-accent-rgb), 0.20);
-}
-.exec-step {
-  position: relative;
-  border: 1px solid var(--ef-border);
-  border-radius: 12px;
-  background: var(--ef-surface);
-  padding: 7px 10px;
-  animation: efSlideIn 0.22s ease;
-}
-.exec-step::before {
-  content: '';
-  position: absolute;
-  left: -12px;
-  top: 14px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--ef-muted);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ef-surface) 96%, var(--ef-subtle));
-}
-.exec-step[data-tone='accent']::before { background: rgb(var(--ef-accent-rgb)); animation: efPulse 1.4s ease-in-out infinite; }
-.exec-step[data-tone='success']::before { background: rgb(var(--ef-success-rgb)); }
-.exec-step[data-tone='danger']::before { background: rgb(var(--ef-danger-rgb)); }
-.exec-step[data-tone='warning']::before { background: rgb(var(--ef-warning-rgb)); animation: efPulse 1.1s ease-in-out infinite; }
-.exec-step[data-tone='danger'] { border-color: rgba(var(--ef-danger-rgb), 0.45); }
-@keyframes efSlideIn {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: none; }
-}
-.exec-step-head {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
-}
-.exec-step-glyph {
-  flex: 0 0 auto;
-  width: 17px;
-  height: 17px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  background: rgba(var(--ef-accent-rgb), 0.10);
-  font-family: Georgia, 'Songti SC', 'Noto Serif SC', serif;
-  font-size: 11px;
-  font-weight: 700;
-}
-.exec-step[data-tone='danger'] .exec-step-glyph { background: rgba(var(--ef-danger-rgb), 0.12); }
-.exec-step[data-tone='success'] .exec-step-glyph { background: rgba(var(--ef-success-rgb), 0.12); }
-.exec-step-label {
-  font-family: ui-monospace, 'IBM Plex Mono', 'JetBrains Mono', Menlo, monospace;
-  font-size: 9px;
-  letter-spacing: 0.2em;
-  color: var(--ef-muted);
-  flex: 0 0 auto;
-}
-.exec-step-title {
-  min-width: 0;
-  flex: 1;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  font-size: 12px;
-  font-weight: 600;
-}
-.exec-step-status {
-  flex: 0 0 auto;
-  font-size: 10px;
-  color: var(--ef-text-2);
-}
-.exec-step-body {
-  margin-top: 4px;
-  font-size: 11px;
-  line-height: 1.55;
-  color: var(--ef-text-2);
-  word-break: break-word;
-}
-.exec-step-body.is-error { color: rgb(var(--ef-danger-rgb)); }
-body[data-reduced-motion='on'] .exec-flow-dot,
-body[data-reduced-motion='on'] .exec-step::before { animation: none !important; }
-body[data-reduced-motion='on'] .exec-step { animation: none !important; }
+.exec-flow-stream .mrc { box-shadow: none; }
+body[data-reduced-motion='on'] .exec-flow-dot { animation: none !important; }
 body[data-reduced-motion='on'] .exec-flow-root::after { animation: none !important; opacity: 0.72; }
 @media (prefers-reduced-motion: reduce) {
   .exec-flow-root::after,
-  .exec-flow-dot,
-  .exec-step,
-  .exec-step::before { animation: none !important; }
+  .exec-flow-dot { animation: none !important; }
 }
 `;
   documentRef.head.appendChild(style);
@@ -497,14 +389,18 @@ export const createExecutionFlowRuntime = ({
   // 女仆投影的首选画布：指令条结果流（返回 true 表示已消费，不再自开面板，避免双流）
   onMaidTrace = null,
   onCancelMaidRun = null,
+  // 卡内确认（与输入胶囊共用）
+  getApproval = () => null,
+  onApprovalDecision = null,
+  onVisibilityChange = null,
+  setIntervalFn = null,
+  clearIntervalFn = null,
 } = {}) => {
   let rootEl = null;
   let chipEl = null;
   let panelEl = null;
   let streamEl = null;
-  let headTitleEl = null;
-  let headStatusEl = null;
-  let cancelMaidBtnEl = null;
+  let runCard = null;
   let maidHostEl = null;
   let creativeHostEl = null;
   let switcherEl = null;
@@ -517,7 +413,6 @@ export const createExecutionFlowRuntime = ({
     expanded: false,
     runId: '',
     view: null,
-    signature: '',
     creative: null,
     activeKind: '',
   };
@@ -587,11 +482,8 @@ export const createExecutionFlowRuntime = ({
           <div class="exec-flow-head">
             <span class="exec-flow-mark">侍</span>
             <div class="exec-flow-kicker">
-              <span class="exec-flow-kicker-label">MAID · RUN</span>
-              <span class="exec-flow-title" data-ef-title></span>
+              <span class="exec-flow-title">女仆任务</span>
             </div>
-            <span class="exec-flow-status" data-ef-status></span>
-            <button type="button" class="exec-flow-btn is-stop" data-ef-cancel-maid aria-label="停止女仆任务"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg></button>
             <button type="button" class="exec-flow-btn" data-ef-toggle aria-label="收起">–</button>
             <button type="button" class="exec-flow-btn" data-ef-close aria-label="关闭">×</button>
           </div>
@@ -606,9 +498,6 @@ export const createExecutionFlowRuntime = ({
     chipEl = rootEl.querySelector?.('.exec-flow-chip') || null;
     panelEl = rootEl.querySelector?.('.exec-flow-panel') || null;
     streamEl = rootEl.querySelector?.('[data-ef-stream]') || null;
-    headTitleEl = rootEl.querySelector?.('[data-ef-title]') || null;
-    headStatusEl = rootEl.querySelector?.('[data-ef-status]') || null;
-    cancelMaidBtnEl = rootEl.querySelector?.('[data-ef-cancel-maid]') || null;
     rootEl.addEventListener?.('click', (event) => {
       const target = event?.target || null;
       const switchTarget = target?.closest?.('[data-ef-switch]');
@@ -622,12 +511,6 @@ export const createExecutionFlowRuntime = ({
       }
       if (target?.closest?.('[data-ef-close]')) {
         setVisible(false);
-        return;
-      }
-      if (target?.closest?.('[data-ef-cancel-maid]')) {
-        if (state.view?.terminal !== true) {
-          void onCancelMaidRun?.({ runId: state.runId, view: state.view });
-        }
         return;
       }
       if (target?.closest?.('[data-ef-toggle]')) {
@@ -667,6 +550,7 @@ export const createExecutionFlowRuntime = ({
     if (!state.visible) state.expanded = false;
     reconcileActiveKind();
     render();
+    try { onVisibilityChange?.({ visible: state.visible }); } catch {}
   };
 
   const position = () => {
@@ -706,26 +590,20 @@ export const createExecutionFlowRuntime = ({
     if (panelEl) panelEl.style.width = state.activeKind === 'maid' && isExpanded ? '100%' : 'auto';
   };
 
-  const renderStepHtml = (step) => {
-    const meta = statusMeta(step.status);
-    const glyph = step.glyph || '行';
-    const label = `TOOL·${String(step.seq).padStart(2, '0')}`;
-    const body = step.error
-      ? `<div class="exec-step-body is-error">${escapeHtml(step.error)}</div>`
-      : (step.toolName && step.toolName !== step.title
-        ? `<div class="exec-step-body">${escapeHtml(step.toolName)}</div>`
-        : '');
-    return `
-      <div class="exec-step" data-tone="${meta.tone}" data-ef-step="${escapeHtml(step.id)}">
-        <div class="exec-step-head">
-          <span class="exec-step-glyph">${glyph}</span>
-          <span class="exec-step-label">${label}</span>
-          <span class="exec-step-title">${escapeHtml(step.title)}</span>
-          <span class="exec-step-status">${meta.label}</span>
-        </div>
-        ${body}
-      </div>
-    `;
+  const ensureRunCard = () => {
+    if (runCard || !streamEl) return runCard;
+    runCard = createMaidRunCardView({
+      documentRef,
+      onStop: ({ runId } = {}) => {
+        if (state.view?.terminal !== true) void onCancelMaidRun?.({ runId, view: state.view });
+      },
+      onDecision: payload => onApprovalDecision?.(payload),
+      onLayoutChange: () => position(),
+      setIntervalFn,
+      clearIntervalFn,
+    });
+    if (runCard) streamEl.appendChild(runCard.el);
+    return runCard;
   };
 
   const render = () => {
@@ -754,44 +632,11 @@ export const createExecutionFlowRuntime = ({
     if (chipTitle) chipTitle.textContent = view.title;
     if (chipProgress) chipProgress.textContent = view.stepTotal ? `${view.stepDone}/${view.stepTotal}` : '';
     if (chipDot) chipDot.setAttribute?.('data-tone', view.tone);
-    if (headTitleEl) headTitleEl.textContent = view.title;
-    if (headStatusEl) {
-      headStatusEl.innerHTML = `<span class="exec-flow-dot" data-tone="${view.tone}"></span>${escapeHtml(view.statusLabel)}`;
-    }
-    if (cancelMaidBtnEl) cancelMaidBtnEl.hidden = view.terminal === true;
-    if (streamEl) {
-      const signature = JSON.stringify([
-        view.runId,
-        view.status,
-        view.steps.map(step => [step.id, step.status, step.title, step.error]),
-        view.doneSummary,
-      ]);
-      if (signature !== state.signature) {
-        state.signature = signature;
-        const planCard = `
-          <div class="exec-step" data-tone="accent">
-            <div class="exec-step-head">
-              <span class="exec-step-glyph">计</span>
-              <span class="exec-step-label">PLAN</span>
-              <span class="exec-step-title">${escapeHtml(view.title)}</span>
-            </div>
-          </div>
-        `;
-        const doneCard = view.terminal ? `
-          <div class="exec-step" data-tone="${view.tone}">
-            <div class="exec-step-head">
-              <span class="exec-step-glyph">${view.status === 'succeeded' ? '成' : view.status === 'cancelled' ? '止' : '败'}</span>
-              <span class="exec-step-label">${view.status === 'succeeded' ? 'DONE' : view.status.toUpperCase()}</span>
-              <span class="exec-step-title">${escapeHtml(view.statusLabel)}</span>
-            </div>
-            ${view.doneSummary ? `<div class="exec-step-body">${escapeHtml(view.doneSummary)}</div>` : ''}
-            ${view.failureCode ? `<div class="exec-step-body is-error">${escapeHtml(view.failureCode)}</div>` : ''}
-          </div>
-        ` : '';
-        const nearBottom = streamEl.scrollHeight - streamEl.scrollTop - streamEl.clientHeight < 48;
-        streamEl.innerHTML = planCard + view.steps.map(renderStepHtml).join('') + doneCard;
-        if (nearBottom || view.terminal === false) streamEl.scrollTop = streamEl.scrollHeight;
-      }
+    const card = ensureRunCard();
+    if (card) {
+      const nearBottom = streamEl.scrollHeight - streamEl.scrollTop - streamEl.clientHeight < 48;
+      card.update(view, { approval: getApproval?.(view.runId) || null, voice: view.source === 'maid_realtime' });
+      if (nearBottom || view.terminal === false) streamEl.scrollTop = streamEl.scrollHeight;
     }
     position();
   };
@@ -848,7 +693,6 @@ export const createExecutionFlowRuntime = ({
     if (view.source === 'maid_realtime') return consumeMaidTraceView(view);
     maidTraceConsumerRunId = '';
     if (view.terminal) return false;
-    state.signature = '';
     state.visible = true;
     state.expanded = true;
     reconcileActiveKind();
@@ -871,7 +715,6 @@ export const createExecutionFlowRuntime = ({
     state.runId = runId;
     state.view = view;
     if (isNewRun || wasConsumedByMaidTrace) {
-      state.signature = '';
       state.visible = true;
       state.expanded = true; // 女仆投影实时显示：运行即展开
     }
@@ -890,8 +733,27 @@ export const createExecutionFlowRuntime = ({
     if (keydownHandler) documentRef?.removeEventListener?.('keydown', keydownHandler);
     keydownHandler = null;
     maidTraceConsumerRunId = '';
+    runCard?.destroy?.();
+    runCard = null;
     rootEl?.remove?.();
     rootEl = null;
+  };
+
+  // 卡内确认：面板正显示该 run 时可承载；有待确认项时自动展开面板，避免确认块藏在缩略胶囊里
+  const hasRunCard = runId => Boolean(
+    trim(runId)
+    && state.visible
+    && state.runId === trim(runId)
+    && state.activeKind === 'maid'
+    && state.view,
+  );
+  const refreshApprovals = () => {
+    if (!state.view || !state.visible) return;
+    if (getApproval?.(state.runId) && !state.expanded) {
+      state.expanded = true;
+      state.activeKind = 'maid';
+    }
+    render();
   };
 
   return {
@@ -901,6 +763,8 @@ export const createExecutionFlowRuntime = ({
     render,
     setVisible,
     rearbitrateMaidTrace,
+    hasRunCard,
+    refreshApprovals,
     adoptCreativeState,
     attachCreativeLane,
     getState: () => ({
@@ -908,7 +772,7 @@ export const createExecutionFlowRuntime = ({
       view: state.view ? { ...state.view } : null,
       creative: state.creative ? { ...state.creative } : null,
     }),
-    getElements: () => ({ rootEl, chipEl, panelEl, streamEl, cancelMaidBtnEl, maidHostEl, creativeHostEl, switcherEl }),
+    getElements: () => ({ rootEl, chipEl, panelEl, streamEl, maidHostEl, creativeHostEl, switcherEl, runCardEl: runCard?.el || null }),
     _adoptEvent: adoptEvent,
   };
 };

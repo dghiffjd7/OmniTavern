@@ -1059,3 +1059,46 @@ const tool = {
   assert.equal(plan.reason, 'unverified_custom_endpoint');
   console.log('ok - request planning cannot bypass endpoint capability eligibility');
 }
+
+{
+  // Vertex 实测会 400 的写法：约束型 anyOf、type 数组、缺 items 的数组、嵌套长度约束；本地 schema 仍负责这些校验
+  const plan = buildProviderFcRequestPlan({
+    config: { provider: 'vertexai', model: 'gemini-3.8-flash', vertexaiAuthMode: 'express', apiKey: 'k' },
+    tools: [{
+      type: 'function',
+      function: {
+        name: 'group_update_members',
+        description: 'Update members.',
+        parameters: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            group: { type: 'string', maxLength: 160 },
+            members: { type: 'array', maxItems: 50, items: { type: 'string', minLength: 1, maxLength: 160 } },
+            refs: { type: 'array', items: { type: ['string', 'integer'], minLength: 1 } },
+            entries: { type: 'array', minItems: 1 },
+            maybe: { type: ['null', 'string'] },
+            pick: { anyOf: [{ type: 'string' }, { type: 'integer' }] },
+          },
+          anyOf: [{ required: ['group'] }, { required: ['groupId'] }],
+        },
+      },
+    }],
+  });
+  if (plan.ok) {
+    const parameters = plan.requestOptions.tools[0].functionDeclarations[0].parameters;
+    assert.equal(parameters.type, 'OBJECT');
+    assert.equal(Object.hasOwn(parameters, 'anyOf'), false, 'constraint-only anyOf is dropped');
+    assert.equal(parameters.properties.refs.items.type, 'STRING');
+    assert.equal(parameters.properties.maybe.type, 'STRING');
+    assert.equal(parameters.properties.maybe.nullable, true);
+    assert.equal(parameters.properties.entries.items.type, 'OBJECT');
+    assert.equal(parameters.properties.pick.anyOf.length, 2, 'typed unions stay');
+    for (const key of ['"minLength"', '"maxLength"', '"minItems"', '"maxItems"']) {
+      assert.equal(JSON.stringify(parameters).includes(key), false, `${key} is not sent to Gemini`);
+    }
+    console.log('ok - Gemini declarations drop constructs Vertex rejects while keeping typed unions');
+  } else {
+    console.log(`ok - (skipped Vertex schema check: ${plan.reason})`);
+  }
+}

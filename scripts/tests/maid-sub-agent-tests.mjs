@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
   MAID_SUB_AGENT_SKILLS,
@@ -7,6 +8,82 @@ import {
 } from '../../src/scripts/storage/maid-settings-store.js';
 import { buildMaidSubAgentsPromptBlock, buildMaidModelPlannerMessages } from '../../src/scripts/agent/maid-model-planner.js';
 import { createAppContentAgentTools } from '../../src/scripts/agent/tools/app-content-tools.js';
+import { createMaidSubAgentRuntime } from '../../src/scripts/ui/maid-sub-agent-runtime.js';
+import { createMaidRuntimeConfigResolver } from '../../src/scripts/agent/maid-runtime-config.js';
+import { createVoiceAwareMaidRuntimeResolver, createVoiceTaskModelRegistry } from '../../src/scripts/ui/realtime/voice-task-model.js';
+
+// Exercise the actual app wiring before its later const dependencies initialize.
+// A module-only test with prebuilt dependencies cannot catch this boot-order failure.
+{
+  const appSource = readFileSync(new URL('../../src/scripts/ui/app.js', import.meta.url), 'utf8');
+  const start = appSource.indexOf('  const generateWithSubAgent = createMaidSubAgentRuntime({');
+  const end = appSource.indexOf('  registerAppContentAgentTools(agentToolRegistry, {', start);
+  assert.ok(start >= 0 && end > start);
+  const wiring = appSource.slice(start, end);
+  const calls = [];
+  const bootstrap = new Function('createMaidSubAgentRuntime', 'chatConfigManager', 'LLMClient', 'buildAdHocWebSearchRuntime', 'logger', 'calls', `
+    ${wiring}
+    const agentRegistry = { listEnabledAgents: () => [{ id: 'late-sub', name: 'Late sub', modelProfileRef: 'late-profile', capabilityTags: [] }] };
+    const requestMaidToolConfirmation = async request => { calls.push(request.toolName); return { decision: 'allow' }; };
+    const resolveMaidTaskRuntimeConfig = async context => { calls.push(context.voiceCallId); return { configured: false }; };
+    return generateWithSubAgent;
+  `);
+  const generate = bootstrap(createMaidSubAgentRuntime,
+    { getRuntimeConfigByProfileId: async () => ({ model: 'late-model' }) },
+    class { async chat() { return 'generated'; } },
+    options => ({ client: options.client, requestOptions: options.requestOptions }),
+    { warn() {} }, calls);
+  assert.deepEqual(calls, [], 'boot only assembles the runtime');
+  const result = await generate({ subAgentId: 'late-sub', prompt: 'fixture', context: { voiceCallId: 'captured-call' } });
+  assert.equal(result.ok, true);
+  assert.equal(result.modelUsed, 'late-model');
+  assert.deepEqual(calls, ['captured-call', 'sub_agent.delegate']);
+  console.log('ok - app sub-agent wiring defers registry, confirmation and task runtime reads until execution');
+}
+
+// Delegation uses the same captured executor as planning; independent sub profiles stay independent.
+{
+  const setup = ({ main = false, sub = true, allow = true, failSub = false } = {}) => {
+    const calls = [], resolutions = [], requests = [];
+    const createClient = config => ({ chat: async (_messages, options) => {
+      calls.push({ model: config.model, options });
+      if (failSub && config.model === 'sub-model') throw new Error('sub failed');
+      return `from ${config.model}`;
+    } });
+    const configManager = { ensureStores: async () => {}, getRuntimeConfigByProfileId: async id => ({ provider: 'openai', model: `${id}-model`, apiKey: 'fixture' }) };
+    const models = createVoiceTaskModelRegistry();
+    models.remember('call', { config: { provider: 'openai', model: 'voice-model', apiKey: 'fixture' } });
+    const resolve = createVoiceAwareMaidRuntimeResolver({ registry: models, createClient,
+      resolveMaidRuntime: createMaidRuntimeConfigResolver({ settingsStore: { getBoundProfileId: () => main ? 'maid' : '' }, configManager, createClient, isConfigReady: () => true }),
+    });
+    const generate = createMaidSubAgentRuntime({
+      resolveMaidRuntimeConfig: context => { resolutions.push(context); return resolve(context); },
+      listEnabledAgents: () => sub ? [{ id: 'sub', name: 'Sub', modelProfileRef: 'sub', capabilityTags: [] }] : [],
+      chatConfigManager: configManager, createClient,
+      requestMaidToolConfirmation: async request => { requests.push(request); return { decision: allow ? 'allow' : 'deny' }; },
+      buildAdHocWebSearchRuntime: options => ({ client: options.client, requestOptions: options.requestOptions, plan: { enabled: options.enabled } }),
+      logger: { warn() {} },
+    });
+    return { generate, calls, resolutions, requests };
+  };
+  const input = { subAgentId: 'sub', prompt: 'fixture', context: { voiceCallId: 'call', sessionId: 'captured-room' } };
+  for (const options of [{ sub: false }, { allow: false }, { failSub: true }, {}]) {
+    const env = setup(options);
+    const result = await env.generate(input);
+    assert.equal(result.ok, true);
+    assert.equal(env.resolutions[0].voiceCallId, 'call');
+    assert.equal(env.resolutions[0].sessionId, 'captured-room');
+    assert.deepEqual(env.calls.map(call => call.model), options.failSub ? ['sub-model', 'voice-model'] : [options.sub === false || options.allow === false ? 'voice-model' : 'sub-model']);
+    assert.equal(result.modelUsed, env.calls.at(-1).model);
+    assert.equal(result.delegated, result.modelUsed === 'sub-model');
+  }
+  const independent = setup();
+  assert.equal((await independent.generate({ subAgentId: 'sub', prompt: 'fixture' })).modelUsed, 'sub-model', 'an independent sub profile works without a main profile');
+  const text = setup({ main: true, sub: false });
+  assert.equal((await text.generate({ prompt: 'fixture' })).modelUsed, 'maid-model');
+  assert.equal((await setup({ sub: false }).generate({ prompt: 'fixture' })).reason, 'maid_api_not_configured');
+  console.log('ok - delegation respects voice executors, independent profiles, refusal and fallback');
+}
 
 {
   const sub = normalizeMaidSubAgent({
@@ -135,6 +212,59 @@ import { createAppContentAgentTools } from '../../src/scripts/agent/tools/app-co
   assert.deepEqual(saved['角色资料'].entries[0].sourceRefs, ['https://example.com/mia']);
   assert.equal(result.sources[0].url, 'https://example.com/mia');
   console.log('ok - worldbook.generate_entries 共享 AI 模板并显式透传本次联网与来源');
+}
+
+{
+  // 委派确认带 run 与取消信号；没有可用执行模型时拒绝即不执行；绑定的连线配置被删时如实说明；任务取消后不再生成
+  const setup = ({ main = true, allow = true, subProfileExists = true, abortDuringConfirm = false } = {}) => {
+    const calls = [], confirms = [];
+    const controller = new AbortController();
+    const createClient = config => ({ chat: async () => { calls.push(config.model); return `from ${config.model}`; } });
+    const generate = createMaidSubAgentRuntime({
+      resolveMaidRuntimeConfig: async () => (main ? { configured: true, client: createClient({ model: 'main-model' }), config: { model: 'main-model' } } : { configured: false }),
+      listEnabledAgents: () => [{ id: 'sub', name: 'Sub', modelProfileRef: 'sub', capabilityTags: [] }],
+      chatConfigManager: { getRuntimeConfigByProfileId: async () => (subProfileExists ? { model: 'sub-model' } : null) },
+      createClient,
+      requestMaidToolConfirmation: async (request, options) => {
+        confirms.push({ request, options });
+        if (abortDuringConfirm) { controller.abort(); throw new Error('aborted'); }
+        return { decision: allow ? 'allow' : 'deny' };
+      },
+      buildAdHocWebSearchRuntime: options => ({ client: options.client, requestOptions: options.requestOptions, plan: { enabled: false } }),
+      logger: { warn() {} },
+    });
+    return { run: () => generate({ subAgentId: 'sub', prompt: 'p', context: { runId: 'run-1', signal: controller.signal } }), calls, confirms, controller };
+  };
+  const withMain = setup();
+  await withMain.run();
+  assert.equal(withMain.confirms[0].options.runId, 'run-1', 'the confirmation can render inside the task card');
+  assert.ok(withMain.confirms[0].options.signal, 'the confirmation closes when the task is cancelled');
+  assert.equal(withMain.confirms[0].request.cancelText, '用主模型');
+
+  const noMain = setup({ main: false, allow: false });
+  const declined = await noMain.run();
+  assert.equal(noMain.confirms[0].request.cancelText, '不执行', 'no main model to fall back to');
+  assert.equal(declined.reason, 'sub_agent_declined');
+  assert.deepEqual(noMain.calls, []);
+
+  const dangling = setup({ main: false, subProfileExists: false });
+  const missing = await dangling.run();
+  assert.equal(missing.reason, 'sub_agent_profile_missing');
+  assert.match(missing.message, /Sub-agent「Sub」绑定的连线配置已不存在/);
+  assert.equal((await setup({ subProfileExists: false }).run()).ok, true, 'with a main model the missing sub profile still falls back');
+
+  const aborted = setup({ abortDuringConfirm: true });
+  const abortResult = await aborted.run();
+  assert.equal(abortResult.reason, 'user_aborted');
+  assert.deepEqual(aborted.calls, [], 'nothing is generated after the task is cancelled');
+  console.log('ok - sub-agent confirmation is task-scoped and never offers a main model that does not exist');
+}
+
+{
+  // hasConfiguredMaidProfile 在后面才赋值为真实实现：提交器必须在调用时读取，否则“首次聊天”永远被引导去配置 API
+  const appSource = readFileSync(new URL('../../src/scripts/ui/app.js', import.meta.url), 'utf8');
+  assert.match(appSource, /hasConfiguredMaidProfile: \(\) => hasConfiguredMaidProfile\(\), resolveMaidRuntimeConfig: resolveMaidTaskRuntimeConfig/);
+  console.log('ok - the command submitter reads the configured-profile check lazily');
 }
 
 console.log('maid-sub-agent-tests passed');

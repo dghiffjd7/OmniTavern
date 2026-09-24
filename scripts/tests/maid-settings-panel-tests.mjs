@@ -495,11 +495,82 @@ const flushMicrotasks = () => new Promise(resolve => setTimeout(resolve, 0));
   assert.match(panelSource, /单次任务步数上限/);
   assert.match(panelSource, /normalizeMaidReactStepLimit\(maxStepsInput\.value\)/);
   assert.match(panelSource, /settingsStore\?\.setMaxReactSteps\?\.\(normalized\)/);
-  const appSource = readFileSync(new URL('../../src/scripts/ui/app.js', import.meta.url), 'utf8');
-  assert.equal(
-    (appSource.match(/maxReactSteps: (?:opts\.maxReactSteps \|\| )?maidSettingsStore\.getMaxReactSteps\?\.\(\)/g) || []).length,
-    2,
-    '两个女仆任务入口都必须按次读取用户设置的步数上限',
-  );
+  // 两个女仆任务入口：app.js 内的直接调用，以及 0.7.3 拆出的指令/语音提交运行时
+  const stepLimitRead = /maxReactSteps: (?:opts\.maxReactSteps \|\| )?maidSettingsStore\.getMaxReactSteps\?\.\(\)/g;
+  const entrySources = ['../../src/scripts/ui/app.js', '../../src/scripts/ui/maid-command-submit-runtime.js']
+    .map(path => readFileSync(new URL(path, import.meta.url), 'utf8'));
+  entrySources.forEach((source, index) => {
+    assert.equal(
+      (source.match(stepLimitRead) || []).length,
+      1,
+      `女仆任务入口 ${index + 1} 必须按次读取用户设置的步数上限`,
+    );
+  });
   console.log('ok - maid settings panel exposes the react step limit and both entries consume it');
+}
+
+{
+  // 记忆管理：长期记忆可编辑；清空长期记忆 / 清除历史 / 清除归档都先弹确认，取消时不动数据
+  const documentRef = new FakeDocument();
+  const memories = [{ id: 'm1', kind: 'preference', key: 'presentation.default', content: '旧内容', confidence: 'inferred', status: 'active', tags: [] }];
+  const calls = [];
+  const confirms = [];
+  let confirmAnswer = false;
+  const panel = createMaidSettingsPanel({
+    documentRef,
+    settingsStore: { getMaidPrompt: () => '' },
+    semanticMemoryStore: {
+      listMemories: () => memories.slice(),
+      updateMemoryContent: async (id, content) => { calls.push(['edit', id, content]); memories[0].content = content; return memories[0]; },
+      clearMemories: async () => { calls.push(['clearSemantic']); const count = memories.length; memories.length = 0; return count; },
+      deleteMemory: async () => true,
+      setMemoryStatus: async () => null,
+    },
+    clearHistoryContext: async () => { calls.push(['clearHistory']); return { turns: 3 }; },
+    clearMemoryTable: async () => { calls.push(['clearTable']); return 1; },
+    confirmMemoryAction: async (payload) => { confirms.push(payload.title); return confirmAnswer; },
+    logger: { warn() {}, debug() {} },
+  });
+  panel.show({ tab: 'prompt' });
+  const elements = panel.getElements();
+  panel.switchTab('semanticMemory');
+  findByText(elements.semanticMemoryListEl, '编辑').dispatchEvent('click', {});
+  const findEditor = (root) => {
+    if (root?.classList?.contains?.('maid-memory-edit-input')) return root;
+    for (const child of root?.children || []) { const found = findEditor(child); if (found) return found; }
+    return null;
+  };
+  const editor = findEditor(elements.semanticMemoryListEl);
+  assert.equal(editor.value, '旧内容');
+  assert.equal(findByText(elements.semanticMemoryListEl, '永久删除'), null, 'no delete while editing');
+  editor.value = '   ';
+  findByText(elements.semanticMemoryListEl, '保存').dispatchEvent('click', {});
+  await flushMicrotasks();
+  assert.equal(calls.length, 0, 'empty content is not saved');
+  editor.value = '新内容';
+  findByText(elements.semanticMemoryListEl, '保存').dispatchEvent('click', {});
+  await flushMicrotasks();
+  assert.deepEqual(calls, [['edit', 'm1', '新内容']]);
+  assert.ok(findByText(elements.semanticMemoryListEl, '新内容'));
+  assert.equal(elements.statusEl.textContent, '长期记忆已更新');
+
+  const clearAll = findByText(elements.promptPanes.get('semanticMemory'), '清空全部');
+  clearAll.dispatchEvent('click', {});
+  await flushMicrotasks();
+  assert.deepEqual(confirms, ['清空长期记忆']);
+  assert.equal(calls.length, 1, 'declined confirmation clears nothing');
+  confirmAnswer = true;
+  clearAll.dispatchEvent('click', {});
+  await flushMicrotasks();
+  assert.deepEqual(calls.at(-1), ['clearSemantic']);
+  assert.ok(findByText(elements.semanticMemoryListEl, '还没有长期记忆。'));
+
+  findByText(elements.promptPanes.get('historyContext'), '清除历史').dispatchEvent('click', {});
+  await flushMicrotasks();
+  findByText(elements.promptPanes.get('memoryTable'), '清除归档').dispatchEvent('click', {});
+  await flushMicrotasks();
+  assert.deepEqual(calls.slice(-2), [['clearHistory'], ['clearTable']]);
+  assert.deepEqual(confirms.slice(-2), ['清除女仆历史上下文', '清除轮次归档']);
+  assert.equal(elements.statusEl.textContent, '轮次归档已清除');
+  console.log('ok - maid memory can be edited and cleared from settings, always behind a confirmation');
 }

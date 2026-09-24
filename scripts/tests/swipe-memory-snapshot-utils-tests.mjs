@@ -193,6 +193,44 @@ test('replaceScopedMemoriesWithSnapshot falls back to per-row delete/create when
   ]);
 });
 
+test('replaceScopedMemoriesWithSnapshot skips rewriting when rows already match the snapshot', async () => {
+  const calls = [];
+  const memoryTableStore = {
+    async batchDeleteMemories(ids) { calls.push(['delete', ids]); },
+    async batchCreateMemories(inputs) { calls.push(['create', inputs.length]); },
+  };
+  const scopeFields = { contact_id: 'chat-a', group_id: null };
+  // 数据库回读：带时间戳，row_data 键顺序与快照不同
+  const existingRows = [
+    { id: 'r1', template_id: 'default-v1', table_id: 'profile', contact_id: 'chat-a', group_id: null, row_data: { b: 2, a: 1 }, is_active: 1, is_pinned: 0, priority: 0, sort_order: 1, created_at: 100, updated_at: 200 },
+    { id: 'r2', template_id: 'default-v1', table_id: 'profile', contact_id: 'chat-a', group_id: null, row_data: { a: 3 }, is_active: 1, is_pinned: 0, priority: 0, sort_order: 2, created_at: 101, updated_at: 300 },
+  ];
+  const snapshotRows = [
+    { id: 'r1', table_id: 'profile', row_data: { a: 1, b: 2 }, is_active: true, is_pinned: false, priority: 0, sort_order: 1 },
+    { id: 'r2', table_id: 'profile', row_data: { a: 3 }, is_active: true, is_pinned: false, priority: 0, sort_order: 2 },
+  ];
+  const same = await replaceScopedMemoriesWithSnapshot({ memoryTableStore, existingRows, snapshotRows, templateId: 'default-v1', scopeFields });
+  assert.equal(same.unchanged, true);
+  assert.deepEqual(calls, [], '内容一致时不删除也不重建');
+
+  for (const changed of [
+    snapshotRows.map((row, index) => (index === 1 ? { ...row, row_data: { a: 4 } } : row)),
+    snapshotRows.map((row, index) => (index === 0 ? { ...row, is_pinned: true } : row)),
+    snapshotRows.slice(0, 1),
+    [...snapshotRows, { id: 'r3', table_id: 'profile', row_data: { a: 5 }, sort_order: 3 }],
+    snapshotRows.map((row, index) => (index === 1 ? { ...row, id: 'r9' } : row)),
+  ]) {
+    calls.length = 0;
+    const result = await replaceScopedMemoriesWithSnapshot({ memoryTableStore, existingRows, snapshotRows: changed, templateId: 'default-v1', scopeFields });
+    assert.notEqual(result.unchanged, true);
+    assert.deepEqual(calls[0], ['delete', ['r1', 'r2']], '有任何差异都照常删除重建');
+  }
+
+  calls.length = 0;
+  const withBadRow = await replaceScopedMemoriesWithSnapshot({ memoryTableStore, existingRows: [...existingRows, { id: 'orphan', table_id: '' }], snapshotRows, templateId: 'default-v1', scopeFields });
+  assert.notEqual(withBadRow.unchanged, true, '现有行里有快照不认的行时照常重建');
+});
+
 let failed = 0;
 for (const t of tests) {
   try {

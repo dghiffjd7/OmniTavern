@@ -258,6 +258,11 @@
   mask: radial-gradient(circle, transparent 58%, #000 62%);
 }
 
+/* 窗口不在前台时暂停常驻光环（app.js syncWindowInactiveState 维护该标记），回到前台从原位置继续 */
+body[data-window-inactive='on'] .mode-switch-btn::before {
+  animation-play-state: paused;
+}
+
 .mode-switch-btn::after {
   content: '';
   position: absolute;
@@ -7840,102 +7845,7 @@ body[data-reduced-motion='on'] .session-add-success-viewport * {
   padding: 2px 0;
 }
 
-.typing-dot {
-  width: 6px;
-  height: 6px;
-  background: radial-gradient(circle at 30% 30%,
-    var(--app-text-muted),
-    var(--app-text-secondary),
-    var(--app-text-secondary));
-  border-radius: 50%;
-  position: relative;
-  filter: blur(0.3px);
-  box-shadow:
-    inset 0 1px 2px rgba(255, 255, 255, 0.3),
-    0 2px 4px rgba(0, 0, 0, 0.1);
-  animation: liquidFlowMerge 1.4s infinite ease-in-out;
-}
-
-.typing-dot:nth-child(1) {
-  animation-delay: 0s;
-  z-index: 3;
-}
-
-.typing-dot:nth-child(2) {
-  animation-delay: 0.2s;
-  animation: liquidFlowMerge 1.5s infinite ease-in-out,
-             liquidMergeEffect 1.8s infinite ease-in-out;
-  z-index: 2;
-}
-
-.typing-dot:nth-child(3) {
-  animation-delay: 0.4s;
-  animation-duration: 1.3s;
-  z-index: 1;
-}
-
-@keyframes liquidFlowMerge {
-  0% {
-    transform: translateY(0) scale(1, 1) translateX(0);
-    opacity: 0.7;
-    border-radius: 50%;
-    filter: blur(0.3px);
-  }
-  15% {
-    transform: translateY(-6px) scale(0.9, 1.3) translateX(-2px);
-    opacity: 0.85;
-    border-radius: 65% 35% 70% 30%;
-    filter: blur(0.2px);
-  }
-  30% {
-    transform: translateY(-8px) scale(1.4, 0.6) translateX(3px);
-    opacity: 1;
-    border-radius: 30% 70% 25% 75%;
-    filter: blur(0.1px);
-  }
-  45% {
-    transform: translateY(-3px) scale(0.7, 1.4) translateX(-1px);
-    opacity: 0.9;
-    border-radius: 75% 25% 80% 20%;
-    filter: blur(0.4px);
-  }
-  60% {
-    transform: translateY(4px) scale(1.3, 0.8) translateX(2px);
-    opacity: 0.8;
-    border-radius: 40% 60% 35% 65%;
-    filter: blur(0.3px);
-  }
-  75% {
-    transform: translateY(2px) scale(0.8, 1.2) translateX(-3px);
-    opacity: 0.85;
-    border-radius: 60% 40% 65% 35%;
-    filter: blur(0.5px);
-  }
-  100% {
-    transform: translateY(0) scale(1, 1) translateX(0);
-    opacity: 0.7;
-    border-radius: 50%;
-    filter: blur(0.3px);
-  }
-}
-
-@keyframes liquidMergeEffect {
-  0%, 100% {
-    transform: scaleX(1) scaleY(1) skew(0deg);
-    border-radius: 50%;
-    margin: 0 1.5px;
-  }
-  33% {
-    transform: scaleX(1.8) scaleY(0.6) skew(-5deg);
-    border-radius: 80% 20% 75% 25%;
-    margin: 0 -2px;
-  }
-  66% {
-    transform: scaleX(0.6) scaleY(1.8) skew(5deg);
-    border-radius: 25% 75% 20% 80%;
-    margin: 0 1px;
-  }
-}
+/* 三个点的样式与动画统一在 chat.css（呼吸波）。 */
 
 /* 输入指示器容器（无气泡） */
 .typing-indicator-wrap {
@@ -8335,6 +8245,147 @@ body[data-maid-spotlight='on'] .app-confirm-modal {
   border-color: #ef4444;
   background: #ef4444;
   color: var(--app-text-inverse);
+}
+
+/* 权限确认（女仆工具）：图标 + 标题 + 动作标签；按钮横排；caution 琥珀、danger 红 */
+.app-confirm-icon,
+.app-confirm-badge {
+  flex: 0 0 auto;
+}
+
+.app-confirm-icon[hidden],
+.app-confirm-badge[hidden] {
+  display: none;
+}
+
+.app-confirm-modal.is-permission {
+  --app-confirm-tone-rgb: var(--app-warning-rgb, 217, 119, 6);
+  border: 1px solid rgba(var(--app-confirm-tone-rgb), 0.22);
+  animation: app-confirm-permission-in 200ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.app-confirm-modal.is-permission[data-tone='danger'] {
+  --app-confirm-tone-rgb: var(--app-danger-rgb, 220, 38, 38);
+}
+
+@keyframes app-confirm-permission-in {
+  from { opacity: 0; transform: translate(-50%, calc(-50% + 6px)) scale(0.985); }
+  to { opacity: 1; transform: translate(-50%, -50%); }
+}
+
+.app-confirm-modal.is-permission .app-confirm-header {
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 16px 16px 10px;
+}
+
+.app-confirm-modal.is-permission .app-confirm-icon {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  color: rgb(var(--app-confirm-tone-rgb));
+  background: rgba(var(--app-confirm-tone-rgb), 0.13);
+}
+
+.app-confirm-modal.is-permission .app-confirm-icon svg {
+  width: 17px;
+  height: 17px;
+}
+
+.app-confirm-modal.is-permission .app-confirm-title {
+  flex: 1 1 auto;
+  font-size: 15.5px;
+}
+
+.app-confirm-modal.is-permission .app-confirm-badge {
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: color-mix(in srgb, rgb(var(--app-confirm-tone-rgb)) 82%, var(--app-text-primary));
+  background: rgba(var(--app-confirm-tone-rgb), 0.13);
+}
+
+.app-confirm-modal.is-permission .app-confirm-body {
+  padding: 0 16px 14px 58px;
+}
+
+.app-confirm-modal.is-permission .app-confirm-item {
+  border-color: var(--app-border-subtle);
+  background: var(--app-surface-card);
+}
+
+.app-confirm-modal.is-permission .app-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  border-top: 0;
+  padding: 4px 16px 16px;
+}
+
+.app-confirm-modal.is-permission .app-confirm-btn {
+  width: auto;
+  min-width: 88px;
+  text-align: center;
+  border-radius: 999px;
+  font-size: 13.5px;
+}
+
+.app-confirm-modal.is-permission .app-confirm-btn[data-variant='link'] {
+  min-width: 0;
+  margin-right: auto;
+  padding: 8px 4px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--app-text-muted);
+  font-weight: 500;
+}
+
+.app-confirm-modal.is-permission .app-confirm-btn[data-variant='link']:hover {
+  color: var(--app-text-secondary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.app-confirm-modal.is-permission .app-confirm-btn[data-variant='ghost'] {
+  border-color: transparent;
+  background: transparent;
+  color: var(--app-text-secondary);
+}
+
+.app-confirm-modal.is-permission .app-confirm-btn.app-confirm-ok {
+  box-shadow: none;
+  border-color: var(--app-text-primary);
+  background: var(--app-text-primary);
+  color: var(--app-surface-card);
+}
+
+.app-confirm-modal.is-permission[data-tone='danger'] .app-confirm-btn.app-confirm-ok {
+  border-color: rgb(var(--app-confirm-tone-rgb));
+  background: rgb(var(--app-confirm-tone-rgb));
+  color: var(--app-text-inverse);
+}
+
+.app-confirm-modal.is-permission .app-confirm-btn:focus-visible {
+  outline: 2px solid rgba(var(--app-confirm-tone-rgb), 0.55);
+  outline-offset: 2px;
+}
+
+@media (max-width: 420px) {
+  .app-confirm-modal.is-permission .app-confirm-body {
+    padding-left: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-confirm-modal.is-permission {
+    animation: none;
+  }
 }
 
 /* 弹窗遮罩层 */

@@ -1,6 +1,9 @@
 import { appSettings } from '../storage/app-settings.js';
 import { themeStore, normalizeAppearance, normalizeThemePreset } from '../storage/theme-store.js';
 import { resolveRpDialogueTextColor } from './theme-dialogue-color-utils.js';
+import { createThemeDarkRulePruner } from './theme-dark-rule-pruner.js';
+
+const themeDarkRulePruner = createThemeDarkRulePruner();
 
 export const THEME_AVATAR_STYLE_OPTIONS = Object.freeze([
   { value: 'system', label: '跟随原样' },
@@ -274,6 +277,8 @@ export class ThemeManager {
     setCssVar('--border-subtle', border.subtle);
 
     const body = document.body;
+    // 暗色专属规则：浅色下移除以省去每次样式重算的匹配成本，切到暗色前先按原位放回
+    themeDarkRulePruner.sync(nextMode);
     body.dataset.themeMode = nextMode;
     body.dataset.themePreset = String(theme.id || 'classic-dark');
     if (resolvedAppearance.avatarStyle && resolvedAppearance.avatarStyle !== 'system') {

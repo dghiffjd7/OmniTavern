@@ -110,6 +110,7 @@ import { registerAppNavigationAgentTools } from '../agent/tools/app-navigation-t
 import { registerAppSessionAgentTools } from '../agent/tools/app-session-tools.js';
 import { registerGroupChatAgentTools } from '../agent/tools/group-chat-agent-tools.js';
 import { registerAppContentAgentTools } from '../agent/tools/app-content-tools.js';
+import { registerPresetRegexScriptAgentTools } from '../agent/tools/preset-regex-script-tools.js';
 import { registerMaidMediaAssetTools } from '../agent/tools/media-asset-tools.js';
 import { registerAppUiCaptureTools } from '../agent/tools/app-ui-capture-tools.js';
 import { registerWebSearchAgentTools } from '../agent/tools/web-search-tools.js';
@@ -186,10 +187,11 @@ import { pickSavePath } from '../utils/save-dialog.js';
 import { safeInvoke } from '../utils/tauri.js';
 import { createMaidSelectionMode } from './maid-selection-mode.js';
 import { captureMaidViewportRegion } from './maid-region-capture-utils.js';
-import { MAID_SUB_AGENT_SKILLS } from '../storage/maid-settings-store.js';
+import { createMaidSubAgentRuntime } from './maid-sub-agent-runtime.js';
 import {
   getCanonicalBuiltinPromptDefaults,
   hasLegacyMigratedPresetBindings,
+  isPresetEligibleForMode,
 } from '../storage/preset-store.js';
 import './bridge.js';
 import {
@@ -251,6 +253,7 @@ import {
 import { createContactDetailRuntime } from './contact-detail-runtime-utils.js';
 import {
   applyMemoryTablePushEvent,
+  createCoalescedRerender,
   rerenderCurrentSessionHistory,
 } from './app-session-refresh-runtime-utils.js';
 import {
@@ -271,7 +274,9 @@ import {
   prepareGuidedActionEntryNavigation,
 } from './app-guided-action-runtime-utils.js';
 import { createMaidCommandSubmit } from './maid-command-submit-runtime.js';
+import { createVoiceAwareMaidRuntimeResolver, createVoiceTaskModelRegistry, resolveVoiceTaskModel } from './realtime/voice-task-model.js';
 import { createMaidCommandInputRuntime } from './maid-command-input-runtime-utils.js';
+import { createMaidToolConfirmationRuntime } from './maid-tool-confirmation-runtime.js';
 import { createMaidSettingsPanel } from './maid-settings-panel.js';
 import { createMaidOnboardingRuntime, maidGuideEmit } from './maid-onboarding-runtime.js';
 import { createMaidRichScriptGuideRuntime } from './maid-rich-script-guide-runtime.js';
@@ -340,7 +345,7 @@ import {
   resolveImageNegativePromptCapability,
 } from './image-generation-params-utils.js';
 import { createImageGenerationSizeControl, validateImageGenerationSizeControls } from './image-generation-size-control.js';
-import { ChatUI } from './chat/chat-ui.js';
+import { ChatUI, registerStickerAnimation } from './chat/chat-ui.js';
 import {
   createChatVoiceRuntime,
   createVoiceRuntimeConfigResolver,
@@ -524,6 +529,12 @@ import { createScopedHopscotchBoardStore } from '../storage/hopscotch-board-stor
 import { createHopscotchBoardPanel } from './chat/hopscotch-board-panel.js';
 import { createFormatGuideSettingsRuntime, resolveFormatReviewAvailability } from './chat/format-review-settings-utils.js';
 import { createFormatReviewExecutor, createCreativeFormatReviewRuntime } from './chat/format-review-runtime.js';
+import {
+  buildFormatCheckStatusPart,
+  describeFormatCheckReason,
+  summarizeFormatCheckResult,
+  withFormatCheckStatusPart,
+} from './chat/format-check-feedback.js';
 import { buildFormatRepairRequest } from '../agent/format-repair-request.js';
 import { validateFormatRepairWriteScope } from '../agent/format-repair-selection.js';
 import { bindInputSuggestionComposer } from './chat/input-suggestion-composer.js';
@@ -607,6 +618,7 @@ import {
   createSessionEnterRequestTracker,
   readSessionEnterNowPerfMs,
 } from './chat/session-enter-progressive-runtime-utils.js';
+import { createMessageDisplayDepthResolver } from './chat/message-display-depth-utils.js';
 import {
   ingestMomentsForStore as ingestMomentsForStoreCore,
   normalizeMomentAuthorDisplay as normalizeMomentAuthorDisplayCore,
@@ -3575,139 +3587,14 @@ const initApp = async () => {
     setActiveSession: sessionId => window.appBridge.setActiveSession(sessionId),
     renderSessionNameHtml: (sessionId, contact) => renderSessionNameHtml(sessionId, contact),
   });
-  const subAgentSkillLabel = (skills = []) => skills
-    .map(id => MAID_SUB_AGENT_SKILLS.find(item => item.id === id)?.label || id)
-    .join('、');
-  // sub-agent 委派执行体：解析 sub 档 -> 委派确认（允许一次/始终允许）-> 单轮生成 -> 失败回退主模型
-  const generateWithSubAgent = async ({
-    subAgentId = '',
-    prompt = '',
-    purposeLabel = '生成内容',
-    webSearch = false,
-    sessionId = '',
-    context = {},
-  } = {}) => {
-    const runtime = await resolveMaidRuntimeConfig();
-    if (!runtime?.configured || !runtime.client) {
-      return { ok: false, reason: 'maid_api_not_configured', message: '女仆 API 未配置。' };
-    }
-    // Phase B：委派也从统一 Agent Registry 取（capabilityTags=skills，modelProfileRef=modelProfileId）。
-    const subAgents = agentRegistry.listEnabledAgents().map(cap => ({
-      id: cap.id,
-      name: cap.name,
-      skills: cap.capabilityTags,
-      modelProfileId: cap.modelProfileRef,
-      modelOverride: cap.modelOverride,
-    }));
-    let sub = subAgentId ? subAgents.find(item => item.id === subAgentId) : null;
-    if (!sub && !subAgentId && subAgents.length === 1) sub = subAgents[0];
-    let client = runtime.client;
-    let clientConfig = runtime.config || {};
-    let delegated = false;
-    let modelUsed = String(runtime.config?.model || '');
-    let subAgentName = '';
-    if (sub) {
-      const confirm = context?.requestToolConfirmation || requestMaidToolConfirmation;
-      let allowed = true;
-      try {
-        const decision = await confirm({
-          toolName: 'sub_agent.delegate',
-          kind: 'sub_agent.delegate',
-          operationType: 'model',
-          riskLevel: 'low',
-          danger: false,
-          title: '使用 Sub-agent 模型',
-          message: `女仆想使用「${sub.name}${sub.skills?.length ? `（${subAgentSkillLabel(sub.skills)}）` : ''}」执行：${purposeLabel}`,
-          confirmText: '允许',
-          cancelText: '用主模型',
-        });
-        allowed = decision === true || ['allow', 'allow_once', 'allow_always'].includes(String(decision?.decision || ''));
-      } catch {
-        allowed = false;
-      }
-      if (allowed) {
-        try {
-          const cfg = await chatConfigManager.getRuntimeConfigByProfileId(sub.modelProfileId);
-          if (cfg) {
-            const effective = {
-              ...(sub.modelOverride ? { ...cfg, model: sub.modelOverride } : cfg),
-              timeout: Math.min(Number(cfg.timeout) > 0 ? Number(cfg.timeout) : 240000, 240000),
-            };
-            client = new LLMClient(effective);
-            clientConfig = effective;
-            delegated = true;
-            modelUsed = String(effective.model || '');
-            subAgentName = sub.name;
-          }
-        } catch (err) {
-          logger.warn('resolve sub-agent config failed, using main model', err);
-        }
-      }
-    }
-    const runChat = async (targetClient, targetConfig) => {
-      let sources = [];
-      const generation = buildAdHocWebSearchRuntime({
-        client: targetClient,
-        config: targetConfig,
-        enabled: webSearch === true,
-        sessionId: String(sessionId || `maid-generation:${purposeLabel}`).slice(0, 240),
-        requestOptions: {
-          temperature: 0.7,
-          maxTokens: 2400,
-          max_tokens: 2400,
-          ...(context?.signal ? { signal: context.signal } : {}),
-        },
-        onStatus: status => {
-          const message = String(status?.message || '').trim();
-          if (message) context?.onStatus?.({ message, tone: status?.state === 'unavailable' ? 'warning' : 'thinking' });
-        },
-        onSources: nextSources => {
-          sources = Array.isArray(nextSources) ? nextSources.slice() : [];
-        },
-      });
-      const text = String(await generation.client.chat(
-        [{ role: 'user', content: prompt }],
-        generation.requestOptions,
-      ) || '').trim();
-      return {
-        text,
-        sources,
-        webSearchUsed: generation.plan?.enabled === true,
-        webSearchReason: String(generation.plan?.diagnostics?.reason || ''),
-      };
-    };
-    try {
-      const generated = await runChat(client, clientConfig);
-      if (!generated.text) throw new Error('empty response');
-      return {
-        ok: true,
-        ...generated,
-        delegated,
-        modelUsed,
-        subAgentName,
-        ...(subAgents.length ? {} : { hint: 'no_sub_agent_configured', hintMessage: '提示：可在女仆设置的 API 分页配置 sub-agent 模型，这类生成任务可交给便宜模型执行。' }),
-      };
-    } catch (error) {
-      if (delegated) {
-        // sub 档失败回退主模型一次
-        try {
-          const generated = await runChat(runtime.client, runtime.config || {});
-          if (!generated.text) throw new Error('empty response');
-          return {
-            ok: true,
-            ...generated,
-            delegated: false,
-            fallbackUsed: true,
-            modelUsed: String(runtime.config?.model || ''),
-            subAgentName: '',
-          };
-        } catch (err2) {
-          return { ok: false, reason: 'generation_failed', message: err2?.message || '生成失败（含主模型回退）。' };
-        }
-      }
-      return { ok: false, reason: 'generation_failed', message: error?.message || '生成失败。' };
-    }
-  };
+  const generateWithSubAgent = createMaidSubAgentRuntime({
+    resolveMaidRuntimeConfig: context => resolveMaidTaskRuntimeConfig(context),
+    // 注册工具早于 registry / 确认运行时初始化，依赖只在任务执行时读取。
+    listEnabledAgents: () => agentRegistry.listEnabledAgents(),
+    chatConfigManager, createClient: config => new LLMClient(config),
+    requestMaidToolConfirmation: (request, options) => requestMaidToolConfirmation(request, options),
+    buildAdHocWebSearchRuntime, logger,
+  });
   registerAppContentAgentTools(agentToolRegistry, {
     generateWithSubAgent,
     personaStore,
@@ -3719,6 +3606,12 @@ const initApp = async () => {
     canSwitchPersona: canAgentSwitchPersona,
     deletePersona: (personaId, options) => personaPanel.deleteCore(personaId, options),
     notifyPersonaChanged: () => personaPanel.notifyPersonaChanged(),
+    // 女仆改名后与面板保存一致：角色卡清掉图库详情缓存再通知；用户走用户面板的保存刷新
+    onPersonaProfileUpdated: ({ personaId } = {}) => {
+      personaPanel.galleryDetailCache?.delete?.(personaId);
+      return personaPanel.notifyPersonaChanged();
+    },
+    onUserProfileUpdated: () => userPanel.onUserChanged?.({ reason: 'save', bindingChanged: false, affectsActiveCharacter: false }),
     saveWorldInfo: (id, data, options) => window.appBridge.saveWorldInfo?.(id, data, options),
     getWorldInfo: id => window.appBridge.getWorldInfo?.(id),
     getWorldInfoMetadata: id => window.appBridge.getWorldInfoMetadata?.(id),
@@ -3911,6 +3804,21 @@ const initApp = async () => {
     getActiveUserName,
     getActiveUserAvatar,
   });
+  // 女仆管理预设 / 正则 / 脚本：写入后沿用面板同款事件刷新（预设联动正则与脚本、正则刷新渲染、脚本重载）
+  registerPresetRegexScriptAgentTools(agentToolRegistry, {
+    presetStore,
+    regexStore,
+    scriptStore,
+    getCurrentSessionId: () => chatStore.getCurrent(),
+    getUiMode: () => (uiMode === 'rp' ? 'rp' : 'chat'),
+    getCurrentPersonaId: () => personaStore.getActive?.()?.id || '',
+    getPersonaName: personaId => personaStore.get?.(personaId)?.name || '',
+    getScriptSettings: () => appSettings.get(),
+    isPresetEligibleForMode,
+    onPresetsChanged: () => window.dispatchEvent(new CustomEvent('preset-changed')),
+    onRegexChanged: () => window.dispatchEvent(new CustomEvent('regex-changed')),
+    onScriptsChanged: () => window.appBridge.restartScriptWorker?.('脚本已重新加载'),
+  });
   const buildCurrentMaidImageGenerationContext = ({
     config = {},
     preset = {},
@@ -4049,11 +3957,11 @@ const initApp = async () => {
       windowRef: window,
       invokeCapture: payload => safeInvoke('capture_viewport_region', payload),
     }),
-    checkVisionSupport: () => checkMaidVisionInput([{
+    checkVisionSupport: ({ context } = {}) => checkMaidVisionInput([{
       id: 'maid-region-vision-check',
       kind: 'image',
       url: 'data:image/png;base64,AA==',
-    }]),
+    }], context),
   });
   registerMaidTodoTools(agentToolRegistry, {
     getRun: runId => agentRunStore.getRun(runId),
@@ -4114,6 +4022,10 @@ const initApp = async () => {
   const maidGuidedActionRuntime = createAppGuidedActionRuntime({
     guideStore: maidGuideStore,
     showGuide: (guide, meta) => showMaidGuide(guide, meta),
+    // 实时语音中不弹首次引导：语音交办的任务，或通话进行中输入的任务都直接执行
+    shouldSkipGuide: ({ context } = {}) => Boolean(String(context?.voiceCallId || '').trim())
+      || context?.source === 'maid_realtime'
+      || (realtimeCallRuntime?.getState?.().status || 'idle') !== 'idle',
   });
   const maidSettingsStore = new MaidSettingsStore();
   markBootPhase('maid-stores');
@@ -4211,6 +4123,14 @@ const initApp = async () => {
     getSubAgents: () => agentRegistry.listPromptShapes(),
     logger,
   });
+  // 实时语音“语音执行”模式：交办时记下该通话的执行模型，女仆规划/ReAct/闲聊据此换用语音设置档的模型
+  const voiceTaskModels = createVoiceTaskModelRegistry();
+  const resolveMaidTaskRuntimeConfig = createVoiceAwareMaidRuntimeResolver({
+    resolveMaidRuntime: resolveMaidRuntimeConfig,
+    registry: voiceTaskModels,
+    createClient: config => new LLMClient(config),
+    captureRequestContext,
+  });
   const resolveMaidMemoryExtractionRuntime = createMaidMemoryExtractionRuntimeResolver({
     settingsStore: maidSettingsStore,
     configManager: chatConfigManager,
@@ -4236,7 +4156,7 @@ const initApp = async () => {
     logger,
   });
   const maidPlanner = createMaidModelBackedPlanner({
-    resolveRuntimeConfig: resolveMaidRuntimeConfig,
+    resolveRuntimeConfig: resolveMaidTaskRuntimeConfig,
     createClient: config => new LLMClient(config),
     isConfigReady: canInitClient,
     getConversationContext: getMaidConversationContext,
@@ -4248,7 +4168,7 @@ const initApp = async () => {
     logger,
   });
   const maidReActPlanner = createMaidModelBackedReActPlanner({
-    resolveRuntimeConfig: resolveMaidRuntimeConfig,
+    resolveRuntimeConfig: resolveMaidTaskRuntimeConfig,
     createClient: config => new LLMClient(config),
     isConfigReady: canInitClient,
     getConversationContext: getMaidConversationContext,
@@ -4259,14 +4179,14 @@ const initApp = async () => {
     logger,
   });
   const maidImportedCardClassifier = createMaidImportedCardClassifier({
-    resolveRuntimeConfig: resolveMaidRuntimeConfig,
+    resolveRuntimeConfig: resolveMaidTaskRuntimeConfig,
     createClient: config => new LLMClient(config),
     isConfigReady: canInitClient,
     onDebugSnapshot: recordMaidDebugSnapshot,
     logger,
   });
   const maidChatResponder = createMaidChatResponder({
-    resolveRuntimeConfig: resolveMaidRuntimeConfig,
+    resolveRuntimeConfig: resolveMaidTaskRuntimeConfig,
     createClient: config => new LLMClient(config),
     isConfigReady: canInitClient,
     getConversationContext: getMaidConversationContext,
@@ -4316,49 +4236,21 @@ const initApp = async () => {
   } catch (err) {
     logger.debug('stream usage compat hydrate skipped', err);
   }
-  const requestMaidToolConfirmation = async (request, { signal = null } = {}) => {
-    // 只读意图升级确认：不吃 allow-always 捷径、也不提供「始终允许」——
-    // 这是对单次意图误差的放行，不该沉淀成永久规则。
-    const escalated = request?.escalation === 'read_only_write';
-    const alwaysConfirm = request?.allowAlways === false;
-    if (!escalated && !alwaysConfirm && maidToolSafetyAllowStore.isAllowed(request)) {
-      return { decision: 'allow', remembered: true };
-    }
-    const danger = request?.danger !== false;
-    const action = await appChoice({
-      title: String(request?.title || '确认危险操作'),
-      message: String(request?.message || '这个动作可能会覆盖、删除或替换已有内容。'),
-      items: request?.details?.items,
-      defaultActionId: 'allow_once',
-      danger,
-      signal,
-      actions: [
-        {
-          id: 'deny',
-          label: String(request?.cancelText || '取消'),
-        },
-        {
-          id: 'allow_once',
-          label: alwaysConfirm
-            ? String(request?.confirmText || '确认执行')
-            : '允许一次',
-          primary: true,
-        },
-        ...(escalated || alwaysConfirm ? [] : [{
-          id: 'allow_always',
-          label: '始终允许',
-        }]),
-      ],
-    });
-    if (action === 'allow_always') {
-      const rule = maidToolSafetyAllowStore.allowAlways(request);
-      return { decision: 'allow', remembered: true, rule };
-    }
-    if (action === 'allow_once') {
-      return { decision: 'allow' };
-    }
-    return { decision: 'deny' };
-  };
+  // 工具确认：能在运行卡里显示时卡内确认（输入胶囊 / 执行流面板 / 语音托盘），否则沿用弹窗
+  const maidToolConfirmationRuntime = createMaidToolConfirmationRuntime({
+    allowStore: maidToolSafetyAllowStore,
+    choose: appChoice,
+    canShowInline: runId => maidCommandInputRuntime?.hasRunCard?.(runId) === true
+      || executionFlowRuntime?.hasRunCard?.(runId) === true
+      || maidVoiceRuntime?.canShowApproval?.(runId) === true,
+    onChange: () => {
+      maidCommandInputRuntime?.refreshApprovals?.();
+      executionFlowRuntime?.refreshApprovals?.();
+      maidVoiceRuntime?.refreshApprovals?.();
+    },
+  });
+  const requestMaidToolConfirmation = (request, options = {}) => maidToolConfirmationRuntime.request(request, options);
+  const resolveMaidInlineApproval = ({ id = '', action = 'deny' } = {}) => maidToolConfirmationRuntime.resolve(id, action);
   let applyRejectedFormatRepairAgentRun = async () => ({
     ok: false,
     reason: 'format_repair_runtime_unavailable',
@@ -5797,6 +5689,16 @@ const initApp = async () => {
     getCurrentSessionId: () => chatStore.getCurrent(),
   });
   const beginChatEnterRequest = (sessionId = '') => sessionEnterRequestTracker.beginRequest(sessionId);
+  // 进房流程随后会自己渲染历史；激活会话时同步派发的 worldinfo-changed 不再额外整页重建一次
+  let activatingEnterSession = false;
+  const setActiveSessionForEnter = (sid) => {
+    activatingEnterSession = true;
+    try {
+      window.appBridge.setActiveSession(sid);
+    } finally {
+      activatingEnterSession = false;
+    }
+  };
   const isChatEnterRequestStale = (request) => sessionEnterRequestTracker.isStale(request);
 
   const sessionEnterProgressiveHistoryRuntime = createSessionEnterProgressiveHistoryRuntime({
@@ -6252,6 +6154,10 @@ const initApp = async () => {
     }
   };
 
+  const messageDisplayDepthResolver = createMessageDisplayDepthResolver({
+    getSessionMessages: sid => chatStore.getMessages(sid),
+    getSessionRevision: sid => chatStore.getMessageStructureRevision?.(sid),
+  });
   const decorateMessagesForDisplay = (messages = [], { sessionId } = {}) => {
     const list = Array.isArray(messages) ? messages : [];
     const sid = String(sessionId || '').trim();
@@ -6261,11 +6167,8 @@ const initApp = async () => {
     const batchAvatarCache = new Map();
     const assistantAvatar = !isGroupSession ? getAssistantAvatarForSession(sid) : '';
     const userAvatar = avatars.user;
-    const convPos = new Map(); // index -> conversation order
-    list.forEach((m, i) => {
-      if (m && (m.role === 'user' || m.role === 'assistant')) convPos.set(i, convPos.size);
-    });
-    const total = convPos.size;
+    // 深度按整个会话计算（0 = 最新一条对话消息），分批加载的旧片段也能得到正确深度
+    const depths = messageDisplayDepthResolver.resolveDepths(sid, list);
     const resolveLocalAttachmentUrl = value => {
       const raw = String(value || '').trim();
       if (!raw) return '';
@@ -6304,8 +6207,7 @@ const initApp = async () => {
         avatar = assistantAvatar;
       }
       avatar = avatar || m.avatar || '';
-      const j = convPos.has(i) ? convPos.get(i) : null;
-      const depth = j === null ? undefined : total - 1 - j;
+      const depth = depths[i];
       const rawSource =
         typeof m.rawSource === 'string' ? m.rawSource : typeof m.raw_source === 'string' ? m.raw_source : '';
       const decorationSignature = buildMessageDecorationSignature(m, sid, { depth, avatar });
@@ -7672,27 +7574,6 @@ const initApp = async () => {
     const fallback = findStickerByKeyword(keyword);
     return clampStickerFps(fallback?.fps);
   };
-  const startStickerFrameAnimation = (img, frames, fps) => {
-    if (!img) return false;
-    const list = Array.isArray(frames) ? frames.filter(Boolean) : [];
-    if (list.length < 2) {
-      if (list.length) img.src = list[0];
-      return false;
-    }
-    let index = 0;
-    img.src = list[0];
-    const interval = Math.max(16, Math.round(1000 / Math.max(1, Number(fps) || 1)));
-    const timer = setInterval(() => {
-      if (!img.isConnected) {
-        clearInterval(timer);
-        return;
-      }
-      index = (index + 1) % list.length;
-      img.src = list[index];
-    }, interval);
-    return true;
-  };
-
   const applyStickerTabIconTransform = (img, meta) => {
     if (!img || !meta) return;
     const wrap = img.parentElement;
@@ -8699,7 +8580,7 @@ const initApp = async () => {
           });
         });
         if (Array.isArray(item?.frames) && item.frames.length > 1) {
-          startStickerFrameAnimation(img, item.frames, item.fps);
+          registerStickerAnimation(img, item.frames, item.fps);
         }
         content.appendChild(img);
       } else {
@@ -9052,7 +8933,7 @@ const initApp = async () => {
         const frames = resolveStickerFramesByKeyword(keyword, resolved?.item);
         if (frames.length > 1) {
           const fps = resolveStickerFpsByKeyword(keyword, resolved?.item);
-          startStickerFrameAnimation(img, frames, fps);
+          registerStickerAnimation(img, frames, fps);
         }
         item.appendChild(img);
       } else {
@@ -9871,6 +9752,18 @@ const initApp = async () => {
   const navBtns = document.querySelectorAll('.bottom-nav .nav-btn');
   const modeSwitch = document.getElementById('mode-switch');
   const modeSwitchBtn = modeSwitch ? modeSwitch.querySelector('button') : null;
+  // 窗口不在前台（失焦或最小化）时暂停模式按钮常驻旋转的光环，省去空闲时的持续合成（dev 实测约 4% GPU）。
+  // 焦点进入聊天卡片 iframe 也会让主窗口触发 blur，此时用户仍在看 APP，不算失焦。
+  const syncWindowInactiveState = () => {
+    const inactive = document.visibilityState === 'hidden'
+      || (!document.hasFocus() && document.activeElement?.tagName !== 'IFRAME');
+    if (inactive) document.body.dataset.windowInactive = 'on';
+    else delete document.body.dataset.windowInactive;
+  };
+  window.addEventListener('blur', () => setTimeout(syncWindowInactiveState, 0));
+  window.addEventListener('focus', syncWindowInactiveState);
+  document.addEventListener('visibilitychange', syncWindowInactiveState);
+  syncWindowInactiveState();
   let syncModeSwitchPosition = () => {};
   let scheduleModeSwitchSync = () => {};
   let modeSwitchPinned = false;
@@ -22529,6 +22422,7 @@ const initApp = async () => {
 	    return true;
 	  };
   let syncRejectedFormatRepairBanner = () => false;
+  let syncAgentSuggestionBanner = () => false;
 	  const enterChatRoom = async (sessionId, sessionName, originPage = activePage, options = {}) => {
     const sid = String(sessionId || '').trim();
     const enterGuard = canEnterPersonaScopedSession({
@@ -22609,7 +22503,7 @@ const initApp = async () => {
         switchSession: sid => chatStore.switchSession(sid),
         setStageSession: sid => stageManager?.setSession?.(sid),
         setTimelineSession: sid => stageTimeline?.setSession?.(sid),
-        setActiveSession: sid => window.appBridge.setActiveSession(sid),
+        setActiveSession: setActiveSessionForEnter,
         syncUserPersonaUI,
         getContact: sid => contactsStore.getContact(sid),
         renderSessionNameHtml,
@@ -22712,6 +22606,7 @@ const initApp = async () => {
 	    chatGeneratedImagePreview.revealPendingForSession(sessionId);
     if (!result?.stale && String(chatStore.getCurrent?.() || '').trim() === sid) {
       syncRejectedFormatRepairBanner(sid);
+      syncAgentSuggestionBanner(sid);
       syncProtocolRevealButtonState();
       // 实时通话按钮的可见性依赖当前会话；模式切换时的同步跑在旧会话仍为 current 的时刻，
       // 必须在真正进房后再同步一次，否则按钮会被上一次“不支持”判定永久隐藏。
@@ -22724,6 +22619,7 @@ const initApp = async () => {
 	  const exitChatRoom = (options) => {
 	    chatGeneratedImagePreview.suspendCurrent();
     syncRejectedFormatRepairBanner('');
+    syncAgentSuggestionBanner('');
     runSessionExitFlow({
       options,
       deactivateView: () => deactivateSessionEnterView({
@@ -24201,6 +24097,7 @@ const initApp = async () => {
       id: String(profile?.id || '').trim(),
       name: String(profile?.name || profile?.id || '').trim(),
       model: String(profile?.model || '').trim(),
+      provider: String(profile?.provider || '').trim(),
       label: [String(profile?.name || profile?.id || '').trim(), String(profile?.model || '').trim()].filter(Boolean).join(' · '),
     })).filter(profile => profile.id),
     listProfileModels: profileId => window.appBridge?.debugUiRegistry?.actions?.listProfileModels?.(profileId),
@@ -24213,6 +24110,9 @@ const initApp = async () => {
       message: `这项操作无法恢复。确定永久删除这条长期记忆吗？\n\n${String(memory?.content || '').trim()}`,
       danger: true,
     }),
+    clearHistoryContext: () => maidConversationStore.clearHistory(),
+    clearMemoryTable: () => maidConversationStore.clearMemoryRows(),
+    confirmMemoryAction: ({ title, message }) => appConfirm({ title, message, danger: true }),
     listRuns: options => agentRunStore.listRuns({ ...(options || {}), kind: 'maid_assistant' }),
     allowRulesStore: maidToolSafetyAllowStore,
     onResumeRun: (run = {}) => {
@@ -24244,12 +24144,13 @@ const initApp = async () => {
     }
     return attachments;
   };
-  const checkMaidVisionInput = async (attachments = []) => {
+  const checkMaidVisionInput = async (attachments = [], context = {}, runtimeConfig = null) => {
     const hasImages = Array.isArray(attachments) && attachments.some(item => item?.kind === 'image' && (item.url || item.llmUrl));
     if (!hasImages) return { ok: true, capability: null };
-    const runtime = await resolveMaidRuntimeConfig({
+    const runtime = runtimeConfig || await resolveMaidTaskRuntimeConfig({
       sessionId: chatStore.getCurrent(),
       uiMode,
+      ...context,
       taskType: 'maid_vision_check',
     });
     const config = runtime?.config || {};
@@ -24316,6 +24217,7 @@ const initApp = async () => {
     onOpenStateChange: ({ open, rootEl }) => {
       maidVoiceRuntime?.setInputOpen(open);
       executionFlowRuntime?.rearbitrateMaidTrace?.({ commandInputOpen: open });
+      maidToolConfirmationRuntime.ensureVisible();
       maidOnboardingRuntime?.handleCommandInputOpen?.({ open, anchorEl: rootEl });
       if (open) maidGuideEmit(window, 'maid-command-opened', {});
     },
@@ -24327,7 +24229,8 @@ const initApp = async () => {
     onSubmit: createMaidCommandSubmit({
       getVoiceRuntime: () => maidVoiceRuntime,
       getOnboardingRuntime: () => maidOnboardingRuntime,
-      matchMaidIntent, hasConfiguredMaidProfile, resolveMaidRuntimeConfig,
+      // hasConfiguredMaidProfile 在后面才赋值为真实实现，这里必须在调用时再读取
+      matchMaidIntent, hasConfiguredMaidProfile: () => hasConfiguredMaidProfile(), resolveMaidRuntimeConfig: resolveMaidTaskRuntimeConfig,
       logger, checkMaidVisionInput, maidSettingsStore, buildAppFeatureSearchContextText,
       getAppContext: () => ({ sessionId: chatStore.getCurrent(), uiMode, activePage, userSelection: maidSelectionMode.getItems() }),
       maidAssistantAgent,
@@ -24349,10 +24252,18 @@ const initApp = async () => {
     },
     onSettings: async () => {
       maidCommandInputRuntime?.close();
+      // 连线档列表按需加载：刚启动还没发过请求时要先载入，否则面板里的连线档与思考选项都是空的
+      await Promise.resolve(chatConfigManager.ensureStores?.()).catch(() => {});
       maidSettingsPanel.show({ tab: 'api' });
     },
     setTimeoutFn: typeof setTimeout === 'function' ? setTimeout : null,
     clearTimeoutFn: typeof clearTimeout === 'function' ? clearTimeout : null,
+    setIntervalFn: typeof setInterval === 'function' ? setInterval : null,
+    clearIntervalFn: typeof clearInterval === 'function' ? clearInterval : null,
+    matchMediaFn: typeof matchMedia === 'function' ? query => matchMedia(query) : null,
+    windowLike: window,
+    getApproval: runId => maidToolConfirmationRuntime.getInline(runId),
+    onApprovalDecision: resolveMaidInlineApproval,
   });
 
   const modeSwitchInteractionRuntime = createModeSwitchInteractionRuntime({
@@ -24405,6 +24316,11 @@ const initApp = async () => {
     // 女仆流首选画布 = 指令条白色结果流（结构化 trace 卡原位并入，避免双流）
     onMaidTrace: view => maidCommandInputRuntime?.applyTraceView?.(view) === true || maidVoiceRuntime?.consumeTrace(view) === true,
     onCancelMaidRun: ({ runId = '' } = {}) => maidCommandInputRuntime?.cancelActive?.({ runId }),
+    getApproval: runId => maidToolConfirmationRuntime.getInline(runId),
+    onApprovalDecision: resolveMaidInlineApproval,
+    onVisibilityChange: () => maidToolConfirmationRuntime.ensureVisible(),
+    setIntervalFn: typeof setInterval === 'function' ? setInterval : null,
+    clearIntervalFn: typeof clearInterval === 'function' ? clearInterval : null,
   });
   executionFlowRuntime.attachCreativeLane?.(creativeExecutionLaneRuntime);
   executionFlowRuntime.bind();
@@ -24464,6 +24380,7 @@ const initApp = async () => {
     onFirstRunTaskStart: () => maidCommandInputRuntime?.close?.(),
     onOpenTaskList: () => {
       maidCommandInputRuntime?.close?.();
+      void Promise.resolve(chatConfigManager.ensureStores?.()).catch(() => {});
       maidSettingsPanel.show({ tab: 'tasks' });
     },
     onFlowEnd: () => {
@@ -27033,6 +26950,33 @@ const initApp = async () => {
       variableActivity: getVariableWorkflowActivity(sid, { place }),
     });
   };
+  // 格式检查结果反馈：消息内状态只作显示（与格式修复候选部件同一 id，候选到达时直接替换）
+  const showFormatCheckStatus = (sessionId = '', messageId = '', state = '', reason = '') => {
+    const sid = String(sessionId || '').trim();
+    const mid = String(messageId || '').trim();
+    if (!sid || !mid || !isSessionActive(sid)) return;
+    const stored = chatStore.findMessage(mid, sid);
+    if (!stored) return;
+    const part = state ? buildFormatCheckStatusPart({ messageId: mid, sessionId: sid, state, reason }) : null;
+    const decorated = decorateMessagesForDisplay([withFormatCheckStatusPart(stored, part, mid)], { sessionId: sid })?.[0];
+    if (!decorated) return;
+    // 提示加在最新回复下方时，原本停在底部的列表跟着露出它，不被输入框挡住
+    const follow = ui.isNearBottom?.(160) === true;
+    ui.updateMessage(mid, decorated);
+    if (follow) ui.scrollToBottom?.();
+  };
+  const concludeFormatCheck = ({ sessionId = '', messageId = '', result = null, automatic = false } = {}) => {
+    const { outcome, reason } = summarizeFormatCheckResult(result);
+    if (outcome === 'no_change') {
+      // 手动检查每次都给结论；自动检查通过时不打扰，只留一个淡标记（活动记录由执行器写入）
+      showFormatCheckStatus(sessionId, messageId, automatic ? 'checked' : 'no_change', reason);
+      if (!automatic && isSessionActive(sessionId)) window.toastr?.success?.(t('已检查：未发现需要修复的格式问题'));
+      return;
+    }
+    if (outcome === 'candidate' && !automatic && isSessionActive(sessionId)) {
+      window.toastr?.info?.(t('发现可修复的格式问题，可在消息下方查看修改'));
+    }
+  };
   const runHopscotchFormatReview = createFormatReviewExecutor({
     findMessage: (mid, sid) => chatStore.findMessage(mid, sid), resolveTarget: resolveChatFormatRepairTarget,
     getScope: sid => `${activePersonaScopeKey}:${chatStore.getCurrentArchiveId(sid) || ''}`,
@@ -27042,8 +26986,16 @@ const initApp = async () => {
     buildOptions: (sid, config) => buildManualChatFormatGuardianOptions(sid, config), createRevision: createFormatPatchRevisionToken,
     runPreview: runChatFormatGuardianPreview,
     onPreview: payload => handleChatFormatGuardianPreview(payload), onRun: payload => handleChatFormatGuardianAgentRun(payload),
-    onQueued: payload => handleChatFormatGuardianModelReviewQueued(payload),
-    onCompleted: sid => chatFormatRepairActiveSessions.delete(sid), logger,
+    onQueued: (payload) => {
+      handleChatFormatGuardianModelReviewQueued(payload);
+      // 手动检查：结论出来前在消息下方显示“正在检查格式…”
+      if (!payload?.quiet) showFormatCheckStatus(payload?.sessionId, payload?.message?.id, 'checking');
+    },
+    onCompleted: (sid, payload, { automatic = false, messageId = '', current = true } = {}) => {
+      chatFormatRepairActiveSessions.delete(sid);
+      if (current) concludeFormatCheck({ sessionId: sid, messageId, result: payload?.result, automatic });
+    },
+    logger,
   });
   const creativeFormatReviewRuntime = createCreativeFormatReviewRuntime({
     getSettings: sid => agentFeatureSettingsStore.getSettings(sid).features[AGENT_FEATURE_IDS.replyCheck],
@@ -27070,7 +27022,9 @@ const initApp = async () => {
       return ui.actionHandler('edit-assistant-raw', message, { text, source: 'agent_text_edit', sessionId: job.sessionId,
         sourceSnapshot, canCommit, sourceKind: isRpSessionId(job.sessionId) ? FORMAT_REPAIR_SOURCE_KINDS.creativeRawOriginal : 'bubble_raw' });
     },
-    notifyReply: ({ title, sessionId, text }) => {
+    notifyReply: ({ title, sessionId, text, invocation }) => {
+      // 当前会话的自动结果由输入框上方的建议横幅提示，不再重复弹出
+      if (invocation === 'auto' && sessionId === chatStore.getCurrent()) return;
       if (sessionId === chatStore.getCurrent()) window.toastr?.info?.(t(text || '修改建议待查看'), title, { onclick: () => agentCenterPanel.show({ tab: 'agents' }) });
     },
     getEvidence: sid => [
@@ -27090,6 +27044,8 @@ const initApp = async () => {
     openCenter: () => agentCenterPanel.show({ tab: 'agents' }),
   });
   const { textEditRuntime, actions: agentConfigurationActions } = agentToolsRuntime;
+  syncAgentSuggestionBanner = sid => agentToolsRuntime.suggestionBanner?.sync?.(sid) || false;
+  syncAgentSuggestionBanner(chatStore.getCurrent());
   patchDebugUiRegistry(registry => { Object.assign(registry.actions, agentConfigurationActions); registry.stores.agentConfigStore = agentConfigStore; registry.stores.textEditRuntime = textEditRuntime; registry.stores.agentToolsRuntime = agentToolsRuntime; });
   const bubbleSelectionEdits = createBubbleSelectionEditRuntime({
     getContext: getAgentExecutionContext,
@@ -28247,7 +28203,7 @@ const initApp = async () => {
       rejectedFormatRepairBannerRuntime?.markChecking?.({ sessionId: sid });
     }
     if (!isSessionActive(sid) || quiet) return;
-    window.toastr?.info?.('正在修复格式中');
+    window.toastr?.info?.(t('正在检查格式…'));
   };
 
   const buildRejectedProtocolRepairTarget = (sessionId = '', envelope = null) => {
@@ -28675,7 +28631,11 @@ const initApp = async () => {
     }
     if (options.localOnly !== true) {
       const result = await runHopscotchFormatReview({ sessionId: sid, messageId: message.id });
-      if (result.status !== 'succeeded') window.toastr?.warning?.(t(result.error || result.reason || '格式复核失败'));
+      if (result.status !== 'succeeded') {
+        window.toastr?.warning?.(result.error ? t(result.error) : describeFormatCheckReason(result.reason));
+        // 失败时由失败部件替换“检查中”；取消或跳过时没有结果部件，需要撤下提示
+        if (result.status !== 'failed') showFormatCheckStatus(sid, message.id, '');
+      }
       return result.status === 'succeeded';
     }
     const repairMessage = {
@@ -31765,6 +31725,10 @@ const initApp = async () => {
     cancelChatVoice: () => chatVoiceRuntime.cancel(), resolveVoiceConfig: resolveVoiceRuntimeConfig,
     openVoiceConfig: openVoiceSettings,
     onDebugSnapshot: recordMaidDebugSnapshot, onContextInjected: recordMaidContextInjection, toast: window.toastr,
+    getApproval: runId => maidToolConfirmationRuntime.getInline(runId),
+    onApprovalDecision: resolveMaidInlineApproval,
+    confirmApproval: runIds => maidToolConfirmationRuntime.confirmByVoice(runIds),
+    cancelPendingAction: options => maidAssistantAgent.cancelPendingAction(options),
   });
   const commitChatLiveTranscript = createLiveTranscriptCommitter({
     isTargetCurrent: isRealtimeCallTargetCurrent,
@@ -31804,7 +31768,14 @@ const initApp = async () => {
     },
     beforeStart: target => maidVoiceRuntime.beforeRealtimeStart(target),
     getMaidSurface: () => maidVoiceRuntime.getSurface(),
-    handleMaidTaskRequest: options => maidVoiceRuntime.handleTaskRequest(options),
+    handleMaidTaskRequest: (options) => {
+      // 交办时决定执行模型：选“语音执行”且语音设置档能提供文本模型时，本通话的任务都用它
+      const callId = options?.target?.maidCallId;
+      voiceTaskModels.remember(callId, maidSettingsStore.getVoiceTaskExecutor() === 'voice'
+        ? resolveVoiceTaskModel(realtimeCallRuntime?.getConnection?.() || {})
+        : null);
+      return maidVoiceRuntime.handleTaskRequest(options);
+    },
     onStateChange: state => maidVoiceRuntime.onCallState(state),
     onExecuteTranscript: text => maidVoiceRuntime.executeTranscript(text),
     buildSemanticSnapshot: options => options.target?.uiMode === 'maid' ? maidVoiceRuntime.buildSemanticSnapshot(options) : buildRealtimeSemanticSnapshot(options),
@@ -31817,6 +31788,7 @@ const initApp = async () => {
     toast: window.toastr,
   });
   realtimeCallRuntime = realtimeCallAppRuntime.runtime;
+  patchDebugUiRegistry(registry => { registry.stores.realtimeCallRuntime = realtimeCallRuntime; });
   realtimeCallPanel = realtimeCallAppRuntime.panel;
   syncRealtimeCallButtonAvailability = realtimeCallAppRuntime.syncButtonAvailability;
   syncRealtimeCallButtonAvailability();
@@ -33018,7 +32990,7 @@ const initApp = async () => {
       return;
     }
   });
-  const rerenderCurrentSession = async () => rerenderCurrentSessionHistory({
+  const rerenderCurrentSession = createCoalescedRerender(() => rerenderCurrentSessionHistory({
     getCurrentSessionId: () => chatStore.getCurrent(),
     getHistoryRevision: sid => chatStore.getHistoryRevision?.(sid) || '',
     ensureRecentMessagesLoaded: sid => ensureRecentMessagesAndWorlds(sid),
@@ -33029,7 +33001,7 @@ const initApp = async () => {
     setRenderState: (sid, state) => chatRenderState.set(sid, state),
     refreshChatAndContacts,
     pageSize: 90,
-  });
+  }));
 
   window.addEventListener('app-settings-changed', (event) => {
     if (String(event?.detail?.key || '').trim() !== 'allowRichIframeScripts') return;
@@ -33049,7 +33021,7 @@ const initApp = async () => {
   window.addEventListener('worldinfo-changed', () => {
     updateWorldIndicator();
     applyMvuSchemaDefaults(chatStore.getCurrent(), { reason: 'worldbook' });
-    rerenderCurrentSession();
+    if (!activatingEnterSession) rerenderCurrentSession();
   });
   window.addEventListener('memory-table-push', ev => {
     applyMemoryTablePushEvent({
@@ -33097,7 +33069,7 @@ const initApp = async () => {
         getContact: sid => contactsStore.getContact(sid),
         activateShellStateFn: ({ sessionId }) => activateSessionShellState({
           sessionId,
-          setActiveSession: sid => window.appBridge.setActiveSession(sid),
+          setActiveSession: setActiveSessionForEnter,
           syncUserPersonaUI,
           getContact: sid => contactsStore.getContact(sid),
           renderSessionNameHtml,

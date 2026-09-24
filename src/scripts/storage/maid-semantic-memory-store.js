@@ -609,8 +609,10 @@ export class MaidSemanticMemoryStore {
     return clone(memory);
   }
 
-  async upsertMemory(input = {}, { candidateKeys = null } = {}) {
+  async upsertMemory(input = {}, { candidateKeys = null, shouldWrite = null } = {}) {
     return this.queueWrite(async () => {
+      // 在串行队列真正执行时复验；提取任务可能在等待上一笔持久化时被用户清除。
+      if (typeof shouldWrite === 'function' && !shouldWrite()) return { ok: false, reason: 'write_invalidated', memory: null };
       this.ensureLoaded();
       const requestedScope = trim(input?.scopeId, this.scopeId);
       if (requestedScope !== this.scopeId) {
@@ -774,6 +776,35 @@ export class MaidSemanticMemoryStore {
       await this.write();
       this.emitChanged({ action: 'deleted', id: target });
       return true;
+    });
+  }
+
+  // 用户在设置里手动改写的内容视为明确表述：之后模型抽取的较弱推断不会覆盖它
+  async updateMemoryContent(id = '', content = '') {
+    return this.queueWrite(async () => {
+      this.ensureLoaded();
+      const nextContent = truncate(content, 8000);
+      if (!nextContent) return null;
+      const memory = this.state.memories.find(item => item.id === trim(id));
+      if (!memory) return null;
+      memory.content = nextContent;
+      memory.confidence = 'explicit';
+      memory.updatedAt = safeNow(this.now);
+      await this.write();
+      this.emitChanged({ action: 'edited', id: memory.id });
+      return clone(memory);
+    });
+  }
+
+  async clearMemories() {
+    return this.queueWrite(async () => {
+      this.ensureLoaded();
+      const removed = this.state.memories.length;
+      if (!removed) return 0;
+      this.state.memories = [];
+      await this.write();
+      this.emitChanged({ action: 'cleared', count: removed });
+      return removed;
     });
   }
 

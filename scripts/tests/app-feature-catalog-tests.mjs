@@ -23,6 +23,7 @@ import { createMaidMemoryTools } from '../../src/scripts/agent/tools/maid-memory
 import { createGuideStartFlowTools } from '../../src/scripts/agent/tools/guide-start-flow-tools.js';
 import { createChatFormatRepairTools } from '../../src/scripts/agent/tools/chat-format-tools.js';
 import { createMomentsAgentTools } from '../../src/scripts/agent/tools/moments-tools.js';
+import { createPresetRegexScriptAgentTools } from '../../src/scripts/agent/tools/preset-regex-script-tools.js';
 
 const getTool = (tools, name) => tools.find(tool => tool.name === name);
 
@@ -335,6 +336,12 @@ const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
         users.set(item.id, item);
         return item;
       },
+      update: async (id, patch) => {
+        if (!users.has(id)) return null;
+        const next = { ...users.get(id), ...patch };
+        users.set(id, next);
+        return next;
+      },
       setActive: async id => users.has(id),
     },
     contactsStore: {
@@ -574,7 +581,47 @@ const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
     createGroupId: () => 'group:catalog',
     now: () => 1000,
   });
-  const tools = [...navTools, ...sessionTools, ...groupTools, ...contentTools, ...mediaTools, ...captureTools, ...webTools, ...todoTools, ...maidMemoryTools, ...guideTools, ...formatTools, ...momentsTools];
+  // 预设 / 正则 / 脚本：最小内存夹具，覆盖目录里每个功能的直接动作
+  const catalogPresets = {
+    openai: {
+      builtin: { name: '内置', prompts: [], prompt_order: [] },
+      main: { name: '主', prompts: [{ identifier: 'main', name: '主提示' }], prompt_order: [{ character_id: 100001, order: [{ identifier: 'main', enabled: true }] }] },
+      alt: { name: '备用', prompts: [], prompt_order: [] },
+    },
+  };
+  const catalogPresetBindings = {};
+  const catalogRegex = { global: { enabled: true, rules: [{ id: 'g1', scriptName: '规则', findRegex: 'a', replaceString: '' }] }, sets: {}, session: {} };
+  const catalogScripts = [{ id: 's1', name: '脚本', enabled: false, compatibility: { blocked: false } }];
+  const presetRegexScriptTools = createPresetRegexScriptAgentTools({
+    presetStore: {
+      getState: () => ({ builtinActive: { openai: 'builtin' } }),
+      getEnabled: () => true,
+      list: type => Object.entries(catalogPresets[type] || {}).map(([id, data]) => ({ id, ...JSON.parse(JSON.stringify(data)) })),
+      getActiveId: () => 'main',
+      getSessionBindingId: (type, sid) => catalogPresetBindings[`${type}:${sid}`] || null,
+      getResolvedActiveId: (type, ctx) => ({ presetId: catalogPresetBindings[`${type}:${ctx.sessionId}`] || 'main', source: 'session', mode: 'chat' }),
+      setSessionBinding: async (type, sid, id) => { catalogPresetBindings[`${type}:${sid}`] = id; },
+      setActive: async () => {},
+      upsert: async (type, { id, name, data }) => { catalogPresets[type][id] = { ...data, name }; },
+      remove: async (type, id) => { delete catalogPresets[type][id]; },
+    },
+    regexStore: {
+      getGlobal: () => JSON.parse(JSON.stringify(catalogRegex.global)),
+      setGlobal: async next => { catalogRegex.global = { enabled: true, rules: next.rules.map((rule, index) => ({ id: rule.id || `n${index}`, ...rule })) }; },
+      listLocalSets: () => [],
+      getLocalSet: () => null,
+      getSession: () => ({ enabled: true, rules: [] }),
+    },
+    scriptStore: {
+      listScopes: () => ({ character: [], preset: [] }),
+      getScripts: scope => (scope === 'global' ? JSON.parse(JSON.stringify(catalogScripts)) : []),
+      getActiveScripts: () => [],
+      toggleScript: async (_scope, _id, scriptId, enabled) => { catalogScripts.find(item => item.id === scriptId).enabled = enabled; return true; },
+      deleteScript: async (_scope, _id, scriptId) => { catalogScripts.splice(catalogScripts.findIndex(item => item.id === scriptId), 1); return true; },
+    },
+    getCurrentSessionId: () => current,
+  });
+  const tools = [...navTools, ...sessionTools, ...groupTools, ...contentTools, ...mediaTools, ...captureTools, ...webTools, ...todoTools, ...maidMemoryTools, ...guideTools, ...formatTools, ...momentsTools, ...presetRegexScriptTools];
   const maidAttachments = [{ id: 'catalog-image', kind: 'image', url: 'data:image/png;base64,AAAA', name: 'catalog.png' }];
 
   for (const feature of listAppFeatures()) {
@@ -704,6 +751,17 @@ const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
       const result = await getTool(tools, 'user.switch').execute({ target: 'CatalogUser' });
       assert.equal(result.ok, true);
       assert.equal(result.switched, true);
+      return;
+    }
+    if (feature.id === 'profile.update') {
+      const tool = getTool(tools, 'profile.update');
+      const args = { kind: 'user', target: 'CatalogUser', name: 'CatalogUserRenamed' };
+      const preflight = await tool.safety.preflight(args, {});
+      assert.equal(preflight.kind, 'profile.update');
+      const result = await tool.execute(args, { toolSafety: { decision: 'allow', request: { kind: 'profile.update' } } });
+      assert.equal(result.ok, true, JSON.stringify(result).slice(0, 200));
+      assert.equal(result.target.name, 'CatalogUserRenamed');
+      await tool.execute({ kind: 'user', target: 'CatalogUserRenamed', name: 'CatalogUser' }, { toolSafety: { decision: 'allow', request: { kind: 'profile.update' } } });
       return;
     }
     if (feature.id === 'user.avatar.set') {
@@ -968,6 +1026,28 @@ const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
       const result = await getTool(tools, 'app.read_recent_errors').execute({});
       assert.equal(result.ok, true);
       assert.ok(Array.isArray(result.errors));
+      return;
+    }
+    const presetRegexScriptArgs = {
+      'preset.list': {},
+      'preset.switch': { preset: '备用' },
+      'preset.prompt_entries.toggle': { preset: '主', entries: ['main'], enabled: false },
+      'preset.delete_many': { type: 'openai', presets: ['备用'] },
+      'regex.list': {},
+      'regex.toggle': { targets: ['g1'], enabled: false },
+      'regex.upsert_rules': { rules: [{ scriptName: '新规则', findRegex: 'b', replaceString: 'c' }] },
+      'regex.delete_many': { targets: ['g1'] },
+      'script.list': {},
+      'script.toggle_many': { scripts: ['s1'], enabled: true },
+      'script.delete_many': { scripts: ['s1'] },
+    };
+    if (presetRegexScriptArgs[feature.id]) {
+      const tool = getTool(tools, feature.directAction);
+      const args = presetRegexScriptArgs[feature.id];
+      const preflight = await tool.safety?.preflight?.(args, {});
+      const kind = preflight?.kind || '';
+      const result = await tool.execute(args, kind ? { toolSafety: { decision: 'allow', request: { kind } } } : {});
+      assert.equal(result.ok, true, `${feature.id} direct action should succeed: ${JSON.stringify(result).slice(0, 200)}`);
       return;
     }
     if (feature.id === 'app.capabilities.search') {

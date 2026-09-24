@@ -417,29 +417,180 @@ body {
 
 .typing {
     display: inline-flex;
-    gap: 6px;
+    gap: 5px;
     align-items: center;
 }
 
+/* 输入中：呼吸波。三点依次起落，到顶时轻微光晕；只动 transform / opacity，走合成线程，
+   不会让消息列表逐帧重排重绘。 */
 .typing-dot {
-    width: 7px;
-    height: 7px;
+    position: relative;
+    width: 6px;
+    height: 6px;
     border-radius: 50%;
     background: var(--accent);
-    animation: typing 1.4s infinite ease-in-out;
+    animation: typingWave 1.25s cubic-bezier(0.45, 0, 0.25, 1) infinite;
+}
+
+.typing-dot::after {
+    content: '';
+    position: absolute;
+    inset: -3px;
+    border-radius: 50%;
+    background: radial-gradient(circle, var(--accent) 0%, transparent 70%);
+    opacity: 0;
+    animation: typingHalo 1.25s cubic-bezier(0.45, 0, 0.25, 1) infinite;
+    animation-delay: inherit;
+    pointer-events: none;
 }
 
 .typing-dot:nth-child(2) {
-    animation-delay: 0.15s;
+    animation-delay: 0.14s;
 }
 
 .typing-dot:nth-child(3) {
-    animation-delay: 0.3s;
+    animation-delay: 0.28s;
 }
 
-@keyframes typing {
-    0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
-    30% { transform: translateY(-4px); opacity: 1; }
+@keyframes typingWave {
+    0%, 100% { transform: translateY(0) scale(0.72); opacity: 0.35; }
+    35% { transform: translateY(-3.5px) scale(1); opacity: 1; }
+    60% { transform: translateY(0) scale(0.86); opacity: 0.6; }
+}
+
+@keyframes typingHalo {
+    0%, 100% { opacity: 0; transform: scale(0.6); }
+    35% { opacity: 0.35; transform: scale(1.25); }
+    60% { opacity: 0; transform: scale(1.1); }
+}
+
+/* 消息下方的格式检查状态：检查中（转动的弧）、无需修改（结论 + 模型理由 + 出口）、
+   自动检查通过（只留一个很淡的“已检查格式”标记，悬停看理由）。 */
+.chat-format-check-status {
+    display: flex;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 6px 8px;
+    width: min(100%, 520px);
+    box-sizing: border-box;
+    padding: 7px 10px;
+    border: 1px solid color-mix(in srgb, var(--app-accent-primary) 22%, transparent);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--app-surface-card) 92%, var(--app-accent-primary) 8%);
+    color: var(--app-text-primary);
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.chat-format-check-status-icon {
+    position: relative;
+    flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
+    margin-top: 2px;
+    border-radius: 50%;
+}
+
+.chat-format-check-status[data-state='checking'] .chat-format-check-status-icon {
+    border: 2px solid color-mix(in srgb, var(--app-accent-primary) 25%, transparent);
+    border-top-color: var(--app-accent-primary);
+    box-sizing: border-box;
+    animation: formatCheckSpin 0.9s linear infinite;
+}
+
+.chat-format-check-status[data-state='no_change'] .chat-format-check-status-icon,
+.chat-format-check-status[data-state='checked'] .chat-format-check-status-icon {
+    background: color-mix(in srgb, var(--app-success-text, var(--app-accent-primary)) 16%, transparent);
+}
+
+.chat-format-check-status[data-state='no_change'] .chat-format-check-status-icon::after,
+.chat-format-check-status[data-state='checked'] .chat-format-check-status-icon::after {
+    content: '';
+    position: absolute;
+    left: 4.5px;
+    top: 2px;
+    width: 3.5px;
+    height: 7px;
+    border: solid var(--app-success-text, var(--app-accent-primary));
+    border-width: 0 1.6px 1.6px 0;
+    transform: rotate(45deg);
+}
+
+.chat-format-check-status-copy {
+    flex: 1 1 200px;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.chat-format-check-status-copy strong {
+    font-weight: 650;
+}
+
+.chat-format-check-status-copy span {
+    color: var(--app-text-secondary);
+    overflow-wrap: anywhere;
+}
+
+.chat-format-check-status-actions {
+    display: flex;
+    gap: 6px;
+    margin-left: auto;
+}
+
+.chat-format-check-status-actions button {
+    min-height: 26px;
+    padding: 0 10px;
+    border: 1px solid color-mix(in srgb, var(--app-accent-primary) 35%, transparent);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--app-accent-primary);
+    font: inherit;
+    font-size: 11.5px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.chat-format-check-status-actions button:hover,
+.chat-format-check-status-actions button:focus-visible {
+    background: color-mix(in srgb, var(--app-accent-primary) 10%, transparent);
+}
+
+.chat-format-check-status[data-state='checked'] {
+    width: auto;
+    padding: 0 2px;
+    border: 0;
+    background: transparent;
+    color: var(--app-text-muted);
+    font-size: 11px;
+    opacity: 0.75;
+}
+
+.chat-format-check-status[data-state='checked'] .chat-format-check-status-icon {
+    width: 12px;
+    height: 12px;
+    margin-top: 1px;
+}
+
+.chat-format-check-status[data-state='checked'] .chat-format-check-status-icon::after {
+    left: 3.8px;
+    top: 1.6px;
+    height: 6px;
+}
+
+.chat-format-check-status[data-state='checked'] .chat-format-check-status-copy strong {
+    font-weight: 500;
+}
+
+@keyframes formatCheckSpin {
+    to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .chat-format-check-status[data-state='checking'] .chat-format-check-status-icon {
+        animation-duration: 2.4s;
+    }
 }
 
 .message-toolbar {

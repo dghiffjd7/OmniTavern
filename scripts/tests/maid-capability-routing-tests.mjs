@@ -286,6 +286,33 @@ const createCatalogRoutingHarness = () => {
 }
 
 {
+  // 提示词只列名称索引：模型读过某功能的说明后，下一步它必须进入候选，才能真正调用
+  const { catalogFeatures, catalogRegistry } = createCatalogRoutingHarness();
+  const runtime = createMaidCapabilityRoutingRuntime({
+    features: catalogFeatures,
+    toolRegistry: catalogRegistry,
+    permissionEvaluator: { evaluateTool: () => ({ decision: 'allow', checks: [] }) },
+    logger: { debug() {} },
+  });
+  const input = '帮我看看正则规则集';
+  const request = runtime.beginRequest({ input });
+  const before = runtime.prepareDecision({ requestId: request.id, input, phase: 'react', steps: [], configOverride: { mode: 'bounded' } });
+  assert.equal(before.candidateIds.has('worldbook.open'), false);
+  const after = runtime.prepareDecision({
+    requestId: request.id, input, phase: 'react', configOverride: { mode: 'bounded' },
+    steps: [{ toolName: 'app.read_feature_doc', status: 'succeeded', args: { featureId: 'worldbook.open' } }],
+  });
+  assert.equal(after.candidateIds.has('worldbook.open'), true, 'looked-up feature becomes a candidate');
+  const failedLookup = runtime.prepareDecision({
+    requestId: request.id, input, phase: 'react', configOverride: { mode: 'bounded' },
+    steps: [{ toolName: 'app.read_feature_doc', status: 'failed', args: { featureId: 'worldbook.open' } }],
+  });
+  assert.equal(failedLookup.candidateIds.has('worldbook.open'), false);
+  runtime.finishRequest(request.id, { ok: true });
+  console.log('ok - a feature doc the maid just read becomes a pinned candidate for the next step');
+}
+
+{
   const { catalogFeatures, catalogRegistry } = createCatalogRoutingHarness();
   const runtime = createMaidCapabilityRoutingRuntime({
     features: catalogFeatures,
@@ -1255,3 +1282,47 @@ const createCatalogRoutingHarness = () => {
 }
 
 console.log('maid-capability-routing-tests passed');
+
+{
+  // 口语化的发消息说法都要检索到 chat.send_message；改名走 profile.update 而不是新建用户，其他资源改名交给对应功能
+  const retriever = createMaidCapabilityRetriever();
+  const features = listAppFeatures();
+  const topOf = query => retriever.retrieve(query, { features, limit: 6 })[0]?.id;
+  for (const query of ['帮我给艾琳发一条消息说晚上好', '在艾琳的聊天室发个晚安', '跟艾琳说一声我今晚晚点回来', '帮我传讯息给艾琳', '转告艾琳：明天见', '向聊天室发送讯息「晚上好」']) {
+    assert.equal(topOf(query), 'chat.send_message', query);
+  }
+  assert.notEqual(topOf('跟你说一声我明天不在'), 'chat.send_message', 'talking to the maid is not a send request');
+  assert.equal(topOf('帮我发条动态'), 'moments.publish');
+  for (const query of ['把我的用户名改成小明', '帮我改一下用户名称', '把角色卡「艾琳」改名叫「艾琳娜」', '把群名改成周末小组']) {
+    assert.equal(topOf(query), 'profile.update', query);
+  }
+  assert.notEqual(topOf('修改预设名称'), 'profile.update');
+  assert.notEqual(topOf('给正则规则集改名'), 'profile.update');
+  assert.equal(topOf('新建一个用户叫小明'), 'user.create');
+  console.log('ok - colloquial send-message and rename requests route to the right features');
+}
+
+{
+  // 对待确认删除清单的修改回复（“确认，但保留乙，只删甲”）：原清单的删除功能不被高风险检查挡掉，并固定在候选里
+  const { catalogFeatures, catalogRegistry } = createCatalogRoutingHarness();
+  const runtime = createMaidCapabilityRoutingRuntime({
+    features: catalogFeatures,
+    toolRegistry: catalogRegistry,
+    permissionEvaluator: { evaluateTool: () => ({ decision: 'allow', checks: [] }) },
+    logger: { debug() {} },
+  });
+  const input = '确认，但保留「批测乙」，只删甲。';
+  const request = runtime.beginRequest({ input });
+  const plain = runtime.prepareDecision({ requestId: request.id, input, phase: 'planner', configOverride: { mode: 'bounded' } });
+  assert.equal(plain.candidateIds.has('regex.delete_many'), false, 'without a pending list the gate still applies');
+  assert.equal(plain.excluded.some(item => item.id === 'regex.delete_many' && item.reason === 'risk_intent_not_explicit'), true);
+  const revision = runtime.prepareDecision({
+    requestId: request.id, input, phase: 'planner', configOverride: { mode: 'bounded' },
+    context: { pendingActionRevision: { featureId: 'regex.delete_many', toolName: 'regex.delete_many' } },
+  });
+  assert.equal(revision.candidateIds.has('regex.delete_many'), true);
+  assert.equal(revision.candidateRefs.find(ref => ref.id === 'regex.delete_many').reasonCodes.includes('pending_action_revision'), true);
+  assert.equal(revision.candidateIds.has('script.delete_many'), false, 'only the pending list feature is released');
+  runtime.finishRequest(request.id, { ok: true });
+  console.log('ok - a reply revising a pending delete list keeps that delete feature available');
+}

@@ -61,6 +61,15 @@ const buildTemplateInputFromRecord = (record, overrides = {}) => {
   };
 };
 
+// 按键排序的序列化：数据库回读的对象键顺序可能与代码定义不同
+const stableStringify = (value) => {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value ?? null);
+};
+
 const buildTemplateDefinitionFromRecord = (record) => {
   const schema = record?.schema && typeof record.schema === 'object' ? record.schema : {};
   return {
@@ -271,7 +280,12 @@ export class MemoryTemplateStore {
           const versionUpgrade = templateVersion && (!existingVersion || isNewerVersion(templateVersion, existingVersion));
           const shouldOverwrite = Boolean(existing.is_builtin) || (nameMatches && authorMatches && versionUpgrade);
           if (shouldOverwrite) {
-            await this.saveTemplateDefinitionRaw(template, { isDefault: existing.is_default, isBuiltin: true });
+            // 已与内置定义完全一致就不再重写：Agent Center 等入口会频繁调用本方法
+            const overrides = { isDefault: existing.is_default, isBuiltin: true };
+            const next = canonicalizeOfficialMemoryTemplateRecord(buildTemplateInput(template, overrides));
+            const stored = canonicalizeOfficialMemoryTemplateRecord(buildTemplateInputFromRecord(existing, overrides));
+            if (stableStringify(next) === stableStringify(stored)) return false;
+            await this.saveTemplateDefinitionRaw(template, overrides);
             return true;
           }
           return false;

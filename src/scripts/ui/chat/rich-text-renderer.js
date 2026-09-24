@@ -3183,6 +3183,16 @@ export const buildIframeBridgeScript = () => `
       }, '*');
     } catch {}
   };
+  // fitToWidth 必须先清空再量真实宽度，会产生 body 样式变更；记下它留下的样式，
+  // 让 MutationObserver 忽略这类“自己写的、最终值未变”的记录，避免宽卡片每帧自触发布局
+  let lastFitBodyStyle = null;
+  const isOwnFitMutation = records => {
+    const body = document.body;
+    if (!body || lastFitBodyStyle === null) return false;
+    return records.length > 0
+      && records.every(record => record.type === 'attributes' && record.target === body && record.attributeName === 'style')
+      && body.getAttribute('style') === lastFitBodyStyle;
+  };
   const fitToWidth = () => {
     try {
       const docEl = document.documentElement;
@@ -3202,7 +3212,9 @@ export const buildIframeBridgeScript = () => `
       body.style.transform = 'scale(' + scale + ')';
       body.style.width = (100 / scale) + '%';
       docEl.style.overflowX = 'hidden';
-    } catch {}
+    } catch {} finally {
+      lastFitBodyStyle = document.body ? document.body.getAttribute('style') : null;
+    }
   };
   const requestLayout = (source = 'bridge', force = false) => {
     pendingSource = normalizeSource(source);
@@ -3443,8 +3455,9 @@ export const buildIframeBridgeScript = () => `
       }, 500);
     }
     try {
-      const mo = new MutationObserver(() => {
+      const mo = new MutationObserver((records) => {
         if (lastSentLock && lastSentMode === 'viewport') return;
+        if (isOwnFitMutation(records)) return;
         requestLayout('observer');
       });
       if (document.body) mo.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
@@ -5740,6 +5753,15 @@ export const buildIframeSrcDoc = (
     } catch {}
   };
 
+  // 同上：忽略 fitToWidth 自己造成、最终值未变的 body 样式记录
+  let lastFitBodyStyle = null;
+  const isOwnFitMutation = records => {
+    const body = document.body;
+    if (!body || lastFitBodyStyle === null) return false;
+    return records.length > 0
+      && records.every(record => record.type === 'attributes' && record.target === body && record.attributeName === 'style')
+      && body.getAttribute('style') === lastFitBodyStyle;
+  };
   const fitToWidth = () => {
     try {
       const docEl = document.documentElement;
@@ -5764,7 +5786,9 @@ export const buildIframeSrcDoc = (
       body.style.width = (100 / scale) + '%';
 
       docEl.style.overflowX = 'hidden';
-    } catch {}
+    } catch {} finally {
+      lastFitBodyStyle = document.body ? document.body.getAttribute('style') : null;
+    }
   };
 
   const start = () => {
@@ -6024,8 +6048,9 @@ export const buildIframeSrcDoc = (
       }, 500);
     }
     try {
-      const mo = new MutationObserver(() => {
+      const mo = new MutationObserver((records) => {
         if (lastSentLock && lastSentMode === 'viewport') return;
+        if (isOwnFitMutation(records)) return;
         requestLayout('observer');
       });
       if (document.body) mo.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });

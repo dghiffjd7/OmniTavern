@@ -181,7 +181,8 @@ const normalizePresetSources = value => asArray(value)
     id: trim(item?.id).slice(0, 160),
     source: trim(item?.source).slice(0, 40),
     revision: Number(item?.revision || item?.updatedAt || 0) || 0,
-    contentFingerprint: fingerprintMaidFormatProfileSource(item?.value ?? item?.preset ?? item?.content ?? null),
+    contentFingerprint: trim(item?.contentFingerprint)
+      || fingerprintMaidFormatProfileSource(item?.value ?? item?.preset ?? item?.content ?? null),
   }))
   .filter(item => item.type || item.id)
   .sort((left, right) => `${left.type}:${left.id}`.localeCompare(`${right.type}:${right.id}`));

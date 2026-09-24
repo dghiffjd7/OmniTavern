@@ -3426,7 +3426,7 @@ class AppBridge {
     try {
       await this.presets?.ready;
       await this.regex?.ready;
-      const presetState = this.presets?.getState?.() || {};
+      const presetState = this.presets?.getSelectionState?.() || {};
       const active = (() => {
         const activePresets = presetState?.active || {};
         const enabled = presetState?.enabled || {};
@@ -3586,7 +3586,7 @@ class AppBridge {
     if (!isDeepSeekApiRequest({ provider: cfg?.provider, model: cfg?.model, baseUrl: cfg?.baseUrl })) {
       return {};
     }
-    const state = this.presets?.getState?.();
+    const state = this.presets?.getSelectionState?.();
     if (!state?.enabled?.openai) return {};
     const openp = this.presets?.getResolvedActive?.('openai', presetContext || {})?.preset || null;
     if (!openp || typeof openp !== 'object') return {};
@@ -6061,7 +6061,7 @@ class AppBridge {
     const preserveCreativeHistoryParagraphs = uiModeRaw === 'rp';
     const memoryMode = String(context?.meta?.memoryStorageMode || '').trim().toLowerCase();
     const useSummaryMemory = memoryMode === 'summary' && !Boolean(context?.meta?.disableSummary);
-    const presetState = this.presets?.getState?.() || null;
+    const presetState = this.presets?.getSelectionState?.() || null;
     const useSysprompt = Boolean(presetState?.enabled?.sysprompt);
     const useContext = Boolean(presetState?.enabled?.context);
     const useOpenAIPreset = Boolean(presetState?.enabled?.openai);
@@ -9215,7 +9215,7 @@ const stringifyMessageContent = (content) => {
    */
   getGenerationOptions(presetContext = {}, runtimeConfigOverride = null) {
     try {
-      const state = this.presets?.getState?.();
+      const state = this.presets?.getSelectionState?.();
       if (!state?.enabled?.openai) return {};
       const resolved = this.presets.getResolvedActive('openai', presetContext || {});
       const p = resolved?.preset;

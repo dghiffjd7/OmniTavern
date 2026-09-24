@@ -13,7 +13,11 @@ const getTool = (tools, name) => tools.find(tool => tool.name === name);
   const captured = [];
   const attachments = [];
   const tools = createAppUiCaptureTools({
-    checkVisionSupport: async () => ({ ok: true, capability: { status: 'supported' } }),
+    checkVisionSupport: async ({ context }) => {
+      assert.equal(context.voiceCallId, 'voice-call');
+      assert.equal(context.sessionId, 'captured-room');
+      return { ok: true, capability: { status: 'supported' } };
+    },
     captureRegion: async payload => {
       captured.push(payload);
       return {
@@ -30,6 +34,7 @@ const getTool = (tools, name) => tools.find(tool => tool.name === name);
   assert.ok(tool);
   let resolveCalls = 0;
   const context = {
+    voiceCallId: 'voice-call', sessionId: 'captured-room',
     userSelection: [{
       regionId: 'region-1',
       semanticSummary: '屏幕选区（160×80）',

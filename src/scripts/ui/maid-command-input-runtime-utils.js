@@ -8,12 +8,15 @@ import { renderMaidMarkdownHtml } from './maid-markdown-utils.js';
 import { getLocalizedPromptText } from '../i18n/prompt-locale.js';
 import { bindMaidVoiceButton } from './maid-voice-button.js';
 import { t } from '../i18n/index.js';
+import { createMaidRunCardView, MAID_RUN_ICONS } from './maid-run-card-dom.js';
 
 const STYLE_ID = 'maid-command-input-runtime-style';
 const FIELD_MIN_HEIGHT = 32;
 const FIELD_MAX_HEIGHT = 76;
 const DEFAULT_MAX_IMAGE_ATTACHMENTS = 4;
-const RESULT_VISIBLE_ITEM_LIMIT = 3;
+const SHEET_MEDIA_QUERY = '(max-width: 760px) and (pointer: coarse)';
+const SHEET_SNAPS = Object.freeze(['peek', 'half', 'full']);
+const REPORT_TONES = new Set(['success', 'error', 'info']);
 
 const trim = (value, fallback = '') => {
   const text = String(value ?? '').trim();
@@ -98,8 +101,8 @@ const injectStyle = (documentRef) => {
   transition: opacity 150ms ease, transform 170ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 .maid-command-input.is-dragover {
-  border-color: rgba(37, 99, 235, 0.42);
-  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.20), 0 0 0 3px rgba(37, 99, 235, 0.12);
+  border-color: rgba(var(--app-accent-rgb, 37, 99, 235), 0.42);
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.20), 0 0 0 3px rgba(var(--app-accent-rgb, 37, 99, 235), 0.12);
 }
 .maid-command-input-drag {
   flex: 0 0 auto;
@@ -133,8 +136,9 @@ const injectStyle = (documentRef) => {
   transform: scale(1);
   pointer-events: auto;
 }
-.maid-command-input.is-open.is-submitting {
-  opacity: 0.92;
+/* 提交中只淡化输入框：结果流是胶囊的子元素，整体降透明度会让运行卡透出底下的页面 */
+.maid-command-input.is-open.is-submitting .maid-command-input-field {
+  opacity: 0.72;
 }
 .maid-command-input.has-result {
   z-index: 26095;
@@ -219,9 +223,9 @@ const injectStyle = (documentRef) => {
   position: relative;
 }
 .maid-command-input-selection.is-active {
-  border-color: rgba(37, 99, 235, 0.45);
-  background: rgba(37, 99, 235, 0.14);
-  color: #1d4ed8;
+  border-color: rgba(var(--app-accent-rgb, 37, 99, 235), 0.45);
+  background: rgba(var(--app-accent-rgb, 37, 99, 235), 0.14);
+  color: var(--app-accent-strong, #1d4ed8);
 }
 .maid-command-input-selection-count {
   position: absolute;
@@ -231,8 +235,8 @@ const injectStyle = (documentRef) => {
   height: 15px;
   padding: 0 4px;
   border-radius: 999px;
-  background: #2563eb;
-  color: #fff;
+  background: var(--app-accent-primary, #2563eb);
+  color: var(--app-text-on-accent, #fff);
   font-size: 10px;
   font-weight: 700;
   display: none;
@@ -267,23 +271,23 @@ const injectStyle = (documentRef) => {
   background: var(--app-surface-subtle, #f8fafc);
 }
 .maid-command-input-submit {
-  background: #2563eb;
-  color: #fff;
+  background: var(--app-accent-primary, #2563eb);
+  color: var(--app-text-on-accent, #fff);
 }
 .maid-command-input-selection:hover,
 .maid-command-input-attach:hover,
 .maid-command-input-settings:hover {
-  background: rgba(37, 99, 235, 0.10);
-  color: #2563eb;
+  background: rgba(var(--app-accent-rgb, 37, 99, 235), 0.10);
+  color: var(--app-accent-primary, #2563eb);
 }
 .maid-command-input-submit:hover {
-  background: #1d4ed8;
+  background: var(--app-accent-strong, #1d4ed8);
 }
 .maid-command-input.is-submitting .maid-command-input-submit {
-  background: #dc2626;
+  background: rgb(var(--app-danger-rgb, 220, 38, 38));
 }
 .maid-command-input.is-submitting .maid-command-input-submit:hover {
-  background: #b91c1c;
+  background: color-mix(in srgb, rgb(var(--app-danger-rgb, 220, 38, 38)) 86%, #000);
 }
 .maid-command-input-selection:active,
 .maid-command-input-attach:active,
@@ -295,12 +299,12 @@ const injectStyle = (documentRef) => {
 .maid-command-input-attach:focus-visible,
 .maid-command-input-settings:focus-visible,
 .maid-command-input-submit:focus-visible {
-  outline: 2px solid rgba(37, 99, 235, 0.32);
+  outline: 2px solid rgba(var(--app-accent-rgb, 37, 99, 235), 0.32);
   outline-offset: 2px;
 }
 .maid-command-input:focus-within {
-  border-color: rgba(37, 99, 235, 0.38);
-  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.20), 0 0 0 2px rgba(37, 99, 235, 0.10);
+  border-color: rgba(var(--app-accent-rgb, 37, 99, 235), 0.38);
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.20), 0 0 0 2px rgba(var(--app-accent-rgb, 37, 99, 235), 0.10);
 }
 .maid-command-input-icon {
   width: 16px;
@@ -322,12 +326,12 @@ const injectStyle = (documentRef) => {
 .maid-command-input-result {
   position: absolute;
   width: 100%;
-  max-height: min(42vh, calc(58px * ${RESULT_VISIBLE_ITEM_LIMIT} + 14px));
+  max-height: min(60vh, 480px);
   overflow: auto;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 1px 2px;
+  gap: 8px;
+  padding: 2px;
   box-sizing: border-box;
   border: 0;
   border-radius: 16px;
@@ -339,27 +343,68 @@ const injectStyle = (documentRef) => {
   word-break: break-word;
   box-shadow: none;
   scrollbar-width: thin;
-}
-.maid-command-input-result::before {
-  display: none;
+  overscroll-behavior: contain;
 }
 .maid-command-input-result-item {
   flex: 0 0 auto;
   max-width: 100%;
   min-height: 38px;
-  padding: 9px 11px;
+  padding: 9px 12px;
   box-sizing: border-box;
-  border: 1px solid rgba(148, 163, 184, 0.24);
-  border-radius: 16px 16px 16px 6px;
-  background: color-mix(in srgb, var(--app-surface-card, #fff) 94%, rgba(37, 99, 235, 0.08));
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.16);
-}
-.maid-command-input-result-item[data-tone="thinking"] {
-  color: var(--app-text-secondary, #475569);
+  border: 1px solid var(--app-border-default, rgba(148, 163, 184, 0.30));
+  border-radius: 16px;
+  background: var(--app-surface-card, #fff);
+  box-shadow: var(--app-shadow-sm, 0 1px 4px rgba(15, 23, 42, 0.08));
 }
 .maid-command-input-result-item[data-tone="error"] {
-  border-color: rgba(239, 68, 68, 0.30);
-  background: color-mix(in srgb, var(--app-surface-card, #fff) 90%, rgba(239, 68, 68, 0.12));
+  border-color: rgba(var(--app-danger-rgb, 220, 38, 38), 0.32);
+}
+/* 运行卡外壳：卡片自带边框与阴影 */
+.maid-command-input-result-item.is-run {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+/* 新项逐个推出（进场用 backwards 配合逐项 delay） */
+.maid-command-input-result-item.is-entering {
+  animation: mciCardIn 0.26s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+}
+@keyframes mciCardIn {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+/* 女仆汇报：最终结果、提问与需要处理的提示，始终显示 */
+.mci-report-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 3px;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--app-text-muted, rgba(100, 116, 139, 0.85));
+  white-space: nowrap;
+}
+.mci-report-mark {
+  width: 17px;
+  height: 17px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(var(--app-accent-rgb, 59, 130, 246), 0.12);
+  color: var(--app-text-primary, #111827);
+  font-family: Georgia, 'Songti SC', 'Noto Serif SC', serif;
+  font-size: 10.5px;
+  font-weight: 700;
+}
+.maid-command-input-result-item[data-tone="error"] .mci-report-mark {
+  background: rgba(var(--app-danger-rgb, 220, 38, 38), 0.14);
+}
+.maid-command-input-result-item.is-queue {
+  color: var(--app-text-secondary, #475569);
+  border-style: dashed;
+  box-shadow: none;
 }
 .mci-result-message > :first-child {
   margin-top: 0;
@@ -423,148 +468,121 @@ const injectStyle = (documentRef) => {
   line-height: 1;
   touch-action: manipulation;
 }
-/* 女仆执行流结构化卡：在白色结果流内原位呈现 计/行/成/败 铭牌与状态 */
-.maid-command-input-result-item.is-trace {
-  padding: 8px 11px;
+/* 未落到运行卡里的思路（纯对话回复等）：默认折叠的一行 */
+.maid-command-input-result-item.is-thought {
+  min-height: 0;
+  padding: 0;
+  box-shadow: none;
+  background: transparent;
+  border-style: dashed;
 }
-.mci-trace-head {
+.mci-thought-toggle {
+  width: 100%;
   display: flex;
   align-items: center;
   gap: 7px;
-  min-width: 0;
-}
-.mci-trace-glyph {
-  flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  background: rgba(var(--app-accent-rgb, 59, 130, 246), 0.10);
-  color: var(--app-text-primary, #111827);
-  font-family: Georgia, 'Songti SC', 'Noto Serif SC', serif;
-  font-size: 11px;
-  font-weight: 700;
-}
-.maid-command-input-result-item.is-trace[data-tone="success"] .mci-trace-glyph { background: rgba(var(--app-success-rgb, 34, 197, 94), 0.12); }
-.maid-command-input-result-item.is-trace[data-tone="danger"] .mci-trace-glyph { background: rgba(var(--app-danger-rgb, 239, 68, 68), 0.12); }
-.maid-command-input-result-item.is-trace[data-tone="warning"] .mci-trace-glyph { background: rgba(var(--app-warning-rgb, 245, 158, 11), 0.14); }
-.mci-trace-label {
-  flex: 0 0 auto;
-  font-family: ui-monospace, 'IBM Plex Mono', 'JetBrains Mono', Menlo, monospace;
-  font-size: 9px;
-  letter-spacing: 0.2em;
-  color: var(--app-text-muted, rgba(100, 116, 139, 0.8));
-}
-.mci-trace-title {
-  min-width: 0;
-  flex: 1;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  min-height: 32px;
+  padding: 6px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--app-text-muted, rgba(100, 116, 139, 0.85));
+  font: inherit;
   font-size: 12px;
-  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
 }
-.mci-trace-status {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
+.mci-thought-toggle svg { width: 11px; height: 11px; flex: 0 0 auto; }
+.mci-thought-list {
+  margin: 0 12px 10px 18px;
+  padding: 0 0 0 13px;
+  border-left: 1px solid var(--app-border-subtle, rgba(15, 23, 42, 0.08));
+  list-style: none;
+  display: flex;
+  flex-direction: column;
   gap: 5px;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--app-text-secondary, #475569);
 }
-.mci-trace-status::before {
-  content: '';
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--app-text-muted, rgba(100, 116, 139, 0.8));
-}
-/* 执行中/等待中：状态点换成小转圈 */
-.mci-trace-status.is-live::before {
-  width: 9px;
-  height: 9px;
-  background: transparent;
-  border: 1.5px solid rgba(var(--app-accent-rgb, 59, 130, 246), 0.25);
-  border-top-color: rgb(var(--app-accent-rgb, 59, 130, 246));
-  animation: mciTraceSpin 0.8s linear infinite;
-  box-shadow: none;
-}
-.maid-command-input-result-item.is-trace[data-tone="warning"] .mci-trace-status.is-live::before {
-  border-color: rgba(var(--app-warning-rgb, 245, 158, 11), 0.30);
-  border-top-color: rgb(var(--app-warning-rgb, 245, 158, 11));
-}
-@keyframes mciTraceSpin {
-  to { transform: rotate(360deg); }
-}
-/* 新卡一张一张推出（进场用 backwards 配合逐卡 delay） */
-.maid-command-input-result-item.is-entering {
-  animation: mciCardIn 0.26s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
-}
-@keyframes mciCardIn {
-  from { opacity: 0; transform: translateY(8px) scale(0.98); }
-  to { opacity: 1; transform: none; }
-}
-.maid-command-input-result-item.is-trace[data-tone="accent"] .mci-trace-status::before {
-  background: rgb(var(--app-accent-rgb, 59, 130, 246));
-  animation: mciTracePulse 1.4s ease-in-out infinite;
-}
-.maid-command-input-result-item.is-trace[data-tone="success"] .mci-trace-status::before { background: rgb(var(--app-success-rgb, 34, 197, 94)); }
-.maid-command-input-result-item.is-trace[data-tone="danger"] .mci-trace-status::before { background: rgb(var(--app-danger-rgb, 239, 68, 68)); }
-.maid-command-input-result-item.is-trace[data-tone="warning"] .mci-trace-status::before {
-  background: rgb(var(--app-warning-rgb, 245, 158, 11));
-  animation: mciTracePulse 1.1s ease-in-out infinite;
-}
-@keyframes mciTracePulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(var(--app-accent-rgb, 59, 130, 246), 0.30); }
-  50% { box-shadow: 0 0 0 4px rgba(var(--app-accent-rgb, 59, 130, 246), 0.10); }
-}
-/* 过程叙述单行状态：转圈 + 文本原位替换（"我已取得结果，正在整理给你"这类不再各占气泡）。
-   刻意做小、做淡、宽度收敛为内容宽——一眼与真正的结果气泡区分开 */
+/* 过程提示单行：像素网格 + 光泽文字，原位替换 */
 .maid-command-input-result-item.mci-live-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 9px;
   align-self: flex-start;
   width: fit-content;
   max-width: 100%;
   min-height: 0;
-  padding: 4px 10px 4px 8px;
-  color: var(--app-text-muted, rgba(100, 116, 139, 0.85));
-  background: color-mix(in srgb, var(--app-surface-card, #fff) 55%, transparent);
+  padding: 6px 12px 6px 9px;
   border-style: dashed;
-  border-color: color-mix(in srgb, var(--app-border-default, rgba(148, 163, 184, 0.30)) 65%, transparent);
   border-radius: 999px;
   box-shadow: none;
-  opacity: 0.88;
+  background: color-mix(in srgb, var(--app-surface-card, #fff) 70%, transparent);
 }
-.mci-live-spinner {
+.mci-live-row .mrc-shimmer { font-size: 12px; }
+/* 手机：底部抽屉（预览 / 半屏 / 全屏），输入胶囊固定在抽屉底部 */
+.mci-sheet-handle { display: none; }
+.maid-command-input[data-layout="sheet"] {
+  left: 0 !important;
+  right: 0;
+  top: auto !important;
+  bottom: var(--mci-keyboard-offset, 0px);
+  width: auto !important;
+  min-height: 56px;
+  padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px));
+  border-width: 1px 0 0;
+  border-radius: 0;
+  box-shadow: none;
+  transform: translateY(12px);
+  transform-origin: bottom center;
+}
+.maid-command-input[data-layout="sheet"].is-open { transform: none; }
+.maid-command-input[data-layout="sheet"].has-attachments { border-radius: 0; }
+.maid-command-input[data-layout="sheet"] .maid-command-input-drag { display: none; }
+.maid-command-input[data-layout="sheet"] .maid-command-input-result {
+  left: 0;
+  right: 0;
+  top: auto;
+  bottom: 100%;
+  width: 100%;
+  padding: 0 10px 10px;
+  border-radius: 22px 22px 0 0;
+  background: var(--app-surface-card, #fff);
+  box-shadow: 0 -10px 30px rgba(15, 23, 42, 0.14);
+  transition: max-height 0.26s cubic-bezier(0.23, 1, 0.32, 1);
+}
+.maid-command-input[data-layout="sheet"][data-snap="peek"] .maid-command-input-result { max-height: 176px; }
+.maid-command-input[data-layout="sheet"][data-snap="half"] .maid-command-input-result { max-height: 52dvh; }
+.maid-command-input[data-layout="sheet"][data-snap="full"] .maid-command-input-result {
+  max-height: calc(100dvh - 88px - env(safe-area-inset-top, 0px) - var(--mci-keyboard-offset, 0px));
+}
+.maid-command-input[data-layout="sheet"] .mci-sheet-handle {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   flex: 0 0 auto;
-  width: 10px;
-  height: 10px;
-  border: 1.5px solid rgba(var(--app-accent-rgb, 59, 130, 246), 0.22);
-  border-top-color: rgba(var(--app-accent-rgb, 59, 130, 246), 0.85);
-  border-radius: 50%;
-  animation: mciTraceSpin 0.8s linear infinite;
+  display: grid;
+  place-items: center;
+  width: calc(100% + 20px);
+  height: 26px;
+  margin: 0 -10px;
+  padding: 0;
+  border: 0;
+  background: var(--app-surface-card, #fff);
+  cursor: grab;
+  touch-action: none;
 }
-.mci-live-text {
-  min-width: 0;
-  font-size: 11px;
-  line-height: 1.45;
-  word-break: break-word;
+.mci-sheet-handle > i {
+  width: 38px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--app-border-strong, rgba(15, 23, 42, 0.16));
 }
-.mci-trace-sub {
-  margin-top: 3px;
-  font-size: 11px;
-  line-height: 1.5;
-  color: var(--app-text-secondary, #475569);
-  word-break: break-word;
-}
-.mci-trace-sub.is-error { color: rgb(var(--app-danger-rgb, 239, 68, 68)); }
-.maid-command-input-result-item.is-trace[data-tone="danger"] {
-  border-color: rgba(var(--app-danger-rgb, 239, 68, 68), 0.35);
-}
+.maid-command-input[data-layout="sheet"] .maid-command-input-result-item { box-shadow: none; }
+.maid-command-input[data-layout="sheet"] .mrc { box-shadow: none; }
+/* 预览档只看最新一项；运行卡只留头部与进行中一行 */
+.maid-command-input[data-layout="sheet"][data-snap="peek"] .maid-command-input-result > [data-key]:not(:last-of-type) { display: none; }
+.maid-command-input[data-layout="sheet"][data-snap="peek"] .mrc-rows,
+.maid-command-input[data-layout="sheet"][data-snap="peek"] .mrc-thought { display: none; }
 .maid-command-input[data-bubble-side="top"] .maid-command-input-result {
   left: 0;
   bottom: calc(100% + 8px);
@@ -584,16 +602,11 @@ const injectStyle = (documentRef) => {
   .maid-command-input {
     transition: none;
   }
-  .maid-command-input-result-item.is-entering,
-  .mci-trace-status.is-live::before,
-  .mci-live-spinner {
+  .maid-command-input-result-item.is-entering {
     animation: none !important;
   }
-  .mci-trace-status.is-live::before {
-    background: rgb(var(--app-accent-rgb, 59, 130, 246));
-    border: 0;
-    width: 6px;
-    height: 6px;
+  .maid-command-input[data-layout="sheet"] .maid-command-input-result {
+    transition: none;
   }
 }
 `;
@@ -620,6 +633,13 @@ export const createMaidCommandInputRuntime = ({
   clearTimeoutFn = globalThis?.clearTimeout || null,
   // 指令条盖住悬浮球时的拖拽通道：非交互区按下即转发给球的拖拽运行时（运行中也可拖）
   getBallDragRuntime = null,
+  // 手机布局判定与键盘避让；卡内确认的数据与回调
+  matchMediaFn = null,
+  windowLike = null,
+  setIntervalFn = null,
+  clearIntervalFn = null,
+  getApproval = () => null,
+  onApprovalDecision = null,
 } = {}) => {
   let rootEl = null;
   let inputEl = null;
@@ -640,7 +660,15 @@ export const createMaidCommandInputRuntime = ({
   let resultMessages = [];
   let resultSeq = 0;
   let resultEnterPaceUntil = 0; // 跨渲染的逐卡推出节拍（相邻新卡 ≥150ms，积压封顶 1.2s）
-  let liveStatus = null; // 过程叙述（thinking）单行状态：转圈+可替换文本，不各占气泡
+  let liveStatus = null; // 写死的过程提示（progress）：单行原位替换；有运行卡时并入卡内
+  const runCards = new Map(); // runId → 运行卡视图
+  const runThoughts = new Map(); // runId → 女仆过程叙述（思路，默认折叠）
+  let pendingThoughts = []; // 当前提交尚未绑定 run 时的叙述
+  let layout = 'float';
+  let sheetSnap = 'half';
+  let sheetSnapTouched = false;
+  let sheetHandleEl = null;
+  let keyboardListenerBound = false;
   let restoreResultOnNextOpen = false;
   let submissionSeq = 0;
   let activeSubmission = null;
@@ -778,12 +806,115 @@ export const createMaidCommandInputRuntime = ({
     } catch {}
   };
 
+  const activeRunView = () => {
+    const runId = trim(activeRunId);
+    if (!runId) return null;
+    return resultMessages.find(item => item.kind === 'run' && item.runId === runId) || null;
+  };
+
+  const latestRunState = () => {
+    for (let index = resultMessages.length - 1; index >= 0; index -= 1) {
+      const item = resultMessages[index];
+      if (item.kind === 'run') return trim(item.view?.status, 'running');
+    }
+    return '';
+  };
+
+  // 手机抽屉：执行中默认预览，等你确认/失败/结束升到半屏；用户拖动或展开详情后以用户为准
+  const resolveAutoSnap = () => {
+    const status = latestRunState();
+    if (['running', 'queued'].includes(status) && activeRunView()) return 'peek';
+    return 'half';
+  };
+
+  const applySheetSnap = () => {
+    if (!rootEl) return;
+    if (layout !== 'sheet') {
+      delete rootEl.dataset.snap;
+      return;
+    }
+    if (!sheetSnapTouched) sheetSnap = resolveAutoSnap();
+    rootEl.dataset.snap = sheetSnap;
+    sheetHandleEl?.setAttribute?.('aria-label', t('调整女仆面板高度（{snap}）', {
+      snap: { peek: t('预览'), half: t('半屏'), full: t('全屏') }[sheetSnap] || '',
+    }));
+  };
+
+  const setSheetSnap = (snap, { touched = true } = {}) => {
+    if (!SHEET_SNAPS.includes(snap)) return;
+    sheetSnap = snap;
+    if (touched) sheetSnapTouched = true;
+    applySheetSnap();
+  };
+
+  const ensureSheetHandle = () => {
+    if (sheetHandleEl || !documentRef?.createElement) return sheetHandleEl;
+    sheetHandleEl = documentRef.createElement('button');
+    sheetHandleEl.type = 'button';
+    sheetHandleEl.className = 'mci-sheet-handle';
+    sheetHandleEl.dataset.mciHandle = '1';
+    sheetHandleEl.innerHTML = '<i></i>';
+    let dragStartY = null;
+    let dragged = false;
+    sheetHandleEl.addEventListener?.('pointerdown', (event) => {
+      dragStartY = Number(event?.clientY);
+      dragged = false;
+      try { sheetHandleEl.setPointerCapture?.(event.pointerId); } catch {}
+    });
+    sheetHandleEl.addEventListener?.('pointermove', (event) => {
+      if (dragStartY == null || !Number.isFinite(dragStartY)) return;
+      if (Math.abs(Number(event?.clientY) - dragStartY) > 8) dragged = true;
+    });
+    const endDrag = (event) => {
+      if (dragStartY == null) return;
+      const delta = Number(event?.clientY) - dragStartY;
+      dragStartY = null;
+      if (!dragged || !Number.isFinite(delta)) return;
+      const index = SHEET_SNAPS.indexOf(sheetSnap);
+      if (delta < -24) setSheetSnap(SHEET_SNAPS[Math.min(SHEET_SNAPS.length - 1, index + 1)]);
+      else if (delta > 24) {
+        if (index <= 0) close({ preserve: true });
+        else setSheetSnap(SHEET_SNAPS[index - 1]);
+      }
+    };
+    sheetHandleEl.addEventListener?.('pointerup', endDrag);
+    sheetHandleEl.addEventListener?.('pointercancel', () => { dragStartY = null; });
+    sheetHandleEl.addEventListener?.('click', (event) => {
+      event?.preventDefault?.();
+      if (dragged) {
+        dragged = false;
+        return;
+      }
+      const index = SHEET_SNAPS.indexOf(sheetSnap);
+      setSheetSnap(SHEET_SNAPS[(index + 1) % SHEET_SNAPS.length]);
+    });
+    return sheetHandleEl;
+  };
+
+  const ensureRunCard = (runId) => {
+    let card = runCards.get(runId);
+    if (card) return card;
+    card = createMaidRunCardView({
+      documentRef,
+      onStop: ({ runId: target } = {}) => cancelActive({ runId: target }),
+      onDecision: payload => onApprovalDecision?.(payload),
+      onLayoutChange: ({ reason, expanded } = {}) => {
+        if (layout === 'sheet' && reason === 'row' && expanded) setSheetSnap('full');
+      },
+      setIntervalFn,
+      clearIntervalFn,
+    });
+    if (card) runCards.set(runId, card);
+    return card;
+  };
+
   const renderResultMessages = ({ forceBottom = false } = {}) => {
     if (!rootEl || !documentRef) return;
     if (!resultMessages.length && !liveStatus) {
       resultEl?.remove?.();
       resultEl = null;
       rootEl.classList.remove('has-result');
+      applySheetSnap();
       return;
     }
     const keepBottom = forceBottom || shouldStickResultToBottom();
@@ -796,75 +927,108 @@ export const createMaidCommandInputRuntime = ({
       rootEl.appendChild(resultEl);
     }
     rootEl.classList.add('has-result');
+    if (layout === 'sheet') {
+      const handle = ensureSheetHandle();
+      if (handle && handle.parentNode !== resultEl) resultEl.insertBefore?.(handle, resultEl.firstChild || null) || resultEl.appendChild(handle);
+    } else if (sheetHandleEl?.parentNode) {
+      sheetHandleEl.remove?.();
+    }
+    const liveRun = activeRunView();
     const buildResultItemContent = (bubble, item) => {
+      const entering = bubble.classList?.contains?.('is-entering') ? ' is-entering' : '';
+      if (item.kind === 'run') {
+        bubble.className = `maid-command-input-result-item is-run${entering}`;
+        const card = ensureRunCard(item.runId);
+        if (!card) return;
+        if (card.el.parentNode !== bubble) {
+          bubble.innerHTML = '';
+          bubble.appendChild(card.el);
+        }
+        card.update(item.view, {
+          thoughts: runThoughts.get(item.runId) || [],
+          liveText: liveRun === item && liveStatus ? liveStatus.message : '',
+          approval: getApproval?.(item.runId) || null,
+          voice: item.view?.source === 'maid_realtime',
+          touch: layout === 'sheet',
+        });
+        return;
+      }
       bubble.innerHTML = '';
-      if (item.kind === 'trace') {
-        bubble.className = `maid-command-input-result-item is-trace${bubble.classList?.contains?.('is-entering') ? ' is-entering' : ''}`;
-        bubble.dataset.tone = item.tone || 'muted';
-        const head = documentRef.createElement?.('div');
-        head.className = 'mci-trace-head';
-        const glyph = documentRef.createElement?.('span');
-        glyph.className = 'mci-trace-glyph';
-        glyph.textContent = item.glyph || '行';
-        const label = documentRef.createElement?.('span');
-        label.className = 'mci-trace-label';
-        label.textContent = item.label || '';
-        const title = documentRef.createElement?.('span');
-        title.className = 'mci-trace-title';
-        title.textContent = item.title || '';
-        head.appendChild(glyph);
-        head.appendChild(label);
-        head.appendChild(title);
-        if (item.statusLabel) {
-          const status = documentRef.createElement?.('span');
-          const live = item.tone === 'accent' || item.tone === 'warning';
-          status.className = `mci-trace-status${live ? ' is-live' : ''}`;
-          status.textContent = item.statusLabel;
-          head.appendChild(status);
-        }
-        bubble.appendChild(head);
-        const subText = trim(item.error) || trim(item.sub);
-        if (subText) {
-          const sub = documentRef.createElement?.('div');
-          sub.className = `mci-trace-sub${item.error ? ' is-error' : ''}`;
-          sub.textContent = subText;
-          bubble.appendChild(sub);
-        }
-      } else {
-        bubble.className = `maid-command-input-result-item${bubble.classList?.contains?.('is-entering') ? ' is-entering' : ''}`;
-        bubble.dataset.tone = item.tone;
-        const message = documentRef.createElement?.('div');
-        message.className = 'mci-result-message';
-        message.innerHTML = renderMaidMarkdownHtml(item.message);
-        bubble.appendChild(message);
-        const actions = Array.isArray(item.actions) ? item.actions : [];
-        if (actions.length) {
-          const actionRow = documentRef.createElement?.('div');
-          actionRow.className = 'mci-result-actions';
-          actions.forEach((action) => {
-            const button = documentRef.createElement?.('button');
-            button.type = 'button';
-            button.className = 'mci-result-action';
-            button.textContent = trim(action?.label, '继续');
-            button.addEventListener?.('click', (event) => {
-              event.preventDefault?.();
-              event.stopPropagation?.();
-              action?.onClick?.();
-            });
-            actionRow.appendChild(button);
+      if (item.kind === 'thought') {
+        bubble.className = `maid-command-input-result-item is-thought${entering}`;
+        const toggle = documentRef.createElement?.('button');
+        toggle.type = 'button';
+        toggle.className = 'mci-thought-toggle';
+        toggle.setAttribute?.('aria-expanded', item.open ? 'true' : 'false');
+        toggle.innerHTML = `${MAID_RUN_ICONS.spark}<span></span>`;
+        const label = toggle.querySelector?.('span');
+        if (label) label.textContent = t('思路 · {count}', { count: item.lines.length });
+        toggle.addEventListener?.('click', (event) => {
+          event.preventDefault?.();
+          event.stopPropagation?.();
+          item.open = !item.open;
+          renderResultMessages({ forceBottom: false });
+        });
+        bubble.appendChild(toggle);
+        if (item.open) {
+          const list = documentRef.createElement?.('ol');
+          list.className = 'mci-thought-list';
+          item.lines.forEach((line) => {
+            const li = documentRef.createElement?.('li');
+            li.textContent = line;
+            list.appendChild(li);
           });
-          bubble.appendChild(actionRow);
+          bubble.appendChild(list);
         }
+        return;
+      }
+      const isReport = item.kind !== 'queue' && REPORT_TONES.has(item.tone);
+      bubble.className = `maid-command-input-result-item${isReport ? ' is-report' : ''}${item.kind === 'queue' ? ' is-queue' : ''}${entering}`;
+      bubble.dataset.tone = item.tone;
+      if (isReport) {
+        const head = documentRef.createElement?.('div');
+        head.className = 'mci-report-head';
+        const mark = documentRef.createElement?.('span');
+        mark.className = 'mci-report-mark';
+        mark.textContent = '侍';
+        mark.setAttribute?.('aria-hidden', 'true');
+        const name = documentRef.createElement?.('span');
+        name.textContent = t('女仆');
+        head.appendChild(mark);
+        head.appendChild(name);
+        bubble.appendChild(head);
+      }
+      const message = documentRef.createElement?.('div');
+      message.className = 'mci-result-message';
+      message.innerHTML = renderMaidMarkdownHtml(item.message);
+      bubble.appendChild(message);
+      const actions = Array.isArray(item.actions) ? item.actions : [];
+      if (actions.length) {
+        const actionRow = documentRef.createElement?.('div');
+        actionRow.className = 'mci-result-actions';
+        actions.forEach((action) => {
+          const button = documentRef.createElement?.('button');
+          button.type = 'button';
+          button.className = 'mci-result-action';
+          button.textContent = trim(action?.label, '继续');
+          button.addEventListener?.('click', (event) => {
+            event.preventDefault?.();
+            event.stopPropagation?.();
+            action?.onClick?.();
+          });
+          actionRow.appendChild(button);
+        });
+        bubble.appendChild(actionRow);
       }
     };
-    // 键控 reconcile：既有卡原位补丁（状态原地翻转、不重播进场），新卡逐张推出（stagger 进场）
+    // 键控 reconcile：既有项原位补丁（状态原地翻转、不重播进场），新项逐个推出（stagger 进场）
     const existingNodes = new Map();
     Array.from(resultEl.children || []).forEach((node) => {
       const key = node?.dataset?.key;
       if (key) existingNodes.set(key, node);
-      else if (!node?.dataset?.mciLive) node.remove?.();
+      else if (!node?.dataset?.mciLive && !node?.dataset?.mciHandle) node.remove?.();
     });
-    // 单次渲染取一次时钟：同批新卡的节拍必须相对同一基准（逐节点取时会因毫秒推进产生 149ms 类漂移）
+    // 单次渲染取一次时钟：同批新项的节拍必须相对同一基准
     const renderNowTs = Date.now();
     resultMessages.forEach((item, index) => {
       const key = trim(item.id, `idx_${index}`);
@@ -878,38 +1042,41 @@ export const createMaidCommandInputRuntime = ({
       if (!node) return;
       node.dataset.key = key;
       node.classList?.add?.('is-entering');
-      // 跨渲染节拍：同批与快速连发的事件都一张一张推出
+      // 跨渲染节拍：同批与快速连发的事件都一个一个推出
       const delayMs = Math.min(1200, Math.max(0, resultEnterPaceUntil - renderNowTs));
       resultEnterPaceUntil = Math.max(renderNowTs, resultEnterPaceUntil) + 150;
       if (node.style) node.style.animationDelay = `${delayMs}ms`;
-      node.addEventListener?.('animationend', () => {
+      node.addEventListener?.('animationend', (event) => {
+        if (event?.target && event.target !== node) return;
         node.classList?.remove?.('is-entering');
         if (node.style) node.style.animationDelay = '';
-      }, { once: true });
+      });
       buildResultItemContent(node, item);
       resultEl.appendChild(node);
     });
-    existingNodes.forEach(node => node.remove?.());
-    // live 状态行：常驻底部单行（转圈+文本原位替换），随每次渲染挪到最末
+    existingNodes.forEach((node) => {
+      const runId = trim(node?.dataset?.key).startsWith('run:') ? trim(node.dataset.key).slice(4) : '';
+      if (runId) {
+        runCards.get(runId)?.destroy?.();
+        runCards.delete(runId);
+      }
+      node.remove?.();
+    });
+    // 过程提示行：有进行中的运行卡时并入卡内，否则常驻底部单行（文本原位替换）
     let liveEl = Array.from(resultEl.children || []).find(node => node?.dataset?.mciLive) || null;
-    if (liveStatus) {
+    if (liveStatus && !liveRun) {
       if (!liveEl) {
         liveEl = documentRef.createElement?.('div');
         if (liveEl) {
           liveEl.dataset.mciLive = '1';
           liveEl.className = 'maid-command-input-result-item mci-live-row';
-          const spinner = documentRef.createElement?.('span');
-          spinner.className = 'mci-live-spinner';
-          const text = documentRef.createElement?.('span');
-          text.className = 'mci-live-text';
-          liveEl.appendChild(spinner);
-          liveEl.appendChild(text);
+          liveEl.innerHTML = `<span class="mrc-grid" aria-hidden="true">${[0, 90, 180, 90, 180, 270, 180, 270, 360].map(delay => `<i style="animation-delay:${delay}ms"></i>`).join('')}</span><span class="mrc-shimmer mci-live-text"></span>`;
         }
       }
       if (liveEl) {
-        const textEl = (liveEl.children || []).find?.(child => String(child?.className || '').includes('mci-live-text'))
-          || liveEl.querySelector?.('.mci-live-text');
+        const textEl = liveEl.querySelector?.('.mci-live-text') || null;
         if (textEl) textEl.textContent = liveStatus.message;
+        liveEl.dataset.message = liveStatus.message;
         resultEl.appendChild(liveEl);
       }
     } else if (liveEl) {
@@ -918,6 +1085,7 @@ export const createMaidCommandInputRuntime = ({
     const latest = resultMessages[resultMessages.length - 1] || {};
     resultEl.dataset.tone = latest.tone || 'info';
     resultEl.dataset.count = String(resultMessages.length);
+    applySheetSnap();
     if (keepBottom) scrollResultToBottom();
     else resultEl.scrollTop = previousScrollTop;
   };
@@ -926,29 +1094,27 @@ export const createMaidCommandInputRuntime = ({
     resultMessages = [];
     liveStatus = null;
     restoreResultOnNextOpen = false;
+    runThoughts.clear();
+    pendingThoughts = [];
+    sheetSnapTouched = false;
     renderResultMessages();
   };
 
-  const getNonDuplicateDoneSummary = (summary = '') => {
-    const text = trim(summary);
-    if (!text) return '';
-    for (let index = resultMessages.length - 1; index >= 0; index -= 1) {
-      const item = resultMessages[index];
-      if (item.kind === 'trace' || !trim(item.message)) continue;
-      return trim(item.message) === text ? '' : text;
+  // 女仆叙述里的“过程”（thinking）并入运行卡的思路；没有 run 时在提交结束后收成一行折叠
+  const appendThought = (text) => {
+    const runId = trim(activeRunId);
+    if (runId && resultMessages.some(item => item.kind === 'run' && item.runId === runId)) {
+      runThoughts.set(runId, [...(runThoughts.get(runId) || []), text]);
+      return;
     }
-    return text;
+    pendingThoughts.push(text);
   };
 
-  const clearMatchingDoneSummary = (message = '') => {
-    const text = trim(message);
-    if (!text) return;
-    for (let index = resultMessages.length - 1; index >= 0; index -= 1) {
-      const item = resultMessages[index];
-      if (item.kind !== 'trace' || !String(item.id || '').startsWith('done:')) continue;
-      if (trim(item.sub) === text) item.sub = '';
-      break;
-    }
+  const flushPendingThoughts = () => {
+    if (!pendingThoughts.length) return;
+    resultSeq += 1;
+    resultMessages.push({ id: `thought_${resultSeq}`, kind: 'thought', lines: pendingThoughts.slice(), open: false });
+    pendingThoughts = [];
   };
 
   const setResult = (message = '', tone = 'info', options = {}) => {
@@ -962,14 +1128,18 @@ export const createMaidCommandInputRuntime = ({
       liveStatus = null;
     }
     const normalizedTone = trim(tone, 'info');
-    // 写死的过程提示（progress）不各占气泡：收进底部单行 live 状态（转圈 + 文本原位替换）。
-    // 模型生成的女仆话语（thinking）保持正常气泡。
+    // 写死的过程提示（progress）不各占气泡：单行原位替换，有运行卡时进卡内。
     if (normalizedTone === 'progress') {
       liveStatus = { message: text };
       renderResultMessages({ forceBottom: options?.forceBottom !== false });
       return;
     }
-    if (normalizedTone === 'success' || normalizedTone === 'error') clearMatchingDoneSummary(text);
+    // 执行中的女仆叙述属于过程，默认折叠进“思路”
+    if (normalizedTone === 'thinking' && activeSubmission) {
+      appendThought(text);
+      renderResultMessages({ forceBottom: options?.forceBottom !== false });
+      return;
+    }
     const latest = resultMessages[resultMessages.length - 1];
     if (!latest || latest.message !== text || latest.tone !== normalizedTone) {
       resultSeq += 1;
@@ -983,52 +1153,25 @@ export const createMaidCommandInputRuntime = ({
     renderResultMessages({ forceBottom: options?.forceBottom !== false });
   };
 
-  /* 女仆执行流投影：结构化 trace 卡按 id 原位更新、按时间与叙述气泡交错追加。
-     返回 true 表示指令条已承载女仆流（执行流面板据此不再自开，避免双流）。 */
   const upsertResultItem = (id, payload = {}) => {
     const index = resultMessages.findIndex(item => item.id === id);
     if (index >= 0) resultMessages[index] = { ...resultMessages[index], ...payload, id };
     else resultMessages.push({ ...payload, id });
   };
 
+  /* 女仆执行流投影：一次任务一张运行卡，按 runId 原位更新、与汇报气泡按时间交错。
+     返回 true 表示指令条已承载女仆流（执行流面板据此不再自开，避免双流）。 */
   const applyTraceView = (view = null) => {
     if (!view || !trim(view.runId)) return false;
-    if (activeSubmission && view.terminal !== true) activeRunId = trim(view.runId);
-    if (!rootEl || !isOpen) return false; // 从未打开或已经关闭 → 交回执行流面板兜底
     const runId = trim(view.runId);
-    upsertResultItem(`plan:${runId}`, {
-      kind: 'trace',
-      glyph: '计',
-      label: 'PLAN',
-      title: trim(view.title, '女仆任务'),
-      tone: 'accent',
-      statusLabel: '',
-    });
-    (Array.isArray(view.steps) ? view.steps : []).forEach((step) => {
-      upsertResultItem(`step:${runId}:${step.id}`, {
-        kind: 'trace',
-        glyph: step.glyph || '行',
-        label: `TOOL·${String(step.seq || 0).padStart(2, '0')}`,
-        title: trim(step.title),
-        sub: step.toolName && step.toolName !== step.title ? step.toolName : '',
-        error: trim(step.error),
-        tone: step.tone || 'muted',
-        statusLabel: trim(step.statusLabel),
-      });
-    });
-    if (view.terminal) {
-      liveStatus = null; // run 终态：过程叙述行退场，终态卡接棒
-      upsertResultItem(`done:${runId}`, {
-        kind: 'trace',
-        glyph: view.status === 'succeeded' ? '成' : view.status === 'cancelled' ? '止' : '败',
-        label: view.status === 'succeeded' ? 'DONE' : String(view.status || '').toUpperCase(),
-        title: trim(view.statusLabel),
-        sub: getNonDuplicateDoneSummary(view.doneSummary),
-        error: trim(view.failureCode),
-        tone: view.tone || 'muted',
-        statusLabel: '',
-      });
+    if (activeSubmission && view.terminal !== true) activeRunId = runId;
+    if (!rootEl || !isOpen) return false; // 从未打开或已经关闭 → 交回执行流面板兜底
+    if (activeSubmission && activeRunId === runId && pendingThoughts.length) {
+      runThoughts.set(runId, [...(runThoughts.get(runId) || []), ...pendingThoughts]);
+      pendingThoughts = [];
     }
+    upsertResultItem(`run:${runId}`, { kind: 'run', runId, view });
+    if (view.terminal) liveStatus = null; // run 终态：过程提示退场
     renderResultMessages({ forceBottom: view.terminal !== true });
     return true;
   };
@@ -1182,6 +1325,7 @@ export const createMaidCommandInputRuntime = ({
           });
           const ok = result?.ok !== false;
           const cancelled = result?.status === 'cancelled' || result?.cancelled === true;
+          flushPendingThoughts();
           setResult(
             result?.message || result?.summary || (ok ? '已完成。' : '执行失败。'),
             cancelled ? 'info' : (ok ? 'success' : 'error'),
@@ -1190,6 +1334,7 @@ export const createMaidCommandInputRuntime = ({
           entry.resolve(result || { ok });
         } catch (error) {
           const cancelled = error?.name === 'AbortError' || submissionAbortController.signal.aborted;
+          flushPendingThoughts();
           setResult(cancelled ? '任务已终止。' : (error?.message || '女仆执行失败。'), cancelled ? 'info' : 'error');
           entry.resolve(cancelled
             ? { ok: false, status: 'cancelled', cancelled: true, reason: 'user_aborted', message: '任务已终止。' }
@@ -1241,8 +1386,52 @@ export const createMaidCommandInputRuntime = ({
     position();
   };
 
+  const resolveLayout = () => {
+    try {
+      return typeof matchMediaFn === 'function' && matchMediaFn(SHEET_MEDIA_QUERY)?.matches === true ? 'sheet' : 'float';
+    } catch {
+      return 'float';
+    }
+  };
+
+  // 手机抽屉贴底：软键盘弹出且布局视口未随之缩小时，用 visualViewport 算出遮挡高度
+  const syncKeyboardOffset = () => {
+    if (!rootEl) return;
+    const viewport = windowLike?.visualViewport;
+    const innerHeight = Number(windowLike?.innerHeight || 0);
+    const covered = viewport && innerHeight
+      ? Math.max(0, Math.round(innerHeight - (Number(viewport.height || 0) + Number(viewport.offsetTop || 0))))
+      : 0;
+    rootEl.style?.setProperty?.('--mci-keyboard-offset', `${covered}px`);
+  };
+
+  const bindKeyboardListener = () => {
+    if (keyboardListenerBound || !windowLike?.visualViewport?.addEventListener) return;
+    keyboardListenerBound = true;
+    windowLike.visualViewport.addEventListener('resize', syncKeyboardOffset);
+    windowLike.visualViewport.addEventListener('scroll', syncKeyboardOffset);
+  };
+
   const position = () => {
     if (!rootEl) return;
+    const nextLayout = resolveLayout();
+    if (nextLayout !== layout) {
+      layout = nextLayout;
+      rootEl.dataset.layout = layout;
+      if (resultEl) renderResultMessages({ forceBottom: false }); // 运行卡的触控尺寸随布局切换
+    }
+    rootEl.dataset.layout = layout;
+    if (layout === 'sheet') {
+      rootEl.style.width = '';
+      rootEl.style.left = '';
+      rootEl.style.top = '';
+      delete rootEl.dataset.bubbleSide;
+      bindKeyboardListener();
+      syncKeyboardOffset();
+      applySheetSnap();
+      return;
+    }
+    applySheetSnap();
     const viewport = getViewportSize?.() || {};
     const w = Number(viewport.w || globalThis?.innerWidth || 0) || 0;
     const h = Number(viewport.h || globalThis?.innerHeight || 0) || 0;
@@ -1342,7 +1531,7 @@ export const createMaidCommandInputRuntime = ({
       const interactive = typeof target?.closest === 'function'
         ? target.closest('textarea:not(:disabled), button:not(:disabled), input, a, .maid-command-input-result, .maid-onboarding-welcome')
         : null;
-      if (interactive) return;
+      if (interactive || layout === 'sheet') return;
       const ballDrag = typeof getBallDragRuntime === 'function' ? getBallDragRuntime() : null;
       if (!ballDrag?.startDrag) return;
       ballDrag.startDrag(event, { suppressLongPress: true, suppressClick: true });
@@ -1490,6 +1679,7 @@ export const createMaidCommandInputRuntime = ({
     restoreResultOnNextOpen = false;
     const wasQueued = isSubmitting || Boolean(activeSubmission);
     if (!wasQueued) clearResult();
+    sheetSnapTouched = false;
     submissionSeq += 1;
     let resolveSubmission = null;
     const completion = new Promise(resolve => {
@@ -1551,6 +1741,13 @@ export const createMaidCommandInputRuntime = ({
     position,
     setStatus: (message = '', tone = 'info') => setResult(message, tone),
     applyTraceView,
+    // 卡内确认：该 run 的运行卡正在输入胶囊里显示时才算可承载
+    hasRunCard: runId => Boolean(isOpen && trim(runId) && resultMessages.some(item => item.kind === 'run' && item.runId === trim(runId))),
+    refreshApprovals: () => {
+      if (isOpen && resultMessages.some(item => item.kind === 'run')) renderResultMessages({ forceBottom: false });
+    },
+    getLayout: () => ({ layout, snap: layout === 'sheet' ? sheetSnap : '' }),
+    setSheetSnap,
     addFiles,
     clearAttachments,
     getAttachments: () => imageAttachments.slice(),

@@ -13,6 +13,11 @@ import { createMaidAssistantAgent } from '../../src/scripts/agent/maid-assistant
 import { createAgentToolRegistry } from '../../src/scripts/agent/agent-tool-registry.js';
 import { createAgentTaskRuntime } from '../../src/scripts/agent/agent-task-runtime.js';
 import { AgentRunStore } from '../../src/scripts/storage/agent-run-store.js';
+import { resolvePendingMaidAction } from '../../src/scripts/agent/maid-pending-action.js';
+import { createVoiceAwareMaidRuntimeResolver, createVoiceTaskModelRegistry } from '../../src/scripts/ui/realtime/voice-task-model.js';
+import { readFile } from 'node:fs/promises';
+import { createPresetRegexScriptAgentTools } from '../../src/scripts/agent/tools/preset-regex-script-tools.js';
+import { createMaidToolConfirmationRuntime } from '../../src/scripts/ui/maid-tool-confirmation-runtime.js';
 
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { resolve, promise }; };
@@ -74,7 +79,7 @@ const target = { supported: true, sessionId: 'maid', uiMode: 'maid', maidCallId:
   const command = { syncVoiceState() {}, collapse: () => collapsed++, isSubmitting: () => submitted.length > 0,
     submitVoiceTask: (text, options) => { const done = deferred(); submitted.push({ text, options, done }); return done.promise; },
   };
-  voice = createMaidVoiceRuntime({ settingsStore: { getVoiceInputMode: () => 'realtime', getMaidPrompt: () => 'Maid' },
+  voice = createMaidVoiceRuntime({ settingsStore: { getVoiceInputMode: () => 'realtime', getMaidPrompt: () => 'Maid', hasChosenVoiceTaskExecutor: () => true },
     conversationStore: { upsertRealtimeTranscript: async value => { persisted.push(value); return { messageId: value.id }; }, finalizeRealtimeConversation: async () => {} },
     prepareConversationContext: async () => ({}), getAppContext: () => ({ sessionId: 'original-room', activePage: page }),
     getCommandRuntime: () => command, getCallAppRuntime: () => app, createOrb: () => surface,
@@ -162,6 +167,9 @@ const target = { supported: true, sessionId: 'maid', uiMode: 'maid', maidCallId:
     protocol.start(); const tool = sent[0].session.tools[0]; assert.equal(provider === 'xai_voice' ? tool.name : tool.function.name, 'maid_task');
     protocol.toolResults([{ call, result }]); protocol.taskUpdate('actual result'); protocol.respond();
     assert.equal(sent[1].item.call_id, call.id); assert.equal(JSON.parse(sent[1].item.output).task_id, 'app-task'); assert.equal(sent.at(-1).type, 'response.create');
+    // Step 拒收 system 角色（400 "item.role must be user or assistant" 并断线），任务更新须以 user 角色发送
+    assert.equal(sent[2].item.role, provider === 'step_realtime' ? 'user' : 'system', `${provider} task update role`);
+    assert.equal(sent[2].item.content[0].text, 'actual result');
   }
   const sent = [], events = [];
   const gemini = createGeminiLiveProtocol({ profile: { provider: 'gemini_live', model: 'gemini-3.1-flash-live-preview', maidTools: tools }, instructions: 'test', send: value => sent.push(value), emit: value => events.push(value), ready() {}, play() {}, clear() {} });
@@ -200,4 +208,256 @@ const target = { supported: true, sessionId: 'maid', uiMode: 'maid', maidCallId:
   assert(store.listRuns().some(run => run.metadata?.submissionSource === 'maid_realtime' && run.metadata.submissionId === 'voice-task'));
 }
 
+// 真实 resolver + 提交入口：未绑定女仆主档仍可使用冻结的语音执行档，视觉门禁用同一配置。
+{
+  const registry = createVoiceTaskModelRegistry();
+  registry.remember('voice-only', { config: { provider: 'openai', model: 'voice-text-model', apiKey: 'offline-placeholder' } });
+  const resolveRuntime = createVoiceAwareMaidRuntimeResolver({ resolveMaidRuntime: async () => ({ configured: false }), registry, createClient: config => ({ config }) });
+  const contexts = [], visionModels = [];
+  const submit = createMaidCommandSubmit({
+    getVoiceRuntime: () => ({ cancelInput: async () => {}, endCall: async () => {} }), matchMaidIntent: () => null, resolveMaidRuntimeConfig: resolveRuntime,
+    checkMaidVisionInput: async (_attachments, context, runtime) => { visionModels.push(runtime.config.model); assert.equal(context.sessionId, 'original-room'); return { ok: true }; },
+    getAppContext: () => ({ sessionId: 'new-room' }), maidSettingsStore: { setLastExchange() {}, getLastExchange: () => ({ source: 'done', requestPrompt: 'sent' }) },
+    buildAppFeatureSearchContextText: () => '', recordMaidTurnFromResult: async () => {}, logger: { debug() {} },
+    maidAssistantAgent: { runPrompt: async (_text, context) => { contexts.push(context); return { ok: true }; } },
+  });
+  await submit('查看附图', { source: 'maid_realtime', voiceCallId: 'voice-only', context: { sessionId: 'original-room' }, attachments: [{ kind: 'image', url: 'data:image/png;base64,AA==' }] });
+  assert.equal(contexts.length, 1);
+  assert.deepEqual(visionModels, ['voice-text-model']);
+  assert.equal((await submit('普通文字任务', {})).responseType, 'local', 'typing still requires its own configured maid profile');
+  const appSource = await readFile(new URL('../../src/scripts/ui/app.js', import.meta.url), 'utf8');
+  const submitWiring = appSource.slice(appSource.indexOf('onSubmit: createMaidCommandSubmit('), appSource.indexOf('onCancelActive:', appSource.indexOf('onSubmit: createMaidCommandSubmit(')));
+  assert.match(submitWiring, /resolveMaidRuntimeConfig:\s*resolveMaidTaskRuntimeConfig/);
+}
+
+// 删除预览释放普通任务队列后，语音确认/取消仍要作用于该通话的原任务。
+const setupPendingVoice = () => {
+  const deleted = [], logger = { warn() {}, debug() {} }, registry = createAgentToolRegistry({ logger });
+  registry.register({ name: 'regex.delete_many', title: 'Delete regex', description: 'Delete regex', permissions: [], riskLevel: 'high',
+    schema: { type: 'object', properties: { targets: { type: 'array', items: { type: 'string' } }, preview: { type: 'boolean' } } },
+    execute: async args => args.preview
+      ? { ok: true, preview: true, plannedCount: 1, items: [{ id: 'original', name: '原项目', status: 'planned' }] }
+      : (deleted.push(...args.targets), { ok: true, results: args.targets.map(id => ({ id, target: id, name: id, status: 'succeeded' })) }),
+  });
+  const store = new AgentRunStore();
+  const agent = createMaidAssistantAgent({ toolRegistry: registry, agentTaskRuntime: createAgentTaskRuntime({ store, toolRegistry: registry, logger }), logger,
+    planner: async input => input.includes('删除')
+      ? { ok: true, toolName: 'regex.delete_many', featureId: 'regex.delete_many', args: { targets: ['原项目'], preview: true } }
+      : { ok: true, action: 'final', message: '普通答复' },
+    reactPlanner: async () => ({ ok: true, action: 'final', message: '本轮结束' }),
+  });
+  let seq = 0, finish = () => {}, currentRoom = 'room-a';
+  const submitted = [];
+  const voice = createMaidVoiceTaskRuntime({ makeId: () => `task-${++seq}`, captureContext: () => ({ sessionId: currentRoom }),
+    cancelPendingAction: options => agent.cancelPendingAction(options),
+    getCommandRuntime: () => ({ submitVoiceTask: (input, options) => { submitted.push(options); return agent.runPrompt(input, { ...options.context, source: options.source, voiceCallId: options.voiceCallId, submissionId: options.id }); },
+      cancelSubmission: async () => false,
+    }), onResult: update => finish(update.result),
+  });
+  const request = async (input, callId = 'call-one', args = resolveMaidLiveControl(input)) => {
+    const completed = new Promise(resolve => { finish = resolve; });
+    const accepted = await voice.request({ target: { maidCallId: callId }, requestId: `req-${++seq}`, inputText: input, args });
+    return accepted.accepted ? completed : accepted;
+  };
+  return { agent, voice, store, request, deleted, submitted, setRoom: id => { currentRoom = id; } };
+};
+{
+  const env = setupPendingVoice();
+  assert.equal((await env.request('删除原项目')).status, 'awaiting_confirmation');
+  assert.equal((await env.request('取消任务')).cancelled, 1);
+  assert.equal(resolvePendingMaidAction(env.store.listRuns()), null);
+  await env.request('确认后执行');
+  assert.deepEqual(env.deleted, [], 'later confirmation cannot revive a cancelled preview');
+}
+for (const answer of ['允许', '允許', 'allow', '允许一次', 'allow once', '']) {
+  const env = setupPendingVoice();
+  await env.request('删除原项目');
+  env.setRoom('room-b');
+  await env.request(answer, 'call-one', answer ? resolveMaidLiveControl(answer) : { action: 'confirm' });
+  assert.deepEqual(env.deleted, ['original'], answer);
+  assert.equal(env.submitted.at(-1).context.sessionId, 'room-a');
+  assert.equal(env.submitted.at(-1).context.pendingActionSubmissionId, env.submitted[0].id);
+  assert.equal(resolvePendingMaidAction(env.store.listRuns()), null);
+}
+{
+  const env = setupPendingVoice();
+  await env.request('删除原项目');
+  assert.equal((await env.request('取消任务', 'another-call')).cancelled, 0);
+  await env.request('允许', 'another-call');
+  assert.deepEqual(env.deleted, []);
+  assert.ok(resolvePendingMaidAction(env.store.listRuns(), { context: { voiceCallId: 'call-one' } }), 'another call neither consumes nor supersedes the old preview');
+  await env.request('允许');
+  assert.deepEqual(env.deleted, ['original']);
+}
+console.log('ok - voice preview confirmation/cancellation retains task ownership and frozen context');
+
+// Exercise the real pending workflow, delete tool and APP safety gate in memory.
+const setupConfirmation = ({ gate = null } = {}) => {
+  const sets = [{ id: 'a', name: 'first', rules: [] }, { id: 'b', name: 'second', rules: [] }];
+  const deleted = [], confirmations = [], submissions = [], updates = [];
+  const logger = { warn() {}, debug() {} };
+  const registry = createAgentToolRegistry({ logger });
+  registry.registerMany(createPresetRegexScriptAgentTools({ regexStore: {
+    getGlobal: () => ({ rules: [] }), listLocalSets: () => sets,
+    getLocalSet: id => sets.find(item => item.id === id), getSession: () => ({ rules: [] }),
+    removeLocalSet: async id => { deleted.push(id); sets.splice(sets.findIndex(item => item.id === id), 1); },
+  } }));
+  const store = new AgentRunStore();
+  const context = { sessionId: 'original-room', requestToolConfirmation: request => { confirmations.push(request); return { decision: 'allow' }; } };
+  const agent = createMaidAssistantAgent({ toolRegistry: registry,
+    agentTaskRuntime: createAgentTaskRuntime({ store, toolRegistry: registry, logger }), logger,
+    planner: async input => input.includes('删除')
+      ? { ok: true, toolName: 'regex.delete_many', featureId: 'regex.delete_many', args: { targets: input.includes('保留第二个') ? ['first'] : ['first', 'second'], preview: true } }
+      : { ok: true, action: 'final', message: '请说明任务' },
+    reactPlanner: async () => ({ ok: true, action: 'final', message: '本轮完成。' }),
+  });
+  let serial = Promise.resolve(), seq = 0;
+  const results = new Map(), waiters = new Map();
+  const voice = createMaidVoiceTaskRuntime({ makeId: () => `confirm-${++seq}`, captureContext: () => ({ sessionId: 'original-room' }),
+    cancelPendingAction: options => agent.cancelPendingAction(options),
+    getCommandRuntime: () => ({ submitVoiceTask: (input, options) => {
+      submissions.push({ input, options });
+      const job = serial.then(async () => {
+        if (gate && input === '确认') await gate.promise;
+        return agent.runPrompt(input, { ...context, ...options.context, source: options.source, voiceCallId: options.voiceCallId, submissionId: options.id });
+      });
+      serial = job.catch(() => {});
+      return job;
+    } }),
+    onResult: update => { updates.push(update); results.set(update.task_id, update.result); waiters.get(update.task_id)?.(update.result); },
+  });
+  const request = (input, args = resolveMaidLiveControl(input)) => voice.request({ target, requestId: `confirm-request-${++seq}`, inputText: input, args });
+  const resultOf = ack => results.has(ack.task_id) ? Promise.resolve(results.get(ack.task_id)) : new Promise(resolve => waiters.set(ack.task_id, resolve));
+  const preview = async () => { const ack = await request('删除 first 和 second，先预览'); assert.equal((await resultOf(ack)).status, 'awaiting_confirmation'); return ack; };
+  return { agent, voice, request, resultOf, preview, context, sets, deleted, confirmations, submissions, updates };
+};
+
+for (const normalized of [false, true]) {
+  const env = setupConfirmation();
+  await env.preview();
+  const input = '允许，但保留第二个';
+  const revised = await env.request(input, { action: 'confirm', request: normalized ? '允许' : input });
+  assert.equal((await env.resultOf(revised)).status, 'awaiting_confirmation');
+  assert.match(env.submissions.at(-1).input, /用户修正：允许，但保留第二个/);
+  assert.equal(env.confirmations.length, 0, 'conditional permission must not reach the deletion gate');
+  assert.deepEqual(env.deleted, []);
+  await env.resultOf(await env.request('允许'));
+  assert.deepEqual(env.deleted, ['a']);
+  assert.equal(env.sets[0].id, 'b');
+  assert.equal(env.confirmations.length, 1);
+}
+{
+  const env = setupConfirmation(), original = await env.preview();
+  await env.agent.runPrompt('确认', { ...env.context, sessionId: 'another-room' });
+  assert.deepEqual(env.deleted, [], 'bare text after hangup cannot confirm a voice preview');
+  assert.equal(env.confirmations.length, 0);
+  await env.agent.runPrompt('确认', { ...env.context, pendingActionSubmissionId: original.task_id });
+  assert.deepEqual(env.deleted, ['a', 'b'], 'an explicitly selected task can resume through the APP confirmation');
+}
+{
+  const gate = deferred(), env = setupConfirmation({ gate });
+  const original = await env.preview();
+  const first = await env.request('允许'), second = await env.request('允许', { action: 'confirm', task_id: original.task_id });
+  assert.equal(second.task_id, first.task_id);
+  assert.equal(second.reused, true);
+  assert.equal(env.submissions.length, 2, 'preview plus exactly one continuation');
+  assert.equal((await env.request('允许')).task_id, first.task_id, 'bare duplicate also reuses the continuation');
+  gate.resolve();
+  assert.equal((await env.resultOf(first)).ok, true);
+  assert.deepEqual(env.deleted, ['a', 'b']);
+  assert.equal(env.confirmations.length, 1);
+  const completed = await env.request('允许');
+  assert.equal(completed.reused, true);
+  assert.equal(completed.status, 'succeeded');
+  assert.equal(completed.accepted, false);
+  assert.equal(env.updates.length, 2, 'no misleading second completion is emitted');
+}
+{
+  const env = setupConfirmation();
+  await env.preview();
+  assert.equal((await env.request('好', { action: 'confirm', request: '好' })).accepted, undefined);
+  assert.equal(env.submissions.length, 1);
+  await env.resultOf(await env.request('允许'));
+  assert.deepEqual(env.deleted, ['a', 'b']);
+}
+{
+  const queue = [], approvals = createMaidToolConfirmationRuntime({ canShowInline: () => true });
+  const controller = new AbortController();
+  let seq = 0;
+  const voice = createMaidVoiceTaskRuntime({ makeId: () => `inline-${++seq}`,
+    getCommandRuntime: () => ({
+      submitVoiceTask: (input, options) => { const done = deferred(); queue.push({ input, options, done }); return done.promise; },
+      cancelSubmission: () => { controller.abort(); queue[0].done.resolve({ status: 'cancelled' }); return true; },
+    }), confirmApproval: ids => approvals.confirmByVoice(ids),
+  });
+  const task = await voice.request({ target, args: { action: 'execute', request: '删除两个项目' } });
+  const decision = approvals.request({ kind: 'delete_fixture', operationType: 'delete' }, { runId: task.task_id, signal: controller.signal });
+  await voice.request({ target, inputText: '允许，但保留第二个', args: { action: 'confirm', request: '允许' } });
+  assert.equal((await decision).decision, 'deny', 'revision aborts the existing real inline approval');
+  assert.match(queue[1].input, /用户修正：允许，但保留第二个/);
+  queue[1].done.resolve({ ok: true });
+  await tick();
+}
+{
+  const submitted = [];
+  let seq = 0;
+  const voice = createMaidVoiceTaskRuntime({ makeId: () => `import-${++seq}`,
+    getCommandRuntime: () => ({ submitVoiceTask: async input => {
+      submitted.push(input);
+      return submitted.length === 1 ? { ok: true, status: 'awaiting_confirmation', pendingWorkflow: { kind: 'imported_card_session_setup' } } : { ok: true };
+    } }),
+  });
+  await voice.request({ target, args: { action: 'execute', request: '导入卡建房' } });
+  await tick();
+  await voice.request({ target, inputText: '可以', args: { action: 'confirm', request: '可以' } });
+  await tick();
+  assert.deepEqual(submitted, ['导入卡建房', '可以'], 'low-risk imported-card confirmation remains lenient');
+}
+console.log('ok - conditional permissions revise, repeated permissions reuse results, text scopes are isolated and imports stay lenient');
+
+{
+  // 带条件的确认/取消作用于正在等待确认的任务；引用已完成的续接任务继续做事时不继承续接授权
+  let seq = 0;
+  const queue = [], cancelledPending = [];
+  const command = { isSubmitting: () => false,
+    submitVoiceTask: (text, options) => { const done = deferred(); queue.push({ text, options, done }); return done.promise; },
+    cancelSubmission: id => { const entry = queue.find(item => item.options.id === id); if (!entry) return false; entry.cancelled = true; return true; },
+  };
+  const tasks = createMaidVoiceTaskRuntime({ getCommandRuntime: () => command, captureContext: () => ({ sessionId: 'room-a' }), makeId: () => `task-${++seq}`,
+    cancelPendingAction: ({ submissionId }) => { cancelledPending.push(submissionId); return true; } });
+  await tasks.request({ target, requestId: 'preview', args: { action: 'execute', request: '删除规则集甲和乙' } });
+  queue[0].done.resolve({ ok: true, status: 'awaiting_confirmation', message: '请确认', pendingWorkflow: { kind: 'maid_pending_action' } }); await tick();
+  await tasks.request({ target, requestId: 'other', args: { action: 'execute', request: '打开设置' } });
+  const revised = await tasks.request({ target, requestId: 'cond', inputText: '允许，但保留第二个', args: { action: 'confirm', request: '允许，但保留第二个' } });
+  assert(revised.accepted);
+  assert.equal(queue[1].cancelled, undefined, 'the unrelated running task is untouched');
+  assert.deepEqual(cancelledPending, ['task-1'], 'the waiting list is the one closed for revision');
+  assert.match(queue.at(-1).text, /删除规则集甲和乙.*用户修正：允许，但保留第二个/s);
+  assert.equal(queue.at(-1).options.context.pendingActionSubmissionId, undefined);
+
+  // 语音取消走 confirm 通道时同样只取消待确认的那一个
+  seq = 10; queue.length = 0; cancelledPending.length = 0;
+  const other = createMaidVoiceTaskRuntime({ getCommandRuntime: () => command, captureContext: () => ({ sessionId: 'room-a' }), makeId: () => `t-${++seq}`,
+    cancelPendingAction: ({ submissionId }) => { cancelledPending.push(submissionId); return true; } });
+  await other.request({ target, requestId: 'p', args: { action: 'execute', request: '删除规则集丙' } });
+  queue[0].done.resolve({ ok: true, status: 'awaiting_confirmation', message: '请确认', pendingWorkflow: { kind: 'maid_pending_action' } }); await tick();
+  await other.request({ target, requestId: 'o', args: { action: 'execute', request: '打开设置' } });
+  const cancelled = await other.request({ target, requestId: 'c', inputText: '取消', args: { action: 'confirm', request: '取消' } });
+  assert.equal(cancelled.cancelled, 1);
+  assert.deepEqual(cancelledPending, ['t-11']);
+  assert.equal(queue[1].cancelled, undefined);
+
+  // 允许 → 续接任务完成；之后引用它继续交办的新请求不带续接授权
+  seq = 20; queue.length = 0;
+  const third = createMaidVoiceTaskRuntime({ getCommandRuntime: () => command, captureContext: () => ({ sessionId: 'room-a' }), makeId: () => `u-${++seq}` });
+  await third.request({ target, requestId: 'p', args: { action: 'execute', request: '删除规则集丁' } });
+  queue[0].done.resolve({ ok: true, status: 'awaiting_confirmation', message: '请确认', pendingWorkflow: { kind: 'maid_pending_action' } }); await tick();
+  const confirmed = await third.request({ target, requestId: 'y', inputText: '允许', args: { action: 'confirm' } });
+  assert.equal(queue[1].options.context.pendingActionSubmissionId, 'u-21');
+  queue[1].done.resolve({ ok: true, message: '已删除' }); await tick();
+  await third.request({ target, requestId: 'f', args: { action: 'execute', request: '再把戊也删了', task_id: confirmed.task_id } });
+  assert.equal(queue[2].options.context.sessionId, 'room-a', 'the referenced room is kept');
+  assert.equal(queue[2].options.context.pendingActionSubmissionId, undefined, 'a follow-up is a new request, not a continuation of the old list');
+  console.log('ok - voice confirm revisions and cancels target the waiting task; follow-ups do not inherit continuation authority');
+}
 console.log('maid realtime tasks: independent lifecycle, frozen targets, revision/cancel, actual results, original UI routing and provider adapters passed');

@@ -64,7 +64,7 @@ import { setPromptLocale } from '../../src/scripts/i18n/prompt-locale.js';
     maidPrompt: '自定义女仆 system prompt',
   });
   assert.match(messages[0].content, /自定义女仆 system prompt/);
-  assert.match(messages[0].content, /历史上下文/);
+  assert.match(messages[0].content, /<maid_history>/);
   assert.match(messages[0].content, /未确认时跳过/);
   console.log('ok - maid chat responder uses editable maid prompt as system prompt');
 }
@@ -78,9 +78,12 @@ import { setPromptLocale } from '../../src/scripts/i18n/prompt-locale.js';
       memoryText: '| 1 | 摘要 |\n| 内容 | 用户创建了角色卡 A。 |',
     },
   });
-  assert.match(messages[1].content, /女仆分层记忆/);
+  assert.match(messages[1].content, /<maid_memory today="\d{4}-\d{2}-\d{2}">\n\| 1 \| 摘要/, 'memory is wrapped and dated');
+  assert.match(messages[1].content, /<\/maid_memory>\n<maid_history>/);
+  assert.match(messages[0].content, /仅供参考/);
+  assert.match(messages[0].content, /先用工具重新读取/, 'changeable app state must be re-read');
   assert.match(messages[1].content, /用户创建了角色卡 A/);
-  assert.match(messages[1].content, /女仆历史上下文/);
+  assert.match(messages[1].content, /<\/maid_history>/);
   assert.match(messages[1].content, /创建角色卡 A/);
   console.log('ok - maid chat responder injects history and memory context');
 }
@@ -148,7 +151,7 @@ import { setPromptLocale } from '../../src/scripts/i18n/prompt-locale.js';
   assert.equal(result.message, '你好，我在。');
   assert.equal(calls.length, 1);
   assert.match(calls[0].messages[0].content, /活泼一点/);
-  assert.match(calls[0].messages[0].content, /历史上下文/);
+  assert.match(calls[0].messages[0].content, /<maid_history>/);
   assert.equal(calls[0].options.maxTokens, 800);
   assert.equal(debugSnapshots.length, 1);
   assert.equal(debugSnapshots[0].source, 'maid_chat_responder');

@@ -259,5 +259,27 @@ const createStorage = () => {
   });
   await restored.load();
   assert.equal(restored.getMaxReactSteps(), 64, 'load 合并列表必须保留 maxReactSteps，不得回落默认值');
+  // 语音任务执行方式：未选时按语音执行；选过后跨重载保留
+  assert.equal(restored.hasChosenVoiceTaskExecutor(), false);
+  assert.equal(restored.getVoiceTaskExecutor(), 'voice');
+  await restored.setVoiceTaskExecutor('maid');
+  // 女仆思考设置：默认不开（强度预设为低），修改后跨重载保留
+  assert.deepEqual(restored.getGenerationSettings(), { reasoningMode: 'off', reasoningEffort: 'low' });
+  await restored.setGenerationSettings({ reasoningMode: 'on' });
+  await restored.setGenerationSettings({ reasoningEffort: 'medium' });
+  await restored.setGenerationSettings({ reasoningMode: 'bogus' });
+  assert.deepEqual(restored.getGenerationSettings(), { reasoningMode: 'off', reasoningEffort: 'medium' }, 'unknown modes fall back to off');
+  await restored.setGenerationSettings({ reasoningMode: 'on' });
+  now = 5400;
+  const reloaded = new MaidSettingsStore({
+    storage,
+    loadKv: async key => kv.get(key) || null,
+    saveKv: async (key, value) => { kv.set(key, JSON.parse(JSON.stringify(value))); },
+    now: () => now,
+  });
+  await reloaded.load();
+  assert.equal(reloaded.hasChosenVoiceTaskExecutor(), true, 'load 合并列表必须保留 voiceTaskExecutor');
+  assert.equal(reloaded.getVoiceTaskExecutor(), 'maid');
+  assert.deepEqual(reloaded.getGenerationSettings(), { reasoningMode: 'on', reasoningEffort: 'medium' }, 'load 合并列表必须保留 generation');
   console.log('ok - MaidSettingsStore normalizes and persists the react step limit across reloads');
 }

@@ -150,6 +150,7 @@ const splitScriptSteps = script =>
     'node scripts/tests/chat-store-scope-guard-tests.mjs',
     'node scripts/tests/chat-store-thread-reset-window-tests.mjs',
     'node scripts/tests/kv-too-large-guard-tests.mjs',
+    'node scripts/tests/preset-store-shard-load-tests.mjs',
     'node scripts/tests/worldinfo-store-read-safety-tests.mjs',
     'node scripts/tests/legacy-state-tie-utils-tests.mjs',
     'node scripts/tests/rp-session-store-storage-tier-tests.mjs',

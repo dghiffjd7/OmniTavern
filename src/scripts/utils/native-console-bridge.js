@@ -57,9 +57,16 @@ const installNativeConsoleBridge = () => {
   let count = 0;
   const limit = 600;
 
+  // 先判断再序列化：超过上限直接返回；log/info 只用字符串参数判断要不要转发，
+  // 确定转发时才序列化对象参数（大对象的 JSON.stringify 是 dev 下每条日志的主要开销）
   const mirror = (level, args) => {
+    if (count > limit) return;
+    const isLoud = level === 'warn' || level === 'error';
+    if (!isLoud) {
+      const probe = args.filter(arg => typeof arg === 'string' || arg instanceof Error).map(stringifyArg).join(' ');
+      if (!shouldMirrorLevel(level, probe)) return;
+    }
     const text = args.map(stringifyArg).join(' ');
-    if (!shouldMirrorLevel(level, text)) return;
     if (count >= limit) {
       if (count === limit) {
         count += 1;

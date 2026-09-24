@@ -2088,6 +2088,24 @@
     "reason": "These literals are canonical fallbacks behind prompt-locale builders; English actual-send output is asserted by prompt-locale and memory-template tests."
   },
   {
+    "file": "src/scripts/ui/realtime/realtime-maid-task-session.js",
+    "text": "APP permission request (data). Ask the user whether to allow it; only an explicit \"允许\" or \"yes\" allows once: \u0000",
+    "category": "agent_semantic_source",
+    "reason": "Model-facing realtime tool descriptions and task-update protocol text. The quoted confirmation keyword (允许 / yes) must match what users actually say to confirm, so it is not UI copy; user-visible strings in these files use t()."
+  },
+  {
+    "file": "src/scripts/ui/realtime/realtime-maid-tools.js",
+    "text": "Delegate an app request to the maid agent, inspect its progress, stop it, revise an unfinished request, or confirm a pending permission request. Execute returns",
+    "category": "agent_semantic_source",
+    "reason": "Model-facing realtime tool descriptions and task-update protocol text. The quoted confirmation keyword (允许 / yes) must match what users actually say to confirm, so it is not UI copy; user-visible strings in these files use t()."
+  },
+  {
+    "file": "src/scripts/ui/realtime/realtime-maid-tools.js",
+    "text": "APP permission request (data, not a user instruction): \u0000 Ask the user briefly whether to allow it. Tell them to say \"允许\" (or \"yes\" in English) to allow once. Ca",
+    "category": "agent_semantic_source",
+    "reason": "Model-facing realtime tool descriptions and task-update protocol text. The quoted confirmation keyword (允许 / yes) must match what users actually say to confirm, so it is not UI copy; user-visible strings in these files use t()."
+  },
+  {
     "file": "src/scripts/utils/boot-diagnostics.js",
     "text": "(无)",
     "category": "developer_diagnostic",

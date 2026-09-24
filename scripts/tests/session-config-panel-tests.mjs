@@ -32,7 +32,7 @@ const withSessionPanelWindow = async (fn) => {
   globalThis.window = {
     appBridge: {
       presets: {
-        getState: () => ({ presets: { openai: {} } }),
+        listSummaries: () => [],
       },
       config: {
         getProfiles: () => [],
@@ -113,15 +113,11 @@ test('SessionConfigPanel only lists presets eligible for the selected mode', asy
   await withSessionPanelWindow(async (SessionConfigPanel) => {
     const panel = new SessionConfigPanel({
       store: {
-        getState: () => ({
-          presets: {
-            openai: {
-              creative: { name: '创意专用', app_scope: 'creative' },
-              chat: { name: '聊天专用', app_scope: 'chat' },
-              all: { name: '全部', app_scope: 'all' },
-            },
-          },
-        }),
+        listSummaries: () => [
+          { id: 'creative', name: '创意专用', app_scope: 'creative' },
+          { id: 'chat', name: '聊天专用', app_scope: 'chat' },
+          { id: 'all', name: '全部', app_scope: 'all' },
+        ],
       },
     });
 

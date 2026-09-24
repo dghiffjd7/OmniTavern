@@ -538,6 +538,16 @@ export const migratePresetStateToAgentCenterSettings = (settings = {}, presetSta
   return normalizeAgentCenterSettings(next);
 };
 
+export const isLazyPresetMigrationNoop = (before = {}, after = {}, { profileType = '', presetId = '' } = {}) => {
+  const key = makeAgentProfileKey(trim(profileType), presetId);
+  const previous = normalizeAgentCenterSettings(before);
+  if (!key || !previous.profiles?.[key]) return false;
+  const candidate = normalizeAgentCenterSettings(after);
+  if (!candidate.profiles?.[key]) return false;
+  candidate.profiles[key] = { ...candidate.profiles[key], updatedAt: previous.profiles[key].updatedAt };
+  return JSON.stringify(candidate) === JSON.stringify(previous);
+};
+
 export const lazyMigratePresetProfileToAgentCenterSettings = (settings = {}, {
   profileType = '',
   presetId = '',
@@ -874,11 +884,17 @@ export const createAgentCenterSettingsStore = ({
     presetState,
     { ...(options || {}), officialPromptDefaults },
   ));
-  const lazyMigratePresetProfile = (options = {}, meta = {}) => save(lazyMigratePresetProfileToAgentCenterSettings(current, {
-    ...(options || {}),
-    now: meta.now || Date.now,
-    officialPromptDefaults,
-  }));
+  // 懒迁移在读取路径上被频繁调用（Agent Center 视图、状态胶囊）：结果除目标配置的 updatedAt 外
+  // 与当前完全相同时视为无变化，不写盘、也不刷新时间戳
+  const lazyMigratePresetProfile = (options = {}, meta = {}) => {
+    const next = lazyMigratePresetProfileToAgentCenterSettings(current, {
+      ...(options || {}),
+      now: meta.now || Date.now,
+      officialPromptDefaults,
+    });
+    if (isLazyPresetMigrationNoop(current, next, options)) return Promise.resolve(normalizeAgentCenterSettings(current));
+    return save(next);
+  };
   const saveGlobalPromptMutation = mutation => save(mutation.settings).then(settings => ({
     ok: true,
     settings,

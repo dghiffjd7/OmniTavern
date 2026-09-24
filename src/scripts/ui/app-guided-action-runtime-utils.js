@@ -386,6 +386,8 @@ export const createAppGuidedActionRuntime = ({
   guideStore = null,
   getFeature = findAppFeature,
   showGuide = null,
+  // 返回 true 时本次不弹首次引导、也不记为已完成（例如实时语音中：用户看不到或点不到高亮，任务会一直等待）
+  shouldSkipGuide = null,
 } = {}) => {
   const resolveFeature = (plan = {}) => {
     const featureId = trim(plan?.featureId);
@@ -405,9 +407,11 @@ export const createAppGuidedActionRuntime = ({
     }
     const feature = resolveFeature(plan);
     const guide = feature ? buildGuidedActionGuide(feature) : null;
+    const skippedByContext = typeof shouldSkipGuide === 'function' && shouldSkipGuide({ plan, context }) === true;
     const shouldGuide = Boolean(
       guide?.guideId &&
       plan?.skipGuide !== true &&
+      !skippedByContext &&
       (plan?.forceGuide === true || !isGuideCompleted(guide.guideId))
     );
     if (shouldGuide && typeof showGuide === 'function') {

@@ -6,6 +6,7 @@ import {
   normalizeMaidReactStepLimit,
 } from '../storage/maid-settings-store.js';
 import { escapeHtml } from '../utils/name-badges.js';
+import { getAgentReasoningControl } from '../agent/agent-generation-settings.js';
 import { rankModelCandidates } from '../utils/model-candidates.js';
 import { ONBOARDING_TASKS } from './maid-onboarding-flows.js';
 const STYLE_ID = 'maid-settings-panel-style';
@@ -1310,6 +1311,18 @@ const injectStyle = (documentRef) => {
 .maid-memory-delete:active {
   transform: scale(.96);
 }
+.maid-memory-clear-all {
+  flex: 0 0 auto;
+  margin-left: auto;
+  align-self: center;
+}
+.maid-memory-edit-input {
+  width: 100%;
+  min-height: 88px;
+  margin-top: 8px;
+  box-sizing: border-box;
+  resize: vertical;
+}
 
 /* API 首页卡片与二级编辑页。运行时样式晚于 qq-legacy，统一覆盖旧紧凑表单。 */
 .maid-api-nav {
@@ -1461,6 +1474,9 @@ const injectStyle = (documentRef) => {
 }
 .maid-api-field {
   gap: 6px;
+}
+.maid-api-field[hidden] {
+  display: none;
 }
 .maid-api-field-label {
   font-size: 11.5px;
@@ -1772,6 +1788,9 @@ const injectStyle = (documentRef) => {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+  .maid-memory-clear-all {
+    width: auto;
+  }
 }
 
 @media (max-width: 380px) {
@@ -1934,6 +1953,10 @@ export const createMaidSettingsPanel = ({
   getMemoryTableText = () => '',
   semanticMemoryStore = null,
   confirmDeleteSemanticMemory = null,
+  // 记忆管理：清除最近对话 / 轮次归档；清除类操作都先经过确认弹窗
+  clearHistoryContext = null,
+  clearMemoryTable = null,
+  confirmMemoryAction = null,
   listRuns = null,
   allowRulesStore = null,
   onResumeRun = null,
@@ -1958,6 +1981,7 @@ export const createMaidSettingsPanel = ({
   let memoryTableTextarea = null;
   let semanticMemoryListEl = null;
   let semanticMemoryCountEl = null;
+  let editingMemoryId = '';
   let lastAppContextTextarea = null;
   let lastPromptTextarea = null;
   let lastResponseTextarea = null;
@@ -1984,6 +2008,25 @@ export const createMaidSettingsPanel = ({
   const getAppKnowledge = () => trim(getAppKnowledgeText?.(), '暂无 APP 知识。');
   const getHistoryContext = () => trim(getHistoryContextText?.(), '尚未记录女仆历史上下文。');
   const getMemoryTable = () => trim(getMemoryTableText?.(), '尚未生成女仆记忆表格。');
+
+  const confirmMemory = async ({ title, message }) => (typeof confirmMemoryAction === 'function'
+    ? await confirmMemoryAction({ title, message })
+    : globalThis?.confirm?.(message) === true);
+
+  // 清除一类记忆：确认后执行并刷新面板
+  const runMemoryClear = async ({ title, message, action, done }) => {
+    if (typeof action !== 'function') return;
+    if (!await confirmMemory({ title, message })) return;
+    try {
+      await action();
+      editingMemoryId = '';
+      setStatus(done);
+      refresh();
+    } catch (error) {
+      logger?.warn?.('maid settings clear memory failed', error);
+      setStatus('清除失败');
+    }
+  };
 
   const appendEmptyItem = (container, message = '') => {
     const empty = documentRef.createElement?.('div');
@@ -2224,10 +2267,20 @@ export const createMaidSettingsPanel = ({
       key.textContent = trim(memory?.key, 'unknown.key');
       heading.append(kind, confidence, status, key);
 
-      const content = documentRef.createElement?.('div');
-      content.className = 'maid-memory-content';
-      content.dataset.i18nSkip = '';
-      content.textContent = trim(memory?.content, '（空）');
+      const isEditing = editingMemoryId && editingMemoryId === trim(memory?.id);
+      let content = null;
+      if (isEditing) {
+        content = createTextarea(documentRef);
+        content.classList?.add?.('maid-memory-edit-input');
+        content.dataset.i18nSkip = '';
+        content.setAttribute?.('aria-label', '编辑记忆内容');
+        content.value = trim(memory?.content);
+      } else {
+        content = documentRef.createElement?.('div');
+        content.className = 'maid-memory-content';
+        content.dataset.i18nSkip = '';
+        content.textContent = trim(memory?.content, '（空）');
+      }
       main.append(heading, content);
 
       const tags = Array.isArray(memory?.tags) ? memory.tags.map(tag => trim(tag)).filter(Boolean).slice(0, 5) : [];
@@ -2254,7 +2307,40 @@ export const createMaidSettingsPanel = ({
       const actions = documentRef.createElement?.('div');
       actions.className = 'maid-memory-actions';
       const memoryStatus = trim(memory?.status, 'active');
-      if (memoryStatus === 'active' || memoryStatus === 'archived') {
+      if (isEditing) {
+        const saveBtn = createButton(documentRef, 'maid-memory-status-action', '保存');
+        saveBtn.addEventListener?.('click', async () => {
+          const next = trim(content.value);
+          if (!next) {
+            setStatus('记忆内容不能为空');
+            return;
+          }
+          try {
+            const updated = await semanticMemoryStore?.updateMemoryContent?.(memory?.id, next);
+            editingMemoryId = '';
+            setStatus(updated ? '长期记忆已更新' : '保存失败');
+            renderSemanticMemories();
+          } catch (error) {
+            logger?.warn?.('maid settings edit semantic memory failed', error);
+            setStatus('保存失败');
+          }
+        });
+        const cancelBtn = createButton(documentRef, 'maid-memory-status-action', '取消');
+        cancelBtn.addEventListener?.('click', () => {
+          editingMemoryId = '';
+          renderSemanticMemories();
+        });
+        actions.append(saveBtn, cancelBtn);
+      } else if (typeof semanticMemoryStore?.updateMemoryContent === 'function') {
+        const editBtn = createButton(documentRef, 'maid-memory-status-action', '编辑');
+        editBtn.addEventListener?.('click', () => {
+          editingMemoryId = trim(memory?.id);
+          renderSemanticMemories();
+          semanticMemoryListEl?.querySelector?.('.maid-memory-edit-input')?.focus?.();
+        });
+        actions.appendChild(editBtn);
+      }
+      if (!isEditing && (memoryStatus === 'active' || memoryStatus === 'archived')) {
         const nextStatus = memoryStatus === 'archived' ? 'active' : 'archived';
         const actionLabel = memoryStatus === 'archived' ? '恢复' : '归档';
         const statusBtn = createButton(documentRef, 'maid-memory-status-action', actionLabel);
@@ -2285,7 +2371,7 @@ export const createMaidSettingsPanel = ({
           setStatus('删除失败');
         }
       });
-      actions.appendChild(deleteBtn);
+      if (!isEditing) actions.appendChild(deleteBtn);
       item.append(main, actions);
 
       const sourceIds = Array.isArray(memory?.sourceTurnIds)
@@ -2569,6 +2655,32 @@ export const createMaidSettingsPanel = ({
                 ${profileOptions(fallbackId)}
               </select>
             </label>
+            ${(() => {
+              const generation = settingsStore?.getGenerationSettings?.() || { reasoningMode: 'off', reasoningEffort: 'low' };
+              const control = getAgentReasoningControl({ provider: boundProfile?.provider || '', model: shownModel });
+              const efforts = control.effortOptions.some(item => item.value === generation.reasoningEffort)
+                ? control.effortOptions : [...control.effortOptions, { value: generation.reasoningEffort, label: generation.reasoningEffort }];
+              const hint = !shownModel ? '选择模型后可设置思考。'
+                : !control.supported ? '暂未识别此模型的思考参数，将使用模型默认行为。'
+                  : control.canDisable ? '关闭时会明确要求模型不思考；开启后按所选强度发送。'
+                    : '此模型无法完全关闭思考，「不额外请求」时沿用模型自身行为；想更快可选开启 + 低强度。';
+              return `
+            <label class="maid-api-field">
+              <span class="maid-api-field-label">思考模式（仅用于女仆，与预设参数独立）</span>
+              <select class="maid-subagent-select" data-main-reasoning-mode>
+                <option value="off"${generation.reasoningMode === 'off' ? ' selected' : ''}>${control.canDisable ? '关闭（默认）' : '不额外请求（默认）'}</option>
+                <option value="on"${generation.reasoningMode === 'on' ? ' selected' : ''}>开启</option>
+                <option value="default"${generation.reasoningMode === 'default' ? ' selected' : ''}>模型默认</option>
+              </select>
+            </label>
+            <label class="maid-api-field" data-main-reasoning-effort-field${generation.reasoningMode === 'on' ? '' : ' hidden'}>
+              <span class="maid-api-field-label">思考强度</span>
+              <select class="maid-subagent-select" data-main-reasoning-effort>
+                ${efforts.map(item => `<option value="${escapeHtml(item.value)}"${item.value === generation.reasoningEffort ? ' selected' : ''}>${escapeHtml(item.label)}</option>`).join('')}
+              </select>
+            </label>
+            <div class="maid-api-group-desc"><span>${hint}</span><span>女仆每步只输出很短的指令，一般不需要思考；开启会变慢、消耗更多。</span></div>`;
+            })()}
             <label class="maid-api-field">
               <span class="maid-api-field-label">单次任务步数上限（${MAID_REACT_STEP_LIMIT_MIN}-${MAID_REACT_STEP_LIMIT_MAX}，默认 ${MAID_REACT_STEP_LIMIT_DEFAULT}）</span>
               <input type="number" class="maid-subagent-input" data-main-max-steps inputmode="numeric" min="${MAID_REACT_STEP_LIMIT_MIN}" max="${MAID_REACT_STEP_LIMIT_MAX}" step="1" value="${escapeHtml(String(settingsStore?.getMaxReactSteps?.() ?? MAID_REACT_STEP_LIMIT_DEFAULT))}" />
@@ -2829,6 +2941,14 @@ export const createMaidSettingsPanel = ({
         apiSection.querySelector('[data-main-fallback]')?.addEventListener('change', (event) => {
           void settingsStore?.setFallbackProfileId?.(event.target.value);
         });
+        apiSection.querySelector('[data-main-reasoning-mode]')?.addEventListener('change', async (event) => {
+          await settingsStore?.setGenerationSettings?.({ reasoningMode: event.target.value });
+          const effortField = apiSection.querySelector('[data-main-reasoning-effort-field]');
+          if (effortField) effortField.hidden = event.target.value !== 'on';
+        });
+        apiSection.querySelector('[data-main-reasoning-effort]')?.addEventListener('change', (event) => {
+          void settingsStore?.setGenerationSettings?.({ reasoningEffort: event.target.value });
+        });
         const maxStepsInput = apiSection.querySelector('[data-main-max-steps]');
         maxStepsInput?.addEventListener('change', async () => {
           const normalized = normalizeMaidReactStepLimit(maxStepsInput.value);
@@ -3036,6 +3156,16 @@ export const createMaidSettingsPanel = ({
     setIconButtonContent(copyHistoryContextBtn, ICONS.copy, '复制');
     copyHistoryContextBtn.addEventListener?.('click', () => void copyCurrentText('historyContext'));
     historyContextFooter.appendChild(copyHistoryContextBtn);
+    if (typeof clearHistoryContext === 'function') {
+      const clearHistoryBtn = createButton(documentRef, 'maid-memory-delete', '清除历史');
+      clearHistoryBtn.addEventListener?.('click', () => void runMemoryClear({
+        title: '清除女仆历史上下文',
+        message: '将删除全部最近对话记录，女仆之后不会再参考这些对话；其中尚未整理进长期记忆的内容也会一起丢弃。长期记忆与轮次归档不受影响。此操作无法恢复。',
+        action: clearHistoryContext,
+        done: '历史上下文已清除',
+      }));
+      historyContextFooter.appendChild(clearHistoryBtn);
+    }
     historyContextField.append(historyContextLabel, historyContextTextarea);
     historyContextPane.append(historyContextField, historyContextFooter);
 
@@ -3065,6 +3195,23 @@ export const createMaidSettingsPanel = ({
     semanticMemoryDesc.textContent = '仅保存跨任务仍有价值的偏好、决定与已验证状态；可追溯到来源轮次。';
     semanticMemoryCopy.append(semanticMemoryTitleRow, semanticMemoryDesc);
     semanticMemoryHead.append(semanticMemoryMark, semanticMemoryCopy);
+    if (typeof semanticMemoryStore?.clearMemories === 'function') {
+      const clearSemanticBtn = createButton(documentRef, 'maid-memory-delete maid-memory-clear-all', '清空全部');
+      clearSemanticBtn.addEventListener?.('click', () => {
+        const count = (semanticMemoryStore?.listMemories?.() || []).length;
+        if (!count) {
+          setStatus('还没有长期记忆。');
+          return;
+        }
+        void runMemoryClear({
+          title: '清空长期记忆',
+          message: `将永久删除全部 ${count} 条长期记忆（包括已归档的）。此操作无法恢复。`,
+          action: () => semanticMemoryStore.clearMemories(),
+          done: '长期记忆已清空',
+        });
+      });
+      semanticMemoryHead.appendChild(clearSemanticBtn);
+    }
     semanticMemoryListEl = documentRef.createElement?.('div');
     semanticMemoryListEl.className = 'maid-memory-list';
     semanticMemoryOverview.append(semanticMemoryHead, semanticMemoryListEl);
@@ -3084,6 +3231,16 @@ export const createMaidSettingsPanel = ({
     setIconButtonContent(copyMemoryTableBtn, ICONS.copy, '复制');
     copyMemoryTableBtn.addEventListener?.('click', () => void copyCurrentText('memoryTable'));
     memoryTableFooter.appendChild(copyMemoryTableBtn);
+    if (typeof clearMemoryTable === 'function') {
+      const clearTableBtn = createButton(documentRef, 'maid-memory-delete', '清除归档');
+      clearTableBtn.addEventListener?.('click', () => void runMemoryClear({
+        title: '清除轮次归档',
+        message: '将删除全部轮次归档（较早对话的压缩摘要）。此操作无法恢复。',
+        action: clearMemoryTable,
+        done: '轮次归档已清除',
+      }));
+      memoryTableFooter.appendChild(clearTableBtn);
+    }
     memoryTableField.append(memoryTableLabel, memoryTableTextarea);
     memoryTablePane.append(memoryTableField, memoryTableFooter);
 

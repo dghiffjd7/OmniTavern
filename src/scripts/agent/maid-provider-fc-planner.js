@@ -2,10 +2,13 @@ import { validateAgentToolArguments } from './agent-tool-registry.js';
 import { createProviderToolCallDeltaAccumulator } from './provider-tool-call-delta-adapter.js';
 import { buildProviderFcRequestPlan, resolveProviderFcTransport } from './provider-fc-transport.js';
 import { toProviderToolModelName } from './provider-tool-name-map.js';
+import { buildMaidReasoningBaseOptions, hasReasoningOptions } from './maid-generation-settings.js';
+import { getReasoningCapability } from '../api/model-capabilities.js';
 
 export const MAID_PROVIDER_FC_MODE = 'provider_fc';
 export const MAID_PROMPTED_JSON_MODE = 'prompted_json';
 export const MAID_PROVIDER_FC_CONTROL_TOOL_NAME = 'maid_planner_control';
+export const MAID_PROVIDER_FC_MESSAGE_MAX_LENGTH = 6000;
 
 const isPlainObject = value => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 
@@ -65,6 +68,29 @@ const hasImageParts = (messages = []) => (Array.isArray(messages) ? messages : [
   Array.isArray(message?.content) && message.content.some(part => part?.type === 'image_url')
 ));
 
+// 同一服务商+模型的函数调用请求失败后，冷却一段时间直接走普通规划：
+// 失败的尝试已经等了一轮，回退还要重发完整提示词，连续失败会让每一步都付两次时间和 token。
+export const MAID_PROVIDER_FC_FAILURE_COOLDOWN_MS = 10 * 60 * 1000;
+const providerFcCooldowns = new Map();
+const providerFcCooldownKey = (config = {}) => `${trim(config?.provider)}|${trim(config?.model)}`;
+export const markMaidProviderFcFailure = (config = {}, now = Date.now()) => {
+  providerFcCooldowns.set(providerFcCooldownKey(config), Number(now) + MAID_PROVIDER_FC_FAILURE_COOLDOWN_MS);
+};
+export const isMaidProviderFcCoolingDown = (config = {}, now = Date.now()) => {
+  const key = providerFcCooldownKey(config);
+  const until = providerFcCooldowns.get(key) || 0;
+  if (until > Number(now)) return true;
+  providerFcCooldowns.delete(key);
+  return false;
+};
+export const resetMaidProviderFcCooldowns = () => providerFcCooldowns.clear();
+export const isProviderFcRequestRejection = (error = null) => {
+  const status = Number(error?.status || error?.statusCode || 0);
+  if (status === 400 || status === 422) return true;
+  return /\b(?:400|422)\b|invalid argument|invalid json payload|unknown name|schema|function_?declaration|tool[_ ]?choice/i
+    .test(String(error?.message || error || ''));
+};
+
 export const resolveMaidProviderFcEligibility = ({
   experimentStatus = null,
   config = {},
@@ -72,6 +98,7 @@ export const resolveMaidProviderFcEligibility = ({
   messages = [],
   phase = 'planner',
   client = null,
+  now = Date.now,
 } = {}) => {
   const enabled = experimentStatus?.enabled === true;
   const thinkingEnabled = experimentStatus?.thinkingEnabled === true;
@@ -81,6 +108,7 @@ export const resolveMaidProviderFcEligibility = ({
   if (!enabled) reason = 'experiment_disabled';
   else if (!providerTransport.supported) reason = providerTransport.reason;
   else if (providerTransport.provider === 'opencode') reason = 'provider_rollout_deferred';
+  else if (isMaidProviderFcCoolingDown(config, Number(now?.() || Date.now()))) reason = 'provider_fc_cooling_down';
   else if (!['planner', 'react'].includes(normalizedPhase)) reason = 'unsupported_phase';
   else if (!client || typeof client.chat !== 'function') reason = 'provider_client_unavailable';
   else if (capabilitySnapshot?.useCandidates !== true) reason = 'candidate_snapshot_required';
@@ -128,10 +156,12 @@ const buildControlSchema = () => ({
       enum: ['final', 'clarify', 'unsupported', 'no_tool'],
       description: 'Use final when observations are sufficient; otherwise clarify, unsupported, or no_tool.',
     },
+    // 最终答复可能是较长的清单（例如列出几十个名称）。Gemini 的 schema 不支持 maxLength，模型看不到上限，
+    // 上限过小会让合法的长答复在本地校验失败、再走一次文本路径重新生成
     message: {
       type: 'string',
       minLength: 1,
-      maxLength: 1200,
+      maxLength: MAID_PROVIDER_FC_MESSAGE_MAX_LENGTH,
       description: 'Natural user-facing answer or clarification, without tool JSON.',
     },
     reason: {
@@ -153,6 +183,7 @@ export const buildMaidProviderFcToolPlan = ({
   features = [],
   phase = 'planner',
   thinkingEnabled = false,
+  reasoningOptions = {},
 } = {}) => {
   const candidateFeatures = Array.isArray(features) ? features : [];
   const usedNames = new Map([[MAID_PROVIDER_FC_CONTROL_TOOL_NAME, MAID_PROVIDER_FC_CONTROL_TOOL_NAME]]);
@@ -227,7 +258,9 @@ export const buildMaidProviderFcToolPlan = ({
   const requestPlan = buildProviderFcRequestPlan({
     config,
     tools,
-    thinkingEnabled,
+    thinkingEnabled: thinkingEnabled && (resolveProviderFcTransport(config).family !== 'anthropic'
+      || getReasoningCapability(config).supported || ['enabled', 'adaptive'].includes(reasoningOptions?.thinking?.type)),
+    reasoningOptions,
     temperature: 0,
   });
   if (!requestPlan.ok) {
@@ -249,7 +282,9 @@ export const buildMaidProviderFcToolPlan = ({
     reason: '',
     toolMappings,
     requestOptions: requestPlan.requestOptions,
-    generationOptions: requestPlan.generationOptions,
+    generationOptions: hasReasoningOptions(requestPlan.generationOptions)
+      ? requestPlan.generationOptions
+      : { ...reasoningOptions, ...requestPlan.generationOptions },
     diagnostics: {
       phase: trim(phase, 'planner'),
       ...(requestPlan.diagnostics || {}),
@@ -315,7 +350,7 @@ export const normalizeMaidProviderFcCompletedCalls = ({
       toolCallCount: 1,
       control: {
         action: trim(validation.args.action, 'no_tool').toLowerCase(),
-        message: truncate(validation.args.message, 1200),
+        message: truncate(validation.args.message, MAID_PROVIDER_FC_MESSAGE_MAX_LENGTH),
         reason: trim(validation.args.reason),
       },
     };
@@ -349,6 +384,7 @@ export const runMaidProviderFcAttempt = async ({
   phase = 'planner',
   signal = null,
   maxTokens = 8000,
+  generationSettings = null,
   onModelUsage = null,
   now = Date.now,
 } = {}) => {
@@ -359,6 +395,7 @@ export const runMaidProviderFcAttempt = async ({
     messages,
     phase,
     client,
+    now,
   });
   if (!eligibility.eligible) {
     return {
@@ -373,7 +410,8 @@ export const runMaidProviderFcAttempt = async ({
     config,
     features: capabilitySnapshot.candidateFeatures,
     phase: eligibility.phase,
-    thinkingEnabled: eligibility.thinkingEnabled,
+    thinkingEnabled: eligibility.thinkingEnabled || generationSettings?.reasoningMode === 'on',
+    reasoningOptions: buildMaidReasoningBaseOptions(config, generationSettings),
   });
   if (!toolPlan.ok) {
     return {
@@ -392,7 +430,8 @@ export const runMaidProviderFcAttempt = async ({
   const completedToolCalls = [];
   let capturedUsage = null;
   const startedAt = Number(now?.() || Date.now()) || Date.now();
-  const reportUsage = () => {
+  // outcome/error 记下这次函数调用尝试的结局（ok 或回退原因），供分段计时区分“慢”与“失败后回退”
+  const reportUsage = ({ outcome = '', error = '' } = {}) => {
     if (typeof onModelUsage !== 'function') return;
     try {
       onModelUsage({
@@ -402,12 +441,16 @@ export const runMaidProviderFcAttempt = async ({
         latencyMs: Math.max(0, (Number(now?.() || Date.now()) || Date.now()) - startedAt),
         modelCallCount: 1,
         degraded: false,
+        transport: 'provider_fc',
+        ...(outcome ? { outcome } : {}),
+        ...(error ? { error } : {}),
       });
     } catch {}
   };
 
   let responseText = '';
   try {
+    // 思考参数已参与工具计划的兼容校验，不能在校验后追加可能不兼容的参数。
     responseText = await client.chat(messages, {
       ...toolPlan.generationOptions,
       maxTokens,
@@ -423,10 +466,11 @@ export const runMaidProviderFcAttempt = async ({
         completedToolCalls.push(...next.completed);
       },
     });
-    reportUsage();
   } catch (error) {
-    reportUsage();
+    reportUsage({ outcome: 'provider_request_failed', error: truncate(error?.message || error, 160) });
     if (isAbortError(error, signal)) throw error;
+    // 只有服务商拒收这类函数调用请求（400/422、参数/schema 无效）才冷却；配额、鉴权、网络等临时故障与函数调用无关
+    if (isProviderFcRequestRejection(error)) markMaidProviderFcFailure(config, Number(now?.() || Date.now()));
     return {
       attempted: true,
       ok: false,
@@ -446,6 +490,7 @@ export const runMaidProviderFcAttempt = async ({
     toolPlan,
     phase: eligibility.phase,
   });
+  reportUsage({ outcome: normalized.ok ? 'ok' : trim(normalized.reason, 'no_tool_call') });
   return {
     attempted: true,
     ...normalized,

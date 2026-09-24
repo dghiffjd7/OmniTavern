@@ -4,6 +4,7 @@ import {
   canonicalizeMaidPrompt,
   getLocalizedMaidPrompt,
 } from '../agent/maid-prompt-defaults.js';
+import { normalizeMaidGenerationSettings } from '../agent/maid-generation-settings.js';
 
 export const MAID_SETTINGS_STORE_KEY = 'maid_settings_store_v1';
 export const MAID_SETTINGS_STORE_VERSION = 1;
@@ -135,6 +136,8 @@ const toPersistedMaidSettingsState = (state = {}, { now = Date.now } = {}) => {
     boundProfileId: normalized.boundProfileId,
     boundModelOverride: normalized.boundModelOverride,
     voiceInputMode: normalized.voiceInputMode,
+    voiceTaskExecutor: normalized.voiceTaskExecutor,
+    generation: normalized.generation,
     fallbackProfileId: normalized.fallbackProfileId,
     subAgents: normalized.subAgents,
     subAgentRemindAt: normalized.subAgentRemindAt,
@@ -202,6 +205,10 @@ export const normalizeMaidSettingsState = (raw = {}, { now = Date.now } = {}) =>
     boundProfileId: trim(src.boundProfileId),
     boundModelOverride: trim(src.boundModelOverride),
     voiceInputMode: src.voiceInputMode === 'stt' ? 'stt' : 'realtime',
+    // 实时语音里的应用任务由谁执行：voice = 语音设置档的推理模型，maid = 女仆设置里的模型；空 = 用户还没选（按 voice）
+    voiceTaskExecutor: ['voice', 'maid'].includes(src.voiceTaskExecutor) ? src.voiceTaskExecutor : '',
+    // 女仆自己的思考模式/强度（与预设参数独立）
+    generation: normalizeMaidGenerationSettings(src.generation),
     fallbackProfileId: trim(src.fallbackProfileId),
     subAgents: (Array.isArray(src.subAgents) ? src.subAgents : [])
       .map(item => normalizeMaidSubAgent(item, { now }))
@@ -306,6 +313,16 @@ export class MaidSettingsStore {
         localHasValue: Object.hasOwn(localRaw, 'voiceInputMode'),
         kvHasValue: Boolean(kvRaw && Object.hasOwn(kvRaw, 'voiceInputMode')),
       }),
+      voiceTaskExecutor: chooseFieldFromSources({ localRaw, kvRaw,
+        localValue: localState.voiceTaskExecutor, kvValue: kvState?.voiceTaskExecutor,
+        localHasValue: Object.hasOwn(localRaw, 'voiceTaskExecutor'),
+        kvHasValue: Boolean(kvRaw && Object.hasOwn(kvRaw, 'voiceTaskExecutor')),
+      }),
+      generation: chooseFieldFromSources({ localRaw, kvRaw,
+        localValue: localState.generation, kvValue: kvState?.generation,
+        localHasValue: Object.hasOwn(localRaw, 'generation'),
+        kvHasValue: Boolean(kvRaw && Object.hasOwn(kvRaw, 'generation')),
+      }),
       boundModelOverride: (readTimestamp(kvRaw) >= readTimestamp(localRaw) ? kvState : localState)?.boundModelOverride
         || kvState?.boundModelOverride || localState.boundModelOverride || '',
       fallbackProfileId: (readTimestamp(kvRaw) >= readTimestamp(localRaw) ? kvState : localState)?.fallbackProfileId
@@ -387,6 +404,36 @@ export class MaidSettingsStore {
     this.state.voiceInputMode = mode === 'stt' ? 'stt' : 'realtime';
     await this.write();
     return this.getVoiceInputMode();
+  }
+
+  // 用户是否已在首次语音时选过任务执行方式
+  hasChosenVoiceTaskExecutor() {
+    this.ensureLoaded();
+    return ['voice', 'maid'].includes(this.state.voiceTaskExecutor);
+  }
+
+  getVoiceTaskExecutor() {
+    this.ensureLoaded();
+    return this.state.voiceTaskExecutor === 'maid' ? 'maid' : 'voice';
+  }
+
+  async setVoiceTaskExecutor(executor) {
+    this.ensureLoaded();
+    this.state.voiceTaskExecutor = executor === 'maid' ? 'maid' : 'voice';
+    await this.write();
+    return this.getVoiceTaskExecutor();
+  }
+
+  getGenerationSettings() {
+    this.ensureLoaded();
+    return normalizeMaidGenerationSettings(this.state.generation);
+  }
+
+  async setGenerationSettings(patch = {}) {
+    this.ensureLoaded();
+    this.state.generation = normalizeMaidGenerationSettings({ ...this.state.generation, ...patch });
+    await this.write();
+    return this.getGenerationSettings();
   }
 
   async setBoundModelOverride(model = '') {

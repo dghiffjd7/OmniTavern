@@ -34,6 +34,7 @@ const safeInvoke = async (cmd, args) => {
 const STORE_KEY = 'prompt_preset_store_v1';
 const SHARDED_STORE_INDEX_KEY = 'prompt_preset_store_v2_index';
 const SHARDED_STORE_ITEM_PREFIX = 'prompt_preset_store_v2_item';
+const PRESET_SHARD_LOAD_CONCURRENCY = 8;
 
 const genId = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 
@@ -1018,7 +1019,11 @@ const normalizeOpenAIPreset = (preset) => {
             if (seen.has(identifier)) continue;
             seen.add(identifier);
             const enabled = (it && typeof it === 'object' && 'enabled' in it) ? (it.enabled !== false) : true;
-            out.push({ identifier, enabled });
+            // 沿用原条目的键顺序：分片落盘后键会按字母排序（enabled 在前），若每次加载都重建成
+            // identifier 在前，启动时的签名比较会把内容未变的预设误判为已修改并整份重写
+            out.push(it && typeof it === 'object' && Object.keys(it)[0] === 'enabled'
+                ? { enabled, identifier }
+                : { identifier, enabled });
         }
         return out;
     };
@@ -1136,6 +1141,8 @@ export class PresetStore {
         this.state = null;
         this.isLoaded = false;
         this.persistedItemSignatures = new Map();
+        // 每次加载、持久化或设置会话内工作副本时递增；只读窥视接口的调用方据此判断缓存是否失效
+        this.revision = 0;
         // TavernHelper's in_use edits are session-local working data. They are
         // deliberately outside state, so export/persist cannot save them.
         this.inUsePresets = new Map();
@@ -1173,36 +1180,56 @@ export class PresetStore {
             bindings: index.bindings,
         };
         let skipPersistOnLoad = false;
+        const entries = [];
         for (const type of PRESET_TYPES) {
             const bucket = index.items[type] || {};
             for (const [id, meta] of Object.entries(bucket)) {
                 const presetId = String(id || '').trim();
                 const key = String(meta?.key || '').trim();
                 if (!presetId || !key) continue;
+                entries.push({ type, presetId, key });
+            }
+        }
+        // 分片并发读取（限制并发数）；结果仍按索引顺序写入 state，列表顺序与串行读取一致
+        const loaded = new Array(entries.length);
+        let cursor = 0;
+        const worker = async () => {
+            while (cursor < entries.length) {
+                const at = cursor++;
                 try {
-                    const payload = await safeInvoke('load_kv', { name: key });
-                    if (payload && typeof payload === 'object' && payload._tooLarge) {
-                        skipPersistOnLoad = true;
-                        logger.warn('preset item payload too large; skip startup prune', { type, id: presetId, key, size: payload.size });
-                        continue;
-                    }
-                    const data = readPresetItemPayload(payload, type, presetId);
-                    if (data) {
-                        state.presets[type][presetId] = data;
-                        this.persistedItemSignatures.set(key, makePresetItemSignature(type, presetId, data));
-                    }
-                    else {
-                        skipPersistOnLoad = true;
-                        if (isNonEmptyObject(payload)) {
-                            logger.warn('preset item payload invalid; skipped without startup prune', { type, id: presetId, key });
-                        } else {
-                            logger.warn('preset item payload missing; skipped without startup prune', { type, id: presetId, key });
-                        }
-                    }
+                    loaded[at] = { payload: await safeInvoke('load_kv', { name: entries[at].key }) };
                 } catch (err) {
-                    skipPersistOnLoad = true;
-                    logger.warn('preset item load failed; skipped without startup prune', { type, id: presetId, key, err });
+                    loaded[at] = { err };
                 }
+            }
+        };
+        await Promise.all(Array.from({ length: Math.min(PRESET_SHARD_LOAD_CONCURRENCY, entries.length) }, worker));
+        for (let at = 0; at < entries.length; at++) {
+            const { type, presetId, key } = entries[at];
+            try {
+                if (loaded[at].err) throw loaded[at].err;
+                const payload = loaded[at].payload;
+                if (payload && typeof payload === 'object' && payload._tooLarge) {
+                    skipPersistOnLoad = true;
+                    logger.warn('preset item payload too large; skip startup prune', { type, id: presetId, key, size: payload.size });
+                    continue;
+                }
+                const data = readPresetItemPayload(payload, type, presetId);
+                if (data) {
+                    state.presets[type][presetId] = data;
+                    this.persistedItemSignatures.set(key, makePresetItemSignature(type, presetId, data));
+                }
+                else {
+                    skipPersistOnLoad = true;
+                    if (isNonEmptyObject(payload)) {
+                        logger.warn('preset item payload invalid; skipped without startup prune', { type, id: presetId, key });
+                    } else {
+                        logger.warn('preset item payload missing; skipped without startup prune', { type, id: presetId, key });
+                    }
+                }
+            } catch (err) {
+                skipPersistOnLoad = true;
+                logger.warn('preset item load failed; skipped without startup prune', { type, id: presetId, key, err });
             }
         }
 
@@ -1555,12 +1582,14 @@ export class PresetStore {
         }
 
         this.state = state;
+        this.revision += 1;
         this.isLoaded = true;
         return this.state;
     }
 
     async persist(next = this.state) {
         this.state = next;
+        this.revision += 1;
         try {
             await this.persistShardedState(this.state);
         } catch (err) {
@@ -1673,6 +1702,35 @@ export class PresetStore {
         return this.state?.active?.[t] || null;
     }
 
+    // 只读的选中/启用状态：不复制预设正文（导入的预设单个可达 MB 级，getState 每次深拷贝全部预设）
+    getSelectionState() {
+        return {
+            active: { ...ensureObj(this.state?.active, {}) },
+            enabled: { ...ensureObj(this.state?.enabled, {}) },
+            builtinActive: { ...ensureObj(this.state?.builtinActive, {}) },
+        };
+    }
+
+    // 单个预设的副本，形状与 list() 的条目一致；只用到一个预设时不必复制整类预设
+    getPreset(type, id) {
+        const t = normalizeType(type);
+        const presetId = String(id || '').trim();
+        const data = presetId ? this.state?.presets?.[t]?.[presetId] : null;
+        if (!data) return null;
+        const preset = clone(data);
+        return { id: presetId, ...(t === 'sysprompt' ? localizeSyspromptDefaults(preset) : preset) };
+    }
+
+    // 只读的预设摘要（id / 名称 / 适用范围），按存储顺序，不复制预设正文
+    listSummaries(type) {
+        const t = normalizeType(type);
+        return Object.entries(this.state?.presets?.[t] || {}).map(([id, data]) => ({
+            id,
+            name: data?.name,
+            app_scope: data?.app_scope,
+        }));
+    }
+
     getActive(type) {
         const t = normalizeType(type);
         const id = this.getActiveId(t);
@@ -1752,6 +1810,21 @@ export class PresetStore {
         };
     }
 
+    // 只读窥视：与 getResolvedActive 相同的解析，但不复制预设正文（导入预设单个可达 MB 级）。
+    // 调用方不得修改返回的 preset；revision 变化即表示预设可能已改动。
+    peekResolvedActive(type, context = {}) {
+        const t = normalizeType(type);
+        const resolved = this.getResolvedActiveId(t, context);
+        const presetId = String(resolved?.presetId || '').trim();
+        const draft = this.resolveInUsePreset(t, context);
+        const preset = presetId ? (draft?.preset || this.state?.presets?.[t]?.[presetId] || null) : null;
+        return {
+            ...resolved,
+            preset: t === 'sysprompt' && preset ? localizeSyspromptDefaults(preset) : preset,
+            revision: this.revision,
+        };
+    }
+
     resolveInUsePreset(type, context = {}) {
         const t = normalizeType(type);
         const key = JSON.stringify([t, String(context.sessionId || '')]);
@@ -1774,6 +1847,7 @@ export class PresetStore {
             throw new Error('预设已切换，请重新应用设置');
         }
         this.inUsePresets ||= new Map();
+        this.revision += 1;
         this.inUsePresets.set(JSON.stringify([t, sid]), {
             presetId, base: this.state.presets[t][presetId],
             preset: clone(preset), regexes: clone(regexes),

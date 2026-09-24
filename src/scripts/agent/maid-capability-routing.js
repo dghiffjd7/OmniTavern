@@ -693,6 +693,8 @@ export const createMaidCapabilityRoutingRuntime = ({
     const excluded = [];
     const projectedById = new Map();
     const primaryIntent = input || state.input;
+    // 对上一份待确认清单的修改回复：原清单的功能不需要这句话再写一次“删除”
+    const revisionFeatureId = trim(context?.pendingActionRevision?.featureId);
 
     for (const rawFeature of allFeatures) {
       const allowedPlatforms = list(rawFeature?.allowedPlatforms || rawFeature?.platforms).map(item => item.toLowerCase());
@@ -721,7 +723,7 @@ export const createMaidCapabilityRoutingRuntime = ({
       projection.excludedTools.forEach((item) => {
         excluded.push({ id: trim(rawFeature.id), tools: [item.toolName], reason: item.reason });
       });
-      if (!hasExplicitHighRiskIntent(primaryIntent, projection.feature)) {
+      if (trim(rawFeature.id) !== revisionFeatureId && !hasExplicitHighRiskIntent(primaryIntent, projection.feature)) {
         excluded.push({
           id: trim(rawFeature.id),
           tools: list(projection.feature.tools),
@@ -825,6 +827,12 @@ export const createMaidCapabilityRoutingRuntime = ({
       );
     });
 
+    if (revisionFeatureId) addRecord(projectedById.get(revisionFeatureId), 118, 'pending_action_revision', { pinned: true });
+    // 模型读过说明的功能进入下一步候选：提示词只给其余功能的名称索引，“查说明→使用”这条路要走得通
+    (Array.isArray(steps) ? steps : []).forEach((step) => {
+      if (trim(step?.toolName) !== 'app.read_feature_doc' || trim(step?.status) === 'failed') return;
+      addRecord(projectedById.get(trim(step?.args?.featureId)), 118, 'looked_up_feature', { pinned: true });
+    });
     const stickyIds = state.usedFeatureIds.slice(-currentConfig.stickyLimit).reverse();
     stickyIds.forEach((featureId, index) => {
       addRecord(projectedById.get(featureId), 120 - index, index === 0 ? 'previous_capability' : 'sticky', { pinned: true });

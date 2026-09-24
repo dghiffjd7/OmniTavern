@@ -6,6 +6,9 @@ import {
   resolveMaidProviderFcEligibility,
   resolveMaidProviderFcRuntimeStatus,
   runMaidProviderFcAttempt,
+  MAID_PROVIDER_FC_FAILURE_COOLDOWN_MS,
+  isProviderFcRequestRejection,
+  resetMaidProviderFcCooldowns,
 } from '../../src/scripts/agent/maid-provider-fc-planner.js';
 
 const readFeature = {
@@ -209,6 +212,15 @@ const deepSeekConfig = {
   assert.equal(selected.selection.featureId, 'session.list');
   assert.deepEqual(selected.selection.args, { query: '当前' });
 
+  // 较长的最终答复（例如列出几十个名称）也是合法的，不能因为长度被判为参数错误而重新生成
+  const longFinal = normalizeMaidProviderFcCompletedCalls({
+    completedToolCalls: [{ toolName: MAID_PROVIDER_FC_CONTROL_TOOL_NAME, arguments: { action: 'final', message: '规则集名称。'.repeat(340) } }],
+    toolPlan,
+    phase: 'react',
+  });
+  assert.equal(longFinal.ok, true, longFinal.reason);
+  assert.equal(longFinal.kind, 'control');
+  assert.equal(longFinal.control.message, '规则集名称。'.repeat(340), 'accepted long answers must retain every entry');
   assert.equal(normalizeMaidProviderFcCompletedCalls({
     completedToolCalls: [],
     toolPlan,
@@ -382,6 +394,76 @@ const deepSeekConfig = {
     assert.equal(attempt.selection.toolName, 'session.list');
   }
   console.log('ok - maid provider FC consumes terminal calls from official OpenAI, Anthropic, and Gemini transports');
+}
+
+{
+  // 女仆思考设置在函数调用路径只做底：传输层对该服务商有思考兼容规则时以规则为准（DeepSeek 函数调用必须关思考）
+  resetMaidProviderFcCooldowns();
+  const seen = {};
+  const run = (label, config) => runMaidProviderFcAttempt({
+    client: { async chat(_messages, options) { seen[label] = options; return ''; } },
+    messages: [{ role: 'user', content: '列出最近会话' }],
+    config,
+    capabilitySnapshot: { ...candidateSnapshot, candidateFeatures: [readFeature], promptFeatures: [readFeature] },
+    experimentStatus: { enabled: true, thinkingEnabled: false },
+    phase: 'planner',
+    generationSettings: { reasoningMode: 'on', reasoningEffort: 'low' },
+  });
+  await run('gemini', { provider: 'makersuite', model: 'gemini-3.6-flash', baseUrl: 'https://generativelanguage.googleapis.com' });
+  assert.equal(seen.gemini.thinkingLevel, 'low', 'no transport rule, so the maid setting applies');
+  await run('deepseek', deepSeekConfig);
+  assert.deepEqual(seen.deepseek.reasoning, { effort: 'none' }, 'the transport rule wins');
+  assert.equal(seen.deepseek.thinking, undefined);
+  assert.equal(seen.deepseek.reasoning_effort, undefined);
+  const manual = await run('anthropicManual', { provider: 'anthropic', model: 'claude-sonnet-4-5' });
+  assert.equal(manual.attempted, false, 'manual thinking and forced tools must be rejected before calling the provider');
+  assert.equal(manual.reason, 'anthropic_manual_thinking_forced_tool_unsupported');
+  assert.equal(seen.anthropicManual, undefined);
+  await run('anthropicAdaptive', { provider: 'anthropic', model: 'claude-opus-4-7' });
+  assert.equal(seen.anthropicAdaptive.thinking.type, 'adaptive', 'compatible adaptive thinking still uses FC');
+  assert.equal(seen.anthropicAdaptive.temperature, undefined);
+  assert.equal(seen.anthropicAdaptive.tool_choice.type, 'any');
+  resetMaidProviderFcCooldowns();
+  console.log('ok - maid reasoning settings only fill in where provider FC has no reasoning rule of its own');
+}
+
+{
+  // 请求失败后同一模型冷却：不再先试函数调用再回退，冷却结束或换模型后恢复
+  resetMaidProviderFcCooldowns();
+  let clock = 1_000_000;
+  const now = () => clock;
+  const base = {
+    messages: [{ role: 'user', content: '列出会话' }],
+    config: deepSeekConfig,
+    capabilitySnapshot: { ...candidateSnapshot, candidateFeatures: [readFeature], promptFeatures: [readFeature] },
+    experimentStatus: { enabled: true, thinkingEnabled: false },
+    phase: 'planner',
+    now,
+  };
+  const usages = [];
+  const failed = await runMaidProviderFcAttempt({ ...base, client: { async chat() { throw new Error('Vertex AI Error: 400 - Request contains an invalid argument.'); } }, onModelUsage: usage => usages.push(usage) });
+  assert.equal(failed.reason, 'provider_request_failed');
+  assert.equal(usages[0].outcome, 'provider_request_failed');
+  assert.match(usages[0].error, /400/);
+  let calls = 0;
+  const skipped = await runMaidProviderFcAttempt({ ...base, client: { async chat() { calls += 1; return ''; } } });
+  assert.equal(skipped.attempted, false);
+  assert.equal(skipped.reason, 'provider_fc_cooling_down');
+  assert.equal(calls, 0, 'cooling down skips the provider request entirely');
+  assert.equal(resolveMaidProviderFcEligibility({ ...base, config: { ...deepSeekConfig, model: 'other-model' }, client: { chat() {} } }).eligible, true, 'other models are unaffected');
+  clock += MAID_PROVIDER_FC_FAILURE_COOLDOWN_MS + 1;
+  assert.equal(resolveMaidProviderFcEligibility({ ...base, client: { chat() {} } }).eligible, true, 'the cooldown expires');
+  resetMaidProviderFcCooldowns();
+  // 配额、鉴权、空响应等临时故障不冷却，函数调用下一次仍会尝试
+  for (const message of ['Vertex AI Error: 429 - Resource exhausted.', 'Failed to authenticate with Service Account: undefined', 'Empty response from Vertex AI']) {
+    assert.equal(isProviderFcRequestRejection(new Error(message)), false, message);
+    await runMaidProviderFcAttempt({ ...base, client: { async chat() { throw new Error(message); } } });
+    assert.equal(resolveMaidProviderFcEligibility({ ...base, client: { chat() {} } }).eligible, true, `${message} does not cool down`);
+  }
+  assert.equal(isProviderFcRequestRejection(Object.assign(new Error('bad'), { status: 422 })), true);
+  assert.equal(isProviderFcRequestRejection(new Error('Vertex AI Error: 400 - Invalid JSON payload received. Unknown name "type"')), true);
+  resetMaidProviderFcCooldowns();
+  console.log('ok - a failed provider FC request cools down that model instead of paying twice on every call');
 }
 
 {

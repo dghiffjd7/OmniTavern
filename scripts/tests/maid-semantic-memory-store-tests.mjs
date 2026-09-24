@@ -355,4 +355,24 @@ const createStore = async ({
   console.log('ok - semantic memory capacity evicts stale history before rejecting new facts');
 }
 
+{
+  // 设置面板的记忆管理：手动改写视为明确表述，之后较弱的推断不能覆盖；清空只清当前范围
+  const { store, kv } = await createStore();
+  const created = await store.upsertMemory({ kind: 'preference', key: 'presentation.default', content: '默认打开界面。', confidence: 'inferred' });
+  const edited = await store.updateMemoryContent(created.memory.id, '  默认后台执行，不要打开界面。  ');
+  assert.equal(edited.content, '默认后台执行，不要打开界面。');
+  assert.equal(edited.confidence, 'explicit');
+  assert.equal(await store.updateMemoryContent(created.memory.id, '   '), null, 'empty content is rejected');
+  assert.equal(await store.updateMemoryContent('missing', '内容'), null);
+  const weaker = await store.upsertMemory({ kind: 'preference', key: 'presentation.default', content: '默认打开界面。', confidence: 'inferred' });
+  assert.equal(weaker.action, 'ignored_weaker', 'a later model guess cannot overwrite the user edit');
+  assert.equal(store.getMemory(created.memory.id).content, '默认后台执行，不要打开界面。');
+  await store.upsertMemory({ kind: 'important_event', key: 'event.test', content: '测试事件。', confidence: 'verified' });
+  assert.equal(await store.clearMemories(), 2);
+  assert.equal(store.listMemories().length, 0);
+  assert.equal([...kv.values()][0].memories.length, 0, 'the cleared state is persisted');
+  assert.equal(await store.clearMemories(), 0);
+  console.log('ok - semantic memories can be edited and cleared from settings');
+}
+
 console.log('maid-semantic-memory-store-tests passed');

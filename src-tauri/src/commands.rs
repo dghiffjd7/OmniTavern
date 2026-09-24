@@ -4743,17 +4743,22 @@ pub async fn log_js(
     let mut msg = message;
     // Avoid huge logcat entries (e.g. prompt blobs)
     const MAX_LEN: usize = 2000;
-    if msg.len() > MAX_LEN {
-        msg.truncate(MAX_LEN);
-        msg.push_str("…");
-    }
-    if let Some(d) = data {
-        let dv = serde_json::to_string(&d).unwrap_or_else(|_| "\"<unserializable>\"".to_string());
-        let mut ds = dv;
-        if ds.len() > MAX_LEN {
-            ds.truncate(MAX_LEN);
-            ds.push_str("…");
+    // String::truncate 截在多字节字符（如中文）中间会 panic：先退到最近的字符边界
+    let truncate_at_char_boundary = |text: &mut String| {
+        if text.len() <= MAX_LEN {
+            return;
         }
+        let mut end = MAX_LEN;
+        while end > 0 && !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        text.truncate(end);
+        text.push_str("…");
+    };
+    truncate_at_char_boundary(&mut msg);
+    if let Some(d) = data {
+        let mut ds = serde_json::to_string(&d).unwrap_or_else(|_| "\"<unserializable>\"".to_string());
+        truncate_at_char_boundary(&mut ds);
         eprintln!("[js][{}][{}] {} {}", tag, lvl, msg, ds);
     } else {
         eprintln!("[js][{}][{}] {}", tag, lvl, msg);

@@ -23,7 +23,9 @@ export const createJsonRealtimeProtocol = ({ profile, instructions, send, emit, 
     toolResults: results => {
       results.forEach(({ call, result }) => send({ type: 'conversation.item.create', item: { type: 'function_call_output', call_id: call.id, output: JSON.stringify(result) } }));
     },
-    taskUpdate: text => send({ type: 'conversation.item.create', item: { type: 'message', role: 'system', content: [{ type: 'input_text', text }] } }),
+    // Step 只接受 user / assistant 角色的消息，system 会返回 400 并断线；任务更新正文已标明是 APP 数据、不是用户指令。
+    // xAI / Qwen 未验证，保持原样。
+    taskUpdate: text => send({ type: 'conversation.item.create', item: { type: 'message', role: profile.provider === 'step_realtime' ? 'user' : 'system', content: [{ type: 'input_text', text }] } }),
     respond: () => send({ type: 'response.create' }),
     receive: event => {
       const type = event.type;

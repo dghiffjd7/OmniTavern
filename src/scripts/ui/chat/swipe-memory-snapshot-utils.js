@@ -77,6 +77,30 @@ export const buildSwipeMemorySnapshotInputs = ({
     .filter(Boolean)
 );
 
+const stableStringify = (value) => {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).filter(key => value[key] !== undefined).sort()
+      .map(key => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value ?? null);
+};
+
+const memoryRowKey = row => stableStringify({ ...row, id: row?.id ? String(row.id) : '' });
+
+// 现有行与快照逐行一致（同 id、同内容、同顺序与状态）时无需删除重建
+export const isScopedMemorySnapshotUnchanged = ({
+  existingRows = [],
+  snapshotInputs = [],
+  templateId = '',
+  scopeFields = {},
+} = {}) => {
+  const existing = Array.isArray(existingRows) ? existingRows : [];
+  const normalized = buildSwipeMemorySnapshotInputs({ rows: existing, templateId, scopeFields });
+  if (normalized.length !== existing.length || normalized.length !== snapshotInputs.length) return false;
+  return normalized.every((row, index) => memoryRowKey(row) === memoryRowKey(snapshotInputs[index]));
+};
+
 export const replaceScopedMemoriesWithSnapshot = async ({
   memoryTableStore = null,
   existingRows = [],
@@ -85,6 +109,17 @@ export const replaceScopedMemoriesWithSnapshot = async ({
   scopeFields = {},
   cloneValue = value => value,
 } = {}) => {
+  const inputs = buildSwipeMemorySnapshotInputs({
+    rows: snapshotRows,
+    templateId,
+    scopeFields,
+    cloneValue,
+  });
+  // 进房、切换模式都会恢复尾部快照；内容没变时跳过删除重建：不再每次进房重写整张表，
+  // 也没有“删完还没建好”的空表窗口。行的 created_at/updated_at 因此保留真实时间。
+  if (isScopedMemorySnapshotUnchanged({ existingRows, snapshotInputs: inputs, templateId, scopeFields })) {
+    return { deletedIds: [], inputs: [], unchanged: true };
+  }
   const ids = (Array.isArray(existingRows) ? existingRows : [])
     .map(row => String(row?.id || '').trim())
     .filter(Boolean);
@@ -100,12 +135,6 @@ export const replaceScopedMemoriesWithSnapshot = async ({
     }
   }
 
-  const inputs = buildSwipeMemorySnapshotInputs({
-    rows: snapshotRows,
-    templateId,
-    scopeFields,
-    cloneValue,
-  });
   if (inputs.length) {
     await batchCreateMemoriesWithFallback({ memoryTableStore, inputs });
   }

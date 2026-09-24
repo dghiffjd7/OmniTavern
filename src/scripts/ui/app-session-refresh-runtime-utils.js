@@ -34,6 +34,40 @@ export const rerenderCurrentSessionHistory = async ({
   }
 };
 
+/* 合并整页重建：同一轮里连续的触发（例如切预设时 preset-changed 与 regex-changed 先后到达）只重建一次；
+   重建进行中又有触发时，结束后再补跑一次，保证最后一次触发之后的状态一定被渲染。
+   所有调用方拿到的 promise 都在“补跑”结束后才完成。 */
+export const createCoalescedRerender = (run, {
+  schedule = fn => setTimeout(fn, 0),
+} = {}) => {
+  let pending = null;
+  let dirty = false;
+  return () => {
+    if (pending) {
+      dirty = true;
+      return pending;
+    }
+    dirty = true;
+    pending = new Promise(resolve => {
+      schedule(async () => {
+        let result = false;
+        try {
+          while (dirty) {
+            dirty = false;
+            result = await run();
+          }
+        } catch {
+          result = false;
+        } finally {
+          pending = null;
+          resolve(result);
+        }
+      });
+    });
+    return pending;
+  };
+};
+
 export const applyMemoryTablePushEvent = ({
   detail = null,
   getCurrentSessionId = () => '',

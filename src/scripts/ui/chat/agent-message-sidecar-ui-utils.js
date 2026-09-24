@@ -1,4 +1,5 @@
 import { buildAgentMessagePartViewModel } from '../agent-message-parts-view.js';
+import { isFormatCheckStatusPart } from './format-check-feedback.js';
 
 const isPlainObject = value => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 
@@ -151,6 +152,37 @@ export const buildAgentMessageSidecarSignature = (message = {}) => {
   })));
 };
 
+// 格式检查的状态提示（检查中 / 无需修改 / 已检查）：一行简洁说明，不展开调试信息
+const buildFormatCheckStatusElement = ({ documentLike, part, message, translateText, onChatFormatGuardianAction }) => {
+  const state = trim(part.metadata?.state, 'checking');
+  const row = createElement(documentLike, 'div', { className: 'chat-format-check-status' });
+  row.dataset.state = state;
+  row.setAttribute?.('role', 'status');
+  row.appendChild(createElement(documentLike, 'span', { className: 'chat-format-check-status-icon' }));
+  const copy = createElement(documentLike, 'div', { className: 'chat-format-check-status-copy' });
+  copy.appendChild(createElement(documentLike, 'strong', { text: translateText(part.title) }));
+  if (trim(part.summary)) {
+    const reason = createElement(documentLike, 'span', { text: part.summary });
+    if (state === 'checked') row.title = part.summary;
+    else copy.appendChild(reason);
+  }
+  row.appendChild(copy);
+  const actions = (Array.isArray(part.metadata?.decisionActions) ? part.metadata.decisionActions : [])
+    .filter(action => action?.enabled !== false && trim(action?.id));
+  if (actions.length && typeof onChatFormatGuardianAction === 'function') {
+    const actionRow = createElement(documentLike, 'div', { className: 'chat-format-check-status-actions' });
+    actions.forEach((action) => {
+      const button = createElement(documentLike, 'button', { text: translateText(trim(action.label, action.id)) });
+      button.type = 'button';
+      button.dataset.chatFormatGuardianAction = trim(action.id);
+      button.addEventListener?.('click', () => onChatFormatGuardianAction({ action: trim(action.id), actionMeta: action, part, message }));
+      actionRow.appendChild(button);
+    });
+    row.appendChild(actionRow);
+  }
+  return row;
+};
+
 export const buildAgentMessageSidecarElement = ({
   documentLike = globalThis.document,
   message = {},
@@ -161,8 +193,19 @@ export const buildAgentMessageSidecarElement = ({
   onChatFormatGuardianAction = null,
 } = {}) => {
   if (!documentLike?.createElement) return null;
-  const parts = buildAgentMessagePartViewModel(getAgentMessagePartsForMessage(message));
-  if (!parts.length) return null;
+  const allParts = buildAgentMessagePartViewModel(getAgentMessagePartsForMessage(message));
+  if (!allParts.length) return null;
+  const statusParts = allParts.filter(isFormatCheckStatusPart);
+  const parts = allParts.filter(part => !isFormatCheckStatusPart(part));
+  const statusElements = statusParts.map(part => buildFormatCheckStatusElement({
+    documentLike, part, message, translateText, onChatFormatGuardianAction,
+  }));
+  if (!parts.length) {
+    if (statusElements.length === 1) return statusElements[0];
+    const stack = createElement(documentLike, 'div', { className: 'chat-format-check-statuses' });
+    statusElements.forEach(el => stack.appendChild(el));
+    return stack;
+  }
   const visible = parts.slice(-Math.max(1, Math.trunc(Number(maxParts)) || 6));
   const root = createElement(documentLike, 'div', {
     className: 'chat-agent-sidecar',
@@ -303,6 +346,7 @@ export const buildAgentMessageSidecarElement = ({
     details.appendChild(body);
     root.appendChild(details);
   });
+  statusElements.forEach(el => root.appendChild(el));
 
   return root;
 };

@@ -3,6 +3,7 @@ import { validateMaidWorldbookSourcePlan } from '../maid-source-grounding.js';
 import { BUILTIN_PHONE_FORMAT_WORLDBOOK_ID } from '../../storage/builtin-worldbooks.js';
 import { resolveWorldSessionBindingMutation } from '../../storage/world-session-binding-utils.js';
 import { createWorldbookPersonaBindingTool } from './worldbook-persona-binding-tool.js';
+import { createProfileUpdateTool } from './profile-update-tool.js';
 import {
   buildWorldbookEntryGenerationPrompt,
   readWorldAiGenerationSettings,
@@ -649,6 +650,8 @@ export const createAppContentAgentTools = ({
   canSwitchPersona = null,
   deletePersona = null,
   notifyPersonaChanged = null,
+  onPersonaProfileUpdated = null,
+  onUserProfileUpdated = null,
   saveWorldInfo = null,
   getWorldInfo = null,
   getWorldInfoMetadata = null,
@@ -1617,7 +1620,7 @@ export const createAppContentAgentTools = ({
   {
     name: 'user.create',
     title: 'Create user profile',
-    description: 'Create an APP user profile/name.',
+    description: 'Create a new APP user profile/name. To rename an existing user, use profile.update instead.',
     source: 'maid-app-content',
     permissions: [],
     riskLevel: 'medium',
@@ -1674,6 +1677,10 @@ export const createAppContentAgentTools = ({
       ? `created user ${trim(result?.profile?.name, '-')}`
       : `user already exists ${trim(result?.profile?.name, '-')}`,
   },
+  createProfileUpdateTool({
+    personaStore, userStore, contactsStore, chatStore,
+    notifyPersonaChanged, onPersonaProfileUpdated, onUserProfileUpdated, refreshChatAndContacts, now,
+  }),
   {
     name: 'user.switch',
     title: 'Switch user profile',

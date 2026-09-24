@@ -1,8 +1,23 @@
-import { buildMaidFormatProfileSourceState } from '../../storage/maid-format-profile-evidence-utils.js';
+import {
+  buildMaidFormatProfileSourceState,
+  fingerprintMaidFormatProfileSource,
+} from '../../storage/maid-format-profile-evidence-utils.js';
 
 const PRESET_TYPES = Object.freeze(['sysprompt', 'context', 'instruct', 'openai', 'reasoning']);
 
 const trim = value => String(value ?? '').trim();
+
+// 预设内容指纹缓存：键为预设存储里的原对象，store.revision 变化即失效。
+// 大预设（MB 级）每次整份序列化+哈希约 10–30ms，一次发送会解析几十次画像来源。
+// sysprompt 会按界面语言本地化（语言切换不改 revision），不走缓存。
+const presetFingerprintCache = new WeakMap();
+const readCachedPresetFingerprint = (preset, revision) => {
+  const hit = presetFingerprintCache.get(preset);
+  if (hit && hit.revision === revision) return hit.fingerprint;
+  const fingerprint = fingerprintMaidFormatProfileSource(preset);
+  presetFingerprintCache.set(preset, { revision, fingerprint });
+  return fingerprint;
+};
 const asArray = value => (Array.isArray(value) ? value : []);
 
 const normalizeDeclaredSources = sources => asArray(sources)
@@ -48,7 +63,7 @@ export const createMaidFormatProfileSourceStateResolver = ({
   );
   const presets = [];
   const presetKeys = new Set();
-  const addPreset = (type, id, preset, source = '') => {
+  const addPreset = (type, id, preset, source = '', contentFingerprint = '') => {
     const presetId = trim(id);
     if (!presetId || !preset || typeof preset !== 'object') return;
     const key = `${type}:${presetId}`;
@@ -60,12 +75,19 @@ export const createMaidFormatProfileSourceStateResolver = ({
       source,
       revision: Number(preset?.updatedAt || 0) || 0,
       value: preset,
+      ...(contentFingerprint ? { contentFingerprint } : {}),
     });
   };
   PRESET_TYPES.forEach((type) => {
     if (presetStore?.getEnabled?.(type) === false) return;
-    const resolved = presetStore?.getResolvedActive?.(type, context) || {};
-    addPreset(type, resolved?.presetId, resolved?.preset, resolved?.source);
+    const canPeek = type !== 'sysprompt' && typeof presetStore?.peekResolvedActive === 'function';
+    const resolved = (canPeek
+      ? presetStore.peekResolvedActive(type, context)
+      : presetStore?.getResolvedActive?.(type, context)) || {};
+    const fingerprint = canPeek && resolved?.preset && typeof resolved.preset === 'object'
+      ? readCachedPresetFingerprint(resolved.preset, resolved.revision)
+      : '';
+    addPreset(type, resolved?.presetId, resolved?.preset, resolved?.source, fingerprint);
     if (!declaredPresetRefs.size || typeof presetStore?.list !== 'function') return;
     asArray(presetStore.list(type)).forEach((preset) => {
       const id = trim(preset?.id);

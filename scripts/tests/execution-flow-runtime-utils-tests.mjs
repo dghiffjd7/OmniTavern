@@ -175,10 +175,8 @@ const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
     '共享容器应提供创意泳道插槽');
   assert.match(flowSource, /data-ef-switch="\$\{kind\}"/,
     '双投影同时可见时应提供 chip 切换入口');
-  assert.match(flowSource, /data-ef-cancel-maid[\s\S]*onCancelMaidRun\?\.\(/,
-    '女仆执行流应把非终态停止入口转发给与指令条共用的取消回调');
-  assert.match(flowSource, /cancelMaidBtnEl\.hidden = view\.terminal === true/,
-    '女仆任务进入终态后必须隐藏停止入口');
+  assert.match(flowSource, /createMaidRunCardView\(\{[\s\S]*onStop:[\s\S]*state\.view\?\.terminal !== true[\s\S]*onCancelMaidRun\?\.\(/,
+    '女仆运行卡的停止入口只在非终态时转发给与指令条共用的取消回调');
   assert.match(flowSource, /startDrag\(event,\s*\{\s*suppressLongPress:\s*true,\s*suppressClick:\s*true\s*\}\)/,
     '执行流标题转发拖拽时应消费静止单击，避免误触模式切换');
   assert.match(flowSource, /rootEl\.style\.width = 'auto';[\s\S]*?const rect = rootEl\.getBoundingClientRect/,
@@ -236,7 +234,8 @@ const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
   });
   consumed.emit({ runId: 'run_x' });
   assert.equal(traces.length, 1, '视图送达指令条');
-  assert.equal(traces[0].steps[0].glyph, '行', '投影含铭牌字段');
+  assert.equal(traces[0].steps[0].toolName, 't', '投影含工具名');
+  assert.equal(traces[0].steps[0].glyph, undefined, '不再投影汉字铭牌');
   assert.equal(consumed.rt.getState().visible, false, '已消费 → 面板不自开');
 
   const fallback = makeRt(() => false);

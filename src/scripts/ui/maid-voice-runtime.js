@@ -20,19 +20,47 @@ export const createMaidVoiceRuntime = ({
   toast = {}, createRecorder = createChatVoiceRuntime, choose = appChoice,
   documentRef = globalThis.document, windowLike = globalThis.window, modeSwitchEl = null,
   createOrb = createMaidVoiceOrbUi,
+  // 卡内确认：语音托盘显示本通话任务的待确认项；口头“允许”只算允许一次
+  getApproval = () => null, onApprovalDecision = null, confirmApproval = () => false,
+  cancelPendingAction = () => false,
   makeId = () => globalThis.crypto?.randomUUID?.() || `maid-voice-${Date.now()}-${Math.random().toString(36).slice(2)}`,
 } = {}) => {
   let recorder = null, activeTarget = null, callState = 'idle', starting = false;
+  const runViews = new Map(); // 语音任务 id（= submissionId）→ 最新运行投影
+  let announcedApprovalId = '';
   const orb = createOrb({ documentRef, windowLike, modeSwitchEl,
     onToggleMute: () => { const runtime = getCallAppRuntime()?.runtime; runtime?.setMicrophoneMuted(!runtime.getState().muted); },
     onToggleOutputMute: () => { const runtime = getCallAppRuntime()?.runtime; runtime?.setOutputMuted(!runtime.getState().outputMuted); },
-    onEnd: () => endCall(), onStopTask: () => tasks.cancel(),
+    onEnd: () => endCall(), onStopTask: id => tasks.cancel(id),
+    onApprovalDecision: payload => onApprovalDecision?.(payload),
     onOpenInput: () => getCommandRuntime()?.open({ autoFocus: false }), onRetry: () => action('realtime'),
   });
   const tasks = createMaidVoiceTaskRuntime({ getCommandRuntime, captureContext: () => structuredClone(getAppContext()),
+    cancelPendingAction,
     onChange: state => orb?.setTasks(state),
     onResult: update => { if (isTargetCurrent(update.target)) getCallAppRuntime()?.runtime?.notifyTaskUpdate?.(update); },
+    confirmApproval: taskIds => confirmApproval((taskIds || []).map(id => runViews.get(id)?.runId).filter(Boolean)) === true,
   });
+  const findVoiceApproval = () => {
+    for (const [taskId, view] of runViews) {
+      const approval = getApproval?.(view.runId);
+      if (approval) return { ...approval, taskId };
+    }
+    return null;
+  };
+  // 待确认项出现时：托盘展开显示确认块，同时让语音模型口头询问（每条只问一次）
+  const refreshApprovals = () => {
+    const approval = findVoiceApproval();
+    orb?.setApproval?.(approval);
+    if (!approval || approval.id === announcedApprovalId) return;
+    announcedApprovalId = approval.id;
+    const meta = tasks.getTaskMeta(approval.taskId);
+    if (!meta || !isTargetCurrent(meta.target)) return;
+    getCallAppRuntime()?.runtime?.notifyTaskUpdate?.({
+      kind: 'confirmation', task_id: meta.task_id, status: 'awaiting_user_confirmation', request: meta.request,
+      message: [approval.title, approval.message].filter(Boolean).join('：'), target: meta.target, requestId: meta.requestId,
+    });
+  };
   const sync = () => getCommandRuntime?.()?.syncVoiceState?.();
   const getTarget = () => ({ supported: true, uiMode: 'maid', sessionId: 'maid', scopeId: 'default', lifecycleEpoch: 0, name: t('女仆'), avatar: '' });
   const isTargetCurrent = target => target?.uiMode === 'maid' && Boolean(activeTarget?.maidCallId) && target.maidCallId === activeTarget.maidCallId;
@@ -77,18 +105,39 @@ export const createMaidVoiceRuntime = ({
       if (kind === 'end-call') return await endCall();
       if (kind === 'stop-recording' || kind === 'stt') return await ensureRecorder().toggleRecording();
       if (kind === 'realtime' && !starting) {
+        // 首次实时通话先说明任务由谁执行；关掉不选视为不开启“交给女仆”，由语音设置档的模型执行
+        if (!settingsStore.hasChosenVoiceTaskExecutor?.()) await chooseTaskExecutor();
         starting = true; sync(); getCommandRuntime()?.collapse?.();
         try { return await getCallAppRuntime()?.startCall(getTarget()); }
         finally { starting = false; if (getCallAppRuntime()?.runtime?.getState?.().status === 'idle') onCallState({ status: 'idle' }); sync(); }
       }
     } catch (error) { toast.error?.(error?.message || t('语音操作失败')); }
   };
+  const chooseTaskExecutor = async () => {
+    const current = settingsStore.getVoiceTaskExecutor?.() || 'voice';
+    const choice = await choose({
+      title: t('语音里交代的任务由谁执行？'),
+      message: [
+        t('交给女仆（推荐）：用女仆设置里的模型执行，多步任务更稳，通常也更省。'),
+        t('语音模型直接执行：用语音设置档的推理模型执行，不用另外配置，费用计入语音账号；非 OpenAI 的语音服务仍交给女仆。'),
+        t('选择独立 Sub-agent 时，使用它绑定的模型与账号。'),
+        t('两种方式修改应用内容前都会先请你确认，之后可在“默认语音模式”里更改。'),
+      ].join('\n'),
+      defaultActionId: settingsStore.hasChosenVoiceTaskExecutor?.() ? current : 'maid',
+      actions: [
+        { id: 'maid', label: t('交给女仆（推荐）'), primary: true },
+        { id: 'voice', label: t('语音模型直接执行') },
+      ],
+    });
+    await settingsStore.setVoiceTaskExecutor?.(choice === 'maid' ? 'maid' : (choice === 'voice' ? 'voice' : current));
+  };
   const chooseMode = async () => {
     const mode = settingsStore.getVoiceInputMode();
     const choice = await choose({ title: t('默认语音模式'), defaultActionId: mode,
       actions: [{ id: 'realtime', label: t('实时通话'), primary: mode === 'realtime' },
-        { id: 'stt', label: t('语音输入'), primary: mode === 'stt' }, { id: 'settings', label: t('语音配置') }],
+        { id: 'stt', label: t('语音输入'), primary: mode === 'stt' }, { id: 'executor', label: t('任务执行方式') }, { id: 'settings', label: t('语音配置') }],
     });
+    if (choice === 'executor') return chooseTaskExecutor();
     if (choice === 'settings') return openSettings();
     if (!['realtime', 'stt'].includes(choice)) return;
     await settingsStore.setVoiceInputMode(choice); sync();
@@ -124,7 +173,18 @@ export const createMaidVoiceRuntime = ({
     },
     submitText: (text, attachments = []) => tasks.request({ target: activeTarget, requestId: makeId(), args: { action: 'execute', request: text }, attachments, preserveDraft: false, showInput: true }),
     getTasks: () => tasks.getState(),
-    consumeTrace: view => view?.source === 'maid_realtime',
+    consumeTrace: view => {
+      if (view?.source !== 'maid_realtime') return false;
+      const taskId = String(view.submissionId || '').trim();
+      if (taskId) {
+        runViews.set(taskId, view);
+        while (runViews.size > 20) runViews.delete(runViews.keys().next().value);
+        refreshApprovals();
+      }
+      return true;
+    },
+    canShowApproval: runId => Boolean(orb && (starting || activeTarget) && [...runViews.values()].some(view => view.runId === runId && !view.terminal)),
+    refreshApprovals,
     getState, getTarget, isTargetCurrent, sync, action, chooseMode, openSettings, cancelInput, endCall, beforeRealtimeStart, onCallState, buildSemanticSnapshot,
     commitUserMessage: options => commit({ ...options, role: 'user', id: options.meta?.realtimeItemId || makeId() }),
     commitAssistantMessage: options => commit({ ...options, role: 'assistant', id: options.meta?.realtimeResponseId || makeId() }),

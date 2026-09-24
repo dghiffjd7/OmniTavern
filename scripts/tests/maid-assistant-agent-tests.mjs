@@ -1171,7 +1171,7 @@ setPromptLocale('zh-CN');
   assert.equal(modelOutput.observationProjection.omittedFields[1].path, 'items[0].originalCard');
   assert.equal(JSON.stringify(modelOutput).includes('data:image'), false);
   assert.equal(JSON.stringify(modelOutput).length < 4_000, true);
-  assert.match(reactPrompt, /"worldbookId": "精灵抱抱"/);
+  assert.match(reactPrompt, /"worldbookId":"精灵抱抱"/);
   assert.doesNotMatch(reactPrompt, /data:image|原卡内的大段世界书正文/);
   assert.deepEqual(routedOutput, modelOutput, 'capability retrieval and ReAct should share the bounded model snapshot');
   assert.equal(result.steps[0].output.items[0].avatar, avatar, 'internal step result must stay truthful and complete');
@@ -4421,6 +4421,7 @@ const runGeneratedMediaQuotaProbe = async input => {
 
   const preview = await agent.runPrompt(
     '我现在就在「海贼王」角色卡。请从这张导入卡自带的世界书挑出草帽一伙主要人物，给每个人建立私聊并建一个「草帽一伙」群聊；先给我确认，先不要真的创建，也不要新建或直接绑定世界书。',
+    { source: 'maid_realtime', voiceCallId: 'import-call', submissionId: 'import-preview' },
   );
   assert.equal(preview.ok, true);
   assert.equal(preview.status, 'awaiting_confirmation');
@@ -4444,7 +4445,7 @@ const runGeneratedMediaQuotaProbe = async input => {
     ['entry-1', 'entry-2', 'entry-3'],
   );
 
-  const applied = await agent.runPrompt('确认，就按这份清单来。');
+  const applied = await agent.runPrompt('好', { source: 'maid_realtime', voiceCallId: 'import-call', submissionId: 'import-apply' });
   assert.equal(applied.ok, true);
   assert.equal(applied.status, 'succeeded');
   assert.equal(classifierCalls, 1, '确认轮必须消费冻结快照，不得重新分类');

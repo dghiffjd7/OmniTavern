@@ -161,7 +161,7 @@ class FakeDocument {
     getViewportSize: () => ({ w: 360, h: 640 }),
     onSubmit: async (text, controls) => {
       submissions.push(text);
-      controls.setStatus('模型生成的执行前回应', 'thinking'); // 模型话语 → 正常气泡
+      controls.setStatus('模型生成的执行前回应', 'thinking'); // 执行中的女仆叙述 → 折叠进思路
       controls.setStatus('我已经取得结果，正在整理给你。', 'progress'); // 写死过程提示 → live 行
       statusSnapshots.push({
         live: runtime.getLiveStatus()?.message || '',
@@ -182,8 +182,13 @@ class FakeDocument {
   assert.doesNotMatch(documentRef.head.children[0].textContent, /\.maid-command-input-field:focus-visible/);
   assert.match(
     documentRef.head.children[0].textContent,
-    /\.maid-command-input\.is-open\.is-submitting\s*\{\s*opacity:\s*0\.92;/,
-    'submitting opacity must not keep a closed command bar visible behind a guide',
+    /\.maid-command-input\.is-open\.is-submitting \.maid-command-input-field\s*\{\s*opacity:\s*0\.72;/,
+    'submitting dim stays scoped to the open bar and only the field, so result cards stay opaque',
+  );
+  assert.doesNotMatch(
+    documentRef.head.children[0].textContent,
+    /\.maid-command-input\.is-open\.is-submitting\s*\{\s*opacity/,
+    'the whole bar (and its result cards) must not turn translucent while submitting',
   );
   assert.equal(rootEl.classList.contains('is-open'), true);
   assert.equal(inputEl.tagName, 'TEXTAREA');
@@ -210,12 +215,13 @@ class FakeDocument {
   const result = await runtime.submit();
   assert.equal(result.ok, true);
   assert.deepEqual(submissions, ['打开世界书']);
-  // 写死过程提示（progress）在 live 单行原位替换；模型话语（thinking）保持气泡
-  assert.deepEqual(statusSnapshots, [{ live: '我已经取得结果，正在整理给你。', messages: ['模型生成的执行前回应'] }]);
-  assert.deepEqual(runtime.getResultMessages().map(item => item.message), [
-    '模型生成的执行前回应',
-    'done 打开世界书',
-  ]);
+  // 写死过程提示（progress）在 live 单行原位替换；执行中的叙述不占气泡
+  assert.deepEqual(statusSnapshots, [{ live: '我已经取得结果，正在整理给你。', messages: [] }]);
+  const finalItems = runtime.getResultMessages();
+  assert.deepEqual(finalItems.map(item => item.kind || item.tone), ['thought', 'success'], '没有 run 时叙述收成一行折叠的思路，汇报单独显示');
+  assert.deepEqual(finalItems[0].lines, ['模型生成的执行前回应']);
+  assert.equal(finalItems[0].open, false);
+  assert.equal(finalItems[1].message, 'done 打开世界书');
   assert.equal(runtime.getLiveStatus(), null, '提交结束 live 行退场');
   assert.equal(runtime.getElements().resultEl.children.length, 2);
   assert.equal(runtime.getElements().resultEl.dataset.tone, 'success');
@@ -269,7 +275,10 @@ class FakeDocument {
   runtime.open();
   runtime.getElements().inputEl.value = '测试 Markdown';
   await runtime.submit();
-  const message = runtime.getElements().resultEl.children[0].children[0];
+  const reportBubble = runtime.getElements().resultEl.children[0];
+  assert.ok(reportBubble.className.includes('is-report'), '最终回复是带标识的汇报气泡');
+  assert.equal(reportBubble.children[0].className, 'mci-report-head');
+  const message = reportBubble.children.find(child => child.className === 'mci-result-message');
   assert.match(message.innerHTML, /<strong>加粗<\/strong>/);
   assert.match(message.innerHTML, /<code>代码<\/code>/);
   assert.match(message.innerHTML, /<br>/);
@@ -658,173 +667,165 @@ class FakeDocument {
 }
 
 {
-  // 执行流 trace 卡并入白色结果流：按 id 原位更新、与叙述气泡交错、未打开时不消费
+  // 执行流并入白色结果流：一次任务一张运行卡，叙述折叠进卡内思路，汇报单独显示，未打开时不消费
   const documentRef = new FakeDocument();
   const modeSwitchEl = new FakeElement('div');
   const openStates = [];
-  const runtime = createMaidCommandInputRuntime({
-    documentRef,
-    modeSwitchEl,
-    getViewportSize: () => ({ w: 360, h: 640 }),
-    onSubmit: async () => ({ ok: true }),
-    onOpenStateChange: state => openStates.push({ ...state }),
-    setTimeoutFn: () => 0,
-    clearTimeoutFn: () => {},
-  });
+  let releaseSubmit = null;
+  const snapshots = [];
   const view = (steps, terminal = false, status = 'running') => ({
     runId: 'run_1',
     title: '整理房间',
     status,
-    statusLabel: terminal ? '完成' : '执行中',
-    tone: terminal ? 'success' : 'accent',
     terminal,
-    doneSummary: terminal ? '搞定了' : '',
-    failureCode: '',
+    startedAt: 1000,
+    finishedAt: terminal ? 4000 : 0,
     steps,
   });
-  const step = (id, seq, status, tone, statusLabel, glyph) => ({
-    id, seq, title: `步骤${seq}`, toolName: `tool.${id}`, status, tone, statusLabel, glyph, error: '',
+  const step = (id, seq, status) => ({ id, seq, title: `步骤${seq}`, toolName: `tool.${id}`, status, error: '' });
+  let runtime;
+  runtime = createMaidCommandInputRuntime({
+    documentRef,
+    modeSwitchEl,
+    getViewportSize: () => ({ w: 360, h: 640 }),
+    onSubmit: async (_text, controls) => {
+      controls.setStatus('我先看看有哪些会话～', 'thinking');
+      runtime.applyTraceView(view([step('a', 1, 'running')]));
+      controls.setStatus('我已经取得结果，正在整理给你。', 'progress');
+      const card = runtime.getElements().resultEl.children[0].children[0];
+      const [rowsEl, , liveEl, thoughtEl] = card.children[1].children;
+      snapshots.push({
+        kinds: runtime.getResultMessages().map(item => item.kind || item.tone),
+        live: liveEl.hidden ? '' : liveEl.innerHTML,
+        thought: thoughtEl.innerHTML,
+        rows: rowsEl.children.map(li => li.dataset.status),
+        liveRowOutside: runtime.getElements().resultEl.children.some(node => node.dataset?.mciLive),
+      });
+      await new Promise(resolve => { releaseSubmit = resolve; });
+      runtime.applyTraceView(view([step('a', 1, 'succeeded')], true, 'succeeded'));
+      return { ok: true, message: '搞定了' };
+    },
+    onOpenStateChange: state => openStates.push({ ...state }),
+    setTimeoutFn: () => 0,
+    clearTimeoutFn: () => {},
   });
 
   assert.equal(runtime.applyTraceView(view([])), false, '指令条未打开 → 不消费（面板兜底）');
   assert.equal(runtime.open(), true);
   assert.equal(openStates.length, 1, '打开后应通知执行流重新仲裁');
-  assert.deepEqual(
-    { open: openStates[0].open, submitting: openStates[0].submitting },
-    { open: true, submitting: false },
-  );
   assert.equal(openStates[0].rootEl, runtime.getElements().rootEl, '打开通知应携带指令条锚点');
-  assert.equal(runtime.applyTraceView(view([step('a', 1, 'running', 'accent', '执行中', '行')])), true);
-  runtime.setStatus('我先看看有哪些会话～', 'thinking'); // 模型话语 → 气泡
-  runtime.setStatus('我已经取得结果，正在整理给你。', 'progress'); // 写死提示 → live 行
-  assert.equal(runtime.getLiveStatus()?.message, '我已经取得结果，正在整理给你。', '写死过程提示进 live 行');
-  assert.equal(runtime.applyTraceView(view([step('a', 1, 'succeeded', 'success', '完成', '成')])), true);
-  let items = runtime.getResultMessages();
-  assert.deepEqual(items.map(item => item.kind || 'text'), ['trace', 'trace', 'text'], '模型话语气泡与 trace 卡交错保留');
-  assert.equal(items[1].glyph, '成', '同 id 步骤原位更新为完成');
-  assert.equal(items[1].statusLabel, '完成');
-
-  runtime.applyTraceView(view([step('a', 1, 'succeeded', 'success', '完成', '成')], true, 'succeeded'));
-  items = runtime.getResultMessages();
-  assert.equal(items[items.length - 1].glyph, '成', '终态卡追加在末尾');
-  assert.equal(items[items.length - 1].sub, '搞定了');
+  runtime.getElements().inputEl.value = '整理房间';
+  const pending = runtime.submit();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(snapshots[0].kinds, ['run'], '执行中只有一张运行卡，叙述不占气泡');
+  assert.match(snapshots[0].thought, /思路 · 1/, '先到的叙述在 run 出现后并入卡内思路');
+  assert.match(snapshots[0].live, /我已经取得结果，正在整理给你。/, '过程提示进卡内进行中行');
+  assert.equal(snapshots[0].liveRowOutside, false, '有运行卡时不再另起 live 行');
+  assert.deepEqual(snapshots[0].rows, ['running']);
+  assert.equal(runtime.hasRunCard('run_1'), true, '卡内确认可承载');
+  releaseSubmit();
+  await pending;
+  const items = runtime.getResultMessages();
+  assert.deepEqual(items.map(item => item.kind || item.tone), ['run', 'success'], '汇报气泡在运行卡之后单独显示');
+  assert.equal(items[1].message, '搞定了');
   assert.equal(runtime.getLiveStatus(), null, 'run 终态 live 行退场');
+  const cardEl = runtime.getElements().resultEl.children[0].children[0];
+  assert.equal(cardEl.dataset.state, 'done');
+  assert.doesNotMatch(cardEl.children[0].innerHTML + cardEl.children[1].children[0].innerHTML, /搞定了/, '卡片不重复汇报正文');
   runtime.close();
-  assert.deepEqual(openStates.map(state => ({ open: state.open, submitting: state.submitting })), [
-    { open: true, submitting: false },
-    { open: false, submitting: false },
-  ], '关闭后应通知执行流立即接管');
-  assert.equal(openStates[1].rootEl, runtime.getElements().rootEl, '关闭通知沿用同一锚点');
+  assert.equal(openStates.at(-1).open, false, '关闭后应通知执行流立即接管');
   assert.equal(runtime.applyTraceView(view([])), false, '指令条曾打开但已关闭 → 不再消费后台 run');
-  console.log('ok - maid command input 承载执行流 trace 卡（原位更新/交错/未开不消费）');
+  assert.equal(runtime.hasRunCard('run_1'), false);
+  console.log('ok - maid command input hosts one run card with folded thoughts and a separate report');
 }
 
 {
-  // 终态 trace 与 submit success 可能先后到达；同文最终回复只保留 success 气泡一份。
-  const terminalView = runId => ({
-    runId,
-    title: '查看当前页面',
-    status: 'succeeded',
-    statusLabel: '完成',
-    tone: 'success',
-    terminal: true,
-    doneSummary: '现在打开的是联系人页面。',
-    failureCode: '',
-    steps: [],
-  });
-  let runtime;
-  runtime = createMaidCommandInputRuntime({
-    documentRef: new FakeDocument(),
+  // 运行卡按行 id 原位更新：同一 run 不新增外壳，已存在的行节点身份不变，新行才进场
+  const documentRef = new FakeDocument();
+  const runtime = createMaidCommandInputRuntime({
+    documentRef,
     modeSwitchEl: new FakeElement('div'),
     getViewportSize: () => ({ w: 360, h: 640 }),
+    onSubmit: async () => ({ ok: true }),
+    setTimeoutFn: () => 0,
+    clearTimeoutFn: () => {},
+  });
+  runtime.open();
+  const mkStep = (id, seq, status) => ({ id, seq, title: `步骤${seq}`, toolName: '', status, error: '' });
+  const mkView = steps => ({ runId: 'run_s', title: '任务', status: 'running', terminal: false, startedAt: 1, steps });
+  runtime.applyTraceView(mkView([mkStep('a', 1, 'running'), mkStep('b', 2, 'queued')]));
+  const { resultEl } = runtime.getElements();
+  assert.equal(resultEl.children.length, 1, '一次任务只有一个外壳');
+  const wrapper = resultEl.children[0];
+  const rowsEl = wrapper.children[0].children[1].children[0];
+  assert.deepEqual(rowsEl.children.map(li => li.dataset.status), ['running', 'queued']);
+  assert.ok(rowsEl.children.every(li => li.classList.contains('is-entering')), '首批行走进场');
+  const rowA = rowsEl.children[0];
+  runtime.applyTraceView(mkView([mkStep('a', 1, 'succeeded'), mkStep('b', 2, 'running')]));
+  assert.equal(resultEl.children[0], wrapper, '外壳原位补丁');
+  assert.equal(rowsEl.children[0], rowA, '既有行节点身份不变');
+  assert.deepEqual(rowsEl.children.map(li => li.dataset.status), ['done', 'running']);
+  assert.match(rowsEl.children[1].innerHTML, /mrc-row-icon/, '状态用图标表达');
+  console.log('ok - maid command input patches run card rows in place');
+}
+
+{
+  // 手机布局：宽度 ≤760 且主要触控时改为底部抽屉；执行中预览、结束升半屏、展开详情全屏、用户拖动为准
+  const documentRef = new FakeDocument();
+  const viewportListeners = new Map();
+  const windowLike = {
+    innerHeight: 800,
+    visualViewport: {
+      height: 500,
+      offsetTop: 0,
+      addEventListener: (type, handler) => viewportListeners.set(type, handler),
+    },
+  };
+  let release = null;
+  let runtime;
+  runtime = createMaidCommandInputRuntime({
+    documentRef,
+    modeSwitchEl: new FakeElement('div'),
+    getViewportSize: () => ({ w: 390, h: 800 }),
+    matchMediaFn: query => ({ matches: query.includes('pointer: coarse') }),
+    windowLike,
     onSubmit: async () => {
-      runtime.applyTraceView(terminalView('run_trace_first'));
-      return { ok: true, message: '现在打开的是联系人页面。' };
+      runtime.applyTraceView({ runId: 'run_m', title: '任务', status: 'running', terminal: false, startedAt: 1, steps: [{ id: 'x', title: '读取', status: 'running' }] });
+      await new Promise(resolve => { release = resolve; });
+      runtime.applyTraceView({ runId: 'run_m', title: '任务', status: 'succeeded', terminal: true, startedAt: 1, finishedAt: 2, steps: [{ id: 'x', title: '读取', status: 'succeeded' }] });
+      return { ok: true, message: '好了' };
     },
     setTimeoutFn: () => 0,
     clearTimeoutFn: () => {},
   });
-  runtime.open();
-  runtime.getElements().inputEl.value = '帮我看看现在打开的是哪个页面';
-  await runtime.submit();
-  let items = runtime.getResultMessages();
-  assert.equal(
-    items.flatMap(item => [item.message, item.sub]).filter(text => text === '现在打开的是联系人页面。').length,
-    1,
-    'DONE 先到时 success 气泡应清掉卡片里的同文 summary',
-  );
-  assert.equal(items.find(item => item.id === 'done:run_trace_first')?.sub, '');
-
-  const replayRuntime = createMaidCommandInputRuntime({
-    documentRef: new FakeDocument(),
-    modeSwitchEl: new FakeElement('div'),
-    getViewportSize: () => ({ w: 360, h: 640 }),
-    onSubmit: async () => ({ ok: true }),
-    setTimeoutFn: () => 0,
-    clearTimeoutFn: () => {},
-  });
-  replayRuntime.open();
-  replayRuntime.setStatus('现在打开的是联系人页面。', 'success');
-  replayRuntime.applyTraceView(terminalView('run_result_first'));
-  items = replayRuntime.getResultMessages();
-  assert.equal(items.find(item => item.id === 'done:run_result_first')?.sub, '');
-  assert.equal(
-    items.flatMap(item => [item.message, item.sub]).filter(text => text === '现在打开的是联系人页面。').length,
-    1,
-    '终态回放晚到时也不应重新写入重复 summary',
-  );
-  console.log('ok - maid command input terminal summary dedupes against the final result bubble');
-}
-
-{
-  // 逐卡推出：同批新卡按序错峰进场；原位补丁不重播进场；live 态状态点带转圈 class
-  const documentRef = new FakeDocument();
-  const modeSwitchEl = new FakeElement('div');
-  const runtime = createMaidCommandInputRuntime({
-    documentRef,
-    modeSwitchEl,
-    getViewportSize: () => ({ w: 360, h: 640 }),
-    onSubmit: async () => ({ ok: true }),
-    setTimeoutFn: () => 0,
-    clearTimeoutFn: () => {},
-  });
-  runtime.open();
-  const mkStep = (id, seq, status, tone, statusLabel, glyph) => ({
-    id, seq, title: `步骤${seq}`, toolName: '', status, tone, statusLabel, glyph, error: '',
-  });
-  const mkView = (steps) => ({
-    runId: 'run_s', title: '任务', status: 'running', statusLabel: '执行中', tone: 'accent',
-    terminal: false, doneSummary: '', failureCode: '', steps,
-  });
-
-  runtime.applyTraceView(mkView([
-    mkStep('a', 1, 'running', 'accent', '执行中', '行'),
-    mkStep('b', 2, 'queued', 'muted', '排队', '行'),
-  ]));
-  const { resultEl } = runtime.getElements();
-  assert.equal(resultEl.children.length, 3, 'plan + 2 步骤');
-  assert.ok(resultEl.children.every(node => node.classList.contains('is-entering')), '首批全部走进场');
-  assert.deepEqual(
-    resultEl.children.map(node => node.style.animationDelay),
-    ['0ms', '150ms', '300ms'],
-    '同批新卡按序错峰推出',
-  );
-  const findStatus = (bubble) => {
-    const head = bubble.children[0];
-    return (head?.children || []).find(child => String(child.className || '').includes('mci-trace-status')) || null;
-  };
-  assert.ok(String(findStatus(resultEl.children[1])?.className).includes('is-live'), '执行中带转圈 class');
-
-  const stepNodeBefore = resultEl.children[1];
-  runtime.applyTraceView(mkView([
-    mkStep('a', 1, 'succeeded', 'success', '完成', '成'),
-    mkStep('b', 2, 'running', 'accent', '执行中', '行'),
-  ]));
-  assert.equal(resultEl.children.length, 3, '原位补丁不新增节点');
-  assert.equal(resultEl.children[1], stepNodeBefore, '既有卡节点身份不变（不重播进场）');
-  assert.equal(String(findStatus(resultEl.children[1])?.className).includes('is-live'), false, '完成后转圈移除');
-  assert.ok(String(findStatus(resultEl.children[2])?.className).includes('is-live'), '轮到的步骤转圈');
-  console.log('ok - maid command input 逐卡推出与 live 转圈');
+  runtime.open({ autoFocus: false });
+  const { rootEl } = runtime.getElements();
+  assert.equal(rootEl.dataset.layout, 'sheet');
+  assert.equal(rootEl.dataset.bubbleSide, undefined, '抽屉不再贴球翻转');
+  assert.equal(rootEl.style.left, '', '抽屉由样式贴底，不写贴球坐标');
+  assert.ok(viewportListeners.has('resize'), '监听软键盘');
+  runtime.getElements().inputEl.value = '做点事';
+  const pending = runtime.submit();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(runtime.getLayout().snap, 'peek', '执行中默认预览档');
+  const handle = runtime.getElements().resultEl.children[0];
+  assert.equal(handle.className, 'mci-sheet-handle', '抽屉把手在最上方');
+  const card = runtime.getElements().resultEl.children[1].children[0];
+  assert.ok(card.classList.contains('is-touch'), '手机上放大点击区');
+  handle.dispatchEvent('click', { preventDefault() {} });
+  assert.equal(runtime.getLayout().snap, 'half', '点把手切换档位');
+  release();
+  await pending;
+  assert.equal(runtime.getLayout().snap, 'half', '用户选过的档位保留');
+  runtime.getElements().inputEl.value = '再做一件';
+  release = null;
+  const second = runtime.submit();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(runtime.getLayout().snap, 'peek', '新任务重新按状态决定档位');
+  release();
+  await second;
+  assert.equal(runtime.getLayout().snap, 'half', '结束后升到半屏看汇报');
+  console.log('ok - maid command input uses a bottom sheet on touch phones');
 }
 
 {

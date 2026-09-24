@@ -45,8 +45,8 @@ import {
 {
   const appBridge = {
     presets: {
-      getState() {
-        return { enabled: { sysprompt: true, openai: false } };
+      getSelectionState() {
+        return { active: {}, enabled: { sysprompt: true, openai: false } };
       },
       getResolvedActive(type) {
         return { preset: { type, ok: true } };

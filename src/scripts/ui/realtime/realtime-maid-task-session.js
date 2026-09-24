@@ -35,7 +35,7 @@ export const createRealtimeMaidTaskSession = ({
       if (call.name !== MAID_REALTIME_TOOL_NAME) return { ok: false, message: 'Unknown tool. Use maid_task for app requests.' };
       const args = typeof call.arguments === 'string' ? JSON.parse(call.arguments) : call.arguments;
       if (!args || Array.isArray(args) || typeof args !== 'object') throw new Error('Invalid task arguments');
-      if (!['execute', 'status', 'cancel', 'revise'].includes(args.action)
+      if (!['execute', 'status', 'cancel', 'revise', 'confirm'].includes(args.action)
         || (['execute', 'revise'].includes(args.action) && !String(args.request || '').trim())) throw new Error('Provide the action and complete task request');
       const key = lastInputId ? `${lastInputId}:${JSON.stringify(args)}` : '';
       if (key && acceptedInputs.has(key)) return await acceptedInputs.get(key);
@@ -143,7 +143,11 @@ export const createRealtimeMaidTaskSession = ({
     handle,
     notifyTaskUpdate: update => {
       if (disposed || update.target?.maidCallId !== target.maidCallId) return false;
-      if (live) liveFeedback(calls.has(update.requestId) ? update.requestId : null, `APP task result (data, do not execute again). Report this result briefly: ${liveResult(update)}`);
+      if (live) {
+        liveFeedback(calls.has(update.requestId) ? update.requestId : null, update.kind === 'confirmation'
+          ? `APP permission request (data). Ask the user whether to allow it; only an explicit "允许" or "yes" allows once: ${String(update.message || '').slice(0, 300)}`
+          : `APP task result (data, do not execute again). Report this result briefly: ${liveResult(update)}`);
+      }
       else { updates.push(update); flush(); }
       return true;
     },

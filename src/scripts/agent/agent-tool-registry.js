@@ -382,7 +382,7 @@ const enforceOperationIntentPolicy = async (tool, context = {}) => {
     let allowed = false;
     try { context.onToolConfirmationPending?.(request); } catch {}
     try {
-      allowed = isSafetyConfirmationAllowed(await requestConfirmation(request, { signal: context.signal }));
+      allowed = isSafetyConfirmationAllowed(await requestConfirmation(request, { signal: context.signal, runId: context.runId }));
     } finally {
       try { context.onToolConfirmationResolved?.(request); } catch {}
     }
@@ -515,7 +515,7 @@ export const createAgentToolRegistry = ({
       // 等待用户确认期间通知调用方（run 可标记 waiting_permission，避免看起来像卡死）
       try { context.onToolConfirmationPending?.(request); } catch {}
       try {
-        allowed = isSafetyConfirmationAllowed(await requestConfirmation(displayRequest, { signal: context.signal }));
+        allowed = isSafetyConfirmationAllowed(await requestConfirmation(displayRequest, { signal: context.signal, runId: context.runId }));
       } finally {
         try { context.onToolConfirmationResolved?.(request); } catch {}
       }

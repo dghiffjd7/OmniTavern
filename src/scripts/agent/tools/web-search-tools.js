@@ -898,7 +898,7 @@ const fetchReadableUrl = async (request, {
     method: 'GET',
     headers: {
       accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5',
-      'user-agent': 'Mozilla/5.0 OmniTavern-Maid-Assistant/0.7.3-diagnose-1',
+      'user-agent': 'Mozilla/5.0 OmniTavern-Maid-Assistant/0.7.3-diagnose-2',
     },
     body: null,
     timeoutMs: 12000,

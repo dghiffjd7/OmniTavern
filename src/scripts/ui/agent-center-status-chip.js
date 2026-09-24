@@ -351,6 +351,25 @@ export class AgentCenterStatusChip {
         this.state = buildAgentStatusChipView({}, this.viewOptions);
         this.refreshTimer = null;
         this.refreshToken = 0;
+        this.refreshSkippedWhileHidden = false;
+        this.visibilityObserver = null;
+        this.visibilityListener = null;
+    }
+
+    // 胶囊不在屏幕上（所在页面隐藏、应用切到后台）时跳过定时刷新；重新可见时立刻补刷一次
+    isShown() {
+        const el = this.element;
+        if (!el || el.isConnected === false) return false;
+        if (this.documentRef?.visibilityState === 'hidden') return false;
+        if (typeof el.checkVisibility === 'function') return el.checkVisibility();
+        if (typeof el.getClientRects === 'function') return el.getClientRects().length > 0;
+        return true;
+    }
+
+    refreshIfSkipped() {
+        if (!this.refreshSkippedWhileHidden || !this.isShown()) return;
+        this.refreshSkippedWhileHidden = false;
+        this.refresh();
     }
 
     ensureStyle() {
@@ -404,15 +423,32 @@ export class AgentCenterStatusChip {
     start() {
         if (!this.refreshIntervalMs || this.refreshTimer) return;
         this.refreshTimer = setInterval(() => {
-            if (this.documentRef?.visibilityState === 'hidden') return;
+            if (!this.isShown()) {
+                this.refreshSkippedWhileHidden = true;
+                return;
+            }
             this.refresh();
         }, this.refreshIntervalMs);
+        const view = this.documentRef?.defaultView || globalThis;
+        if (!this.visibilityObserver && typeof view?.IntersectionObserver === 'function' && this.element) {
+            this.visibilityObserver = new view.IntersectionObserver((entries) => {
+                if (entries.some(entry => entry.isIntersecting)) this.refreshIfSkipped();
+            });
+            this.visibilityObserver.observe(this.element);
+        }
+        if (!this.visibilityListener && typeof this.documentRef?.addEventListener === 'function') {
+            this.visibilityListener = () => this.refreshIfSkipped();
+            this.documentRef.addEventListener('visibilitychange', this.visibilityListener);
+        }
     }
 
     stop() {
-        if (!this.refreshTimer) return;
-        clearInterval(this.refreshTimer);
+        if (this.refreshTimer) clearInterval(this.refreshTimer);
         this.refreshTimer = null;
+        this.visibilityObserver?.disconnect?.();
+        this.visibilityObserver = null;
+        if (this.visibilityListener) this.documentRef?.removeEventListener?.('visibilitychange', this.visibilityListener);
+        this.visibilityListener = null;
     }
 
     async refresh() {

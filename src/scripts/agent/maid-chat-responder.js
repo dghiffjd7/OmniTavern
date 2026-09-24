@@ -19,6 +19,8 @@ import {
   getMaidImageAttachmentsFromContext,
 } from './maid-attachment-parts.js';
 import { isMaidUserAbort } from './maid-failure-codes.js';
+import { buildMaidGenerationOptions } from './maid-generation-settings.js';
+import { MAID_MEMORY_REFERENCE_RULE, buildMaidMemoryPromptBlock } from './maid-memory-prompt.js';
 
 const trim = (value, fallback = '') => {
   const text = String(value ?? '').trim();
@@ -95,8 +97,7 @@ export const buildMaidChatResponderMessages = ({
     `当前会话：${trim(context?.sessionId, '-')}`,
     `UI 模式：${trim(context?.uiMode, '-')}`,
     `当前页面：${trim(context?.activePage, '-')}`,
-    `女仆分层记忆：\n${memoryText || '（空）'}`,
-    `女仆历史上下文：\n${historyText || '（空）'}`,
+    buildMaidMemoryPromptBlock({ memoryText, historyText }),
     `APP 相关讯息：\n${appContext}`,
     observationText ? `已执行工具观察结果：\n${observationText}` : '',
   ].filter(Boolean).join('\n');
@@ -107,7 +108,8 @@ export const buildMaidChatResponderMessages = ({
         getLocalizedMaidPrompt(trim(maidPrompt, DEFAULT_MAID_PROMPT)),
         getLocalizedMaidOperationSafetyPrompt(),
         modelFeatureContext.awareness,
-        '你可以参考女仆分层记忆和历史上下文来延续对话、理解“刚才那个”等省略指代；不要编造不存在的历史。',
+        '你可以参考 <maid_memory> 和 <maid_history> 来延续对话、理解“刚才那个”等省略指代；不要编造不存在的历史。',
+        MAID_MEMORY_REFERENCE_RULE,
         observationText ? '如果提供了工具观察结果，请基于观察结果直接回答用户本次问题；不要只说已查看，也不要输出 JSON。' : '',
         getLocalizedMaidOutputLanguagePrompt(),
       ].filter(Boolean).join('\n'),
@@ -152,6 +154,7 @@ export const createMaidChatResponder = ({
       sessionId: trim(context?.sessionId),
       uiMode: trim(context?.uiMode),
       taskType: 'maid_chat',
+      voiceCallId: trim(context?.voiceCallId),
     });
   } catch (error) {
     logger?.warn?.('maid chat responder runtime unavailable', error);
@@ -207,12 +210,12 @@ export const createMaidChatResponder = ({
       input: text,
       conversationContext,
     });
-    const responseText = await client.chat(messages, {
+    const responseText = await client.chat(messages, buildMaidGenerationOptions({
       temperature: 0.7,
       maxTokens: 800,
       max_tokens: 800,
       signal: context?.signal,
-    });
+    }, runtime?.config, runtime?.generationSettings));
     emitDebugSnapshot(onDebugSnapshot, {
       source: 'maid_chat_responder',
       input: text,

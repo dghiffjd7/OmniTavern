@@ -62,6 +62,69 @@ const emitToolCall = (options, {
   }, { provider: 'deepseek', model: 'deepseek-v4-flash' });
 };
 
+// 从 provider tool call 一直走到最终 decision，避免标准化后又被第二次截断。
+{
+  const answer = '规则集名称。'.repeat(340) + 'FINAL_ENTRY';
+  const planner = createMaidModelBackedReActPlanner({
+    getProviderFcExperimentStatus: () => ({ enabled: true }),
+    resolveRuntimeConfig: async () => ({ configured: true, config: runtimeConfig,
+      client: { chat: async (_messages, options) => { emitToolCall(options, { control: true, args: { action: 'final', message: answer } }); return ''; } },
+    }),
+    logger: { warn() {}, debug() {} },
+  });
+  const decision = await planner('列出全部名称', { ...context, maidReactSteps: [] });
+  assert.equal(decision.ok, true);
+  assert.equal(decision.message, answer);
+  console.log('ok - long FC answers reach the final decision without losing entries');
+}
+
+// 手动思考不先发送一个注定被拒的强制工具请求，直接走兼容文本规划并保留思考设置。
+{
+  let calls = 0;
+  const planner = createMaidModelBackedPlanner({
+    features: [feature], getProviderFcExperimentStatus: () => ({ enabled: true }),
+    resolveRuntimeConfig: async () => ({ config: { provider: 'anthropic', model: 'claude-3-5-haiku-20241022' },
+      generationSettings: { reasoningMode: 'on', reasoningEffort: 'low' },
+      client: { chat: async (_messages, options) => {
+        calls++;
+        assert.equal(options.thinking, undefined);
+        assert.equal(options.tool_choice.type, 'any');
+        const tool = options.tools.find(item => item.name !== MAID_PROVIDER_FC_CONTROL_TOOL_NAME);
+        options.onProviderToolCallDelta({ type: 'message', content: [{ type: 'tool_use', id: 'haiku-tool', name: tool.name, input: { query: '当前' } }] });
+        return '';
+      } },
+    }), logger: { warn() {}, debug() {} },
+  });
+  const result = await planner('列出当前会话', context);
+  assert.equal(result.ok, true);
+  assert.equal(result.plannerTransport.effectiveMode, 'provider_fc');
+  assert.equal(result.plannerTransport.thinkingEnabled, false);
+  assert.equal(calls, 1);
+  console.log('ok - unsupported reasoning does not disable available Anthropic function calling');
+}
+
+{
+  let calls = 0;
+  const planner = createMaidModelBackedPlanner({
+    features: [feature], getProviderFcExperimentStatus: () => ({ enabled: true }),
+    resolveRuntimeConfig: async () => ({ config: { provider: 'anthropic', model: 'claude-sonnet-4-5' },
+      generationSettings: { reasoningMode: 'on', reasoningEffort: 'low' },
+      client: { chat: async (_messages, options) => {
+        calls++;
+        assert.equal(options.tools, undefined);
+        assert.equal(options.thinking.type, 'enabled');
+        assert.equal(options.temperature, undefined);
+        return JSON.stringify({ ok: true, toolName: 'session.list', args: { query: '当前' }, featureId: 'session.list' });
+      } },
+    }), logger: { warn() {}, debug() {} },
+  });
+  const result = await planner('列出当前会话', context);
+  assert.equal(result.ok, true);
+  assert.equal(calls, 1);
+  assert.equal(result.plannerTransport.fallbackReason, 'anthropic_manual_thinking_forced_tool_unsupported');
+  console.log('ok - manual Anthropic thinking falls back before a request, preserving thinking without forced tools');
+}
+
 {
   const globalSemanticPromptPlan = resolveGlobalSemanticPromptPlan({
     blocks: [

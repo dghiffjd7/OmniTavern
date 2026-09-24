@@ -643,10 +643,33 @@ const inferGeminiConstType = (value) => {
   return '';
 };
 
+// 联合里的分支没有任何类型信息（只写 required 之类的约束）时，Gemini/Vertex 会以“缺少类型”拒绝整个请求。
+const GEMINI_DROPPED_BOUND_KEYS = new Set(['minLength', 'maxLength', 'minItems', 'maxItems', 'pattern']);
+
+const isTypelessSchemaBranch = branch => isPlainObject(branch)
+  && !['type', 'properties', 'items', 'enum', 'const', 'anyOf', 'oneOf'].some(key => Object.prototype.hasOwnProperty.call(branch, key));
+
 const toGeminiSchema = (value) => {
   if (Array.isArray(value)) return value.map(toGeminiSchema);
   if (!isPlainObject(value)) return value;
   const out = {};
+  // type 数组（如 ["string","integer"]）Gemini 不认：取第一个非 null 类型，含 null 时标 nullable
+  if (Array.isArray(value.type)) {
+    const types = value.type.map(item => String(item || '').toLowerCase());
+    const primary = types.find(item => item && item !== 'null');
+    value = { ...value, type: primary || 'string', ...(types.includes('null') ? { nullable: true } : {}) };
+  }
+  // 只有约束的联合交给本地校验，不发给服务商
+  ['anyOf', 'oneOf'].forEach((key) => {
+    if (Array.isArray(value[key]) && value[key].every(isTypelessSchemaBranch)) {
+      value = { ...value };
+      delete value[key];
+    }
+  });
+  // Gemini 要求数组声明 items；未声明时按任意对象处理，具体结构仍由本地 schema 校验
+  if (String(value.type || '').toLowerCase() === 'array' && !isPlainObject(value.items)) {
+    value = { ...value, items: { type: 'object' } };
+  }
   const hasConst = Object.prototype.hasOwnProperty.call(value, 'const');
   if (hasConst) {
     const inferredType = inferGeminiConstType(value.const);
@@ -657,6 +680,9 @@ const toGeminiSchema = (value) => {
   }
   Object.entries(value).forEach(([key, child]) => {
     if (key === 'additionalProperties' || key === 'const' || (key === 'enum' && hasConst)) return;
+    // 长度/条数约束嵌套在数组里时 Vertex 会以 400“invalid argument”拒绝整个请求（实测 regex.upsert_rules）；
+    // 这些约束仍由本地工具 schema 校验，不必发给服务商
+    if (GEMINI_DROPPED_BOUND_KEYS.has(key)) return;
     if (key === 'oneOf') {
       out.anyOf = toGeminiSchema(child);
       return;

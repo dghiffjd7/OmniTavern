@@ -109,6 +109,12 @@
       "reason": "This Claude-compatible empty-stream suffix is part of a complete localized error template; it remains separately visible to the scanner because the runtime composes the error from two constants."
     },
     {
+      "scope": "source",
+      "paths": ["src/scripts/ui/realtime/realtime-maid-tools.js", "src/scripts/ui/realtime/realtime-maid-task-session.js"],
+      "category": "agent_semantic_source",
+      "reason": "Model-facing realtime tool descriptions and task-update protocol text. The quoted confirmation keyword (允许 / yes) must match what users actually say to confirm, so it is not UI copy; user-visible strings in these files use t()."
+    },
+    {
       "scope": "content",
       "pathPrefixes": ["src/scripts/agent/"],
       "category": "agent_semantic_source",

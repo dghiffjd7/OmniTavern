@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 
 import {
   applyMemoryTablePushEvent,
+  createCoalescedRerender,
   rerenderCurrentSessionHistory,
 } from '../../src/scripts/ui/app-session-refresh-runtime-utils.js';
 
@@ -158,4 +159,40 @@ import {
   });
   assert.equal(result, null);
   console.log('ok - applyMemoryTablePushEvent ignores incomplete event payloads');
+}
+
+{
+  const queue = [];
+  const flush = async () => {
+    while (queue.length) await queue.shift()();
+  };
+  let runs = 0;
+  let release = null;
+  const rerender = createCoalescedRerender(async () => {
+    runs += 1;
+    if (runs === 1) await new Promise(resolve => { release = resolve; });
+    return `run-${runs}`;
+  }, { schedule: fn => queue.push(fn) });
+
+  const first = rerender();
+  const second = rerender();
+  assert.equal(first, second, '同一轮的触发共用一次重建');
+  assert.equal(queue.length, 1);
+  const draining = flush();
+  await Promise.resolve();
+  assert.equal(runs, 1);
+  const during = rerender();
+  const duringAgain = rerender();
+  assert.equal(during, first, '重建进行中的触发并入同一个 promise');
+  assert.equal(duringAgain, first);
+  release();
+  await draining;
+  assert.equal(await first, 'run-2', '进行中有新触发时只补跑一次，调用方等到补跑结束');
+  assert.equal(runs, 2);
+
+  const later = rerender();
+  assert.notEqual(later, first, '空闲后的触发开启新一轮');
+  await flush();
+  assert.equal(await later, 'run-3');
+  console.log('ok - coalesced rerender merges bursts and reruns once after in-flight triggers');
 }

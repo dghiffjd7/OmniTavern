@@ -139,8 +139,10 @@ pub fn run() {
             _app.manage(HttpAbortState::default());
             _app.manage(HttpStreamState::default());
             _app.manage(realtime_transport::RealtimeTransportState::default());
+            // DevTools 常开会让 WebView 保留控制台对象、拖慢渲染与回收：dev 下改为按需打开
+            // （需要时设置环境变量 OMNITAVERN_DEVTOOLS=1 再运行 npm run dev）
             #[cfg(all(debug_assertions, not(any(target_os = "android", target_os = "ios"))))]
-            {
+            if std::env::var("OMNITAVERN_DEVTOOLS").map(|value| value == "1").unwrap_or(false) {
                 use tauri::Manager;
                 if let Some(window) = _app.get_webview_window("main") {
                     window.open_devtools();

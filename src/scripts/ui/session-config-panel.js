@@ -306,14 +306,13 @@ export class SessionConfigPanel {
     }
 
     getPresetList(mode = 'chat') {
-        const presets = Object.entries(this.store.getState()?.presets?.openai || {});
-        return presets
-            .filter(([, preset]) => isPresetEligibleForMode(preset, mode))
-            .map(([id, p]) => ({ value: id, label: p?.name || id }));
+        return this.store.listSummaries('openai')
+            .filter(preset => isPresetEligibleForMode(preset, mode))
+            .map(({ id, name }) => ({ value: id, label: name || id }));
     }
 
     getPresetName(presetId) {
-        const p = this.store.getState()?.presets?.openai?.[presetId];
+        const p = this.store.listSummaries('openai').find(preset => preset.id === presetId);
         return String(p?.name || '').trim() || presetId || '';
     }
 

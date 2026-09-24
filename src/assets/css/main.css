@@ -88,6 +88,10 @@ body.is-android {
     filter: none !important;
     border-radius: 50% !important;
   }
+  .typing-dot::after {
+    animation: none !important;
+    opacity: 0 !important;
+  }
 }
 
 /* 背景占位（若需要使用已下载外部背景） */

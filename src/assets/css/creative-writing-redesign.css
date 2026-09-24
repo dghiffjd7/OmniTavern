@@ -1084,7 +1084,14 @@ body[data-ui-mode='rp'] .rp-toolbar {
   background: rgba(28, 25, 23, 0.25);
   -webkit-backdrop-filter: blur(2px);
   backdrop-filter: blur(2px);
-  transition: opacity 180ms ease;
+  transition: opacity 180ms ease, visibility 0s linear 0s;
+}
+
+/* 隐藏时只把透明度降到 0 仍会让全屏背景模糊每帧参与合成（dev 实测 rp 空闲 GPU 约 22% → 12%）；
+   淡出结束后再设为不可见，打开时立即可见，淡入淡出观感不变。 */
+.rp-greeting-overlay.hidden {
+  visibility: hidden;
+  transition: opacity 180ms ease, visibility 0s linear 180ms;
 }
 
 .rp-greeting-sheet {

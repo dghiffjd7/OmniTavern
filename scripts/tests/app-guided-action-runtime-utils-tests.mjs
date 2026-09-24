@@ -176,6 +176,31 @@ import { listAppFeatures } from '../../src/scripts/agent/app-feature-catalog.js'
 }
 
 {
+  // 实时语音中跳过首次引导：直接执行、不弹引导，也不记为已完成（之后打字使用时仍会引导一次）
+  const completed = new Set();
+  const shown = [];
+  let inCall = true;
+  const runtime = createAppGuidedActionRuntime({
+    guideStore: { isCompleted: id => completed.has(id), markCompleted: id => completed.add(id) },
+    getFeature: id => ({ id, title: '发送聊天消息', firstRunGuide: 'chat.send_message.guide', uiPath: ['聊天室', '输入框', '发送'] }),
+    showGuide: guide => shown.push(guide.guideId),
+    shouldSkipGuide: ({ context }) => inCall || Boolean(context?.voiceCallId),
+  });
+  let executed = 0;
+  const execute = async () => { executed += 1; return { status: 'succeeded', result: { ok: true } }; };
+  const voice = await runtime.run({ plan: { featureId: 'chat.send_message' }, context: { voiceCallId: 'call-1' }, execute });
+  assert.equal(voice.guided, false);
+  assert.equal(executed, 1);
+  assert.deepEqual(shown, []);
+  assert.equal(completed.has('chat.send_message.guide'), false, 'a skipped guide is not marked completed');
+  inCall = false;
+  const typed = await runtime.run({ plan: { featureId: 'chat.send_message' }, context: {}, execute });
+  assert.equal(typed.guided, true, 'typed use after the call still gets the first-run guide');
+  assert.deepEqual(shown, ['chat.send_message.guide']);
+  console.log('ok - first-run guides are skipped during realtime voice without being marked completed');
+}
+
+{
   const shown = [];
   const runtime = createAppGuidedActionRuntime({
     guideStore: {

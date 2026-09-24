@@ -83,3 +83,18 @@ assert.equal(presets.state.presets.openai.p.prompts[0].content, 'concurrent user
 assert.equal(presets.state.presets.openai.p.prompt_order[0].order[0].enabled, false);
 assert.equal(presets.getActiveId('openai'), 'p');
 console.log('ok - script preset edits separate in-use working data from named persistence, scope regex overrides and preserve concurrent edits');
+
+{
+  // 规则集筛选在复制前进行：只复制命中的规则集，返回的仍是副本
+  const store = Object.create(RegexStore.prototype);
+  const bound = { id: 'a', bind: { type: 'preset', presetType: 'openai', presetId: 'p' }, rules: [{ id: 'r1' }] };
+  const other = { id: 'b', bind: { type: 'world', worldId: 'w' }, rules: [{ id: 'r2' }] };
+  store.state = { local: { order: ['a', 'b'], sets: { a: bound, b: other } } };
+  const seen = [];
+  const hits = store.listLocalSets(set => { seen.push(set.id); return set.bind?.type === 'preset'; });
+  assert.deepEqual(seen, ['a', 'b']);
+  assert.deepEqual(hits.map(set => set.id), ['a']);
+  assert.notEqual(hits[0], bound, '命中的规则集仍以副本返回');
+  assert.deepEqual(store.listLocalSets().map(set => set.id), ['a', 'b'], '不传筛选时行为不变');
+  console.log('ok - regex listLocalSets filters before cloning');
+}
