@@ -2,6 +2,7 @@ import {
   buildAppFeatureDoc,
   searchAppFeatures,
 } from '../app-feature-catalog.js';
+import { readMaidSkill } from '../maid-skill-catalog.js';
 
 const trim = (value, fallback = '') => {
   const text = String(value ?? '').trim();
@@ -224,6 +225,24 @@ export const createAppNavigationAgentTools = ({
       return { ok: true, feature };
     },
     summarizeResult: result => result?.ok === false ? 'feature doc not found' : `feature doc: ${trim(result?.feature?.id)}`,
+  },
+  {
+    name: 'app.read_skill',
+    title: 'Read maid workflow',
+    description: 'Read a workflow from the maid skill index. This does not execute actions or grant permissions.',
+    source: 'maid-app-navigation',
+    permissions: [],
+    riskLevel: 'low',
+    capabilities: { read: true, write: false, network: false, cost: 'none', undo: 'none', modelContext: 'allowlist', confirmation: 'allow_once' },
+    schema: {
+      type: 'object', required: ['skillId'], additionalProperties: false,
+      properties: { skillId: { type: 'string', minLength: 1, maxLength: 80 } },
+    },
+    execute: async (args = {}) => {
+      const skill = readMaidSkill(args.skillId);
+      return skill ? { ok: true, skill } : { ok: false, reason: 'skill_not_found' };
+    },
+    summarizeResult: result => result?.ok ? `workflow: ${result.skill.title}` : 'workflow not found',
   },
   {
     name: 'app.open_panel',

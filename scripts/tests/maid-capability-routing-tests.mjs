@@ -310,6 +310,14 @@ const createCatalogRoutingHarness = () => {
   assert.equal(failedLookup.candidateIds.has('worldbook.open'), false);
   runtime.finishRequest(request.id, { ok: true });
   console.log('ok - a feature doc the maid just read becomes a pinned candidate for the next step');
+  const skillRequest = runtime.beginRequest({ input: '帮我整理这些资料' });
+  const withSkill = runtime.prepareDecision({ requestId: skillRequest.id, input: '帮我整理这些资料', phase: 'react', configOverride: { mode: 'bounded' },
+    steps: [{ toolName: 'app.read_skill', status: 'succeeded', args: { skillId: 'worldbook.from_sources' } }] });
+  assert(withSkill.candidateIds.size <= 8, 'workflow references stay within the candidate budget');
+  assert(withSkill.candidateIds.has('app.capabilities.search'), 'the lookup path stays available');
+  assert(!withSkill.candidateIds.has('worldbook.delete_many'), 'a workflow does not grant unrelated destructive capabilities');
+  assert(withSkill.candidateIds.has('worldbook.read'), 'workflow references can reveal the next relevant capability');
+  runtime.finishRequest(skillRequest.id, { ok: true });
 }
 
 {

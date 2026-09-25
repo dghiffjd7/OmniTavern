@@ -1,4 +1,5 @@
 import { t } from '../i18n/index.js';
+import { createUtilityAgentEditor } from './utility-agent-editor.js';
 import { appConfirm, appChoice } from './app-confirm.js';
 import { createFormatRepairProfileDraft, createFormatRepairProfileId } from '../agent/format-repair-profiles.js';
 import { mountAgentRequestPreview } from './chat/agent-request-preview.js';
@@ -64,6 +65,7 @@ const installStyle = doc => {
 // Own the draft DOM so periodic AC refreshes never erase unsaved prompt blocks.
 export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', context, messageId = '', repairProfileId = '', newRepairProfile = false, targetSnapshot = null, documentRef = document, onDeleted = () => {} }) => {
   const doc = documentRef; installStyle(doc);
+  if (['archive_naming', 'reply_scoring'].includes(id)) return createUtilityAgentEditor({ actions, id, scope, context, documentRef: doc });
   const node = doc.createElement('div'); node.className = 'agent-config-editor'; node.dataset.agentCommonEditor = id;
   let saved = actions.getAgentConfiguration({ id, scope, context, ...(repairProfileId ? { repairProfileId } : {}) }), config = clone(saved.config), bodyRule = clone(saved.bodyRule);
   repairProfileId = config.repairProfileId || '';

@@ -1,6 +1,7 @@
 import { isOpenAiLive, OPENAI_LIVE_MODEL, OPENAI_LIVE_BACKEND_MODEL } from './openai-live-config.js';
 import { getRealtimeSettingsTarget, startRealtimeSettingsCall, acquireRealtimeSettingsCheck } from './realtime-settings-target.js';
 import { normalizeCustomRealtimeEndpoint } from './custom-realtime-config.js';
+import { normalizeRealtimeVadSettings } from './realtime-voice-config-utils.js';
 import { checkCustomRealtime } from './custom-realtime-probe.js';
 import { getRealtimeProfileStore } from '../../storage/realtime-profile-store.js';
 import { REALTIME_PROVIDERS, makeRealtimeProfile, isDoubaoSc2, GEMINI_VERTEX_MODELS, GEMINI_VERTEX_REGIONS, isGeminiVertex, usesGeminiServiceAccount } from './realtime-provider-catalog.js';
@@ -67,6 +68,14 @@ export class RealtimeSettingsPanel {
     this.root.querySelectorAll('[data-secret]').forEach(node => { this.secretDraft[node.dataset.secret] = node.value; });
     for (const [field, id] of Object.entries({ name: 'rt-name', model: 'rt-model', openaiBackend: 'rt-openai-backend', liveBackendModel: 'rt-backend-model', region: 'rt-region', workspaceId: 'rt-workspace', idleTimeoutMinutes: 'rt-idle', voiceKind: 'rt-voice-kind', voice: 'rt-voice', geminiBackend: 'rt-gemini-backend', vertexaiAuthMode: 'rt-vertex-auth-mode', vertexaiProjectId: 'rt-vertex-project', replyLanguage: 'rt-reply-language', transcriptionLanguage: 'rt-transcription-language', customProtocol: 'rt-custom-protocol', endpoint: 'rt-endpoint', authMode: 'rt-auth-mode', authHeader: 'rt-auth-header', transcriptionModel: 'rt-transcription-model' })) {
       const element = this.root.querySelector(`#${id}`); if (element) this.draft[field] = element.value;
+    }
+    if (this.draft.provider === 'custom') {
+      const vad = { ...this.draft.vad };
+      for (const field of ['threshold', 'prefixPaddingMs', 'silenceDurationMs']) {
+        const element = this.root.querySelector(`#rt-vad-${field}`);
+        if (element) vad[field] = element.value;
+      }
+      this.draft.vad = normalizeRealtimeVadSettings(vad);
     }
   }
   async leaveDraft() { this.capture(); return !this.dirty || await appConfirm({ title: '未保存的实时语音设置', message: '切换设置档会放弃未保存的修改。', confirmText: '放弃修改', cancelText: '继续编辑' }); }
@@ -274,6 +283,7 @@ export class RealtimeSettingsPanel {
       <div class="api-config-realtime-actions">${this.draft?.id ? button('rt-bind', target.uiMode === 'maid' ? '为女仆使用此声音' : '为当前角色使用此声音') : ''}${binding ? button('rt-unbind', '跟随全局实时配置') : ''}${button('rt-try-call', '试用当前通话配置')}</div></div>`;
   }
   fields(profile, preset) {
+    const vad = normalizeRealtimeVadSettings(profile.vad);
     const input = (id, label, value = '', type = 'text', extra = '', messages = []) => `<label class="api-config-realtime-field">${helpTitle(label, messages)}<input id="${id}" type="${type}" value="${escape(value)}" autocomplete="off" ${extra}></label>`;
     const vertex = isGeminiVertex(profile), serviceAccount = usesGeminiServiceAccount(profile);
     const regions = serviceAccount ? GEMINI_VERTEX_REGIONS : preset.regions;
@@ -310,6 +320,9 @@ export class RealtimeSettingsPanel {
       <label class="api-config-realtime-field"><span>${tr('鉴权方式')}</span><select id="rt-auth-mode">${option('bearer', 'Bearer Token')}${option('header', translateUiText('自定义鉴权请求头'))}${option('none', translateUiText('不使用 API Key'))}</select></label>
       ${profile.authMode === 'header' ? input('rt-auth-header', '鉴权请求头名称', profile.authHeader) : ''}
       ${input('rt-transcription-model', '转写模型', profile.transcriptionModel, 'text', '', ['填写渠道支持的输入转写模型；每轮转写后会更新角色上下文并回复。'])}
+      ${input('rt-vad-threshold', '说话检测阈值', vad.threshold, 'number', 'min="0" max="1" step="0.05"', ['默认 0.5；环境噪声容易触发时可调高，轻声说话难以识别时可调低。'])}
+      ${input('rt-vad-silenceDurationMs', '停顿等待（毫秒）', vad.silenceDurationMs, 'number', 'min="100" max="5000" step="100"', ['默认 600；调高可留出更长的句间停顿，调低会更快开始回复。'])}
+      ${input('rt-vad-prefixPaddingMs', '保留句首音频（毫秒）', vad.prefixPaddingMs, 'number', 'min="0" max="5000" step="100"', ['默认 300；用于保留检测到说话之前的音频，避免遗漏句首。'])}
       <label class="api-config-realtime-field is-wide">${helpTitle('附加请求头（JSON）', ['与 API Key 一同加密保存。留空保留已保存的值，填写 {} 清除。'])}<textarea id="rt-extra-headers" data-secret="extraHeaders" rows="3" autocomplete="off" spellcheck="false" placeholder="${tr(profile.credentialId ? '已保存；留空保持原值' : '尚未填写')}">${escape(this.secretDraft.extraHeaders || '')}</textarea></label>
     </div></details>` : ''}
     <div class="api-config-realtime-actions">${button('rt-save', '保存并使用')}</div>

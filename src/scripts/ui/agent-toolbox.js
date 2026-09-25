@@ -48,7 +48,7 @@ export const createAgentToolbox = ({ input, actions, getContext, getMessages, ge
     onChoose: messageId => { target = { messageId }; selectedRunId = ''; selectionSnapshot = null; rawRange = null; rawSource = ''; void prepare(); } });
   const stopFormatPick = () => { if (formatPicker.active) { formatPicker.stop(); controller?.cancel?.(); } };
   const readCatalog = () => {
-    catalog = (actions.listAgentConfigurations({ context: getContext() }) || []).map(record => record.config).filter(Boolean);
+    catalog = (actions.listAgentConfigurations({ context: getContext() }) || []).map(record => record.config).filter(config => config && !['archive_naming', 'reply_scoring'].includes(config.kind));
     const next = reconcileToolboxPreferences(prefs, catalog, getContext());
     if (JSON.stringify(next) !== JSON.stringify(prefs)) { prefs = next; savePrefs(); }
     items = getToolboxItems(prefs, catalog, getContext());

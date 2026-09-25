@@ -22,7 +22,11 @@ const normalizeReactionActorId = (value) => {
   return actor || SELF_REACTION_ACTOR;
 };
 
-const normalizeEmojiValue = (value) => clampPreview(String(value || '').trim(), 16);
+const normalizeEmojiValue = (value) => {
+  const text = String(value || '').trim();
+  if (text.startsWith('custom:')) return /^custom:[a-f0-9]{64}$/.test(text) ? text : '';
+  return clampPreview(text, 16);
+};
 
 export const getMessagePreviewText = (message, { maxLength = 120, fallback = '...' } = {}) => {
   const msg = message && typeof message === 'object' ? message : {};
@@ -171,7 +175,7 @@ export const normalizeReactionEntries = (input) => {
     });
     if (!uniqActors.length) return;
     if (!byEmoji.has(emoji)) {
-      byEmoji.set(emoji, { emoji, actors: uniqActors });
+      byEmoji.set(emoji, { emoji, actors: uniqActors, ...(emoji.startsWith('custom:') ? { name: clampPreview(entry.name || '自定义反应', 40) } : {}) });
       return;
     }
     const current = byEmoji.get(emoji);
@@ -182,14 +186,14 @@ export const normalizeReactionEntries = (input) => {
   return Array.from(byEmoji.values());
 };
 
-export const toggleReactionActor = (input, emoji, actorId = SELF_REACTION_ACTOR) => {
+export const toggleReactionActor = (input, emoji, actorId = SELF_REACTION_ACTOR, { name = '' } = {}) => {
   const targetEmoji = normalizeEmojiValue(emoji);
   if (!targetEmoji) return normalizeReactionEntries(input);
   const actor = normalizeReactionActorId(actorId);
   const list = normalizeReactionEntries(input).map((entry) => ({ ...entry, actors: entry.actors.slice() }));
   const index = list.findIndex((entry) => entry.emoji === targetEmoji);
   if (index === -1) {
-    list.push({ emoji: targetEmoji, actors: [actor] });
+    list.push({ emoji: targetEmoji, actors: [actor], ...(targetEmoji.startsWith('custom:') ? { name: clampPreview(name || '自定义反应', 40) } : {}) });
     return list;
   }
   const nextActors = list[index].actors.filter((item) => item !== actor);

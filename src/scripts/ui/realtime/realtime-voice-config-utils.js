@@ -46,6 +46,22 @@ const clampNumber = (value, fallback, min, max) => {
 const normalizeModelId = (value, fallback) => String(value || fallback).trim() || fallback;
 const normalizeReplyLanguage = value => String(value || '').replace(/\s+/g, ' ').trim().slice(0, 80);
 
+export const normalizeRealtimeVadSettings = (value = {}) => {
+  const input = value && typeof value === 'object' ? value : {};
+  const number = (key, min, max) => clampNumber(
+    input[key] === '' || input[key] == null ? undefined : input[key],
+    DEFAULT_REALTIME_VOICE_SETTINGS.vad[key], min, max,
+  );
+  return {
+    mode: input.mode === 'semantic_vad' ? 'semantic_vad' : 'server_vad',
+    threshold: number('threshold', 0, 1),
+    prefixPaddingMs: Math.round(number('prefixPaddingMs', 0, 5000)),
+    silenceDurationMs: Math.round(number('silenceDurationMs', 100, 5000)),
+    createResponse: false,
+    interruptResponse: true,
+  };
+};
+
 // A spoken-language preference is separate from input transcription. Native audio
 // providers (including Gemini) use system instructions rather than languageCode.
 export const applyRealtimeReplyLanguage = (instructions, settings = {}) => {
@@ -65,7 +81,8 @@ export const normalizeRealtimeVoiceSettings = (value = {}) => {
       transcriptionModel: '', transcriptionLanguage: '', contextMode: 'full_duplex' };
   }
   if (input.provider && input.provider !== 'openai' && getRealtimeProvider(input.provider)) {
-    return { ...normalizeRealtimeVoiceSettings({}), ...input, replyLanguage: normalizeReplyLanguage(input.replyLanguage), voice: String(input.voice || '').trim(), contextMode: input.provider === 'custom' ? 'per_turn' : 'session_snapshot' };
+    return { ...normalizeRealtimeVoiceSettings({}), ...input, replyLanguage: normalizeReplyLanguage(input.replyLanguage), voice: String(input.voice || '').trim(), contextMode: input.provider === 'custom' ? 'per_turn' : 'session_snapshot',
+      ...(input.provider === 'custom' ? { vad: normalizeRealtimeVadSettings({ ...input.vad, mode: 'server_vad' }) } : {}) };
   }
   const configRefInput = input.configRef && typeof input.configRef === 'object' ? input.configRef : {};
   const rawScope = String(configRefInput.scope || '').trim().toLowerCase();
@@ -92,31 +109,7 @@ export const normalizeRealtimeVoiceSettings = (value = {}) => {
     voice: OPENAI_REALTIME_VOICES.includes(voiceInput)
       ? voiceInput
       : DEFAULT_REALTIME_VOICE_SETTINGS.voice,
-    vad: {
-      mode: String(vadInput.mode || '').trim().toLowerCase() === 'semantic_vad'
-        ? 'semantic_vad'
-        : 'server_vad',
-      threshold: clampNumber(
-        vadInput.threshold,
-        DEFAULT_REALTIME_VOICE_SETTINGS.vad.threshold,
-        0,
-        1,
-      ),
-      prefixPaddingMs: Math.round(clampNumber(
-        vadInput.prefixPaddingMs,
-        DEFAULT_REALTIME_VOICE_SETTINGS.vad.prefixPaddingMs,
-        0,
-        5000,
-      )),
-      silenceDurationMs: Math.round(clampNumber(
-        vadInput.silenceDurationMs,
-        DEFAULT_REALTIME_VOICE_SETTINGS.vad.silenceDurationMs,
-        100,
-        5000,
-      )),
-      createResponse: false,
-      interruptResponse: true,
-    },
+    vad: normalizeRealtimeVadSettings({ ...vadInput, mode: String(vadInput.mode || '').trim().toLowerCase() }),
     idleTimeoutMinutes: Math.round(clampNumber(
       input.idleTimeoutMinutes,
       DEFAULT_REALTIME_VOICE_SETTINGS.idleTimeoutMinutes,

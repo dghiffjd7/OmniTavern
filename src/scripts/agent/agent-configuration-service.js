@@ -87,6 +87,7 @@ export const createAgentConfigurationService = ({ store, getContext, getMessages
       const repairDraft = options.id === 'reply_check' && options.repairProfileId;
       if (repairDraft && !String(options.config?.repairProfileName || '').trim()) return { ok: false, message: '请填写方案名称' };
       if (!repairDraft && config.enabled && (config.modelMode === 'none' || (config.modelMode === 'profile' && !config.modelProfileId))) return { ok: false, message: '请先选择模型' };
+      if (config.enabled && ['archive_naming', 'reply_scoring'].includes(config.kind) && config.modelMode !== 'profile') return { ok: false, message: '请选择独立模型配置' };
       if (config.enabled && isInputAgent(config) && config.modelMode !== 'profile') return { ok: false, message: '输入建议请选择独立模型配置' };
       if (config.enabled && config.kind === 'input_agent' && !config.prompt.trim()) return { ok: false, message: '请填写任务要求' };
       if (!repairDraft && config.enabled && config.id === 'reply_check' && context(options).place === 'writing' && !config.formatGuide.trim()) return { ok: false, message: '请先填写格式要求' };

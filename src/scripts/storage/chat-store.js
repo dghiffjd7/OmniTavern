@@ -3074,6 +3074,18 @@ export class ChatStore {
     )} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   }
 
+  subscribeArchives(listener) {
+    this._archiveListeners ||= new Set();
+    this._archiveListeners.add(listener);
+    return () => this._archiveListeners.delete(listener);
+  }
+
+  _emitArchiveEvent(event) {
+    for (const listener of this._archiveListeners || []) {
+      try { listener({ ...event, scopeId: this.scopeId }); } catch {}
+    }
+  }
+
   archiveCurrentMessages(id = this.currentId, name = '', forceCreate = false, options = {}) {
     const sid = String(id || '').trim();
     if (!sid || !this.state.sessions[sid]) return null;
@@ -3224,6 +3236,7 @@ export class ChatStore {
       mode: 'create_new',
       timestamp,
     };
+    this._emitArchiveEvent({ type: 'created', sessionId: sid, archiveId, automaticName: !cleanName || options.automaticName === true });
     return archiveId;
   }
 
@@ -3297,10 +3310,14 @@ export class ChatStore {
     if (!session || !Array.isArray(session.archives)) return false;
     const archive = session.archives.find(a => String(a?.id || '').trim() === aid);
     if (!archive) return false;
-    if (String(archive.name || '') === cleanName) return true;
+    if (String(archive.name || '') === cleanName) {
+      this._emitArchiveEvent({ type: 'renamed', sessionId: sid, archiveId: aid });
+      return true;
+    }
     archive.name = cleanName;
     archive.updatedAt = Date.now();
     this._persist();
+    this._emitArchiveEvent({ type: 'renamed', sessionId: sid, archiveId: aid });
     return true;
   }
 
@@ -3329,7 +3346,7 @@ export class ChatStore {
     if (totalMessages > 0) {
       const isDetached = !session.currentArchiveId;
       const autoName = isDetached ? '自动存档' : '';
-      archivedCurrentId = String(this.archiveCurrentMessages(sid, autoName, false, options) || '').trim();
+      archivedCurrentId = String(this.archiveCurrentMessages(sid, autoName, false, { ...options, automaticName: true }) || '').trim();
     }
 
     session.currentArchiveId = archiveId;
@@ -3356,6 +3373,7 @@ export class ChatStore {
     const session = this.state.sessions[sid];
     if (!session || !session.archives) return false;
     session.archives = session.archives.filter(a => a.id !== archiveId);
+    this._emitArchiveEvent({ type: 'deleted', sessionId: sid, archiveId });
     if (session.currentArchiveId === archiveId) {
       session.currentArchiveId = null;
     }

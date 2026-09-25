@@ -1,4 +1,5 @@
 import { stickerPackStore } from '../storage/sticker-pack-store.js';
+import { customReactionAssets, customReactionImportWarning } from './chat/custom-reaction-assets.js';
 import { BUILTIN_PHONE_FORMAT_WORLDBOOK_ID } from '../storage/builtin-worldbooks.js';
 import { logger } from '../utils/logger.js';
 import { pickSavePath } from '../utils/save-dialog.js';
@@ -832,6 +833,9 @@ export class ExperiencePackTransfer extends CharacterCardTransfer {
         })
       : null;
 
+    const reactions = customReactionAssets.collect([
+      ...(chat?.currentMessages || []), ...(chat?.archives || []).flatMap(archive => archive.messages || []),
+    ], assets, 'chat/reactions');
     const manifest = buildExperiencePackManifest({
       sessionId: sid,
       character,
@@ -859,6 +863,7 @@ export class ExperiencePackTransfer extends CharacterCardTransfer {
       name: entry.name,
       data_url: textToDataUrl(JSON.stringify(entry.value, null, 2), 'application/json'),
     }));
+    if (reactions.length) entries.push({ name: 'chat/reactions.json', data_url: textToDataUrl(JSON.stringify(reactions), 'application/json') });
     entries.push(...assets.entries);
 
     const fileName = sanitizeExportName(`${character?.contact?.name || sid}.${EXPERIENCE_PACK_EXTENSION}`, `experience_pack.${EXPERIENCE_PACK_EXTENSION}`);
@@ -941,6 +946,7 @@ export class ExperiencePackTransfer extends CharacterCardTransfer {
       personaCard: this.readJsonEntry(entryMap, 'persona/original-card.json', null),
       chatSession: sessionJson,
       chatCurrent: this.readJsonEntry(entryMap, 'chat/current.json', []),
+      reactionAssets: this.readJsonEntry(entryMap, 'chat/reactions.json', []),
       chatArchives: archives,
     };
   }
@@ -1096,7 +1102,7 @@ export class ExperiencePackTransfer extends CharacterCardTransfer {
 
   getUniqueStickerPackId(baseId = 'pack') {
     const source = String(baseId || '').trim() || 'pack';
-    const existing = new Set(ensureArray(stickerPackStore.getPacks?.()).map(pack => String(pack?.id || '').trim()).filter(Boolean));
+    const existing = new Set(ensureArray(stickerPackStore.getState().packs).map(pack => String(pack?.id || '').trim()).filter(Boolean));
     if (!existing.has(source)) return source;
     let index = 1;
     while (index < 9999) {
@@ -1447,6 +1453,8 @@ export class ExperiencePackTransfer extends CharacterCardTransfer {
     const archivesPayload = normalizeExperiencePackChatArchivePayloads(packageData?.chatArchives);
     const session = this.chatStore?._ensureSession?.(sid);
     if (!session) return false;
+    const reactionImport = await customReactionAssets.import(packageData?.reactionAssets, ref => this.getEntryDataUrl(packageData, ref));
+    if (reactionImport.failed.length) window.toastr?.warning?.(customReactionImportWarning(reactionImport));
     const restoredState = buildExperiencePackRestoredSessionChatState(chatSession, { includeMemoryData });
     session.draft = restoredState.draft;
     session.detachedSummaries = restoredState.detachedSummaries;

@@ -11,6 +11,16 @@ const isPlainObject = value => Boolean(value && typeof value === 'object' && !Ar
 
 const AGENT_CARD_DEFINITIONS = Object.freeze([
   {
+    id: 'archive_naming', title: '小管家', summary: '保存新存档时，在后台为默认名称生成简短标题。',
+    detail: ['手动输入的名称与后续改名不会被覆盖。'], category: 'assistant', accent: 'dialogue', implemented: true,
+    enabledDefault: false, toggleKind: 'feature', runtimeKinds: ['archive_naming'], promptRefs: [], resourceRefs: [], settingRefs: [],
+  },
+  {
+    id: 'reply_scoring', title: '正文评分', summary: '按段查看正文的修改必要性评分，手动运行并保留原文。',
+    detail: ['使用选定模型返回的评分作参考，不自动润色或修改消息。'], category: 'creative', accent: 'check', implemented: true,
+    enabledDefault: false, toggleKind: 'feature', runtimeKinds: ['reply_scoring'], promptRefs: [], resourceRefs: [], settingRefs: [],
+  },
+  {
     id: 'image_director',
     title: '生图 Agent',
     summary: '根据对话自动整理生图标签和图片提示词。',

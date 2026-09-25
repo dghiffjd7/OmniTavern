@@ -33,7 +33,7 @@ test('custom profiles survive restart, duplicate and role binding without persis
     invoke: async (command, args) => command === 'save_kv' ? (saved = structuredClone(args.data)) : saved,
     keyring: { addKey: async (id, value) => { const key = crypto.randomUUID(); keys.set(key, value); return key; }, decryptKey: async (id, key) => keys.get(key), removeKey: async (id, key) => keys.delete(key) } };
   const store = new RealtimeProfileStore(deps); await store.ready;
-  const item = await store.save(profile(), { apiKey: 'secret', extraHeaders: '{"X-Secret":"header-secret"}' });
+  const item = await store.save({ ...profile(), vad: { threshold: .7, prefixPaddingMs: 500, silenceDurationMs: 1200 } }, { apiKey: 'secret', extraHeaders: '{"X-Secret":"header-secret"}' });
   const target = { supported: true, sessionId: 'maid', uiMode: 'maid' };
   await store.bindTarget(target, item.id);
   const reloaded = new RealtimeProfileStore(deps); await reloaded.ready;
@@ -43,11 +43,30 @@ test('custom profiles survive restart, duplicate and role binding without persis
   assert.equal(normalizeRealtimeVoiceSettings(resolved.settings).contextMode, 'per_turn');
   assert.equal(resolved.settings.transcriptionModel, 'vendor-transcribe');
   assert.equal(resolved.settings.voice, 'Voice_A');
+  const detection = buildOpenAiRealtimeSessionConfig(resolved.settings).audio.input.turn_detection;
+  assert.equal(detection.threshold, .7);
+  assert.equal(detection.prefix_padding_ms, 500);
+  assert.equal(detection.silence_duration_ms, 1200);
+  assert.equal(detection.create_response, false);
   assert(!JSON.stringify(saved).includes('header-secret')); assert(!JSON.stringify(saved).includes('"apiKey"'));
   const copy = await reloaded.duplicate(item.id); assert.notEqual(copy.credentialId, item.credentialId);
   assert.equal(copy.endpoint, item.endpoint);
+  assert.deepEqual(copy.vad, item.vad);
   const noKey = await reloaded.save({ ...profile(), authMode: 'none' }, null);
   assert(noKey.credentialId); assert.deepEqual(await reloaded.credentials(noKey), {});
+});
+
+test('custom VAD defaults survive old profiles and malformed values cannot change turn ownership', () => {
+  const detection = value => buildOpenAiRealtimeSessionConfig({ ...profile(), vad: value }).audio.input.turn_detection;
+  assert.equal(detection(undefined).silence_duration_ms, 600);
+  assert.equal(detection({ threshold: '', prefixPaddingMs: null }).threshold, .5);
+  const normalized = detection({ threshold: 5, silenceDurationMs: -1, prefixPaddingMs: 'bad', mode: 'semantic_vad', createResponse: true, interruptResponse: false });
+  assert.equal(normalized.type, 'server_vad');
+  assert.equal(normalized.threshold, 1);
+  assert.equal(normalized.silence_duration_ms, 100);
+  assert.equal(normalized.prefix_padding_ms, 300);
+  assert.equal(normalized.create_response, false);
+  assert.equal(normalized.interrupt_response, true);
 });
 
 test('GA adapter waits for session acceptance, streams PCM and truncates heard audio without counting silence gaps', () => {

@@ -36,7 +36,7 @@ export const makeRealtimeProfile = (provider = 'gemini_live') => {
   if (!preset) throw new Error('未知实时语音服务商');
   return { id: '', name: preset.label, provider, model: preset.models[0], voice: preset.voices[0], voiceKind: 'system', region: preset.regions?.[0] || '', workspaceId: '', credentialId: '', customVoices: [], idleTimeoutMinutes: 10, replyLanguage: '', transcriptionLanguage: '',
     ...(provider === 'openai' ? { openaiBackend: 'realtime', liveBackendModel: OPENAI_LIVE_BACKEND_MODEL } : {}),
-    ...(provider === 'custom' ? { customProtocol: CUSTOM_REALTIME_PROTOCOL, endpoint: '', authMode: 'bearer', authHeader: 'api-key', transcriptionModel: 'gpt-4o-mini-transcribe' } : {}),
+    ...(provider === 'custom' ? { customProtocol: CUSTOM_REALTIME_PROTOCOL, endpoint: '', authMode: 'bearer', authHeader: 'api-key', transcriptionModel: 'gpt-4o-mini-transcribe', vad: {} } : {}),
     ...(provider === 'gemini_live' ? { geminiBackend: 'developer', vertexaiAuthMode: 'service_account', vertexaiProjectId: '' } : {}) };
 };
 export const validateRealtimeProfile = profile => {

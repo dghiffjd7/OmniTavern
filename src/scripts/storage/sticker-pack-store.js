@@ -60,6 +60,7 @@ const normalizePack = (pack) => {
     id: String(raw.id || '').trim(),
     name: String(raw.name || '').trim(),
     colorIndex: Number.isFinite(Number(raw.colorIndex)) ? Number(raw.colorIndex) : 0,
+    ...(raw.kind === 'reaction' ? { kind: 'reaction' } : {}),
     iconPath: String(raw.iconPath || '').trim(),
     iconDataUrl: String(raw.iconDataUrl || '').trim(),
     iconMeta: normalizeImageMeta(raw.iconMeta),
@@ -127,6 +128,9 @@ export const stickerPackStore = {
   getState() {
     return readState();
   },
+  getStickerState(state = readState()) {
+    return { ...state, packs: (state.packs || []).filter(pack => pack.kind !== 'reaction') };
+  },
   update(mutator) {
     const current = readState();
     const next = normalizeState(typeof mutator === 'function' ? mutator({ ...current }) : current);
@@ -134,7 +138,10 @@ export const stickerPackStore = {
     return next;
   },
   getPacks() {
-    return readState().packs;
+    return readState().packs.filter(pack => pack.kind !== 'reaction');
+  },
+  getReactionPacks() {
+    return readState().packs.filter(pack => pack.kind === 'reaction');
   },
   getPack(id) {
     const key = String(id || '').trim();
@@ -179,7 +186,7 @@ export const stickerPackStore = {
     const state = readState();
     const keywords = [];
     state.packs.forEach((pack) => {
-      if (!pack.aiEnabled) return;
+      if (!pack.aiEnabled || pack.kind === 'reaction') return;
       pack.stickers.forEach((sticker) => {
         const key = String(sticker.keyword || '').trim();
         if (key) keywords.push(key);

@@ -1,6 +1,7 @@
 import { realtimeTargetBindingKey } from '../ui/realtime/realtime-settings-target.js';
 import { safeInvoke } from '../utils/tauri.js';
 import { isOpenAiLive } from '../ui/realtime/openai-live-config.js';
+import { normalizeRealtimeVadSettings } from '../ui/realtime/realtime-voice-config-utils.js';
 import { makeRealtimeProfile, getRealtimeProvider, validateRealtimeProfile, validateRealtimeCredentials, usesGeminiServiceAccount, parseRealtimeServiceAccount } from '../ui/realtime/realtime-provider-catalog.js';
 
 export const REALTIME_PROFILE_STORE_KEY = 'realtime_profiles_v1';
@@ -15,6 +16,7 @@ const cleanProfile = input => {
   if (result.provider === 'step_realtime' && !result.region) result.region = 'cn';
   if (result.provider === 'openai') for (const key of ['openaiBackend', 'liveBackendModel']) result[key] = text(result[key]);
   if (result.provider === 'custom') for (const key of ['customProtocol', 'endpoint', 'authMode', 'authHeader', 'transcriptionModel']) result[key] = text(result[key]);
+  if (result.provider === 'custom') result.vad = normalizeRealtimeVadSettings({ ...result.vad, mode: 'server_vad' });
   if (result.provider === 'gemini_live') for (const key of ['geminiBackend', 'vertexaiAuthMode', 'vertexaiProjectId']) result[key] = text(result[key]);
   result.idleTimeoutMinutes = Math.min(30, Math.max(1, Number(result.idleTimeoutMinutes) || 10));
   result.voiceKind = input.voiceKind === 'custom' ? 'custom' : 'system';

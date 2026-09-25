@@ -367,7 +367,7 @@ const createMemoryStorage = (initial = {}) => {
   assert.equal(shown, true);
   assert.equal(contextMenuEl.style.display, 'none');
   assert.equal(picker.dataset.activeCategory, 'frequent');
-  assert.equal(picker.children.length, 4);
+  assert.equal(picker.children.length, 5);
   const [header, search, tabs, content] = picker.children;
   assert.equal(header.className, 'chat-reaction-picker-header');
   assert.equal(search.className, 'chat-reaction-picker-search');

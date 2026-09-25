@@ -12,6 +12,9 @@ import {
   getTwemojiAssetPath,
 } from './reaction-emoji-catalog.js';
 import { resolveFrequentReactionEmojis } from './reaction-preference-utils.js';
+import { customReactionAssets, customReactionImageSource, isCustomReaction } from './custom-reaction-assets.js';
+import { appConfirm } from '../app-confirm.js';
+import { t } from '../../i18n/index.js';
 
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 
@@ -45,22 +48,28 @@ const createReactionMoreIcon = (documentLike) => {
 export const createReactionEmojiVisual = (emojiValue, {
   documentLike = document,
   className = '',
+  fallbackName = '',
 } = {}) => {
   const emoji = String(emojiValue || '').trim();
+  const custom = isCustomReaction(emoji);
+  const asset = custom ? customReactionAssets.find(emoji) : null;
   const wrap = documentLike.createElement('span');
   wrap.className = `chat-reaction-emoji-visual${className ? ` ${className}` : ''}`;
   wrap.setAttribute?.('aria-hidden', 'true');
 
   const image = documentLike.createElement('img');
   image.className = 'chat-reaction-emoji-image';
-  image.src = getTwemojiAssetPath(emoji);
+  const source = custom ? customReactionImageSource(asset) : getTwemojiAssetPath(emoji);
+  if (source) image.src = source;
   image.alt = '';
   image.draggable = false;
   image.decoding = 'async';
 
   const fallback = documentLike.createElement('span');
   fallback.className = 'chat-reaction-emoji-fallback';
-  fallback.textContent = emoji;
+  fallback.textContent = custom ? asset?.name || fallbackName || t('自定义反应') : emoji;
+  if (custom) wrap.classList?.add?.('is-custom');
+  if (!source) wrap.classList?.add?.('is-fallback');
   image.addEventListener?.('error', () => wrap.classList?.add?.('is-fallback'));
 
   wrap.appendChild?.(image);
@@ -90,13 +99,14 @@ export const buildReactionSummaryElement = (
     const emoji = createReactionEmojiVisual(entry.emoji, {
       documentLike,
       className: 'chat-reaction-chip-emoji',
+      fallbackName: entry.name,
     });
     const count = documentLike.createElement('span');
     count.className = 'chat-reaction-chip-count';
     count.textContent = String(countReactionActors(entry));
     chip.appendChild?.(emoji);
     chip.appendChild?.(count);
-    chip.setAttribute?.('aria-label', translateText(`${entry.emoji} ${countReactionActors(entry)}个反应`));
+    chip.setAttribute?.('aria-label', translateText(`${entry.name || entry.emoji} ${countReactionActors(entry)}个反应`));
     chip.addEventListener?.('click', (event) => {
       event.preventDefault?.();
       event.stopPropagation?.();
@@ -163,7 +173,7 @@ export const createReactionQuickBar = (
     ))) {
       button.classList?.add?.('is-active');
     }
-    button.setAttribute?.('aria-label', translateText(`使用${emojiValue}回应`));
+    button.setAttribute?.('aria-label', translateText(`使用${customReactionAssets.find(emojiValue)?.name || emojiValue}回应`));
     button.appendChild?.(createReactionEmojiVisual(emojiValue, { documentLike }));
     button.addEventListener?.('click', (event) => {
       event.preventDefault?.();
@@ -332,12 +342,13 @@ export const hideReactionPicker = (picker) => {
 };
 
 const resolvePickerCategories = (usage = {}) => {
+  const customItems = customReactionAssets.list().map(asset => ({ emoji: asset.emoji, label: asset.name, keywords: asset.name, categoryId: 'custom', categoryLabel: t('自定义') }));
   const frequentEmojis = resolveFrequentReactionEmojis({
     usage,
     defaults: DEFAULT_REACTION_EMOJIS,
     limit: 18,
   });
-  const frequentItems = frequentEmojis.map(emoji => findReactionEmoji(emoji) || {
+  const frequentItems = frequentEmojis.filter(emoji => !isCustomReaction(emoji) || customReactionAssets.find(emoji)).map(emoji => findReactionEmoji(emoji) || customItems.find(item => item.emoji === emoji) || {
     emoji,
     label: emoji,
     keywords: emoji,
@@ -346,6 +357,7 @@ const resolvePickerCategories = (usage = {}) => {
   });
   return [
     { id: 'frequent', label: '常用', icon: '🕘', emojis: frequentItems },
+    { id: 'custom', label: t('自定义'), icon: '🖼️', emojis: customItems },
     ...REACTION_EMOJI_CATEGORIES,
   ];
 };
@@ -356,6 +368,7 @@ const buildPickerOption = ({
   documentLike,
   hidePicker,
   onToggleReaction,
+  onRemove = null,
 }) => {
   const emojiValue = String(item?.emoji || '').trim();
   const button = documentLike.createElement('button');
@@ -367,12 +380,13 @@ const buildPickerOption = ({
   ))) {
     button.classList?.add?.('is-active');
   }
-  button.setAttribute?.('aria-label', `使用${emojiValue}回应，${item?.label || emojiValue}`);
+  button.setAttribute?.('aria-label', onRemove ? t('移除反应：{name}', { name: item?.label }) : `使用${item?.label || emojiValue}回应`);
   button.setAttribute?.('title', item?.label || emojiValue);
   button.appendChild?.(createReactionEmojiVisual(emojiValue, { documentLike }));
   button.addEventListener?.('click', (event) => {
     event.preventDefault?.();
     event.stopPropagation?.();
+    if (onRemove) { void onRemove(emojiValue); return; }
     hidePicker?.();
     onToggleReaction?.(emojiValue);
   });
@@ -395,8 +409,8 @@ export const showReactionPicker = ({
   if (contextMenuEl) contextMenuEl.style.display = 'none';
   picker.innerHTML = '';
   const currentReactions = normalizeReactionEntries(message?.meta?.reactions);
-  const categories = resolvePickerCategories(usage);
-  const state = { activeCategory: 'frequent', query: '' };
+  let categories = resolvePickerCategories(usage);
+  const state = { activeCategory: 'frequent', query: '', managing: false };
 
   const header = documentLike.createElement('div');
   header.className = 'chat-reaction-picker-header';
@@ -430,7 +444,27 @@ export const showReactionPicker = ({
   content.setAttribute?.('role', 'tabpanel');
 
   const tabButtons = new Map();
+  const tools = documentLike.createElement('div');
+  tools.className = 'chat-reaction-custom-tools';
+  const upload = documentLike.createElement('button');
+  upload.type = 'button'; upload.textContent = t('添加图片');
+  const manage = documentLike.createElement('button');
+  manage.type = 'button'; manage.textContent = t('管理');
+  const fileInput = documentLike.createElement('input');
+  fileInput.type = 'file'; fileInput.accept = 'image/png,image/webp,image/jpeg'; fileInput.multiple = true; fileInput.hidden = true;
+  const status = documentLike.createElement('small');
+  status.setAttribute?.('role', 'status'); status.setAttribute?.('aria-live', 'polite');
+  const remove = async emoji => {
+    if (!await appConfirm({ title: t('移除自定义反应'), message: t('已有消息会保留反应名称。'), confirmText: t('移除'), cancelText: t('取消') })) return;
+    let errorMessage = '';
+    try { await customReactionAssets.remove(emoji); } catch (error) { errorMessage = error.message; }
+    categories = resolvePickerCategories(usage); render();
+    if (errorMessage) status.textContent = t(errorMessage);
+  };
   const render = () => {
+    manage.textContent = state.managing ? t('完成') : t('管理');
+    manage.setAttribute?.('aria-pressed', state.managing ? 'true' : 'false');
+    status.textContent = state.managing ? t('点击图片可移除反应') : t('静态图片 · 最多 60 个');
     picker.dataset.activeCategory = state.activeCategory;
     tabButtons.forEach((button, categoryId) => {
       const active = !state.query && categoryId === state.activeCategory;
@@ -439,7 +473,7 @@ export const showReactionPicker = ({
     });
     content.innerHTML = '';
     const items = state.query
-      ? filterReactionEmojiCatalog(state.query)
+      ? [...filterReactionEmojiCatalog(state.query), ...categories.find(category => category.id === 'custom').emojis.filter(item => item.label.toLocaleLowerCase().includes(state.query.toLocaleLowerCase()))]
       : (categories.find(category => category.id === state.activeCategory)?.emojis || []);
     if (!items.length) {
       const empty = documentLike.createElement('div');
@@ -454,6 +488,7 @@ export const showReactionPicker = ({
       documentLike,
       hidePicker,
       onToggleReaction,
+      onRemove: state.managing && isCustomReaction(item.emoji) ? remove : null,
     })));
   };
 
@@ -481,10 +516,27 @@ export const showReactionPicker = ({
     render();
   });
 
+  upload.addEventListener?.('click', () => fileInput.click?.());
+  manage.addEventListener?.('click', () => { state.managing = !state.managing; state.activeCategory = 'custom'; state.query = ''; search.value = ''; render(); });
+  fileInput.addEventListener?.('change', async () => {
+    upload.disabled = manage.disabled = true;
+    const files = Array.from(fileInput.files || []);
+    let added = 0, errorMessage = '';
+    for (const file of files) {
+      try { await customReactionAssets.addFile(file); added++; }
+      catch (error) { errorMessage = error.message; break; }
+    }
+    fileInput.value = ''; upload.disabled = manage.disabled = false;
+    categories = resolvePickerCategories(usage); state.activeCategory = 'custom'; state.managing = false; state.query = ''; search.value = ''; render();
+    status.textContent = errorMessage ? t(errorMessage) : t('已添加 {count} 个反应', { count: added });
+  });
+  tools.appendChild?.(upload); tools.appendChild?.(manage); tools.appendChild?.(fileInput); tools.appendChild?.(status);
+
   picker.appendChild?.(header);
   picker.appendChild?.(search);
   picker.appendChild?.(tabs);
   picker.appendChild?.(content);
+  picker.appendChild?.(tools);
   render();
 
   picker.style.display = 'block';

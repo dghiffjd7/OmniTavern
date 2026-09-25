@@ -8,6 +8,7 @@ import { MomentsStore } from '../storage/moments-store.js';
 import { RpSessionStore } from '../storage/rp-session-store.js';
 import { makeScopedKey, normalizeScopeId } from '../storage/store-scope.js';
 import { stickerPackStore } from '../storage/sticker-pack-store.js';
+import { customReactionAssets, customReactionImportWarning } from './chat/custom-reaction-assets.js';
 import { emitDebugLog } from '../utils/debug-log.js';
 import { logger } from '../utils/logger.js';
 import { pickSavePath } from '../utils/save-dialog.js';
@@ -2253,6 +2254,9 @@ export class CustomBundleExporter {
     const memoryData = options.includeMemoryData
       ? await this.collectMemorySnapshot(runtime?.getMemoryTableStore?.(), sid, { isGroup: Boolean(descriptor?.isGroup) })
       : null;
+    roomConfig.reactions = customReactionAssets.collect([
+      ...(content?.current?.messages || []), ...(content?.archives || []).flatMap(archive => archive.messages || []),
+    ], assets, `${basePath}/assets/reactions`);
     const contactPayload = uiMode === 'chat'
       ? this.buildContactPayload(descriptor, assets, `${basePath}/assets`)
       : null;
@@ -2609,7 +2613,7 @@ export class CustomBundleExporter {
 
   getUniqueStickerPackId(baseId = 'pack') {
     const source = String(baseId || '').trim() || 'pack';
-    const existing = new Set(ensureArray(stickerPackStore.getPacks?.()).map((pack) => String(pack?.id || '').trim()).filter(Boolean));
+    const existing = new Set(ensureArray(stickerPackStore.getState().packs).map((pack) => String(pack?.id || '').trim()).filter(Boolean));
     if (!existing.has(source)) return source;
     let index = 1;
     while (index < 9999) {
@@ -3236,6 +3240,12 @@ export class CustomBundleExporter {
     if (!roomPackage?.chatCurrent) return 0;
     const restoreStarted = getPerfNow();
     try {
+      const reactionImport = await customReactionAssets.import(roomPackage.roomConfig?.reactions, ref => this.getEntryDataUrl(packageData, ref));
+      if (reactionImport.failed.length) {
+        const warning = customReactionImportWarning(reactionImport);
+        diagnosticsNotes?.push?.(warning);
+        window.toastr?.warning?.(warning);
+      }
       await this.restoreConversationToStore(runtime.chatStore, sessionId, roomPackage, {
         includeMemoryData: Boolean(packageData?.manifest?.options?.includeMemoryData),
       });

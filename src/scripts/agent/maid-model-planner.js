@@ -4,6 +4,7 @@ import {
   listAppFeatures,
 } from './app-feature-catalog.js';
 import { resolveCandidateCapabilitySelection } from './maid-capability-routing.js';
+import { buildMaidSkillIndexPrompt } from './maid-skill-catalog.js';
 import {
   buildMaidImageAttachmentSummary,
   buildMaidUserContentWithImages,
@@ -487,6 +488,7 @@ export const buildMaidFeatureCatalogPrompt = ({
     '<app_feature_index> 列出全部功能的名称；用户消息开头的 <app_features> 给出与本次请求最相关功能的完整参数，可以直接选用。',
     '需要不在 <app_features> 里的功能时，先调用 app.read_feature_doc 并传 featureId 读取它的工具与参数，下一步再使用；不要凭名称猜测工具名或参数。',
     indexLines.length ? `<app_feature_index>\n${indexLines.join('\n')}\n</app_feature_index>` : '',
+    indexSource.some(feature => feature.tools?.includes('app.read_skill')) ? buildMaidSkillIndexPrompt() : '',
   ].filter(Boolean).join('\n');
   // 别名只服务于本地检索匹配，模型选择工具用不到
   const detailText = `<app_features>\n${buildMaidModelPlannerFeatureList(detailed, { includeSchemas, includeAliases: false })}\n</app_features>`;

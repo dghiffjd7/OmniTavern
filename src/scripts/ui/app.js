@@ -541,6 +541,8 @@ import { bindInputSuggestionComposer } from './chat/input-suggestion-composer.js
 import { createAgentConfigStore, BODY_SELECTOR_ID } from '../storage/agent-config-store.js';
 import { createScopedAgentFeatures } from '../agent/scoped-agent-features.js';
 import { createAgentToolsAppRuntime } from './agent-tools-app-runtime.js';
+import { createUtilityAgentRuntime } from '../agent/utility-agent-runtime.js';
+import { createCustomAgentRequestRuntime } from '../agent/custom-agent-request-runtime.js';
 import { createBubbleSelectionEditRuntime, canEditBubbleText } from './chat/bubble-selection-edit-runtime.js';
 import { bindBubbleTextSelection } from './chat/bubble-text-selection.js';
 import { allowsAgentInvocation, createInputRequestBudget } from '../agent/agent-invocation.js';
@@ -804,6 +806,7 @@ import {
   normalizeReactionEntries,
   toggleReactionActor,
 } from './chat/message-interaction-utils.js';
+import { customReactionAssets } from './chat/custom-reaction-assets.js';
 import { parseSpecialMessage } from './chat/message-parser.js';
 import {
   canDeleteCurrentSwipe,
@@ -6781,7 +6784,7 @@ const initApp = async () => {
     if (!Number.isFinite(num)) return fallback;
     return Math.min(60, Math.max(1, Math.trunc(num)));
   };
-  let stickerPackState = stickerPackStore.getState();
+  let stickerPackState = stickerPackStore.getStickerState();
   let stickerPackDeleteMode = false;
   let stickerPackDeleteTarget = '';
   let activeStickerEditor = null;
@@ -7473,7 +7476,7 @@ const initApp = async () => {
   };
 
   const syncStickerPackState = (nextState = null) => {
-    stickerPackState = nextState || stickerPackStore.getState();
+    stickerPackState = stickerPackStore.getStickerState(nextState || undefined);
     setCustomMediaItems(buildCustomStickerAssets(stickerPackState));
     return stickerPackState;
   };
@@ -27044,6 +27047,20 @@ const initApp = async () => {
     openCenter: () => agentCenterPanel.show({ tab: 'agents' }),
   });
   const { textEditRuntime, actions: agentConfigurationActions } = agentToolsRuntime;
+  const utilityRequests = createCustomAgentRequestRuntime({ createClient: config => new LLMClient(config) });
+  const utilityAgentRuntime = createUtilityAgentRuntime({ chatStore, configStore: agentConfigStore, getContext: getAgentExecutionContext,
+    captureModel: customAgentRequests.captureModel, request: utilityRequests.request,
+    onChange: () => window.dispatchEvent(new CustomEvent('agent-utility-changed')),
+    onArchiveNamed: () => { contactSettingsPanel.renderArchives?.(); groupSettingsPanel.renderArchives?.(); },
+  });
+  Object.assign(agentConfigurationActions, {
+    runUtilityAgent: options => utilityAgentRuntime.run(options),
+    getUtilityAgentSample: ({ id, context }) => utilityAgentRuntime.sample(id, context),
+    listUtilityAgentRuns: ({ id, context }) => utilityAgentRuntime.list(id, context),
+    cancelUtilityAgentRun: id => utilityAgentRuntime.cancel(id),
+  });
+  window.addEventListener('session-changed', utilityAgentRuntime.reconcile);
+  window.addEventListener('agent-feature-settings-changed', utilityAgentRuntime.reconcile);
   syncAgentSuggestionBanner = sid => agentToolsRuntime.suggestionBanner?.sync?.(sid) || false;
   syncAgentSuggestionBanner(chatStore.getCurrent());
   patchDebugUiRegistry(registry => { Object.assign(registry.actions, agentConfigurationActions); registry.stores.agentConfigStore = agentConfigStore; registry.stores.textEditRuntime = textEditRuntime; registry.stores.agentToolsRuntime = agentToolsRuntime; });
@@ -32132,7 +32149,7 @@ const initApp = async () => {
       if (!emoji) return true;
       const current = chatStore.findMessage(message.id, sessionId) || message;
       const baseMeta = current?.meta && typeof current.meta === 'object' ? { ...current.meta } : {};
-      baseMeta.reactions = toggleReactionActor(baseMeta.reactions, emoji, SELF_REACTION_ACTOR);
+      baseMeta.reactions = toggleReactionActor(baseMeta.reactions, emoji, SELF_REACTION_ACTOR, { name: customReactionAssets.find(emoji)?.name });
       if (!baseMeta.reactions.length) delete baseMeta.reactions;
       else baseMeta.reactions = normalizeReactionEntries(baseMeta.reactions);
       const updated = chatStore.updateMessage(message.id, { meta: baseMeta }, sessionId);

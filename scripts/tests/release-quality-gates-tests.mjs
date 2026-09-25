@@ -58,6 +58,7 @@ const splitScriptSteps = script =>
     'npm run test:migration',
     'npm run test:release',
     'npm run test:theme',
+    'npm run test:maid-extensions',
   ]);
   console.log('ok - test:all keeps brand i18n maid-onboarding agent contact-profile maid-memory role-worldbook web-search chat memory variables cancel moments sessions integration transfer migration release and theme gates');
 }

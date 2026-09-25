@@ -24,13 +24,13 @@ const loadImage = (dataUrl) => {
 
 const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
 
-const canvasToDataUrl = (canvas, { mime, quality }) => {
+const canvasToDataUrl = (canvas, { mime, quality, preserveAlpha = false }) => {
     try {
         const out = canvas.toDataURL(mime, quality);
         if (typeof out === 'string' && out.startsWith('data:')) return out;
     } catch {}
     try {
-        const out = canvas.toDataURL('image/jpeg', quality);
+        const out = canvas.toDataURL(preserveAlpha ? 'image/png' : 'image/jpeg', quality);
         if (typeof out === 'string' && out.startsWith('data:')) return out;
     } catch {}
     try {
@@ -45,6 +45,34 @@ export const isGifFile = (file) => {
     if (type === 'image/gif') return true;
     const name = String(file?.name || '').toLowerCase();
     return name.endsWith('.gif');
+};
+
+export const isReactionImageBytes = header => {
+    const png = [137, 80, 78, 71, 13, 10, 26, 10].every((v, i) => header[i] === v);
+    const jpeg = header[0] === 255 && header[1] === 216 && header[2] === 255;
+    const webp = String.fromCharCode(...header.slice(0, 4)) === 'RIFF' && String.fromCharCode(...header.slice(8, 12)) === 'WEBP';
+    return png || jpeg || webp;
+};
+
+export const reactionDataUrlFromFile = async file => {
+    if (!file || file.size > 8 * 1024 * 1024) throw new Error('请选择不超过 8MB 的 PNG、WebP 或 JPEG 图片');
+    const header = new Uint8Array(await file.slice(0, 12).arrayBuffer());
+    if (!isReactionImageBytes(header)) throw new Error('自定义反应支持静态 PNG、WebP 或 JPEG 图片');
+    const img = await loadImage(await readFileAsDataUrl(file));
+    const width = img.naturalWidth, height = img.naturalHeight;
+    if (!width || !height || width * height > 32_000_000) throw new Error('图片尺寸过大，请选择较小的图片');
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 96;
+    const ctx = canvas.getContext('2d', { alpha: true });
+    if (!ctx) throw new Error('图片处理不可用');
+    const scale = Math.min(96 / width, 96 / height);
+    ctx.drawImage(img, (96 - width * scale) / 2, (96 - height * scale) / 2, width * scale, height * scale);
+    for (const quality of [.86, .7, .5, .3]) {
+        const result = canvasToDataUrl(canvas, { mime: 'image/webp', quality, preserveAlpha: true });
+        if (!/^data:image\/(webp|png);base64,/.test(result)) continue;
+        if (atob(result.split(',')[1]).length <= 30 * 1024) return result;
+    }
+    throw new Error('图片压缩后仍超过 30KB，请选择较简单的图片');
 };
 
 /**
