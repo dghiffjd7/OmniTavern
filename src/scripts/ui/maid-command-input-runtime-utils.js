@@ -8,6 +8,7 @@ import { renderMaidMarkdownHtml } from './maid-markdown-utils.js';
 import { getLocalizedPromptText } from '../i18n/prompt-locale.js';
 import { bindMaidVoiceButton } from './maid-voice-button.js';
 import { t } from '../i18n/index.js';
+import { maidSkillMessage } from './maid-skill-messages.js';
 import { createMaidRunCardView, MAID_RUN_ICONS } from './maid-run-card-dom.js';
 
 const STYLE_ID = 'maid-command-input-runtime-style';
@@ -49,7 +50,7 @@ const isAppModalPointerTarget = (target, path = null) => {
   const nodes = Array.isArray(path) && path.length ? path : [target];
   return nodes.some(node => {
     if (!node || typeof node !== 'object') return false;
-    if (typeof node.closest === 'function' && node.closest('.app-confirm-overlay, .app-confirm-modal, .maid-guide-step-bubble, .maid-spotlight-root')) {
+    if (typeof node.closest === 'function' && node.closest('.app-confirm-overlay, .app-confirm-modal, .maid-guide-step-bubble, .maid-spotlight-root, .maid-skill-dialog')) {
       return true;
     }
     return isClassedNode(node, 'app-confirm-overlay') ||
@@ -618,6 +619,8 @@ export const createMaidCommandInputRuntime = ({
   modeSwitchEl = null,
   getViewportSize = () => ({ w: 0, h: 0 }),
   onSubmit = async () => ({}),
+  prepareSubmission = null,
+  mountSkills = null,
   onVoiceTextSubmit = null,
   onCancelActive = null,
   onSettings = null,
@@ -1524,6 +1527,7 @@ export const createMaidCommandInputRuntime = ({
     rootEl.appendChild(inputEl);
     rootEl.appendChild(settingsBtn);
     rootEl.appendChild(submitBtn);
+    mountSkills?.(rootEl, settingsBtn);
     // 指令条以球心定位、整体盖住悬浮球：非交互区/拖柄按下即转发球拖拽；
     // 输入、附件、设置、发送等控件保持各自交互。
     rootEl.addEventListener?.('pointerdown', (event) => {
@@ -1673,7 +1677,7 @@ export const createMaidCommandInputRuntime = ({
     return true;
   };
 
-  const enqueueSubmission = (text, attachments, { preserveDraft = false, ...controls } = {}) => {
+  const enqueuePreparedSubmission = (text, attachments, { preserveDraft = false, ...controls } = {}) => {
     if (!text && !attachments.length) return false;
     clearCloseTimer();
     restoreResultOnNextOpen = false;
@@ -1694,7 +1698,10 @@ export const createMaidCommandInputRuntime = ({
       resolve: resolveSubmission,
     };
     queuedSubmissions.push(entry);
-    if (inputEl && !preserveDraft) {
+    controls.onAccepted?.();
+    const draftAttachments = controls.draftAttachments || attachments;
+    if (inputEl && !preserveDraft && (!controls.skillsPrepared ||
+      (trim(inputEl.value) === text || !trim(inputEl.value) && draftAttachments.length > 0) && imageAttachments.length === draftAttachments.length && imageAttachments.every((item, index) => item === draftAttachments[index] || (item.id || item.url || item.llmUrl) === (draftAttachments[index].id || draftAttachments[index].url || draftAttachments[index].llmUrl)))) {
       inputEl.value = '';
       clearAttachments();
       resizeInput();
@@ -1702,6 +1709,22 @@ export const createMaidCommandInputRuntime = ({
     if (wasQueued) showQueuedSubmission(entry);
     else void processSubmissionQueue();
     return completion;
+  };
+  let preparingSubmission = false;
+  const enqueueSubmission = (text, attachments, controls = {}) => {
+    if (!prepareSubmission || controls.skillsPrepared) return enqueuePreparedSubmission(text, attachments, controls);
+    if (!text && !attachments.length) return false;
+    if (preparingSubmission) return false;
+    preparingSubmission = true;
+    return Promise.resolve().then(() => prepareSubmission(text, attachments, controls)).then(prepared => {
+      preparingSubmission = false;
+      return enqueuePreparedSubmission(text, prepared.attachments || attachments, prepared);
+    }, error => {
+      preparingSubmission = false;
+      const message = maidSkillMessage(error);
+      setResult(message, 'error');
+      return { ok: false, status: 'failed', reason: error?.code, message };
+    });
   };
   const submit = () => {
     const text = trim(inputEl?.value), attachments = imageAttachments.slice();
@@ -1727,6 +1750,10 @@ export const createMaidCommandInputRuntime = ({
     close,
     submit,
     collapse: () => close({ preserve: true }),
+    submitTask: (text, options = {}) => {
+      open({ autoFocus: false });
+      return enqueueSubmission(trim(text), options.attachments || [], { preserveDraft: true, ...options });
+    },
     submitVoiceTask: (text, options = {}) => {
       if (options.showInput !== false) open({ autoFocus: false });
       else ensure();

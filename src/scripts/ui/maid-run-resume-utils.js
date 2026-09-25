@@ -1,4 +1,28 @@
 import { getLocalizedPromptText } from '../i18n/prompt-locale.js';
+import { resolveMaidRunContinuationFromRun } from '../agent/maid-run-continuation.js';
+import { t } from '../i18n/index.js';
+import { hasTauriRuntime } from '../utils/save-dialog.js';
+
+export const buildMaidRunResumeSubmission = run => ({
+  text: buildMaidRunResumePrompt(run),
+  controls: { preserveDraft: true, context: { runContinuation: resolveMaidRunContinuationFromRun(run) } },
+});
+
+// Reuse the image-reference store's content hashing and file transport. Run
+// metadata contains references, never a second copy of native image bytes.
+export const createMaidTaskInputPersistence = ({ referenceStore, native = hasTauriRuntime() } = {}) => ({
+  persist: async (attachments, context) => {
+    const references = attachments.length ? await referenceStore.persist(attachments.map(item => ({ ...item, url: item.llmUrl || item.url })), 'maid-task-inputs') : [];
+    if (native && references.some(item => !item.path && /^data:|^blob:/.test(item.url || item.dataUrl || ''))) throw new Error(t('附图未能保存，输入和技能选择已保留'));
+    return { version: 1, references, context: { sessionId: context.sessionId || '', uiMode: context.uiMode || '', activePage: context.activePage || '', userSelection: structuredClone(context.userSelection || []) } };
+  },
+  restore: async snapshot => {
+    if (snapshot?.version !== 1 || !Array.isArray(snapshot.references)) throw new Error(t('原任务附图记录不可用，请重新附图后发起任务'));
+    const loaded = await referenceStore.load(snapshot.references, 'maid-task-inputs');
+    if (loaded.length !== snapshot.references.length) throw new Error(t('原任务附图记录不可用，请重新附图后发起任务'));
+    return loaded.map(item => ({ kind: 'image', url: item.dataUrl, name: item.name, mime: item.mime, size: item.size }));
+  },
+});
 
 const trim = (value, fallback = '') => {
   const text = String(value ?? '').trim();

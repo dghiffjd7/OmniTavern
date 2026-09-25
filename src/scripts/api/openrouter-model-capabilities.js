@@ -27,6 +27,7 @@ export const recordOpenRouterModelCapabilities = ({
     known: true,
     id,
     canonicalSlug: trim(model?.canonical_slug || id),
+    contextLength: Number(model?.context_length) > 0 ? Number(model.context_length) : null,
     supportedParameters: Object.freeze(supportedParameters),
     supportsTools: supportedParameters.includes('tools'),
     supportsToolChoice: supportedParameters.includes('tool_choice'),

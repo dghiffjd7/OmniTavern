@@ -2,7 +2,7 @@ import {
   buildAppFeatureDoc,
   searchAppFeatures,
 } from '../app-feature-catalog.js';
-import { readMaidSkill } from '../maid-skill-catalog.js';
+import { createMaidSkillContext, readMaidTaskSkill, searchMaidTaskSkills } from '../maid-skill-context.js';
 
 const trim = (value, fallback = '') => {
   const text = String(value ?? '').trim();
@@ -238,11 +238,24 @@ export const createAppNavigationAgentTools = ({
       type: 'object', required: ['skillId'], additionalProperties: false,
       properties: { skillId: { type: 'string', minLength: 1, maxLength: 80 } },
     },
-    execute: async (args = {}) => {
-      const skill = readMaidSkill(args.skillId);
-      return skill ? { ok: true, skill } : { ok: false, reason: 'skill_not_found' };
-    },
+    execute: async (args = {}, context = {}) => readMaidTaskSkill(context.maidSkillContext || createMaidSkillContext(), args.skillId),
     summarizeResult: result => result?.ok ? `workflow: ${result.skill.title}` : 'workflow not found',
+  },
+  {
+    name: 'app.search_skills',
+    title: 'Search maid workflows',
+    description: 'Search workflow names and descriptions, or browse with a cursor. Include manual-only workflows only when the user explicitly requests one.',
+    source: 'maid-app-navigation', permissions: [], riskLevel: 'low',
+    capabilities: { read: true, write: false, network: false, cost: 'none', undo: 'none', modelContext: 'allowlist', confirmation: 'allow_once' },
+    schema: {
+      type: 'object', additionalProperties: false,
+      properties: {
+        query: { type: 'string', maxLength: 200 }, includeManualOnly: { type: 'boolean' },
+        cursor: { type: 'string', maxLength: 1500 }, limit: { type: 'integer', minimum: 1, maximum: 20 },
+      },
+    },
+    execute: async (args = {}, context = {}) => searchMaidTaskSkills(context.maidSkillContext || createMaidSkillContext(), args),
+    summarizeResult: result => result?.ok ? `workflows: ${result.skills.length}/${result.total}` : 'workflow search failed',
   },
   {
     name: 'app.open_panel',

@@ -134,6 +134,7 @@ export const buildMaidRunCardModel = (view = null) => {
     runId: trim(view.runId),
     source: trim(view.source),
     executionModel: trim(view.executionModel),
+    maidSkills: view.maidSkills || null,
     title: trim(view.title, t('女仆任务')),
     state,
     stateLabel: maidRunStateLabel(state),

@@ -16,6 +16,7 @@ const publicTask = task => task ? { task_id: task.id, request: task.request, sta
 // Execution, ordering and cancellation still belong to the existing maid queue.
 export const createMaidVoiceTaskRuntime = ({
   getCommandRuntime, captureContext = () => ({}), onChange = () => {}, onResult = () => {},
+  prepareSubmission = null,
   // 口头“允许”：只作用于本通话任务正在卡内等待的确认，结果恒为允许一次
   confirmApproval = () => false,
   cancelPendingAction = () => false,
@@ -24,11 +25,11 @@ export const createMaidVoiceTaskRuntime = ({
   const tasks = new Map();
   const requests = new Map();
   let latest = null;
-  const snapshot = () => ({
-    active: [...tasks.values()].filter(task => !terminal(task)).map(publicTask),
-    latest: publicTask(latest),
-    recent: [...tasks.values()].slice(-3).reverse().map(publicTask),
-  });
+  const scopedTasks = callId => [...tasks.values()].filter(task => !callId || task.target?.maidCallId === callId);
+  const snapshot = (callId = '') => {
+    const list = scopedTasks(callId);
+    return { active: list.filter(task => !terminal(task)).map(publicTask), latest: publicTask(list.at(-1)), recent: list.slice(-3).reverse().map(publicTask) };
+  };
   const notify = () => { try { onChange(snapshot()); } catch {} };
   const prune = () => {
     for (const [id, task] of tasks) {
@@ -37,16 +38,21 @@ export const createMaidVoiceTaskRuntime = ({
     }
     while (requests.size > 160) requests.delete(requests.keys().next().value);
   };
-  const findTask = id => id ? tasks.get(id) : [...tasks.values()].find(task => !terminal(task)) || latest;
+  const findTask = (id, callId) => {
+    const list = scopedTasks(callId);
+    return id ? list.find(task => task.id === id) : list.find(task => !terminal(task)) || list.at(-1);
+  };
   const followContinuation = task => {
     while (task?.continuationId && tasks.has(task.continuationId)) task = tasks.get(task.continuationId);
     return task;
   };
-  const submit = ({ request, target, requestId, context, attachments = [], preserveDraft = true, showInput = false, pendingTask = null }) => {
+  const submitPrepared = async ({ request, target, requestId, context, attachments = [], preserveDraft = true, showInput = false, pendingTask = null, useDraftSkills = true }) => {
     const command = getCommandRuntime?.();
     if (!command?.submitVoiceTask) throw new Error(t('女仆任务入口尚未就绪'));
     const id = makeId();
-    const task = { id, request, target: { ...target }, requestId, context: structuredClone(context || captureContext()), attachments: attachments.map(item => ({ ...item })),
+    const prepared = prepareSubmission ? await prepareSubmission(request, attachments, { source: 'maid_realtime', voiceCallId: target?.maidCallId || '',
+      context: structuredClone(context || captureContext()), useDraftSkills }) : {};
+    const task = { id, request, target: { ...target }, requestId, context: prepared.context || structuredClone(context || captureContext()), attachments: (prepared.attachments || attachments).map(item => ({ ...item })),
       status: command.isSubmitting?.() ? 'queued' : 'running', message: command.isSubmitting?.() ? t('排队') : t('正在处理'), completion: null,
       pendingActionSubmissionId: pendingTask?.id || '', goal: pendingTask?.goal || request };
     if (pendingTask) pendingTask.continuationId = id;
@@ -54,6 +60,7 @@ export const createMaidVoiceTaskRuntime = ({
     let completion;
     try {
       completion = command.submitVoiceTask(request, {
+        ...prepared,
         id, source: 'maid_realtime', context: task.context, voiceCallId: target?.maidCallId || '',
         voiceRequestId: requestId, attachments: task.attachments, preserveDraft, showInput,
         onStatus: (message, tone) => {
@@ -79,6 +86,13 @@ export const createMaidVoiceTaskRuntime = ({
       return result;
     });
     return { ok: true, ...publicTask(task), accepted: true };
+  };
+  // Preparation and queue acceptance are ordered so only one execute takes the call draft.
+  let submitQueue = Promise.resolve();
+  const submit = options => {
+    const result = submitQueue.then(() => submitPrepared(options));
+    submitQueue = result.catch(() => {});
+    return result;
   };
   const cancel = async (id, all = false, callId = '') => {
     if (id) id = followContinuation(tasks.get(id))?.id || id;
@@ -113,7 +127,7 @@ export const createMaidVoiceTaskRuntime = ({
     if (requestId && requests.has(key)) return requests.get(key);
     const operation = (async () => {
       const action = text(args.action || 'execute');
-      if (action === 'status') return { ok: true, ...snapshot() };
+      if (action === 'status') return { ok: true, ...snapshot(target?.maidCallId) };
       if (action === 'cancel') return cancel(text(args.task_id), args.scope === 'all', target?.maidCallId || '');
       if (action === 'confirm') {
         const taskId = args.task_id ? (followContinuation(tasks.get(text(args.task_id)))?.id || text(args.task_id)) : '';
@@ -142,16 +156,16 @@ export const createMaidVoiceTaskRuntime = ({
         const answer = text(inputText || args.request);
         if (!answer && !pendingTask) return { ok: false, message: t('当前没有需要确认的操作') };
         // 导入建房的短答复可宽松确认；删除与卡内授权仍要求明确同意。
-        return submit({ request: pendingTask ? (vague ? answer : '确认') : answer, target, requestId, attachments: attachments?.length ? attachments : pendingTask?.attachments, preserveDraft, showInput, pendingTask,
+        return submit({ request: pendingTask ? (vague ? answer : '确认') : answer, target, requestId, attachments: attachments?.length ? attachments : pendingTask?.attachments, preserveDraft, showInput, pendingTask, useDraftSkills: false,
           context: pendingTask ? { ...pendingTask.context, pendingActionSubmissionId: pendingTask.id } : undefined });
       }
       const commandText = text(args.request || inputText);
       if (!commandText || commandText.length > 12000) return { ok: false, message: t('请完整说出要女仆处理的需求') };
       if (action === 'revise') {
-        return revise(findTask(text(args.task_id)), commandText, { target, requestId, preserveDraft, showInput });
+        return revise(findTask(text(args.task_id), target?.maidCallId), commandText, { target, requestId, preserveDraft, showInput });
       }
       if (action !== 'execute') return { ok: false, message: t('未知的女仆任务操作') };
-      const reference = args.task_id ? tasks.get(text(args.task_id)) : null;
+      const reference = args.task_id ? findTask(text(args.task_id), target?.maidCallId) : null;
       if (args.task_id && !reference) return { ok: false, message: t('找不到引用的女仆任务，请重新说明目标') };
       return submit({ request: commandText, target, requestId, attachments: attachments?.length ? attachments : reference?.attachments,
         context: withoutPendingAuthorization(reference?.context), preserveDraft, showInput });

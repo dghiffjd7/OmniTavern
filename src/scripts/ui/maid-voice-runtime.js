@@ -16,6 +16,7 @@ export const buildMaidVoiceSnapshot = ({ inputText = '', maidPrompt, conversatio
 export const createMaidVoiceRuntime = ({
   settingsStore, conversationStore, prepareConversationContext, getAppContext = () => ({}),
   getCommandRuntime, getCallAppRuntime, cancelChatVoice = async () => {},
+  skillRuntime = null,
   resolveVoiceConfig, openVoiceConfig, onDebugSnapshot = null, onContextInjected = null,
   toast = {}, createRecorder = createChatVoiceRuntime, choose = appChoice,
   documentRef = globalThis.document, windowLike = globalThis.window, modeSwitchEl = null,
@@ -36,6 +37,7 @@ export const createMaidVoiceRuntime = ({
     onOpenInput: () => getCommandRuntime()?.open({ autoFocus: false }), onRetry: () => action('realtime'),
   });
   const tasks = createMaidVoiceTaskRuntime({ getCommandRuntime, captureContext: () => structuredClone(getAppContext()),
+    prepareSubmission: skillRuntime?.prepare,
     cancelPendingAction,
     onChange: state => orb?.setTasks(state),
     onResult: update => { if (isTargetCurrent(update.target)) getCallAppRuntime()?.runtime?.notifyTaskUpdate?.(update); },
@@ -85,6 +87,7 @@ export const createMaidVoiceRuntime = ({
     await cancelChatVoice();
     if (target.uiMode === 'maid') {
       target.maidCallId = makeId();
+      skillRuntime?.beginCall(target.maidCallId);
       activeTarget = { ...target };
       getCommandRuntime()?.collapse?.();
     }
@@ -93,6 +96,7 @@ export const createMaidVoiceRuntime = ({
     if (state.status === 'idle') {
       callState = 'idle';
       const finished = activeTarget; activeTarget = null;
+      if (finished) skillRuntime?.endCall(finished.maidCallId);
       if (finished) void conversationStore.finalizeRealtimeConversation(finished.maidCallId).catch(error => toast.error?.(error.message));
     } else if (state.target?.uiMode === 'maid') callState = state.status;
     sync();
@@ -147,7 +151,7 @@ export const createMaidVoiceRuntime = ({
     const conversationContext = await prepareConversationContext({ input: inputText });
     if (!isTargetCurrent(target)) throw new Error(t('通话已结束'));
     const snapshot = buildMaidVoiceSnapshot({ inputText, maidPrompt: settingsStore.getMaidPrompt(), conversationContext, context: getAppContext() });
-    snapshot.instructions += `\n\nCurrent maid task state (application data): ${JSON.stringify(tasks.getState())}`;
+    snapshot.instructions += `\n\nCurrent maid task state (application data): ${JSON.stringify(tasks.getState(target.maidCallId))}`;
     onContextInjected?.({ conversationContext });
     onDebugSnapshot?.({ source: 'maid_realtime', input: inputText, requestPrompt: snapshot.instructions });
     return snapshot;
@@ -164,7 +168,7 @@ export const createMaidVoiceRuntime = ({
     isCallActive: () => starting || Boolean(activeTarget),
     handleTaskRequest: options => {
       if (!isTargetCurrent(options?.target)) return { ok: false, message: t('通话已结束') };
-      const latest = tasks.getState().latest;
+      const latest = tasks.getState(options.target.maidCallId).latest;
       if (options.delegated && options.args?.action === 'execute' && latest?.has_references
         && /刚才|剛才|刚刚|剛剛|上一张|上一張|那张图|那張圖|这张图|這張圖|同一张|同一張|previous image|same image|that image/i.test(options.args.request || '')) {
         options = { ...options, args: { ...options.args, task_id: latest.task_id } };

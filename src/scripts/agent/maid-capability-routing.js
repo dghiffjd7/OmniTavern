@@ -7,6 +7,7 @@ import {
   stripNegatedMaidCapabilityActions,
 } from './maid-capability-concept-retriever.js';
 import { readMaidSkill } from './maid-skill-catalog.js';
+import { getMaidLoadedSkillFeatures } from './maid-skill-context.js';
 
 export const MAID_CAPABILITY_ROUTING_CONFIG_KEY = 'maid_capability_routing_v1';
 export const MAID_CAPABILITY_RETRIEVER_VERSION = 'maid-capability-retriever-v4';
@@ -838,7 +839,8 @@ export const createMaidCapabilityRoutingRuntime = ({
     // Workflow references aid discovery without pinning a whole workflow or bypassing availability checks.
     const loadedSkillStep = (Array.isArray(steps) ? steps : []).filter(step => step?.toolName === 'app.read_skill' && step.status === 'succeeded').slice(-1)[0];
     const loadedSkill = loadedSkillStep && readMaidSkill(loadedSkillStep.args?.skillId);
-    loadedSkill?.featureIds.forEach(featureId => addRecord(projectedById.get(featureId), 50, 'skill_reference'));
+    const skillFeatureIds = context.maidSkillContext ? getMaidLoadedSkillFeatures(context.maidSkillContext) : loadedSkill?.featureIds || [];
+    skillFeatureIds.forEach(featureId => addRecord(projectedById.get(featureId), 50, 'skill_reference'));
     stickyIds.forEach((featureId, index) => {
       addRecord(projectedById.get(featureId), 120 - index, index === 0 ? 'previous_capability' : 'sticky', { pinned: true });
     });

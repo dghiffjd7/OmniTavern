@@ -2696,6 +2696,12 @@
     ]
   },
   {
+    "source": "按资料编写世界书",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "按作用域管理与替换聊天文本",
     "references": [
       "src/scripts/ui/extensions-panel.js#ui-property"
@@ -2855,6 +2861,12 @@
     "source": "板至少需要一行",
     "references": [
       "src/scripts/ui/chat/hopscotch-board-utils.js#ui-call"
+    ]
+  },
+  {
+    "source": "版本",
+    "references": [
+      "src/scripts/ui/maid-skill-ui.js#ui-call"
     ]
   },
   {
@@ -3092,6 +3104,7 @@
       "src/scripts/ui/general-settings-panel.js#html-text",
       "src/scripts/ui/group-chat-panels.js#html-text",
       "src/scripts/ui/group-panel.js#html-attribute",
+      "src/scripts/ui/maid-skill-panel.js#ui-call",
       "src/scripts/ui/memory-table-editor.js#html-text",
       "src/scripts/ui/memory-template-panel.js#html-text",
       "src/scripts/ui/moment-summary-panel.js#html-text",
@@ -3170,6 +3183,12 @@
     "source": "保存并试运行",
     "references": [
       "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "保存并用于下一次请求",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
     ]
   },
   {
@@ -4220,6 +4239,12 @@
     ]
   },
   {
+    "source": "编辑技能",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "编辑角色卡",
     "references": [
       "src/scripts/ui/persona-panel.js#dom-assignment",
@@ -4703,6 +4728,12 @@
     ]
   },
   {
+    "source": "标识",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "标识色",
     "references": [
       "src/scripts/ui/group-panel.js#html-text"
@@ -4715,10 +4746,17 @@
     ]
   },
   {
+    "source": "标识只能使用小写英文、数字和连字符，最多 64 个字符",
+    "references": [
+      "src/scripts/ui/maid-skill-messages.js#ui-call"
+    ]
+  },
+  {
     "source": "标题",
     "references": [
       "src/scripts/ui/app.js#html-text",
       "src/scripts/ui/help-tooltip.js#html-attribute",
+      "src/scripts/ui/maid-skill-panel.js#ui-call",
       "src/scripts/ui/preset-panel.js#html-text"
     ]
   },
@@ -4727,6 +4765,12 @@
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/scripts/ui/world-editor.js#html-text"
+    ]
+  },
+  {
+    "source": "标题需要 1–80 个字符",
+    "references": [
+      "src/scripts/ui/maid-skill-messages.js#ui-call"
     ]
   },
   {
@@ -5422,6 +5466,12 @@
     ]
   },
   {
+    "source": "步骤",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "步骤 {count}",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
@@ -5992,6 +6042,12 @@
     ]
   },
   {
+    "source": "插入写作提纲",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "插图",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -6034,6 +6090,12 @@
     "source": "插图素材已删除",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "查看",
+    "references": [
+      "src/scripts/ui/maid-skill-ui.js#ui-call"
     ]
   },
   {
@@ -6117,6 +6179,12 @@
     "source": "查看关系",
     "references": [
       "src/scripts/ui/app.js#html-text"
+    ]
+  },
+  {
+    "source": "查看和补全内容",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
     ]
   },
   {
@@ -7726,6 +7794,18 @@
     ]
   },
   {
+    "source": "存在同名技能，默认另存为新技能",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "存在相对链接或资源引用；本次未导入关联文件",
+    "references": [
+      "src/scripts/ui/maid-skill-messages.js#ui-call"
+    ]
+  },
+  {
     "source": "错误",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -8165,6 +8245,12 @@
     ]
   },
   {
+    "source": "待导入版本",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "待发送 {value} 条",
     "references": [
       "src/scripts/ui/chat/session-activity-runtime-utils.js#dom-assignment"
@@ -8568,6 +8654,12 @@
     "source": "当前补丁组合无法安全分发：{value}",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "当前不可用",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
     ]
   },
   {
@@ -10384,6 +10476,12 @@
     ]
   },
   {
+    "source": "导出 Markdown",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "导出变量与规则",
     "references": [
       "src/scripts/ui/variable-panel-runtime.js#dom-assignment"
@@ -10429,6 +10527,12 @@
     "source": "导出记忆数据",
     "references": [
       "src/scripts/ui/memory-template-panel.js#html-text"
+    ]
+  },
+  {
+    "source": "导出技能包",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
     ]
   },
   {
@@ -10587,6 +10691,7 @@
       "src/scripts/ui/chat-fc-compatibility-panel.js#html-text",
       "src/scripts/ui/experience-pack-transfer.js#dom-assignment",
       "src/scripts/ui/general-settings-panel.js#html-text",
+      "src/scripts/ui/maid-skill-panel.js#ui-call",
       "src/scripts/ui/memory-template-panel.js#ui-property",
       "src/scripts/ui/preset-panel.js#html-text",
       "src/scripts/ui/regex-panel.js#html-text",
@@ -10662,9 +10767,21 @@
     ]
   },
   {
+    "source": "导入方式",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "导入规则会强制设为停用、未测试，并清除外部健康状态；{value}",
     "references": [
       "src/scripts/ui/chat-fc-compatibility-panel.js#ui-property"
+    ]
+  },
+  {
+    "source": "导入后启用",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
     ]
   },
   {
@@ -10922,6 +11039,12 @@
     "source": "导入选项",
     "references": [
       "src/scripts/ui/character-card-importer.js#html-text"
+    ]
+  },
+  {
+    "source": "导入预览",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
     ]
   },
   {
@@ -13004,6 +13127,12 @@
     ]
   },
   {
+    "source": "发现动态命令语法；仅作为文字保留，不会执行",
+    "references": [
+      "src/scripts/ui/maid-skill-messages.js#ui-call"
+    ]
+  },
+  {
     "source": "发现可修复的格式问题，可在消息下方查看修改",
     "references": [
       "src/scripts/ui/app.js#ui-call"
@@ -13098,6 +13227,7 @@
       "src/scripts/ui/chat-image-prompt-modal.js#html-text",
       "src/scripts/ui/image-generation-params-panel.js#html-text",
       "src/scripts/ui/maid-settings-panel.js#html-text",
+      "src/scripts/ui/maid-skill-panel.js#ui-call",
       "src/scripts/ui/persona-panel.js#html-attribute",
       "src/scripts/ui/preset-panel.js#html-text",
       "src/scripts/ui/user-panel.js#html-attribute"
@@ -13265,9 +13395,21 @@
     ]
   },
   {
+    "source": "放弃",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "放弃未保存的更改",
     "references": [
       "src/scripts/ui/preset-panel.js#ui-property"
+    ]
+  },
+  {
+    "source": "放弃未保存的内容？",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
     ]
   },
   {
@@ -13734,6 +13876,12 @@
     ]
   },
   {
+    "source": "附图未能保存，输入和技能选择已保留",
+    "references": [
+      "src/scripts/ui/maid-run-resume-utils.js#ui-call"
+    ]
+  },
+  {
     "source": "附注（只读建议）",
     "references": [
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
@@ -13834,6 +13982,7 @@
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call",
       "src/scripts/ui/debug-panel-viewer-utils.js#dom-assignment",
       "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition",
+      "src/scripts/ui/maid-skill-panel.js#ui-call",
       "src/scripts/ui/memory-table-editor.js#html-text",
       "src/scripts/ui/session-summary-modal-utils.js#ui-property",
       "src/scripts/ui/variable-panel-runtime.js#html-text"
@@ -13855,6 +14004,12 @@
     "source": "复制变量引用",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "复制并编辑",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
     ]
   },
   {
@@ -13891,6 +14046,12 @@
     "source": "复制到所有角色卡的配置，初始设为停用。",
     "references": [
       "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "复制技能",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
     ]
   },
   {
@@ -13983,7 +14144,8 @@
     "references": [
       "src/scripts/ui/agent-configuration-editor.js#ui-call",
       "src/scripts/ui/agent-configuration-editor.js#ui-definition",
-      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
+      "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition",
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
     ]
   },
   {
@@ -14175,6 +14337,24 @@
     "source": "该规则已熔断。请先运行零写入测试，通过后再保存恢复。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "该技能已被修改，请保留草稿并重新载入后再保存",
+    "references": [
+      "src/scripts/ui/maid-skill-messages.js#ui-call"
+    ]
+  },
+  {
+    "source": "该技能已不存在，请重新选择",
+    "references": [
+      "src/scripts/ui/maid-skill-messages.js#ui-call"
+    ]
+  },
+  {
+    "source": "该技能已停用，请重新选择或先启用",
+    "references": [
+      "src/scripts/ui/maid-skill-messages.js#ui-call"
     ]
   },
   {
@@ -14489,6 +14669,12 @@
     "source": "高权限插件授权",
     "references": [
       "src/scripts/ui/plugin-panel.js#ui-property"
+    ]
+  },
+  {
+    "source": "告诉女仆如何处理一类任务；自动选用或在输入框手动指定。",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
     ]
   },
   {
@@ -15058,6 +15244,7 @@
     "source": "更多",
     "references": [
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call",
+      "src/scripts/ui/maid-skill-panel.js#ui-call",
       "src/scripts/ui/moments-card-view-utils.js#html-attribute"
     ]
   },
@@ -15415,6 +15602,12 @@
     ]
   },
   {
+    "source": "功能引用（可选，最多 12 项）",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "供应方 usage",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -15685,6 +15878,7 @@
       "src/scripts/ui/group-panel.js#html-attribute",
       "src/scripts/ui/image-generation-params-utils.js#ui-definition",
       "src/scripts/ui/image-generation-params-utils.js#ui-property",
+      "src/scripts/ui/maid-skill-ui.js#ui-call",
       "src/scripts/ui/memory-table-editor.js#html-attribute",
       "src/scripts/ui/moment-summary-panel.js#html-text",
       "src/scripts/ui/moments-modal-shell-utils.js#html-text",
@@ -16242,6 +16436,12 @@
     ]
   },
   {
+    "source": "管理技能",
+    "references": [
+      "src/scripts/ui/maid-skill-ui.js#ui-call"
+    ]
+  },
+  {
     "source": "管理角色卡",
     "references": [
       "src/scripts/ui/app.js#html-text"
@@ -16548,6 +16748,12 @@
     "source": "还没有分组",
     "references": [
       "src/scripts/ui/group-panel.js#html-text"
+    ]
+  },
+  {
+    "source": "还没有符合条件的技能",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
     ]
   },
   {
@@ -18414,6 +18620,60 @@
     ]
   },
   {
+    "source": "技能",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "技能包格式或版本不受支持",
+    "references": [
+      "src/scripts/ui/maid-skill-messages.js#ui-call"
+    ]
+  },
+  {
+    "source": "技能不可用",
+    "references": [
+      "src/scripts/ui/maid-skill-ui.js#ui-call"
+    ]
+  },
+  {
+    "source": "技能操作失败，请重试",
+    "references": [
+      "src/scripts/ui/maid-skill-messages.js#ui-call"
+    ]
+  },
+  {
+    "source": "技能库数据无法读取。请先备份并检查数据，再重新载入",
+    "references": [
+      "src/scripts/ui/maid-skill-messages.js#ui-call"
+    ]
+  },
+  {
+    "source": "技能库已达到 2 MiB 容量上限，请先导出并整理技能",
+    "references": [
+      "src/scripts/ui/maid-skill-messages.js#ui-call"
+    ]
+  },
+  {
+    "source": "技能已保存",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "技能元数据格式无效",
+    "references": [
+      "src/scripts/ui/maid-skill-messages.js#ui-call"
+    ]
+  },
+  {
+    "source": "技能暂时无法载入",
+    "references": [
+      "src/scripts/ui/maid-skill-messages.js#ui-call"
+    ]
+  },
+  {
     "source": "继承旧版设置",
     "references": [
       "src/scripts/ui/agent-configuration-editor.js#ui-definition"
@@ -18434,6 +18694,7 @@
     "references": [
       "src/scripts/ui/agent-configuration-editor.js#ui-call",
       "src/scripts/ui/agent-configuration-editor.js#ui-definition",
+      "src/scripts/ui/maid-skill-panel.js#ui-call",
       "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition",
       "src/scripts/ui/realtime/realtime-settings-panel.js#ui-property",
       "src/scripts/ui/utility-agent-editor.js#ui-call"
@@ -20465,6 +20726,18 @@
     ]
   },
   {
+    "source": "仅导入流程说明，接受上述兼容差异",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "仅导入流程说明与元数据；脚本、外部资源和执行权限不会被导入。",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "仅导入世界书",
     "references": [
       "src/scripts/ui/world-panel.js#ui-property"
@@ -20540,6 +20813,13 @@
     "source": "仅设定资源",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "仅手动使用",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call",
+      "src/scripts/ui/maid-skill-ui.js#ui-call"
     ]
   },
   {
@@ -21568,6 +21848,13 @@
     ]
   },
   {
+    "source": "可自动选用",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call",
+      "src/scripts/ui/maid-skill-ui.js#ui-call"
+    ]
+  },
+  {
     "source": "可自填",
     "references": [
       "src/scripts/ui/app.js#dom-assignment",
@@ -22003,6 +22290,12 @@
     "source": "冷艳御姐",
     "references": [
       "src/scripts/ui/realtime/realtime-voice-catalog.js#ui-definition"
+    ]
+  },
+  {
+    "source": "离开后，本次编辑或导入预览不会保存。",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
     ]
   },
   {
@@ -23237,6 +23530,12 @@
     ]
   },
   {
+    "source": "另存为新技能",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "另有 {count} 条建议待查看",
     "references": [
       "src/scripts/ui/chat/agent-suggestion-banner.js#ui-call"
@@ -23264,6 +23563,24 @@
     "source": "流程已结束",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "流程用于指导任务，不会增加工具权限，也不会改变模型配置。",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "流程正文（Markdown）",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "流程正文需要 1–16000 个字符",
+    "references": [
+      "src/scripts/ui/maid-skill-messages.js#ui-call"
     ]
   },
   {
@@ -23644,6 +23961,12 @@
     "source": "没有可用的对话内容",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "没有可用的技能",
+    "references": [
+      "src/scripts/ui/maid-skill-ui.js#ui-call"
     ]
   },
   {
@@ -25128,7 +25451,8 @@
     "source": "目标",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
-      "src/scripts/memory/default-template.js#ui-definition"
+      "src/scripts/memory/default-template.js#ui-definition",
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
     ]
   },
   {
@@ -25476,6 +25800,12 @@
     ]
   },
   {
+    "source": "内容相同，默认跳过",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "内容重复: {value} 条",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -25490,7 +25820,20 @@
   {
     "source": "内置",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "内置技能",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "内置流程只读，可复制后修改。",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
     ]
   },
   {
@@ -26486,6 +26829,7 @@
       "src/scripts/ui/agent-center-panel.js#ui-call",
       "src/scripts/ui/agent-configuration-editor.js#ui-call",
       "src/scripts/ui/agent-configuration-editor.js#ui-definition",
+      "src/scripts/ui/maid-skill-panel.js#ui-call",
       "src/scripts/ui/memory-table-editor.js#dom-assignment",
       "src/scripts/ui/memory-table-editor.js#html-attribute",
       "src/scripts/ui/preset-panel.js#html-text",
@@ -26528,6 +26872,18 @@
     "source": "启用插件",
     "references": [
       "src/scripts/ui/plugin-panel.js#ui-property"
+    ]
+  },
+  {
+    "source": "启用此副本时，同时停用内置版本",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "启用此技能",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
     ]
   },
   {
@@ -27763,6 +28119,12 @@
     ]
   },
   {
+    "source": "请确认仅导入流程说明，再继续导入",
+    "references": [
+      "src/scripts/ui/maid-skill-messages.js#ui-call"
+    ]
+  },
+  {
     "source": "请使用 /hide、/hide 3 或 /hide 2-5",
     "references": [
       "src/scripts/ui/command-runner.js#ui-call"
@@ -28268,6 +28630,12 @@
     ]
   },
   {
+    "source": "请先配置女仆 API，技能选择已保留",
+    "references": [
+      "src/scripts/ui/maid-skill-runtime.js#ui-call"
+    ]
+  },
+  {
     "source": "请先配置图片生成 API",
     "references": [
       "src/scripts/ui/app.js#ui-call"
@@ -28597,6 +28965,7 @@
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call",
       "src/scripts/ui/custom-select.js#dom-assignment",
       "src/scripts/ui/custom-select.js#html-attribute",
+      "src/scripts/ui/maid-skill-panel.js#ui-call",
       "src/scripts/ui/memory-table-editor.js#dom-assignment",
       "src/scripts/ui/memory-table-editor.js#ui-property",
       "src/scripts/ui/preset-panel.js#dom-assignment",
@@ -28622,6 +28991,12 @@
     "source": "请选择 Gemini Live 接入方式",
     "references": [
       "src/scripts/ui/realtime/realtime-provider-catalog.js#ui-definition"
+    ]
+  },
+  {
+    "source": "请选择 Markdown 或 OmniTavern 技能包",
+    "references": [
+      "src/scripts/ui/maid-skill-messages.js#ui-call"
     ]
   },
   {
@@ -28781,6 +29156,12 @@
     ]
   },
   {
+    "source": "请选择替换目标",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "请选择新聊天处理方式",
     "references": [
       "src/scripts/ui/session-memory-table-utils.js#html-text"
@@ -28808,6 +29189,12 @@
     "source": "请选择一个节点或一条边查看详情。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "请选择一个有效且不重复的替换目标",
+    "references": [
+      "src/scripts/ui/maid-skill-messages.js#ui-call"
     ]
   },
   {
@@ -28839,6 +29226,12 @@
     "source": "请至少选择一个角色会话、创意写作或动态内容",
     "references": [
       "src/scripts/ui/custom-bundle-exporter.js#ui-call"
+    ]
+  },
+  {
+    "source": "请至少选择一个要导入的技能",
+    "references": [
+      "src/scripts/ui/maid-skill-messages.js#ui-call"
     ]
   },
   {
@@ -28967,6 +29360,7 @@
       "src/scripts/ui/image-generation-params-panel.js#html-text",
       "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition",
       "src/scripts/ui/maid-run-card-dom.js#ui-call",
+      "src/scripts/ui/maid-skill-ui.js#ui-call",
       "src/scripts/ui/maid-voice-orb-ui.js#ui-call",
       "src/scripts/ui/memory-table-editor.js#html-text",
       "src/scripts/ui/memory-template-panel.js#html-text",
@@ -29173,6 +29567,7 @@
     "references": [
       "src/scripts/ui/chat/lineage-graph-view-utils.js#ui-property",
       "src/scripts/ui/experience-pack-transfer.js#html-text",
+      "src/scripts/ui/maid-skill-panel.js#ui-call",
       "src/scripts/ui/memory-template-panel.js#ui-property",
       "src/scripts/ui/preset-panel.js#html-text",
       "src/scripts/ui/sticker-picker.js#html-text",
@@ -30060,6 +30455,12 @@
     ]
   },
   {
+    "source": "确认导入",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "确认导入该模板？ {value} {value2}",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -30626,6 +31027,12 @@
     ]
   },
   {
+    "source": "任务保存的版本",
+    "references": [
+      "src/scripts/ui/maid-skill-ui.js#ui-call"
+    ]
+  },
+  {
     "source": "任务彻底作废或已无意义时删除。",
     "references": [
       "src/scripts/memory/default-template.js#ui-definition"
@@ -30957,6 +31364,7 @@
   {
     "source": "筛选",
     "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call",
       "src/scripts/ui/variable-panel.js#html-text"
     ]
   },
@@ -30985,6 +31393,7 @@
       "src/scripts/ui/group-chat-panels.js#html-attribute",
       "src/scripts/ui/image-generation-params-panel.js#html-text",
       "src/scripts/ui/maid-settings-panel.js#html-text",
+      "src/scripts/ui/maid-skill-panel.js#ui-call",
       "src/scripts/ui/maid-tool-confirmation-runtime.js#ui-call",
       "src/scripts/ui/memory-table-editor.js#dom-assignment",
       "src/scripts/ui/memory-template-panel.js#dom-assignment",
@@ -31284,6 +31693,12 @@
     "source": "删除记忆",
     "references": [
       "src/scripts/ui/memory-table-editor.js#ui-property"
+    ]
+  },
+  {
+    "source": "删除技能？",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
     ]
   },
   {
@@ -32322,6 +32737,12 @@
     ]
   },
   {
+    "source": "生成并设置头像",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "生成参数",
     "references": [
       "src/scripts/ui/preset-panel.js#ui-property",
@@ -33276,6 +33697,12 @@
     ]
   },
   {
+    "source": "使用方式",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "使用格式修复提示中的操作继续",
     "references": [
       "src/scripts/ui/maid-onboarding-runtime.js#ui-definition"
@@ -33311,6 +33738,12 @@
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/scripts/ui/app.js#ui-call"
+    ]
+  },
+  {
+    "source": "使用所选技能",
+    "references": [
+      "src/scripts/ui/maid-skill-ui.js#ui-call"
     ]
   },
   {
@@ -33894,6 +34327,18 @@
     ]
   },
   {
+    "source": "适用说明",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "适用说明需要 1–1024 个字符",
+    "references": [
+      "src/scripts/ui/maid-skill-messages.js#ui-call"
+    ]
+  },
+  {
     "source": "适用于聊天界面、动态界面与 RP 界面的基础记忆表格模板。",
     "references": [
       "src/scripts/memory/default-template.js#ui-definition",
@@ -34362,6 +34807,12 @@
     "source": "输出速度",
     "references": [
       "src/scripts/ui/chat/prompt-preview-view-utils.js#ui-property"
+    ]
+  },
+  {
+    "source": "输出要求",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
     ]
   },
   {
@@ -34925,6 +35376,12 @@
     ]
   },
   {
+    "source": "说明何时适合使用这个技能，供模型选择。",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "说明文字",
     "references": [
       "src/scripts/ui/help-tooltip.js#html-attribute"
@@ -35256,10 +35713,23 @@
     ]
   },
   {
+    "source": "搜索功能",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "搜索记忆…",
     "references": [
       "src/scripts/ui/memory-table-editor.js#dom-assignment",
       "src/scripts/ui/memory-table-editor.js#html-attribute"
+    ]
+  },
+  {
+    "source": "搜索技能",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call",
+      "src/scripts/ui/maid-skill-ui.js#ui-call"
     ]
   },
   {
@@ -35512,6 +35982,12 @@
     "references": [
       "src/scripts/ui/app.js#html-attribute",
       "src/scripts/ui/world-editor/world-node-editor-core.js#ui-property"
+    ]
+  },
+  {
+    "source": "所选技能超过本轮上下文预算，请减少选择或缩短正文",
+    "references": [
+      "src/scripts/ui/maid-skill-messages.js#ui-call"
     ]
   },
   {
@@ -35881,9 +36357,27 @@
     ]
   },
   {
+    "source": "替换目标",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "替换行已截断",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "替换已有技能",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "替换已有技能？",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
     ]
   },
   {
@@ -36481,6 +36975,7 @@
       "src/scripts/ui/chat/execution-flow-runtime-utils.js#ui-property",
       "src/scripts/ui/chat/hopscotch-court-view.js#ui-call",
       "src/scripts/ui/maid-intent-presets.js#ui-definition",
+      "src/scripts/ui/maid-skill-panel.js#ui-call",
       "src/scripts/ui/memory-template-panel.js#ui-property",
       "src/scripts/ui/world-editor.js#html-text"
     ]
@@ -36815,6 +37310,12 @@
       "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/scripts/ui/maid-voice-runtime.js#ui-call",
       "src/scripts/ui/realtime/realtime-call-panel.js#ui-definition"
+    ]
+  },
+  {
+    "source": "通话已结束，技能选择已保留",
+    "references": [
+      "src/scripts/ui/maid-skill-messages.js#ui-call"
     ]
   },
   {
@@ -37994,6 +38495,12 @@
     "source": "为给定正文生成图片提示。只输出 <{tag}> 标签；无需配图时输出 <{tag}>none</{tag}>。",
     "references": [
       "src/scripts/ui/chat/hopscotch-sidecar-executors.js#ui-call"
+    ]
+  },
+  {
+    "source": "为角色卡、联系人或用户生成头像，保持人物设计一致，并写回正确的目标。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -39225,6 +39732,24 @@
     ]
   },
   {
+    "source": "文件标识",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "文件不是有效的 UTF-8 文本",
+    "references": [
+      "src/scripts/ui/maid-skill-messages.js#ui-call"
+    ]
+  },
+  {
+    "source": "文件读取失败",
+    "references": [
+      "src/scripts/ui/maid-skill-messages.js#ui-call"
+    ]
+  },
+  {
     "source": "文件夹: {value}",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -40347,6 +40872,12 @@
     ]
   },
   {
+    "source": "现有版本",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "现在选择模型",
     "references": [
       "src/scripts/ui/agent-center-panel.js#ui-property"
@@ -40602,6 +41133,12 @@
     ]
   },
   {
+    "source": "写明目标、步骤、参考资料和输出要求。女仆会结合本次任务使用这些说明。",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "写评论…",
     "references": [
       "src/scripts/ui/moments-modal-shell-utils.js#dom-assignment",
@@ -40786,6 +41323,12 @@
     "source": "新建副本",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "新建技能",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
     ]
   },
   {
@@ -41866,6 +42409,12 @@
     ]
   },
   {
+    "source": "选择导出",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "选择动态以预览独立评论请求",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
@@ -41894,6 +42443,12 @@
     "source": "选择记忆",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "选择技能",
+    "references": [
+      "src/scripts/ui/maid-skill-ui.js#ui-call"
     ]
   },
   {
@@ -42453,9 +43008,21 @@
     ]
   },
   {
+    "source": "一次最多导入 20 个文件、共 2 MiB；单个 Markdown 不超过 128 KiB",
+    "references": [
+      "src/scripts/ui/maid-skill-messages.js#ui-call"
+    ]
+  },
+  {
     "source": "一次最多发送 {value} 张图片",
     "references": [
       "src/scripts/ui/app.js#ui-call"
+    ]
+  },
+  {
+    "source": "一次最多选择 3 个技能",
+    "references": [
+      "src/scripts/ui/maid-skill-messages.js#ui-call"
     ]
   },
   {
@@ -42547,6 +43114,12 @@
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/scripts/ui/chat/reaction-ui-utils.js#ui-call"
+    ]
+  },
+  {
+    "source": "移除技能",
+    "references": [
+      "src/scripts/ui/maid-skill-ui.js#ui-call"
     ]
   },
   {
@@ -42756,6 +43329,12 @@
     "source": "已保存，但当前 Key 不可用（请在 Key 管理中重新保存）",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "已保存，当前还有未保存的修改",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
     ]
   },
   {
@@ -43131,6 +43710,12 @@
     ]
   },
   {
+    "source": "已导入",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "已导入 {value} 个会话。是否切换到第一个导入结果？",
     "references": [
       "src/scripts/ui/custom-bundle-import-diagnostics-utils.js#ui-property"
@@ -43254,6 +43839,12 @@
     "source": "已读{value}",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "已读取",
+    "references": [
+      "src/scripts/ui/maid-skill-ui.js#ui-call"
     ]
   },
   {
@@ -43792,6 +44383,7 @@
       "src/scripts/ui/agent-center-panel.js#ui-call",
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call",
       "src/scripts/ui/chat/hopscotch-variable-card-view.js#ui-call",
+      "src/scripts/ui/maid-skill-panel.js#ui-call",
       "src/scripts/ui/plugin-panel.js#dom-assignment"
     ]
   },
@@ -44177,6 +44769,7 @@
       "src/scripts/ui/chat/hopscotch-variable-card-view.js#ui-call",
       "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition",
       "src/scripts/ui/image-prompt/image-prompt-utils.js#ui-definition",
+      "src/scripts/ui/maid-skill-panel.js#ui-call",
       "src/scripts/ui/plugin-panel.js#dom-assignment",
       "src/scripts/ui/request-param-report-view.js#ui-call"
     ]
@@ -44720,6 +45313,12 @@
     ]
   },
   {
+    "source": "已指定",
+    "references": [
+      "src/scripts/ui/maid-skill-ui.js#ui-call"
+    ]
+  },
+  {
     "source": "已指定 {value} 个上游；请求只会使用已选服务商。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -44819,6 +45418,12 @@
     ]
   },
   {
+    "source": "以下功能引用目前不可用，仍会保留",
+    "references": [
+      "src/scripts/ui/maid-skill-messages.js#ui-call"
+    ]
+  },
+  {
     "source": "以下仅保留最近 {value} 条摘录，另有 {value2} 条未注入。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -44847,6 +45452,12 @@
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/scripts/ui/chat/agent-request-preview.js#ui-call"
+    ]
+  },
+  {
+    "source": "以下字段仅保留为元数据，不控制执行",
+    "references": [
+      "src/scripts/ui/maid-skill-messages.js#ui-call"
     ]
   },
   {
@@ -45739,6 +46350,12 @@
     ]
   },
   {
+    "source": "用于下一次请求",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "用于限制可用上下文窗口。",
     "references": [
       "src/scripts/ui/preset-panel.js#html-attribute"
@@ -46268,7 +46885,8 @@
   {
     "source": "预览",
     "references": [
-      "src/scripts/ui/maid-command-input-runtime-utils.js#ui-call"
+      "src/scripts/ui/maid-command-input-runtime-utils.js#ui-call",
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
     ]
   },
   {
@@ -46675,6 +47293,12 @@
     "references": [
       "src/scripts/ui/chat/code-viewer-ui-utils.js#dom-assignment",
       "src/scripts/ui/chat/code-viewer-ui-utils.js#html-attribute"
+    ]
+  },
+  {
+    "source": "原任务附图记录不可用，请重新附图后发起任务",
+    "references": [
+      "src/scripts/ui/maid-run-resume-utils.js#ui-call"
     ]
   },
   {
@@ -48678,6 +49302,12 @@
     ]
   },
   {
+    "source": "这次任务的技能版本已无法恢复，请重新发起任务",
+    "references": [
+      "src/scripts/ui/maid-skill-messages.js#ui-call"
+    ]
+  },
+  {
     "source": "这份回复已有任务或待审阅结果，请先查看或放弃",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -48711,6 +49341,12 @@
     "source": "这个功能",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "这个技能标识已存在，请换一个",
+    "references": [
+      "src/scripts/ui/maid-skill-messages.js#ui-call"
     ]
   },
   {
@@ -49147,6 +49783,12 @@
     "source": "整理与排版",
     "references": [
       "src/scripts/ui/world-editor.js#html-attribute"
+    ]
+  },
+  {
+    "source": "整理作品资料或用户设定，区分原作、原创与扩写，生成世界书条目并按要求绑定。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -49953,6 +50595,12 @@
     "source": "正在载入 {value}",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "正在载入…",
+    "references": [
+      "src/scripts/ui/maid-skill-ui.js#ui-call"
     ]
   },
   {
@@ -50998,6 +51646,12 @@
     ]
   },
   {
+    "source": "重新载入",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "重新转换",
     "references": [
       "src/scripts/ui/variable-panel.js#html-text"
@@ -51436,7 +52090,8 @@
   {
     "source": "注意事项",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
     ]
   },
   {
@@ -51782,6 +52437,7 @@
       "src/scripts/ui/chat/reaction-ui-utils.js#ui-call",
       "src/scripts/ui/custom-bundle-exporter.js#html-text",
       "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition",
+      "src/scripts/ui/maid-skill-panel.js#ui-call",
       "src/scripts/ui/realtime/realtime-provider-catalog.js#ui-definition",
       "src/scripts/ui/realtime/realtime-provider-catalog.js#ui-property"
     ]
@@ -52538,6 +53194,12 @@
     ]
   },
   {
+    "source": "最多保存 100 个自定义技能",
+    "references": [
+      "src/scripts/ui/maid-skill-messages.js#ui-call"
+    ]
+  },
+  {
     "source": "最多保存 60 个自定义反应，请先移除不再使用的图片",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -52554,6 +53216,18 @@
     "references": [
       "src/scripts/ui/agent-reference-editor.js#ui-call",
       "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "最多选择 3 个技能，发送下一项任务时使用。",
+    "references": [
+      "src/scripts/ui/maid-skill-ui.js#ui-call"
+    ]
+  },
+  {
+    "source": "最多引用 12 项功能",
+    "references": [
+      "src/scripts/ui/maid-skill-messages.js#ui-call"
     ]
   },
   {
@@ -55390,6 +56064,12 @@
     "source": "Workspace ID（可选）",
     "references": [
       "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
+    ]
+  },
+  {
+    "source": "YAML 格式无效，或包含不支持的别名、标签或嵌套",
+    "references": [
+      "src/scripts/ui/maid-skill-messages.js#ui-call"
     ]
   },
   {

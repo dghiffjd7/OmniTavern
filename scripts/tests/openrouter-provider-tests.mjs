@@ -144,7 +144,7 @@ test('OpenRouterProvider lists OpenRouter models without filtering provider slug
       data: [
         { id: 'openrouter/auto' },
         { id: 'anthropic/claude-sonnet-4.5' },
-        { id: 'openai/gpt-5.2', canonical_slug: 'openai/gpt-5.2-202608', supported_parameters: ['tools', 'tool_choice'] },
+        { id: 'openai/gpt-5.2', canonical_slug: 'openai/gpt-5.2-202608', context_length: 128000, supported_parameters: ['tools', 'tool_choice'] },
         { id: 'deepseek/deepseek-v3.2' },
       ],
     };
@@ -162,6 +162,7 @@ test('OpenRouterProvider lists OpenRouter models without filtering provider slug
     known: true,
     id: 'openai/gpt-5.2',
     canonicalSlug: 'openai/gpt-5.2-202608',
+    contextLength: 128000,
     supportedParameters: ['tools', 'tool_choice'],
     supportsTools: true,
     supportsToolChoice: true,

@@ -8,7 +8,7 @@ export const createMaidCommandSubmit = ({
   return async (text, controls = {}) => {
       await getVoiceRuntime()?.cancelInput();
       if (controls.source !== 'maid_realtime') await getVoiceRuntime()?.endCall();
-      const intent = matchMaidIntent(text);
+      const intent = controls.context?.maidSkillContext?.loaded?.some(item => item.source === 'user') ? null : matchMaidIntent(text);
       if (intent) {
         if (intent.kind === 'skip') getOnboardingRuntime()?.skip?.();
         let flowId = String(intent.flowId || '').trim();

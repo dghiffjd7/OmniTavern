@@ -25,6 +25,7 @@ import {
   validateMaidImportedCardWorkflowSnapshot,
 } from './maid-imported-card-workflow.js';
 import { buildMaidSourceGroundingContext } from './maid-source-grounding.js';
+import { createMaidSkillContext, restoreMaidSkillContext, serializeMaidSkillContext, stripMaidSkillObservationBodies } from './maid-skill-context.js';
 import {
   buildConfirmedPendingActionPlan,
   cancelPendingMaidAction,
@@ -46,6 +47,7 @@ import {
   normalizeMaidVisualSpecLedger,
 } from './maid-visual-spec.js';
 import { getLocalizedPromptText } from '../i18n/prompt-locale.js';
+import { t } from '../i18n/index.js';
 
 const trim = (value, fallback = '') => {
   const text = String(value ?? '').trim();
@@ -448,6 +450,8 @@ const createMaidRunTracker = ({ agentTaskRuntime = null, input = '', context = {
       summary: truncateForRun(trackedGoal, 200),
       metadata: {
         goal: trackedGoal,
+        maidSkills: serializeMaidSkillContext(context.maidSkillContext),
+        ...(context.maidTaskInputs ? { maidTaskInputs: clone(context.maidTaskInputs) } : {}),
         ...(executionModel ? { executionModel } : {}),
         ...(context.source === 'maid_realtime' ? { submissionSource: context.source, submissionId: context.submissionId, voiceCallId: context.voiceCallId } : {}),
         ...(trim(continuation?.sourceRunId) ? {
@@ -482,7 +486,14 @@ const createMaidRunTracker = ({ agentTaskRuntime = null, input = '', context = {
   };
   const finishToolStep = (step = null, patch = {}) => {
     if (!run || !step?.id) return;
-    agentTaskRuntime.finishStep(run.id, step.id, patch);
+    const toolName = step.input?.toolName || patch.output?.toolName;
+    const output = toolName === 'app.read_skill'
+      ? stripMaidSkillObservationBodies([{ toolName, output: patch.output }], context.maidSkillContext)[0].output
+      : patch.output;
+    if (toolName === 'app.read_skill') {
+      agentTaskRuntime.updateRun?.(run.id, { metadata: { maidSkills: serializeMaidSkillContext(context.maidSkillContext) } });
+    }
+    agentTaskRuntime.finishStep(run.id, step.id, { ...patch, output });
   };
   const finish = (result = {}, usage = null) => {
     if (!run) return;
@@ -511,6 +522,7 @@ const createMaidRunTracker = ({ agentTaskRuntime = null, input = '', context = {
     );
     const metadata = {
       goal: trackedGoal,
+      maidSkills: serializeMaidSkillContext(context.maidSkillContext),
       ...(executionModel ? { executionModel } : {}),
       ...(trim(continuation?.sourceRunId) ? {
         resumedFromRunId: trim(continuation.sourceRunId),
@@ -2846,6 +2858,7 @@ export const createMaidAssistantAgent = ({
   guidedActionRuntime = null,
   prepareConversationContext = null,
   getCapabilityRoutingConfigOverride = null,
+  getSkillCatalog = null,
   maxReactSteps = 48,
   repeatedFailureLimit = 3,
   logger = console,
@@ -4134,7 +4147,7 @@ export const createMaidAssistantAgent = ({
     };
 
     let pendingImportedCardWorkflow = null;
-    if (typeof agentTaskRuntime?.listRuns === 'function') {
+    if (!context.runContinuation && typeof agentTaskRuntime?.listRuns === 'function') {
       try {
         pendingImportedCardWorkflow = resolvePendingMaidImportedCardWorkflow(
           agentTaskRuntime.listRuns({ kind: 'maid_assistant', limit: 20 }),
@@ -4202,14 +4215,14 @@ export const createMaidAssistantAgent = ({
 
     // 上一轮留下的“待确认删除清单”：明确确认则原样执行，取消则作废，说了别的就视为放弃
     let confirmedPendingPlan = null;
-    if (typeof agentTaskRuntime?.listRuns === 'function') {
+    if (!context.runContinuation && typeof agentTaskRuntime?.listRuns === 'function') {
       let pendingAction = null;
       try {
         pendingAction = resolvePendingMaidAction(agentTaskRuntime.listRuns({ kind: 'maid_assistant', limit: 100 }), { context });
       } catch (error) {
         logger?.debug?.('maid pending action lookup skipped', error);
       }
-      if (context.pendingActionSubmissionId && !pendingAction) {
+      if (context.pendingActionSubmissionId && !pendingAction && !pendingImportedCardWorkflow) {
         return { ok: false, status: 'cancelled', reason: 'pending_action_unavailable', message: '这份待确认清单已结束或过期，没有执行任何操作。' };
       }
       if (pendingAction) {
@@ -5205,6 +5218,30 @@ export const createMaidAssistantAgent = ({
     }
   };
 
+  // Called before queue acceptance as well as by direct agent callers. It only
+  // resolves existing task ownership; natural-language execution stays with the planner.
+  const prepareSkillTaskContext = (input = '', context = {}, { hasDraftSkills = false } = {}) => {
+    if (context.maidSkillContextPrepared) return { context, useDraftSkills: false };
+    const sourceRunId = trim(context.runContinuation?.sourceRunId) || extractMaidResumeRunId(input);
+    const runs = agentTaskRuntime?.listRuns?.({ kind: 'maid_assistant', limit: 100 }) || [];
+    const deletion = resolvePendingMaidAction(runs, { context });
+    const imported = !deletion ? resolvePendingMaidImportedCardWorkflow(runs, { context }) : null;
+    const pending = deletion || imported;
+    const reply = deletion ? classifyMaidPendingActionReply(input, { voice: Boolean(trim(context.voiceCallId)) })
+      : imported ? classifyMaidImportedCardConfirmation(input) : 'none';
+    const explicitSelection = hasDraftSkills || context.maidSkillContext?.loaded?.some(item => item.source === 'user');
+    const inheritPending = !sourceRunId && pending && (context.pendingActionSubmissionId || reply !== 'none' || !explicitSelection);
+    const restoreId = sourceRunId || (inheritPending ? pending.runId : '');
+    if (!restoreId) return { context, useDraftSkills: true };
+    const run = agentTaskRuntime?.getRun?.(restoreId) || runs.find(item => item.id === restoreId);
+    if (!run && !agentTaskRuntime) return { context: { ...context, maidSkillContext: context.maidSkillContext || createMaidSkillContext(), maidSkillContextPrepared: true }, useDraftSkills: false };
+    if (!run) throw Object.assign(new Error('skill_snapshot_unavailable'), { code: 'skill_snapshot_unavailable' });
+    const maidSkillContext = restoreMaidSkillContext(run) || createMaidSkillContext();
+    return { context: { ...context, ...(run.metadata?.maidTaskInputs?.context || {}), maidSkillContext, maidSkillContextPrepared: true,
+      ...(run.metadata?.maidTaskInputs ? { maidTaskInputs: clone(run.metadata.maidTaskInputs) } : {}),
+      ...(inheritPending && run.metadata?.submissionId ? { pendingActionSubmissionId: run.metadata.submissionId } : {}) }, useDraftSkills: false };
+  };
+
   const runPrompt = async (input = '', context = {}) => {
     const promptStartedAt = Date.now();
     try {
@@ -5240,6 +5277,15 @@ export const createMaidAssistantAgent = ({
       ...(runContinuation ? { runContinuation } : {}),
       maidConversationContextRef,
     };
+    try {
+      Object.assign(requestContext, prepareSkillTaskContext(input, requestContext).context);
+      if (!requestContext.maidSkillContext) {
+        const catalog = typeof getSkillCatalog === 'function' ? await getSkillCatalog() : undefined;
+        requestContext.maidSkillContext = createMaidSkillContext({ catalog });
+      }
+    } catch (error) {
+      return { ok: false, status: 'failed', reason: error.code || 'skill_store_unavailable', message: t('这次任务的技能版本已无法恢复，请重新发起任务') };
+    }
     if (
       !isPlainObject(maidConversationContextRef.current) &&
       typeof prepareConversationContext === 'function'
@@ -5280,6 +5326,7 @@ export const createMaidAssistantAgent = ({
       },
     };
     tracker = createMaidRunTracker({ agentTaskRuntime, input, context: routedContext, promptStartedAt });
+    if (routedContext.maidSkillContext?.loaded?.length) tracker.ensureRun();
     try {
       const result = await runPromptWithTracker(input, routedContext, tracker);
       let capabilityRouting = null;
@@ -5322,6 +5369,7 @@ export const createMaidAssistantAgent = ({
 
   return {
     plan: planner,
+    prepareSkillTaskContext,
     runPrompt,
     cancelPendingAction: (options = {}) => {
       if (cancelPendingMaidAction(agentTaskRuntime, options)) return true;

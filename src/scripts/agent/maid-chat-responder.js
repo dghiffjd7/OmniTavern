@@ -21,6 +21,7 @@ import {
 import { isMaidUserAbort } from './maid-failure-codes.js';
 import { buildMaidGenerationOptions } from './maid-generation-settings.js';
 import { MAID_MEMORY_REFERENCE_RULE, buildMaidMemoryPromptBlock } from './maid-memory-prompt.js';
+import { MAID_SKILL_INSTRUCTIONS, buildMaidSkillContextPrompt, assertMaidSkillRequestBudget } from './maid-skill-context.js';
 
 const trim = (value, fallback = '') => {
   const text = String(value ?? '').trim();
@@ -92,6 +93,7 @@ export const buildMaidChatResponderMessages = ({
   const imageAttachments = getMaidImageAttachmentsFromContext(context);
   const imageSummary = buildMaidImageAttachmentSummary(imageAttachments);
   const userText = [
+    buildMaidSkillContextPrompt(context.maidSkillContext),
     `用户输入：${trim(input)}`,
     imageSummary ? `用户附图：\n${imageSummary}` : '',
     `当前会话：${trim(context?.sessionId, '-')}`,
@@ -110,6 +112,7 @@ export const buildMaidChatResponderMessages = ({
         modelFeatureContext.awareness,
         '你可以参考 <maid_memory> 和 <maid_history> 来延续对话、理解“刚才那个”等省略指代；不要编造不存在的历史。',
         MAID_MEMORY_REFERENCE_RULE,
+        context.maidSkillContext ? MAID_SKILL_INSTRUCTIONS : '',
         observationText ? '如果提供了工具观察结果，请基于观察结果直接回答用户本次问题；不要只说已查看，也不要输出 JSON。' : '',
         getLocalizedMaidOutputLanguagePrompt(),
       ].filter(Boolean).join('\n'),
@@ -210,6 +213,7 @@ export const createMaidChatResponder = ({
       input: text,
       conversationContext,
     });
+    assertMaidSkillRequestBudget(messages, runtime?.config, 800);
     const responseText = await client.chat(messages, buildMaidGenerationOptions({
       temperature: 0.7,
       maxTokens: 800,

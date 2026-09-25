@@ -4,7 +4,7 @@ import {
   listAppFeatures,
 } from './app-feature-catalog.js';
 import { resolveCandidateCapabilitySelection } from './maid-capability-routing.js';
-import { buildMaidSkillIndexPrompt } from './maid-skill-catalog.js';
+import { MAID_SKILL_INSTRUCTIONS, buildMaidSkillContextPrompt, createMaidSkillContext, stripMaidSkillObservationBodies, assertMaidSkillRequestBudget } from './maid-skill-context.js';
 import {
   buildMaidImageAttachmentSummary,
   buildMaidUserContentWithImages,
@@ -141,6 +141,7 @@ const chatWithFallback = async (
       ? { ...requestOptions, onProviderUsage: usage => { capturedUsage = usage; } }
       : requestOptions;
     try {
+      assertMaidSkillRequestBudget(messages, model, baseOptions.maxTokens || baseOptions.max_tokens);
       return requireText(await targetClient.chat(messages, buildMaidGenerationOptions(baseOptions, model, maidGeneration?.settings)));
     } catch (error) {
       failed = true;
@@ -488,11 +489,12 @@ export const buildMaidFeatureCatalogPrompt = ({
     '<app_feature_index> 列出全部功能的名称；用户消息开头的 <app_features> 给出与本次请求最相关功能的完整参数，可以直接选用。',
     '需要不在 <app_features> 里的功能时，先调用 app.read_feature_doc 并传 featureId 读取它的工具与参数，下一步再使用；不要凭名称猜测工具名或参数。',
     indexLines.length ? `<app_feature_index>\n${indexLines.join('\n')}\n</app_feature_index>` : '',
-    indexSource.some(feature => feature.tools?.includes('app.read_skill')) ? buildMaidSkillIndexPrompt() : '',
+    indexSource.some(feature => feature.tools?.includes('app.read_skill')) ? MAID_SKILL_INSTRUCTIONS : '',
   ].filter(Boolean).join('\n');
   // 别名只服务于本地检索匹配，模型选择工具用不到
   const detailText = `<app_features>\n${buildMaidModelPlannerFeatureList(detailed, { includeSchemas, includeAliases: false })}\n</app_features>`;
   return {
+    skillsAvailable: indexSource.some(feature => feature.tools?.includes('app.read_skill')),
     detailedIds: [...detailedIds],
     staticText,
     detailText,
@@ -530,6 +532,7 @@ export const buildMaidModelPlannerMessages = ({
   // 会变的内容（本次候选的完整参数）放在用户消息开头，系统提示保持不变以命中服务商的提示词缓存
   const userText = [
     featureCatalog.detailText,
+    featureCatalog.skillsAvailable ? buildMaidSkillContextPrompt(context.maidSkillContext || createMaidSkillContext()) : '',
     `用户请求：${trim(input)}`,
     runContinuationBlock,
     sourceGroundingBlock,
@@ -972,7 +975,7 @@ export const buildMaidModelReActMessages = ({
   // 步骤观察滚动窗口：早期步骤只留一行摘要，最近步骤保留完整观察——
   // 防止长任务里 steps 序列化超限截断导致模型看不到最新工具结果（观察失明）。
   const RECENT_STEP_WINDOW = 4;
-  const stepList = Array.isArray(steps) ? steps : [];
+  const stepList = stripMaidSkillObservationBodies(steps, context.maidSkillContext);
   const olderSteps = stepList.slice(0, Math.max(0, stepList.length - RECENT_STEP_WINDOW));
   const recentSteps = stepList.slice(-RECENT_STEP_WINDOW);
   const sourceGroundingBlock = buildMaidSourceGroundingPromptBlock({
@@ -991,6 +994,7 @@ export const buildMaidModelReActMessages = ({
   // 会变的内容（本次候选的完整参数）放在用户消息开头，系统提示保持不变以命中服务商的提示词缓存
   const userText = [
     featureCatalog.detailText,
+    featureCatalog.skillsAvailable ? buildMaidSkillContextPrompt(context.maidSkillContext || createMaidSkillContext()) : '',
     `用户请求：${trim(input)}`,
     runContinuationBlock,
     sourceGroundingBlock,
@@ -1276,6 +1280,7 @@ const runMaidProviderFcPlanner = async ({
   onDebugSnapshot = null,
   logger = console,
 } = {}) => {
+  assertMaidSkillRequestBudget(messages, config, maxTokens);
   const attempt = await runMaidProviderFcAttempt({
     client,
     messages,

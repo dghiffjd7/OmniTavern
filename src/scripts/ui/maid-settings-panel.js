@@ -9,6 +9,7 @@ import { escapeHtml } from '../utils/name-badges.js';
 import { getAgentReasoningControl } from '../agent/agent-generation-settings.js';
 import { rankModelCandidates } from '../utils/model-candidates.js';
 import { ONBOARDING_TASKS } from './maid-onboarding-flows.js';
+import { appendMaidSkillRunDetails } from './maid-skill-ui.js';
 const STYLE_ID = 'maid-settings-panel-style';
 
 const trim = (value, fallback = '') => {
@@ -1943,6 +1944,7 @@ const setIconButtonContent = (button, icon = '', label = '') => {
 export const createMaidSettingsPanel = ({
   documentRef = globalThis?.document || null,
   settingsStore = null,
+  skillPanel = null,
   listModelProfiles = null,
   listProfileModels = null,
   onOpenApiConfig = null,
@@ -2093,6 +2095,7 @@ export const createMaidSettingsPanel = ({
       });
       main.append(heading, meta);
       if (tags.children?.length) main.appendChild(tags);
+      appendMaidSkillRunDetails(documentRef, main, run);
       item.append(runIcon, main);
       if (run?.metadata?.continuable && typeof onResumeRun === 'function') {
         const resumeBtn = createButton(documentRef, 'maid-settings-action is-primary', '继续');
@@ -2449,11 +2452,14 @@ export const createMaidSettingsPanel = ({
   };
 
   let refreshApiSubSection = null;
-  const switchTab = (tab = 'api') => {
+  const switchTab = (tab = 'api', approved = false) => {
+    if (!approved && activeTab === 'skills' && tab !== 'skills' && skillPanel?.isDirty()) {
+      return skillPanel.beforeLeave().then(ok => ok && switchTab(tab, true));
+    }
     const promptSubtab = tab === 'appKnowledge' || tab === 'historyContext' || tab === 'semanticMemory' || tab === 'memoryTable' || tab === 'lastPrompt' || tab === 'lastResponse' || tab === 'persona'
       ? tab
       : '';
-    const next = promptSubtab ? 'prompt' : (['api', 'prompt', 'tasks', 'activity', 'safety'].includes(tab) ? tab : 'api');
+    const next = promptSubtab ? 'prompt' : (['api', 'prompt', 'skills', 'tasks', 'activity', 'safety'].includes(tab) ? tab : 'api');
     if (next === 'api') {
       try { refreshApiSubSection?.(); } catch {}
     }
@@ -2467,6 +2473,7 @@ export const createMaidSettingsPanel = ({
       section.setAttribute?.('aria-hidden', key === activeTab ? 'false' : 'true');
     });
     if (activeTab === 'prompt') switchPromptTab(promptSubtab || activePromptTab || 'persona');
+    if (activeTab === 'skills') skillPanel?.refresh();
     refresh();
     setStatus('');
   };
@@ -2568,6 +2575,7 @@ export const createMaidSettingsPanel = ({
     [
       ['api', 'API', ICONS.api],
       ['prompt', '提示词', ICONS.prompt],
+      ...(skillPanel ? [['skills', '技能', ICONS.tasks]] : []),
       ['tasks', '任务', ICONS.tasks],
       ['activity', '活动', ICONS.activity],
       ['safety', '权限', ICONS.shield],
@@ -3373,9 +3381,13 @@ export const createMaidSettingsPanel = ({
     ruleListEl.className = 'maid-settings-list';
     safetySection.append(safetyCaption, ruleListEl);
 
+    const skillSection = documentRef.createElement?.('section');
+    skillSection.className = 'maid-settings-section';
+    skillPanel?.mount(skillSection);
     [
       ['api', apiSection],
       ['prompt', promptSection],
+      ...(skillPanel ? [['skills', skillSection]] : []),
       ['tasks', tasksSection],
       ['activity', activitySection],
       ['safety', safetySection],
@@ -3405,7 +3417,8 @@ export const createMaidSettingsPanel = ({
     return true;
   };
 
-  const hide = () => {
+  const hide = (approved = false) => {
+    if (!approved && skillPanel?.isDirty()) return skillPanel.beforeLeave().then(ok => ok && hide(true));
     isOpen = false;
     overlay?.classList.remove('is-open');
     overlay?.setAttribute?.('aria-hidden', 'true');

@@ -1,4 +1,5 @@
 // Workflow documents are read by the model. They neither grant permissions nor execute tools.
+import { t } from '../i18n/index.js';
 const skills = [
   {
     id: 'avatar.create_and_set',
@@ -31,11 +32,11 @@ const skills = [
   },
 ];
 
-export const listMaidSkills = () => skills.map(({ id, title, description }) => ({ id, title, description }));
+export const listMaidSkills = () => skills.map(({ id, title, description }) => ({ id, title: t(title), description: t(description) }));
 
 export const readMaidSkill = id => {
   const skill = skills.find(item => item.id === String(id || '').trim());
-  return skill ? { ...skill, featureIds: [...skill.featureIds] } : null;
+  return skill ? { ...skill, title: t(skill.title), description: t(skill.description), featureIds: [...skill.featureIds] } : null;
 };
 
 export const buildMaidSkillIndexPrompt = () => [

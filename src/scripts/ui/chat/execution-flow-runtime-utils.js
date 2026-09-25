@@ -90,6 +90,7 @@ export const projectMaidRunToTraceView = (run = null) => {
     submissionId: trim(run.metadata?.submissionId),
     title: trim(run.metadata?.goal, trim(run.title, '女仆任务')),
     executionModel: trim(run.metadata?.executionModel || run.usage?.model),
+    maidSkills: run.metadata?.maidSkills || null,
     status,
     statusLabel: statusMeta(status).label,
     tone: statusMeta(status).tone,

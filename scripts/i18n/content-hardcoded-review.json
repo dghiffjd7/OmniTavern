@@ -3457,7 +3457,7 @@
   },
   {
     "file": "src/scripts/agent/app-feature-catalog.js",
-    "text": "app.search_feature: query 必填、limit 可选，返回候选功能；app.read_feature_doc: featureId 必填，返回该功能的说明、工具、参数提示和风险等级；app.read_skill: skillId 必填，读取 <maid_skills> 索引中的多步流程，仅提供参考",
+    "text": "app.search_feature: query 必填、limit 可选，返回候选功能；app.read_feature_doc: featureId 必填，返回功能说明与工具参数；app.read_skill: skillId 必填，按需读取技能流程，仅提供说明，不执行或授权；app.search_skills: ",
     "category": "agent_semantic_source",
     "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
   },
@@ -5101,18 +5101,6 @@
   },
   {
     "file": "src/scripts/agent/maid-skill-catalog.js",
-    "text": "生成并设置头像",
-    "category": "agent_semantic_source",
-    "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
-  },
-  {
-    "file": "src/scripts/agent/maid-skill-catalog.js",
-    "text": "为角色卡、联系人或用户生成头像，保持人物设计一致，并写回正确的目标。",
-    "category": "agent_semantic_source",
-    "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
-  },
-  {
-    "file": "src/scripts/agent/maid-skill-catalog.js",
     "text": "先根据用户要求确定要修改的是角色卡、聊天室联系人还是用户档案；使用当前任务中已解析的稳定目标，缺少资料时读取资源。目标含糊且无法从上下文确定时再询问用户。",
     "category": "agent_semantic_source",
     "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
@@ -5144,18 +5132,6 @@
   {
     "file": "src/scripts/agent/maid-skill-catalog.js",
     "text": "以工具实际 applied 结果汇报完成；等待确认、失败或取消时如实说明。不要因为已生成图片就声称头像已经设置。",
-    "category": "agent_semantic_source",
-    "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
-  },
-  {
-    "file": "src/scripts/agent/maid-skill-catalog.js",
-    "text": "按资料编写世界书",
-    "category": "agent_semantic_source",
-    "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
-  },
-  {
-    "file": "src/scripts/agent/maid-skill-catalog.js",
-    "text": "整理作品资料或用户设定，区分原作、原创与扩写，生成世界书条目并按要求绑定。",
     "category": "agent_semantic_source",
     "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
   },

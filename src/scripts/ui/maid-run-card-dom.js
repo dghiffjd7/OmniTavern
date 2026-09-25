@@ -3,6 +3,7 @@
    颜色全部来自 --app-* token（含 *-rgb 派生），明暗主题与 reduced-motion 均成立。 */
 
 import { t } from '../i18n/index.js';
+import { appendMaidSkillRunDetails } from './maid-skill-ui.js';
 import {
   buildMaidRunCardModel,
   formatMaidRunElapsed,
@@ -297,10 +298,12 @@ export const createMaidRunCardView = ({
   const approvalEl = make('div', 'mrc-approval');
   const liveEl = make('div', 'mrc-live');
   const thoughtEl = make('div', 'mrc-thought');
+  const skillsEl = make('div', 'mrc-skills');
   el.appendChild(headEl);
   el.appendChild(bodyEl);
   // 固定顺序：步骤 → 确认 → 进行中 → 思路；只切换 hidden，避免重挂载丢焦点
   [rowsEl, approvalEl, liveEl, thoughtEl].forEach(section => bodyEl.appendChild(section));
+  el.appendChild(skillsEl);
   approvalEl.setAttribute?.('role', 'group');
   liveEl.setAttribute?.('aria-live', 'polite');
 
@@ -314,6 +317,7 @@ export const createMaidRunCardView = ({
   let liveSignature = '';
   let approvalSignature = '';
   let thoughtSignature = '';
+  let skillSignature = '';
 
   const elapsedText = () => {
     if (!model?.startedAt) return '';
@@ -435,6 +439,13 @@ export const createMaidRunCardView = ({
     el.classList?.toggle?.('is-touch', extras.touch === true);
     el.setAttribute?.('aria-label', `${t('女仆任务')}：${model.title} · ${model.stateLabel}`);
     renderHead();
+    const nextSkillSignature = JSON.stringify((model.maidSkills?.loaded || []).map(item => [item.id, item.revision, item.source]));
+    if (nextSkillSignature !== skillSignature) {
+      skillSignature = nextSkillSignature;
+      while (skillsEl.firstChild) skillsEl.removeChild(skillsEl.firstChild);
+      appendMaidSkillRunDetails(documentRef, skillsEl, { metadata: { maidSkills: model.maidSkills } });
+    }
+    skillsEl.hidden = !model.maidSkills?.loaded?.length;
     bodyEl.hidden = isCollapsed();
     renderRows(animate);
     renderExtras();

@@ -82,6 +82,7 @@ import { createMaidChatResponder } from '../agent/maid-chat-responder.js';
 import {
   buildAppFeatureKnowledgeText,
   buildAppFeatureSearchContextText,
+  listAppFeatures,
 } from '../agent/app-feature-catalog.js';
 import { createAppResourceReader } from '../agent/app-resource-reader.js';
 import {
@@ -124,6 +125,10 @@ import { MaidGuideStore } from '../storage/maid-guide-store.js';
 import { MaidConversationStore } from '../storage/maid-conversation-store.js';
 import { MaidSemanticMemoryStore } from '../storage/maid-semantic-memory-store.js';
 import { MaidSettingsStore } from '../storage/maid-settings-store.js';
+import { MaidSkillStore } from '../storage/maid-skill-store.js';
+import { createMaidSkillRuntime, createMaidSkillTaskValidator } from './maid-skill-runtime.js';
+import { createMaidSkillPanel } from './maid-skill-panel.js';
+import { createMaidSkillInput } from './maid-skill-ui.js';
 import { appSettings } from '../storage/app-settings.js';
 import { bootstrapAppLanguage } from '../i18n/app-language-bootstrap.js';
 import { requestAppLanguageRestart } from '../i18n/app-language-restart.js';
@@ -287,7 +292,7 @@ import {
 import { matchMaidIntent } from './maid-intent-presets.js';
 import { createMaidOnboardingAppAdapter } from './maid-onboarding-app-adapter.js';
 import { createAgentUiClickRuntime } from './agent-ui-click-runtime.js';
-import { buildMaidRunResumePrompt } from './maid-run-resume-utils.js';
+import { buildMaidRunResumeSubmission, createMaidTaskInputPersistence } from './maid-run-resume-utils.js';
 import {
   createAppBackNavigationRuntime,
   isAppBackLayerVisible as isBackLayerVisible,
@@ -4031,6 +4036,7 @@ const initApp = async () => {
       || (realtimeCallRuntime?.getState?.().status || 'idle') !== 'idle',
   });
   const maidSettingsStore = new MaidSettingsStore();
+  const maidSkillStore = new MaidSkillStore();
   markBootPhase('maid-stores');
   await maidSettingsStore.load();
   // Phase B：统一 Agent Registry，第一种来源 = 女仆 Sub-agent 配置（投影为统一 Agent capability）。
@@ -4198,6 +4204,7 @@ const initApp = async () => {
     logger,
   });
   const maidAssistantAgent = createMaidAssistantAgent({
+    getSkillCatalog: async () => { await maidSkillStore.ready; return maidSkillStore.list(); },
     toolRegistry: agentToolRegistry,
     agentTaskRuntime,
     capabilityRoutingRuntime: maidCapabilityRoutingRuntime,
@@ -24094,6 +24101,8 @@ const initApp = async () => {
   const maidSettingsPanel = createMaidSettingsPanel({
     documentRef: document,
     settingsStore: maidSettingsStore,
+    skillPanel: createMaidSkillPanel({ store: maidSkillStore, documentRef: document, listFeatures: () => listAppFeatures(),
+      onUseSkill: id => { maidSkillRuntime.setSelected([...maidSkillRuntime.getSelected(), id]); maidSettingsPanel.hide(); maidCommandInputRuntime.open(); } }),
     onOpenVoiceConfig: mode => maidVoiceRuntime?.openSettings(mode),
     onVoiceModeChanged: () => maidVoiceRuntime?.sync(),
     listModelProfiles: () => (chatConfigManager.getProfiles?.() || []).map(profile => ({
@@ -24119,10 +24128,8 @@ const initApp = async () => {
     listRuns: options => agentRunStore.listRuns({ ...(options || {}), kind: 'maid_assistant' }),
     allowRulesStore: maidToolSafetyAllowStore,
     onResumeRun: (run = {}) => {
-      maidCommandInputRuntime?.open?.({
-        initialText: buildMaidRunResumePrompt(run),
-      });
-      void maidCommandInputRuntime?.submit?.();
+      const submission = buildMaidRunResumeSubmission(run);
+      void maidCommandInputRuntime?.submitTask(submission.text, submission.controls);
     },
     onOpenApiConfig: () => openMaidApiConfigPanel({ reason: 'manual' }),
     guideStore: maidGuideStore,
@@ -24208,8 +24215,19 @@ const initApp = async () => {
     },
     logger,
   });
+  const maidSkillRuntime = createMaidSkillRuntime({
+    store: maidSkillStore,
+    resolveTaskContext: maidAssistantAgent.prepareSkillTaskContext,
+    inputPersistence: createMaidTaskInputPersistence({ referenceStore: imageGenerationReferenceStore }),
+    getAppContext: () => ({ sessionId: chatStore.getCurrent(), uiMode, activePage, userSelection: maidSelectionMode.getItems() }),
+    validateTask: createMaidSkillTaskValidator({ resolveConfig: resolveMaidTaskRuntimeConfig, checkVision: checkMaidVisionInput }),
+  });
+  const maidSkillInput = createMaidSkillInput({ store: maidSkillStore, runtime: maidSkillRuntime, documentRef: document,
+    onManage: () => { maidCommandInputRuntime?.collapse(); maidSettingsPanel.show({ tab: 'skills' }); } });
   maidCommandInputRuntime = createMaidCommandInputRuntime({
     documentRef: document,
+    prepareSubmission: maidSkillRuntime.prepare,
+    mountSkills: maidSkillInput.mount,
     modeSwitchEl: modeSwitch,
     getVoiceState: () => maidVoiceRuntime?.getState() || {},
     onVoiceAction: kind => maidVoiceRuntime?.action(kind),
@@ -24403,6 +24421,9 @@ const initApp = async () => {
     registry.stores.maidCommandInputRuntime = maidCommandInputRuntime;
     registry.stores.maidSelectionMode = maidSelectionMode;
     registry.stores.maidSettingsStore = maidSettingsStore;
+    registry.stores.maidSkillStore = maidSkillStore;
+    registry.stores.maidSkillRuntime = maidSkillRuntime;
+    registry.actions.openMaidSkills = () => maidSettingsPanel.show({ tab: 'skills' });
     registry.stores.maidOnboardingRuntime = maidOnboardingRuntime;
     registry.actions.startMaidOnboardingFlow = flowId => maidOnboardingRuntime.startFlow(flowId);
     registry.stores.agentRegistry = agentRegistry;
@@ -31733,6 +31754,7 @@ const initApp = async () => {
   };
 
   maidVoiceRuntime = createMaidVoiceRuntime({
+    skillRuntime: maidSkillRuntime,
     documentRef: document, windowLike: window, modeSwitchEl: modeSwitch,
     settingsStore: maidSettingsStore, conversationStore: maidConversationStore,
     prepareConversationContext: prepareMaidConversationContext,
