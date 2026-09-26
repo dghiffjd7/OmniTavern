@@ -46,7 +46,11 @@ const renderInlineMarkdown = (text) => {
   return output;
 };
 
-export const renderMaidMarkdownHtml = (text) => {
+// Nested quotes recurse once per level; deeper markers are shown as plain text so authored
+// or imported skills cannot overflow the stack.
+const MAX_QUOTE_DEPTH = 8;
+
+export const renderMaidMarkdownHtml = (text, depth = 0) => {
   const lines = String(text ?? '').replace(/\r\n?/g, '\n').split('\n');
   const output = [];
   const isBlank = line => !String(line || '').trim();
@@ -81,7 +85,8 @@ export const renderMaidMarkdownHtml = (text) => {
         quoteLines.push(isBlank(lines[index]) ? '' : lines[index].replace(/^\s*>+\s?/, ''));
         index += 1;
       }
-      output.push(`<blockquote>${renderMaidMarkdownHtml(quoteLines.join('\n'))}</blockquote>`);
+      const inner = depth + 1 >= MAX_QUOTE_DEPTH ? quoteLines.map(item => item.replace(/^(?:\s*>)+\s?/, '')) : quoteLines;
+      output.push(`<blockquote>${renderMaidMarkdownHtml(inner.join('\n'), depth + 1)}</blockquote>`);
       continue;
     }
     if (isUnordered(line) || isOrdered(line)) {

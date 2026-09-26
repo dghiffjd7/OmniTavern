@@ -59,23 +59,37 @@ export const assertMaidSkillStoreSize = state => {
   }
 };
 
+// 单条记录损坏（手改数据、旧版本、导入工具写坏）只隔离这一条：原样保留、存盘时写回，
+// 不让整个技能库和所有女仆任务一起失败；由设置面板提示并让用户决定是否删除。
 export const normalizeMaidSkillStoreState = value => {
-  if (value == null || (skillObject(value) && !Object.keys(value).length)) return { schemaVersion: 1, storeRevision: 0, skills: [], builtinOverrides: {} };
+  if (value == null || (skillObject(value) && !Object.keys(value).length)) return { schemaVersion: 1, storeRevision: 0, skills: [], builtinOverrides: {}, quarantined: [] };
   if (!skillObject(value) || value.schemaVersion !== 1 || !Array.isArray(value.skills) || !skillObject(value.builtinOverrides)) throw skillError('skill_store_invalid');
-  const skills = value.skills.map(item => {
-    if (!skillObject(item) || !/^custom:[a-zA-Z0-9-]{1,73}$/.test(item.id || '') || !Number.isSafeInteger(item.revision) || item.revision < 1) throw skillError('skill_store_invalid');
-    return { ...normalizeMaidSkillDraft(item), id: item.id, kind: 'custom', revision: item.revision,
-      createdAt: Number(item.createdAt) || 0, updatedAt: Number(item.updatedAt) || 0,
-      derivedFrom: skillObject(item.derivedFrom) ? normalizeMaidSkillMetadata(item.derivedFrom) : typeof item.derivedFrom === 'string' ? item.derivedFrom.slice(0, 80) : null,
-      source: normalizeMaidSkillMetadata(item.source || { kind: 'local' }) };
-  });
+  const skills = [], quarantined = [], ids = new Set(), names = new Set();
+  for (const item of value.skills) {
+    try {
+      if (!skillObject(item) || !/^custom:[a-zA-Z0-9-]{1,73}$/.test(item.id || '') || !Number.isSafeInteger(item.revision) || item.revision < 1) throw skillError('skill_store_invalid');
+      const skill = { ...normalizeMaidSkillDraft(item), id: item.id, kind: 'custom', revision: item.revision,
+        createdAt: Number(item.createdAt) || 0, updatedAt: Number(item.updatedAt) || 0,
+        derivedFrom: skillObject(item.derivedFrom) ? normalizeMaidSkillMetadata(item.derivedFrom) : typeof item.derivedFrom === 'string' ? item.derivedFrom.slice(0, 80) : null,
+        source: normalizeMaidSkillMetadata(item.source || { kind: 'local' }) };
+      if (ids.has(skill.id)) throw skillError('skill_duplicate_id');
+      if (names.has(skill.name)) throw skillError('skill_duplicate_name');
+      ids.add(skill.id); names.add(skill.name); skills.push(skill);
+    } catch (error) {
+      quarantined.push({ raw: skillClone(item), reason: String(error?.code || 'skill_store_invalid') });
+    }
+  }
   const builtinOverrides = {};
   for (const [id, override] of Object.entries(value.builtinOverrides)) {
-    if (!/^[a-z0-9_.-]{1,80}$/.test(id) || ['__proto__', 'prototype', 'constructor'].includes(id) || !skillObject(override)) throw skillError('skill_store_invalid');
+    if (!/^[a-z0-9_.-]{1,80}$/.test(id) || ['__proto__', 'prototype', 'constructor'].includes(id) || !skillObject(override)) continue;
     builtinOverrides[id] = { enabled: override.enabled !== false, invocationMode: override.invocationMode === 'manual' ? 'manual' : 'auto' };
   }
   if (!Number.isSafeInteger(value.storeRevision) || value.storeRevision < 0) throw skillError('skill_store_invalid');
-  const state = { schemaVersion: 1, storeRevision: value.storeRevision, skills, builtinOverrides };
-  assertMaidSkillStoreSize(state);
-  return state;
+  return { schemaVersion: 1, storeRevision: value.storeRevision, skills, builtinOverrides, quarantined };
 };
+
+// 存盘格式：隔离的记录原样放回 skills，下次载入仍会被隔离，不会因为保存其他技能而丢失
+export const toPersistedMaidSkillStoreState = state => ({
+  schemaVersion: 1, storeRevision: state.storeRevision, builtinOverrides: state.builtinOverrides,
+  skills: [...state.skills, ...(state.quarantined || []).map(item => item.raw)],
+});

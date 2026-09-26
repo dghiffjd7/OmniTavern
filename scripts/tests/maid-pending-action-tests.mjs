@@ -316,4 +316,35 @@ console.log('ok - confirmed deletions keep exact IDs and scopes, without name fa
   console.log('ok - a conditional reply goes to the model with the pending list feature available');
 }
 
+
+// 有待确认清单时：只有明确确认 / 取消或结构化续接才接回旧任务的房间与输入；无关的新请求留在当前房间
+{
+  const registry = createAgentToolRegistry({ logger: { warn() {}, debug() {} } });
+  registry.register({
+    name: 'regex.delete_many', title: 'Delete regex', description: 'Delete regex', source: 'test', permissions: [], riskLevel: 'high',
+    schema: { type: 'object', properties: { targets: { type: 'array', items: { type: 'string' } }, preview: { type: 'boolean' } } },
+    execute: async args => ({ ok: true, preview: true, plannedCount: args.targets.length, items: args.targets.map(name => ({ id: name, name, status: 'planned' })) }),
+  });
+  const store = new AgentRunStore();
+  const runtime = createAgentTaskRuntime({ store, toolRegistry: registry, logger: { warn() {} } });
+  const agent = createMaidAssistantAgent({
+    agentTaskRuntime: runtime, toolRegistry: registry,
+    planner: async input => (/删除/.test(input)
+      ? { ok: true, toolName: 'regex.delete_many', args: { targets: ['甲'], preview: true }, featureId: 'regex.delete_many', title: '删除正则', response: '先列清单。' }
+      : { ok: true, action: 'final', message: '好的。' }),
+    reactPlanner: async () => ({ ok: true, action: 'final', message: '请确认。' }),
+    logger: { warn() {}, debug() {} },
+  });
+  await agent.runPrompt('删除规则集甲', { sessionId: 'room-a', maidTaskInputs: { context: { sessionId: 'room-a', activePage: 'regex' }, attachments: [] } });
+  const unrelated = agent.prepareSkillTaskContext('总结当前聊天', { sessionId: 'room-b', activePage: 'chat' }).context;
+  assert.equal(unrelated.sessionId, 'room-b', 'an unrelated request stays in the current room');
+  assert.equal(unrelated.activePage, 'chat');
+  assert.equal(unrelated.pendingActionSubmissionId, undefined);
+  assert.equal(unrelated.maidTaskInputs, undefined, 'old attachments are not brought back');
+  const conditional = agent.prepareSkillTaskContext('确认，但保留乙', { sessionId: 'room-b' }).context;
+  assert.equal(conditional.sessionId, 'room-b', 'a conditional reply is a new request for the model');
+  const confirmed = agent.prepareSkillTaskContext('确认', { sessionId: 'room-b' }).context;
+  assert.equal(confirmed.sessionId, 'room-a', 'an explicit confirmation continues the pending task');
+  console.log('ok - only explicit confirm / cancel or structured continuation inherits the pending task context');
+}
 console.log('maid pending action tests passed');

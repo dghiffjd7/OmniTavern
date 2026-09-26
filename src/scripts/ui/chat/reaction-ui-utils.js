@@ -12,7 +12,7 @@ import {
   getTwemojiAssetPath,
 } from './reaction-emoji-catalog.js';
 import { resolveFrequentReactionEmojis } from './reaction-preference-utils.js';
-import { customReactionAssets, customReactionImageSource, isCustomReaction } from './custom-reaction-assets.js';
+import { CUSTOM_REACTION_LIMIT, customReactionAssets, customReactionImageSource, isCustomReaction } from './custom-reaction-assets.js';
 import { appConfirm } from '../app-confirm.js';
 import { t } from '../../i18n/index.js';
 
@@ -447,9 +447,9 @@ export const showReactionPicker = ({
   const tools = documentLike.createElement('div');
   tools.className = 'chat-reaction-custom-tools';
   const upload = documentLike.createElement('button');
-  upload.type = 'button'; upload.textContent = t('添加图片');
+  upload.type = 'button'; upload.className = 'chat-reaction-custom-add'; upload.textContent = t('添加图片');
   const manage = documentLike.createElement('button');
-  manage.type = 'button'; manage.textContent = t('管理');
+  manage.type = 'button'; manage.className = 'chat-reaction-custom-manage'; manage.textContent = t('管理');
   const fileInput = documentLike.createElement('input');
   fileInput.type = 'file'; fileInput.accept = 'image/png,image/webp,image/jpeg'; fileInput.multiple = true; fileInput.hidden = true;
   const status = documentLike.createElement('small');
@@ -466,6 +466,7 @@ export const showReactionPicker = ({
     manage.setAttribute?.('aria-pressed', state.managing ? 'true' : 'false');
     status.textContent = state.managing ? t('点击图片可移除反应') : t('静态图片 · 最多 60 个');
     picker.dataset.activeCategory = state.activeCategory;
+    if (state.managing) picker.dataset.managing = '1'; else delete picker.dataset.managing;
     tabButtons.forEach((button, categoryId) => {
       const active = !state.query && categoryId === state.activeCategory;
       button.classList?.toggle?.('is-active', active);
@@ -478,7 +479,7 @@ export const showReactionPicker = ({
     if (!items.length) {
       const empty = documentLike.createElement('div');
       empty.className = 'chat-reaction-picker-empty';
-      empty.textContent = '没有找到表情';
+      empty.textContent = !state.query && state.activeCategory === 'custom' ? t('还没有自定义反应，可点“添加图片”上传 PNG、WebP 或 JPEG') : t('没有找到表情');
       content.appendChild?.(empty);
       return;
     }
@@ -521,14 +522,19 @@ export const showReactionPicker = ({
   fileInput.addEventListener?.('change', async () => {
     upload.disabled = manage.disabled = true;
     const files = Array.from(fileInput.files || []);
-    let added = 0, errorMessage = '';
+    // One bad file does not stop the rest; only a full library ends the batch early.
+    let added = 0, failed = 0, errorMessage = '';
     for (const file of files) {
       try { await customReactionAssets.addFile(file); added++; }
-      catch (error) { errorMessage = error.message; break; }
+      catch (error) {
+        failed++; errorMessage ||= error.message;
+        if (customReactionAssets.list().length >= CUSTOM_REACTION_LIMIT) { failed += files.length - added - failed; errorMessage = error.message; break; }
+      }
     }
     fileInput.value = ''; upload.disabled = manage.disabled = false;
     categories = resolvePickerCategories(usage); state.activeCategory = 'custom'; state.managing = false; state.query = ''; search.value = ''; render();
-    status.textContent = errorMessage ? t(errorMessage) : t('已添加 {count} 个反应', { count: added });
+    status.textContent = !failed ? t('已添加 {count} 个反应', { count: added })
+      : files.length === 1 ? t(errorMessage) : t('已添加 {count} 个反应；{failed} 个未添加：{reason}', { count: added, failed, reason: t(errorMessage) });
   });
   tools.appendChild?.(upload); tools.appendChild?.(manage); tools.appendChild?.(fileInput); tools.appendChild?.(status);
 

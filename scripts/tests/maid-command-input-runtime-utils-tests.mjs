@@ -887,3 +887,48 @@ class FakeDocument {
   started[2].resolve({ ok: true }); await new Promise(resolve => setImmediate(resolve));
   console.log('ok - continuous voice preserves drafts, uses the real queue and stops only the selected task');
 }
+
+{
+  // 图片、技能、圈选收进“＋”：点开/选中即收起/Esc 收起；有附图或圈选时“＋”带状态点；附图卡点击放大
+  const documentRef = new FakeDocument();
+  const previews = [];
+  let mountedMenu = null;
+  const runtime = createMaidCommandInputRuntime({
+    documentRef,
+    getViewportSize: () => ({ w: 360, h: 640 }),
+    onAttachFiles: async files => files.map((file, index) => ({ id: `img-${index}`, kind: 'image', url: `data:image/png;base64,${index}`, name: file.name })),
+    onPreviewImage: url => previews.push(url),
+    mountSkills: (root, menu, { onChange }) => { mountedMenu = menu; mountedMenu.onChange = onChange; },
+    setTimeoutFn: () => 1,
+    clearTimeoutFn: () => {},
+  });
+  runtime.open({ autoFocus: false });
+  const { rootEl, moreBtn, menuEl, attachBtn, selectionBtn, attachmentsEl, settingsBtn, submitBtn } = runtime.getElements();
+  assert.equal(mountedMenu, menuEl, '技能入口挂进“＋”菜单');
+  assert.deepEqual(rootEl.children.filter(node => node.tagName === 'BUTTON'), [moreBtn, settingsBtn, submitBtn], '输入条常驻按钮只有＋、设置、语音/发送');
+  assert.equal(attachBtn.parentNode, menuEl);
+  assert.equal(selectionBtn.parentNode, menuEl);
+  const click = () => ({ preventDefault() {}, stopPropagation() {} });
+  moreBtn.dispatchEvent('click', click());
+  assert.equal(menuEl.classList.contains('is-open'), true);
+  assert.equal(moreBtn.attributes['aria-expanded'], 'true');
+  menuEl.dispatchEvent('click', { target: { closest: () => attachBtn } });
+  assert.equal(menuEl.classList.contains('is-open'), false, '选中一项后收起');
+  moreBtn.dispatchEvent('click', click());
+  rootEl.dispatchEvent('keydown', { key: 'Escape', ...click() });
+  assert.equal(menuEl.classList.contains('is-open'), false, 'Esc 收起菜单');
+  assert.equal(moreBtn.classList.contains('has-state'), false);
+  runtime.setSelectionState({ active: false, count: 2 });
+  assert.equal(moreBtn.classList.contains('has-state'), true, '有圈选内容时显示状态点');
+  runtime.setSelectionState({ active: false, count: 0 });
+  await runtime.addFiles([{ name: 'a.png', type: 'image/png', size: 1 }]);
+  assert.equal(moreBtn.classList.contains('has-state'), true, '有附图时显示状态点');
+  const card = attachmentsEl.children[0];
+  const preview = card.children.find(node => node.className === 'maid-command-input-attachment-preview');
+  attachmentsEl.dispatchEvent('click', { target: { closest: selector => (selector.includes('preview') ? preview : null) }, preventDefault() {} });
+  assert.deepEqual(previews, ['data:image/png;base64,0'], '点击附图卡放大查看');
+  moreBtn.dispatchEvent('click', click());
+  runtime.close();
+  assert.equal(menuEl.classList.contains('is-open'), false, '关闭输入条时一并收起菜单');
+  console.log('ok - maid command input folds image/skills/selection into the plus menu');
+}

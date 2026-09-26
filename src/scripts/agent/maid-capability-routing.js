@@ -22,6 +22,7 @@ const ROUTING_MODE_SET = new Set(Object.values(MAID_CAPABILITY_ROUTING_MODES));
 const CONTROL_CAPABILITY_ID = 'app.capabilities.search';
 const MULTI_STEP_TODO_CAPABILITY_ID = 'maid.todo';
 const DEFAULT_CANDIDATE_LIMIT = 8;
+const SKILL_REFERENCE_SCORE = 40;
 const DEFAULT_STICKY_LIMIT = 4;
 const DEFAULT_MIN_SCORE = 45;
 const MAX_SNAPSHOT_CACHE = 256;
@@ -840,7 +841,8 @@ export const createMaidCapabilityRoutingRuntime = ({
     const loadedSkillStep = (Array.isArray(steps) ? steps : []).filter(step => step?.toolName === 'app.read_skill' && step.status === 'succeeded').slice(-1)[0];
     const loadedSkill = loadedSkillStep && readMaidSkill(loadedSkillStep.args?.skillId);
     const skillFeatureIds = context.maidSkillContext ? getMaidLoadedSkillFeatures(context.maidSkillContext) : loadedSkill?.featureIds || [];
-    skillFeatureIds.forEach(featureId => addRecord(projectedById.get(featureId), 50, 'skill_reference'));
+    // 技能引用的功能只补空位：分数低于意图及格线，不挤掉按本句意图检索到的功能，也不单独触发候选模式
+    skillFeatureIds.forEach(featureId => addRecord(projectedById.get(featureId), SKILL_REFERENCE_SCORE, 'skill_reference'));
     stickyIds.forEach((featureId, index) => {
       addRecord(projectedById.get(featureId), 120 - index, index === 0 ? 'previous_capability' : 'sticky', { pinned: true });
     });
@@ -862,7 +864,8 @@ export const createMaidCapabilityRoutingRuntime = ({
         Number(trim(a.feature?.id) === CONTROL_CAPABILITY_ID) -
         Number(trim(b.feature?.id) === CONTROL_CAPABILITY_ID)
       ));
-    const intentMatches = selected.filter(item => !item.pinned && item.score >= currentConfig.minScore);
+    const intentMatches = selected.filter(item => !item.pinned && item.score >= currentConfig.minScore
+      && !(item.reasons.size === 1 && item.reasons.has('skill_reference')));
     const confidence = intentMatches[0]?.score || 0;
     const hasConfidentMatch = intentMatches.length > 0;
     const bucketKey = [state.id, context?.sessionId].filter(Boolean).join('|');

@@ -24,6 +24,14 @@ assert.equal(panel.floatingAgentFlipped, true);
 assert.match(panel.renderAgents(), /data-agent-hopscotch-host/);
 assert.match(panel.renderAgents(), /data-agent-library/);
 assert.doesNotMatch(panel.renderAgents(), /<details[^>]*\bopen\b/);
+{
+  // 创意写作只从跳房子的“+”新建修改文本 Agent；聊天模式的流程只读，入口在“全部 Agent”里。
+  const withPlace = place => Object.assign(Object.create(panel), { getActions: () => ({ createTextEditAgent: async () => ({}), getAgentConfiguration: () => ({ context: { place } }) }) });
+  assert.doesNotMatch(withPlace('writing').renderAgents(), /data-add-text-agent/);
+  const chat = withPlace('chat').renderAgents();
+  assert.match(chat, /<summary>[^<]*<\/summary><div class="agent-center-card-actions"><button class="agent-center-card-action" data-add-text-agent>/);
+  assert.ok(chat.indexOf('data-agent-hopscotch-host') < chat.indexOf('data-add-text-agent'), '聊天模式的新建入口不再位于流程图上方');
+}
 panel.closeTopLayer();
 assert.equal(panel.floatingAgentId, '', '返回先关闭浮卡，不关闭 AC');
 assert.equal(panel.isVisible(), true);

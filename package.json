@@ -88,7 +88,7 @@
     "test:maid-realtime": "node scripts/tests/maid-run-card-tests.mjs && node scripts/tests/voice-task-model-tests.mjs && node scripts/tests/maid-realtime-task-tests.mjs && node scripts/tests/maid-voice-tests.mjs && node scripts/tests/maid-command-input-runtime-utils-tests.mjs && node scripts/tests/realtime-call-runtime-tests.mjs && node scripts/tests/realtime-call-app-runtime-tests.mjs && node scripts/tests/realtime-multi-provider-tests.mjs && node scripts/tests/openai-live-tests.mjs && node scripts/tests/execution-flow-runtime-utils-tests.mjs && node scripts/tests/app-mode-switch-interaction-runtime-utils-tests.mjs && node scripts/tests/feedback-073-app-tests.mjs",
     "test:maid-extensions": "npm run test:maid-skills && node scripts/tests/custom-realtime-tests.mjs && node scripts/tests/custom-reaction-assets-tests.mjs && node scripts/tests/utility-agent-runtime-tests.mjs",
     "build:maid-skill-deps": "node scripts/build-maid-skill-deps.mjs",
-    "test:maid-skills": "node scripts/tests/maid-skill-store-tests.mjs && node scripts/tests/maid-skill-context-tests.mjs && node scripts/tests/maid-skill-transfer-tests.mjs && node scripts/tests/maid-skill-runtime-tests.mjs && node scripts/tests/maid-skill-tests.mjs"
+    "test:maid-skills": "node scripts/tests/maid-skill-store-tests.mjs && node scripts/tests/maid-skill-context-tests.mjs && node scripts/tests/maid-skill-transfer-tests.mjs && node scripts/tests/maid-skill-runtime-tests.mjs && node scripts/tests/maid-submission-preparation-tests.mjs && node scripts/tests/maid-skill-tests.mjs"
   },
   "dependencies": {
     "@aws-crypto/sha256-js": "^5.2.0",

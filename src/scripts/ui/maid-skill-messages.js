@@ -34,5 +34,8 @@ export const maidSkillMessage = error => {
     skill_import_missing_resources: t('存在相对链接或资源引用；本次未导入关联文件'),
     skill_import_unknown_features: t('以下功能引用目前不可用，仍会保留'),
   };
-  return messages[code] || (code ? t('技能暂时无法载入') : String(error?.message || t('技能操作失败，请重试')));
+  if (messages[code]) return messages[code];
+  // Only unknown skill codes are skill-loading failures; other coded errors (attachments, storage…) keep their own message.
+  if (String(code || '').startsWith('skill_')) return t('技能暂时无法载入');
+  return String((typeof error === 'string' ? '' : error?.message) || t('技能操作失败，请重试'));
 };

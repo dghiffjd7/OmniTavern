@@ -19,30 +19,33 @@ export const createUtilityAgentEditor = ({ actions, id, scope = 'local', context
     const items = actions.listUtilityAgentRuns?.({ id, context }) || [];
     node.querySelector('[data-runs]').innerHTML = items.slice(-5).reverse().map(job => {
       const tokens = job.usage?.totalTokens ?? (job.usage?.promptTokens != null && job.usage?.completionTokens != null ? job.usage.promptTokens + job.usage.completionTokens : null);
-      return `<div class="ac-utility-result"><div class="ac-row"><strong>${escape(t(statuses[job.status] || job.status))}</strong>${['queued', 'running'].includes(job.status) ? `<button type="button" class="agent-center-card-action" data-cancel="${escape(job.id)}">${escape(t('停止'))}</button>` : ''}</div>
-        <small>${escape(job.model)} · ${(job.durationMs / 1000).toFixed(1)}s · ${tokens == null ? escape(t('未返回用量')) : `${tokens} tokens`}</small>
-        ${job.message ? `<p role="status">${escape(t(job.message))}</p>` : ''}
-        ${job.title ? `<p>${escape(job.title)}${job.previewOnly ? ` · ${escape(t('仅预览'))}` : ''}</p>` : ''}
-        ${(job.scores || []).map(row => `<div class="ac-utility-score"><div><strong>${escape(row.id)} · ${row.score.toFixed(2)}</strong>${row.score >= job.threshold ? ` <span>${escape(t('建议关注'))}</span>` : ''}</div><p>${escape(row.text)}</p><small>${escape(row.reason)}</small></div>`).join('')}</div>`;
+      return `<div class="ac-utility-result"><div class="ac-utility-result-head"><span class="ac-utility-status is-${escape(job.status)}">${escape(t(statuses[job.status] || job.status))}</span>
+        <small>${escape([job.model, `${(job.durationMs / 1000).toFixed(1)}s`].filter(Boolean).join(' · '))} · ${tokens == null ? escape(t('未返回用量')) : `${tokens} tokens`}</small>
+        ${['queued', 'running'].includes(job.status) ? `<button type="button" class="agent-center-card-action" data-cancel="${escape(job.id)}">${escape(t('停止'))}</button>` : ''}</div>
+        ${job.message ? `<p role="status" class="ac-utility-message">${escape(t(job.message))}</p>` : ''}
+        ${job.title ? `<p class="ac-utility-title">${escape(job.title)}${job.previewOnly ? ` <span class="ac-utility-flag">${escape(t('仅预览'))}</span>` : ''}</p>` : ''}
+        ${(job.scores || []).map(row => `<div class="ac-utility-score${row.score >= job.threshold ? ' is-flagged' : ''}"><div class="ac-utility-score-head"><strong>${escape(row.id)}</strong><span class="ac-utility-meter" aria-hidden="true"><span style="width:${Math.round(row.score * 100)}%"></span></span><strong>${row.score.toFixed(2)}</strong>${row.score >= job.threshold ? `<span class="ac-utility-flag">${escape(t('建议关注'))}</span>` : ''}</div><p>${escape(row.text)}</p>${row.reason ? `<small>${escape(row.reason)}</small>` : ''}</div>`).join('')}</div>`;
     }).join('');
   };
   let profileOptions = saved.profiles || [], renderVersion = 0;
   const render = () => {
     const version = ++renderVersion;
     const sample = node.querySelector('[name=sample]')?.value || '';
-    node.innerHTML = `<label>${escape(t('配置范围'))}<select name="scope"><option value="local" ${scope === 'local' ? 'selected' : ''}>${escape(t(context.place === 'writing' ? '当前角色' : '当前聊天'))}</option><option value="global" ${scope === 'global' ? 'selected' : ''}>${escape(t('全局'))}</option></select></label>
-    <p class="ac-hint">${escape(t(scoring ? '分数越高，越建议修改。评分仅供参考，不会修改正文。' : '新存档未填写名称时自动命名；手动名称保持不变。'))}</p>
-    <label class="ac-switch"><span>${escape(t(scoring ? '启用评分预览' : '自动命名存档'))}</span><input type="checkbox" name="enabled" ${config.enabled ? 'checked' : ''}></label>
+    node.innerHTML = `<div class="ac-utility-head"><label>${escape(t('配置范围'))}<select name="scope"><option value="local" ${scope === 'local' ? 'selected' : ''}>${escape(t(context.place === 'writing' ? '当前角色' : '当前聊天'))}</option><option value="global" ${scope === 'global' ? 'selected' : ''}>${escape(t('全局'))}</option></select></label>
+    <p class="ac-hint">${escape(t(scoring ? '分数越高，越建议修改。评分仅供参考，不会修改正文。' : '新存档未填写名称时自动命名；手动名称保持不变。'))}</p></div>
+    <section class="ac-utility-card">
+    <label class="ac-switch ac-utility-toggle"><span>${escape(t(scoring ? '启用评分预览' : '自动命名存档'))}</span><input type="checkbox" role="switch" name="enabled" ${config.enabled ? 'checked' : ''}></label>
     <label>${escape(t('模型配置'))}<select name="profile"></select></label>
     <label>${escape(t('补充要求（可选）'))}<textarea name="prompt" rows="3">${escape(config.prompt)}</textarea></label>
     ${scoring ? `<label>${escape(t('关注阈值'))}<input type="number" name="scoreThreshold" min="0" max="1" step="0.05" value="${config.scoreThreshold}"></label>` : ''}
-    <details><summary>${escape(t('生成设置'))}</summary><div class="ac-row"><label>${escape(t('最大输出 token'))}<input type="number" name="maxTokens" min="16" max="16000" value="${config.maxTokens}"></label><label>${escape(t('超时（秒）'))}<input type="number" name="timeoutSeconds" min="5" max="300" value="${config.timeoutSeconds}"></label></div></details>
-    <div class="ac-actions"><button type="button" class="agent-center-card-action" data-action="save">${escape(t('保存'))}</button><button type="button" class="agent-center-card-action" data-action="reset">${escape(t(scope === 'global' ? '恢复默认' : '跟随全局配置'))}</button><small data-status role="status" aria-live="polite"></small></div>
-    <details ${scoring ? 'open' : ''}><summary>${escape(t(scoring ? '手动评分' : '试运行'))}</summary>
-      <p>${escape(t(scoring ? '按换行分段，最多 40 段、12000 个字符。' : '试运行只预览名称，不修改存档。'))}</p>
-      <button type="button" class="agent-center-card-action" data-action="load">${escape(t(scoring ? '载入最近回复' : '载入最近对话'))}</button>
+    <details class="ac-utility-disclosure"><summary>${escape(t('生成设置'))}</summary><div class="ac-row"><label>${escape(t('最大输出 token'))}<input type="number" name="maxTokens" min="16" max="16000" value="${config.maxTokens}"></label><label>${escape(t('超时（秒）'))}<input type="number" name="timeoutSeconds" min="5" max="300" value="${config.timeoutSeconds}"></label></div></details>
+    <div class="ac-actions"><button type="button" class="agent-center-card-action is-primary" data-action="save">${escape(t('保存'))}</button><button type="button" class="agent-center-card-action" data-action="reset">${escape(t(scope === 'global' ? '恢复默认' : '跟随全局配置'))}</button><small data-status role="status" aria-live="polite"></small></div>
+    </section>
+    <details class="ac-utility-card ac-utility-trial" ${scoring ? 'open' : ''}><summary>${escape(t(scoring ? '手动评分' : '试运行'))}</summary>
+      <p class="ac-hint">${escape(t(scoring ? '按行分段；超过 40 行时按空行段落或相邻行合并，最多 12000 个字符。' : '试运行只预览名称，不修改存档。'))}</p>
+      ${scope === 'global' && actions.getAgentConfiguration({ id, scope: 'local', context })?.inherited === false ? `<p class="ac-hint">${escape(t('当前聊天有单独配置，试运行按当前聊天的配置执行。'))}</p>` : ''}
       <label>${escape(t(scoring ? '待评分正文' : '对话摘录'))}<textarea name="sample" rows="6" maxlength="12000"></textarea></label>
-      <button type="button" class="agent-center-card-action" data-action="run">${escape(t(scoring ? '开始评分' : '试运行'))}</button>
+      <div class="ac-actions"><button type="button" class="agent-center-card-action" data-action="load">${escape(t(scoring ? '载入最近回复' : '载入最近对话'))}</button><button type="button" class="agent-center-card-action is-primary" data-action="run">${escape(t(scoring ? '开始评分' : '试运行'))}</button></div>
     </details><div data-runs class="ac-utility-results" aria-live="polite"></div>`;
     node.querySelector('[name=sample]').value = sample;
     const marker = doc.createElement('input'); marker.type = 'text'; marker.hidden = true; marker.name = 'agent-config-draft';

@@ -1,4 +1,4 @@
-import { createMaidSkillContext, resolveMaidSkillModelContextLimit } from '../agent/maid-skill-context.js';
+import { createMaidSkillContext, mergeMaidSkillCatalog, resolveMaidSkillModelContextLimit } from '../agent/maid-skill-context.js';
 import { MAID_SKILL_LIMITS, skillError } from '../agent/maid-skill-schema.js';
 import { t } from '../i18n/index.js';
 import { maidSkillMessage } from './maid-skill-messages.js';
@@ -44,36 +44,40 @@ export const createMaidSkillRuntime = ({ store, getAppContext = () => ({}), vali
   };
   const prepare = async (text, attachments = [], controls = {}) => {
     const voice = controls.source === 'maid_realtime';
-    const owner = voice ? (call?.id === controls.voiceCallId ? call : null) : null;
+    // During a call the visible chips are the call's selection, so typed tasks use it too.
+    const owner = voice ? (call?.id === controls.voiceCallId ? call : null) : call;
     if (voice && !owner) throw skillError('skill_call_changed');
     const revision = owner ? owner.revision : draftRevision;
-    let ids = controls.useDraftSkills === false ? [] : voice ? [...owner.ids] : [...draft];
+    let ids = controls.useDraftSkills === false ? [] : owner ? [...owner.ids] : [...draft];
     const resolved = resolveTaskContext(text, { ...getAppContext(), ...controls.context, source: controls.source, voiceCallId: controls.voiceCallId }, { hasDraftSkills: ids.length > 0 });
     const context = resolved.context;
     if (resolved.useDraftSkills === false) ids = [];
     if (context.maidSkillContext) {
+      // 续接任务的目录补上当前技能库里未读取过的技能；技能库读不出来时只保留快照与内置技能
+      try { await store.ready; mergeMaidSkillCatalog(context.maidSkillContext, store.list()); } catch {}
       const restored = !attachments.length && context.maidTaskInputs && inputPersistence ? await inputPersistence.restore(context.maidTaskInputs) : attachments;
       await validateTask({ text, attachments: restored, context, selectedIds: context.maidSkillContext.loaded.map(item => item.id) });
       if (attachments.length && inputPersistence) context.maidTaskInputs = await inputPersistence.persist(attachments, context);
       if (voice && call !== owner) throw skillError('skill_call_changed');
       return { ...controls, context, attachments: restored, draftAttachments: attachments, skillsPrepared: true };
     }
-    try { await store.ready; } catch (error) { throw new Error(maidSkillMessage(error)); }
+    // 技能库读不出来时：指定了技能就报错（用户明确要用）；没指定则只用内置技能继续，不让所有任务一起失败
+    let storeAvailable = true;
+    try { await store.ready; } catch (error) { if (ids.length) throw new Error(maidSkillMessage(error)); storeAvailable = false; }
     const constraints = await validateTask({ text, attachments, context, selectedIds: ids });
-    if (voice && call !== owner) throw skillError('skill_call_changed');
-    const state = store.exportState();
-    context.maidSkillContext = createMaidSkillContext({ catalog: store.list(), selectedIds: ids,
-      storeRevision: state.storeRevision, ...(constraints?.maxContentChars != null ? { maxContentChars: constraints.maxContentChars } : {}) });
+    if (owner && call !== owner) throw skillError('skill_call_changed');
+    context.maidSkillContext = createMaidSkillContext({ ...(storeAvailable ? { catalog: store.list(), storeRevision: store.exportState().storeRevision } : {}), selectedIds: ids,
+      ...(constraints?.maxContentChars != null ? { maxContentChars: constraints.maxContentChars } : {}) });
     context.maidSkillContextPrepared = true;
     if (inputPersistence) context.maidTaskInputs = await inputPersistence.persist(attachments, context);
-    if (voice && call !== owner) throw skillError('skill_call_changed');
+    if (owner && call !== owner) throw skillError('skill_call_changed');
     let accepted = false;
     return { ...controls, context, skillsPrepared: true, onAccepted: () => {
       if (accepted) return;
       accepted = true;
       if (controls.useDraftSkills !== false && resolved.useDraftSkills !== false) {
-        if (owner && owner === call && owner.revision === revision) { owner.ids = []; owner.revision++; }
-        else if (!voice && draftRevision === revision) { draft = []; draftRevision++; }
+        if (owner) { if (owner === call && owner.revision === revision) { owner.ids = []; owner.revision++; } }
+        else if (draftRevision === revision) { draft = []; draftRevision++; }
       }
       notify(); controls.onAccepted?.();
     } };

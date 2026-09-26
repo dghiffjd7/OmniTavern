@@ -122,3 +122,61 @@ test('explicit retry preserves an unrelated pending task and new attachments rep
   const restored = await runtime.prepare(retry.text, [], retry.controls);
   assert.equal(restores, 1); assert.equal(restored.attachments[0].url, 'old-image');
 });
+
+test('an unreadable library only blocks explicit selections; other tasks continue with builtin skills', async () => {
+  const store = new MaidSkillStore({ loadKv: async () => ({ schemaVersion: 99 }), saveKv: async () => {} });
+  await store.ready.catch(() => {});
+  const runtime = createMaidSkillRuntime({ store });
+  const prepared = await runtime.prepare('hello');
+  assert.ok(prepared.context.maidSkillContext.catalog.length >= 2, 'builtin skills remain available');
+  assert.equal(prepared.context.maidSkillContext.catalog.every(item => item.kind === 'builtin'), true);
+});
+
+test('a resumed task keeps loaded skill versions and regains the rest of the library', async () => {
+  const { store, skill } = await setup();
+  const other = await store.save({ title: '另一份', name: 'other-rules', description: '其他', content: '其他正文', featureIds: [] });
+  const frozen = createMaidSkillContext({ catalog: store.list(), selectedIds: [skill.id] });
+  const run = { metadata: { maidSkills: serializeMaidSkillContext(frozen) } };
+  const { restoreMaidSkillContext } = await import('../../src/scripts/agent/maid-skill-context.js');
+  const restored = restoreMaidSkillContext(run);
+  assert.ok(restored.catalog.some(item => item.kind === 'builtin'), 'builtins are back in a resumed task');
+  await store.save({ ...skill, content: '新版本' }, { id: skill.id, expectedRevision: skill.revision });
+  const runtime = createMaidSkillRuntime({ store, resolveTaskContext: (_text, context) => ({ context: { ...context, maidSkillContext: restored, maidSkillContextPrepared: true }, useDraftSkills: false }) });
+  const prepared = await runtime.prepare('继续');
+  const catalog = prepared.context.maidSkillContext.catalog;
+  assert.equal(catalog.find(item => item.id === skill.id).content, '旧版本', 'the loaded version stays frozen');
+  assert.equal(catalog.find(item => item.id === other.id)?.content, '其他正文', 'unloaded skills come from the current library');
+});
+
+test('a voice follow-up that references an old task prepares skills from the current call selection', async () => {
+  const submissions = [];
+  const tasks = createMaidVoiceTaskRuntime({ getCommandRuntime: () => ({
+    submitVoiceTask: (_text, controls) => { submissions.push(controls); return Promise.resolve({ ok: true }); },
+  }), makeId: (() => { let n = 0; return () => `task-${++n}`; })() });
+  const target = { maidCallId: 'call-a' };
+  await tasks.request({ target, args: { action: 'execute', request: '画一张图' } });
+  submissions[0].context.maidSkillContext = { loaded: [{ id: 'old' }] };
+  submissions[0].context.maidSkillContextPrepared = true;
+  await new Promise(resolve => setTimeout(resolve, 0));
+  await tasks.request({ target, args: { action: 'execute', request: '同样再来一张', task_id: 'task-1' } });
+  const followUp = submissions.at(-1).context;
+  assert.equal(followUp.maidSkillContext, undefined);
+  assert.equal(followUp.maidSkillContextPrepared, undefined);
+});
+test('typing during a call uses the call chips shown on screen and consumes them once', async () => {
+  const { skill, runtime } = await setup(); runtime.beginCall('call-a'); runtime.setSelected([skill.id]);
+  const prepared = await runtime.prepare('typed while talking');
+  assert.deepEqual(prepared.context.maidSkillContext.loaded.map(item => item.id), [skill.id]);
+  prepared.onAccepted(); assert.deepEqual(runtime.getSelected(), []);
+  runtime.setSelected([skill.id]);
+  const stale = runtime.prepare('typed then hung up');
+  runtime.endCall('call-a');
+  await assert.rejects(stale, { code: 'skill_call_changed' });
+  assert.deepEqual(runtime.getSelected(), [skill.id], 'the selection returns to the draft on hangup');
+});
+test('only skill codes map to skill-loading messages', async () => {
+  const { maidSkillMessage } = await import('../../src/scripts/ui/maid-skill-messages.js');
+  assert.equal(maidSkillMessage({ code: 'skill_something_new' }), '技能暂时无法载入');
+  assert.equal(maidSkillMessage(Object.assign(new Error('附件保存失败'), { code: 'attachment_write_failed' })), '附件保存失败');
+  assert.equal(maidSkillMessage({ code: 'attachment_write_failed' }), '技能操作失败，请重试');
+});

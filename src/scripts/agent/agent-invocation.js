@@ -17,3 +17,12 @@ export const createInputRequestBudget = ({ maxPerMinute = 12, now = Date.now } =
     recent.push(now()); return true;
   } };
 };
+
+// 需要独立模型配置才能开启的 Agent（小管家、正文评分、输入助手）。编辑器保存与卡片开关共用，
+// 避免从卡片开启后显示“已开启”却因缺模型而从不运行。满足时返回空字符串。
+export const agentIndependentModelRequirement = (config = {}) => {
+  if (config?.enabled !== true || config.modelMode === 'profile' && String(config.modelProfileId || '').trim()) return '';
+  if (['archive_naming', 'reply_scoring'].includes(config.kind)) return '请选择独立模型配置';
+  if (isInputAgent(config)) return '输入建议请选择独立模型配置';
+  return '';
+};

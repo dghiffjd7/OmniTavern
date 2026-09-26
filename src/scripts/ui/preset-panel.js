@@ -45,6 +45,7 @@ import {
     applyPresetBlockHunk,
     buildPresetPreviewBlockMap,
     createLatestPreviewBuildQueue,
+    isSamePresetData,
     presetBlockContentChanged,
 } from './preset-preview-utils.js';
 import {
@@ -3311,7 +3312,7 @@ export class PresetPanel {
             const next = this.collectSectionData(sec.id, this.detailEditorEl, base);
             // 与已保存基线一致的草稿直接丢弃：避免「未保存更改」误报，也减少无谓写盘
             const baseline = this.store.getActive(storeType) || {};
-            if (JSON.stringify(next) === JSON.stringify(baseline)) this.drafts.delete(key);
+            if (isSamePresetData(next, baseline)) this.drafts.delete(key);
             else this.drafts.set(key, next);
         } catch (err) {
             logger.debug('capture detail draft failed', sec.id, err);
@@ -5922,7 +5923,7 @@ export class PresetPanel {
             });
         }
         const baseline = this.store.getActive('openai') || {};
-        if (JSON.stringify(snapshot) === JSON.stringify(baseline)) this.drafts.delete(key);
+        if (isSamePresetData(snapshot, baseline)) this.drafts.delete(key);
         else this.drafts.set(key, snapshot);
     }
 

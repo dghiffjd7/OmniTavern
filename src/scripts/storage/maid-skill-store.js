@@ -1,6 +1,6 @@
 import { safeInvoke } from '../utils/tauri.js';
 import { listMaidSkills, readMaidSkill } from '../agent/maid-skill-catalog.js';
-import { assertMaidSkillStoreSize, maidSkillContentKey, makeMaidSkillId, normalizeMaidSkillDraft, normalizeMaidSkillMetadata, normalizeMaidSkillStoreState, skillClone, skillError } from '../agent/maid-skill-schema.js';
+import { assertMaidSkillStoreSize, maidSkillContentKey, makeMaidSkillId, normalizeMaidSkillDraft, normalizeMaidSkillMetadata, normalizeMaidSkillStoreState, skillClone, skillError, toPersistedMaidSkillStoreState } from '../agent/maid-skill-schema.js';
 
 export const MAID_SKILL_STORE_KEY = 'maid_skill_store_v1';
 const nativeAvailable = () => Boolean(globalThis.__TAURI_INTERNALS__?.invoke || globalThis.__TAURI__?.core?.invoke || globalThis.__TAURI__?.invoke || globalThis.__TAURI_INVOKE__);
@@ -48,10 +48,11 @@ export class MaidSkillStore {
       await ready; this.assertReady();
       const next = skillClone(this.state), result = mutate(next);
       next.storeRevision += 1; assertMaidSkillStoreSize(next);
-      if (this.native) await this.saveKv(MAID_SKILL_STORE_KEY, next);
+      const persisted = toPersistedMaidSkillStoreState(next);
+      if (this.native) await this.saveKv(MAID_SKILL_STORE_KEY, persisted);
       else {
         if (!this.storage?.setItem) throw skillError('skill_storage_unavailable');
-        this.storage.setItem(MAID_SKILL_STORE_KEY, JSON.stringify(next));
+        this.storage.setItem(MAID_SKILL_STORE_KEY, JSON.stringify(persisted));
       }
       this.state = next; this.notify(); return skillClone(result);
     });
@@ -91,6 +92,10 @@ export class MaidSkillStore {
       if (expectedRevision !== undefined && skill.revision !== expectedRevision) throw skillError('skill_revision_conflict');
       next.skills = next.skills.filter(item => item.id !== id); return { id };
     });
+  }
+  // 删除无法读取的记录（由设置面板在用户确认后调用）
+  removeQuarantined() {
+    return this.commit(next => { const count = (next.quarantined || []).length; next.quarantined = []; return { count }; });
   }
   setAvailability(id, patch = {}) {
     return this.commit(next => {

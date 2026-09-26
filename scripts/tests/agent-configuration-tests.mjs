@@ -140,6 +140,10 @@ const facade = createScopedAgentFeatures({ legacy, store, getContext: sid => sid
 assert.equal(facade.getSettings('contact').features.reply_check.modelProfileId, 'old');
 assert.equal(facade.getSettings(writing.sessionId).features.reply_check.prompt, 'newer');
 assert.equal(facade.isEnabled('write_preview'), true, 'unrelated legacy features retain their behavior');
+// 卡片开关与编辑器同样要求独立模型：小管家没选模型时不能开启，也不写入
+await assert.rejects(facade.setEnabled('archive_naming', true), /请选择独立模型配置/);
+assert.equal(facade.isEnabled('archive_naming', writing.sessionId), false, 'a blocked switch writes nothing');
+await facade.setEnabled('archive_naming', false);
 
 const workflowStore = createHopscotchBoardStore({ storage: { getItem: () => null, setItem() {} } });
 const workflowBoard = { rows: [{ id: 'body-row', houses: [{ id: 'body', kind: 'body' }] },

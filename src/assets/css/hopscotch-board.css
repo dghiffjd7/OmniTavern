@@ -39,6 +39,7 @@
 .hop-agent-library > summary { cursor: pointer; color: var(--app-text-muted); font-size: 12px; padding: 6px 4px; list-style: none; }
 .hop-agent-library > summary::-webkit-details-marker { display: none; }
 .hop-agent-library[open] > summary { margin-bottom: 16px; }
+.hop-agent-library > .agent-center-card-actions { margin: 0 0 12px; }
 .hop-house-detail:not(.hop-agent-detail)[open] { animation: hop-card-rise .2s ease-out; }
 .hop-card-stage { height: min(560px, 64dvh); perspective: 1400px; }
 .hop-card-inner { position: relative; height: 100%; transform-style: preserve-3d; transition: transform .35s ease; }

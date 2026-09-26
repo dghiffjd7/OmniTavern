@@ -75,7 +75,21 @@ export class RealtimeSettingsPanel {
         const element = this.root.querySelector(`#rt-vad-${field}`);
         if (element) vad[field] = element.value;
       }
-      this.draft.vad = normalizeRealtimeVadSettings(vad);
+      // Keep what was typed so a re-render never clamps it silently; the store normalizes on save after checkVadRanges().
+      this.draft.vad = vad;
+    }
+  }
+  // Empty VAD fields fall back to defaults; out-of-range values are refused instead of silently clamped.
+  checkVadRanges() {
+    const labels = { threshold: '说话检测阈值', silenceDurationMs: '停顿等待（毫秒）', prefixPaddingMs: '保留句首音频（毫秒）' };
+    for (const [field, label] of Object.entries(labels)) {
+      const node = this.root.querySelector(`#rt-vad-${field}`), raw = node?.value.trim();
+      if (!node || !raw) continue;
+      const value = Number(raw), min = Number(node.min), max = Number(node.max);
+      if (Number.isFinite(value) && value >= min && value <= max) continue;
+      const details = node.closest('details'); if (details) details.open = true;
+      node.focus?.();
+      throw new Error(t('{label}需在 {min}–{max} 之间', { label: t(label), min: node.min, max: node.max }));
     }
   }
   async leaveDraft() { this.capture(); return !this.dirty || await appConfirm({ title: '未保存的实时语音设置', message: '切换设置档会放弃未保存的修改。', confirmText: '放弃修改', cancelText: '继续编辑' }); }
@@ -154,7 +168,7 @@ export class RealtimeSettingsPanel {
       if (!release) throw new Error(t('请先结束当前通话，再检查实时连接'));
       const cancel = this.root.querySelector('#rt-check-cancel'); cancel.hidden = false; cancel.disabled = false;
       try {
-        this.capture();
+        this.checkVadRanges(); this.capture();
         const credentials = await this.readCredentials() || await this.store.credentials(this.store.get(this.draft.id));
         this.status(checkTools ? '正在检查任务调用与结果回传…' : '正在检查实时连接…');
         await checkCustomRealtime(cloneData(this.draft), credentials, { signal, checkTools });
@@ -226,7 +240,7 @@ export class RealtimeSettingsPanel {
       this.voicePicker.setVoices(voices); this.status(t('已获取 {count} 个音色', { count: voices.length }));
     }, '操作已取消'));
     this.root.querySelector('#rt-save').onclick = () => this.run(async () => {
-      this.capture(); const credentials = await this.readCredentials();
+      this.checkVadRanges(); this.capture(); const credentials = await this.readCredentials();
       this.draft = await this.store.save(this.draft, credentials); this.secretDraft = {}; this.selectedId = this.draft.id; this.dirty = false; this.render(); this.status(this.store.getBinding(getRealtimeSettingsTarget()) ? '已保存全局配置；当前角色的专属声音绑定仍生效' : '已保存并设为当前实时语音配置；下次通话生效');
     });
     this.root.querySelector('#rt-register')?.addEventListener('click', () => this.run(async () => {
@@ -284,6 +298,7 @@ export class RealtimeSettingsPanel {
   }
   fields(profile, preset) {
     const vad = normalizeRealtimeVadSettings(profile.vad);
+    for (const key of ['threshold', 'prefixPaddingMs', 'silenceDurationMs']) if (typeof profile.vad?.[key] === 'string') vad[key] = profile.vad[key];
     const input = (id, label, value = '', type = 'text', extra = '', messages = []) => `<label class="api-config-realtime-field">${helpTitle(label, messages)}<input id="${id}" type="${type}" value="${escape(value)}" autocomplete="off" ${extra}></label>`;
     const vertex = isGeminiVertex(profile), serviceAccount = usesGeminiServiceAccount(profile);
     const regions = serviceAccount ? GEMINI_VERTEX_REGIONS : preset.regions;

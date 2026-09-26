@@ -2911,12 +2911,6 @@
   },
   {
     "file": "src/scripts/agent/app-feature-catalog.js",
-    "text": "圈选",
-    "category": "agent_semantic_source",
-    "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
-  },
-  {
-    "file": "src/scripts/agent/app-feature-catalog.js",
     "text": "拖拽选择区域",
     "category": "agent_semantic_source",
     "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
@@ -4129,7 +4123,7 @@
   },
   {
     "file": "src/scripts/agent/maid-assistant-agent.js",
-    "text": "用户改说其他事，待确认的删除清单已作废。",
+    "text": "收到新的指示，原待确认的删除清单已作废，未执行删除。",
     "category": "agent_semantic_source",
     "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
   },

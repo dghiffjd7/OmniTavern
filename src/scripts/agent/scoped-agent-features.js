@@ -1,4 +1,5 @@
-import { CONFIGURABLE_AGENT_IDS } from '../storage/agent-config-store.js';
+import { CONFIGURABLE_AGENT_IDS, normalizeAgentConfiguration } from '../storage/agent-config-store.js';
+import { agentIndependentModelRequirement } from './agent-invocation.js';
 
 // Compatibility facade: unrelated legacy features keep their original storage.
 export const createScopedAgentFeatures = ({ legacy, store, getContext }) => {
@@ -10,7 +11,11 @@ export const createScopedAgentFeatures = ({ legacy, store, getContext }) => {
   const update = async (id, patch, fallback) => {
     if (!CONFIGURABLE_AGENT_IDS.includes(id)) return fallback();
     const context = getContext(), current = store.read(id, context);
-    const result = await store.save({ id, context, scope: 'local', revision: current.revision, config: { ...current.config, ...patch } });
+    const config = { ...current.config, ...patch };
+    // 卡片开关与编辑器保存同样要求独立模型：缺模型时不写入，由 AC 显示“切换失败：原因”
+    const requirement = agentIndependentModelRequirement(normalizeAgentConfiguration(config, id));
+    if (requirement) throw new Error(requirement);
+    const result = await store.save({ id, context, scope: 'local', revision: current.revision, config });
     if (!result.ok) throw new Error(result.reason === 'config_changed' ? '配置已变化，请重新打开' : '配置保存失败');
     return settings();
   };

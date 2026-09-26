@@ -1073,6 +1073,13 @@
     ]
   },
   {
+    "source": "{label}需在 {min}–{max} 之间",
+    "references": [
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-call",
+      "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
+    ]
+  },
+  {
     "source": "{name} · 当前角色卡",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -2561,12 +2568,6 @@
     ]
   },
   {
-    "source": "按换行分段，最多 40 段、12000 个字符。",
-    "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
-    ]
-  },
-  {
     "source": "按角色整理提示词，发送时合并为画面描述",
     "references": [
       "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
@@ -2634,6 +2635,12 @@
   },
   {
     "source": "按行拆分条目",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "按行分段；超过 40 行时按空行段落或相邻行合并，最多 12000 个字符。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -9655,6 +9662,12 @@
     ]
   },
   {
+    "source": "当前聊天有单独配置，试运行按当前聊天的配置执行。",
+    "references": [
+      "src/scripts/ui/utility-agent-editor.js#ui-call"
+    ]
+  },
+  {
     "source": "当前录音转文字功能不支持实时转写模型",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -11440,7 +11453,8 @@
   {
     "source": "点击查看大图",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/maid-command-input-runtime-utils.js#ui-call"
     ]
   },
   {
@@ -13209,6 +13223,12 @@
   },
   {
     "source": "反应素材格式无效",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "反应素材需为 96px 以内的静态图片",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -15244,7 +15264,6 @@
     "source": "更多",
     "references": [
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call",
-      "src/scripts/ui/maid-skill-panel.js#ui-call",
       "src/scripts/ui/moments-card-view-utils.js#html-attribute"
     ]
   },
@@ -15271,7 +15290,8 @@
   {
     "source": "更多功能",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/maid-command-input-runtime-utils.js#ui-call"
     ]
   },
   {
@@ -16847,6 +16867,12 @@
     "source": "还没有注册 Agent 工具",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "还没有自定义反应，可点“添加图片”上传 PNG、WebP 或 JPEG",
+    "references": [
+      "src/scripts/ui/chat/reaction-ui-utils.js#ui-call"
     ]
   },
   {
@@ -18622,7 +18648,8 @@
   {
     "source": "技能",
     "references": [
-      "src/scripts/ui/maid-skill-panel.js#ui-call"
+      "src/scripts/ui/maid-skill-panel.js#ui-call",
+      "src/scripts/ui/maid-skill-ui.js#ui-call"
     ]
   },
   {
@@ -19388,6 +19415,12 @@
     "source": "将删除",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "将删除 {count} 条无法读取的记录，此操作无法恢复。",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
     ]
   },
   {
@@ -24081,7 +24114,7 @@
   {
     "source": "没有找到表情",
     "references": [
-      "src/scripts/ui/chat/reaction-ui-utils.js#dom-assignment"
+      "src/scripts/ui/chat/reaction-ui-utils.js#ui-call"
     ]
   },
   {
@@ -29072,8 +29105,7 @@
     "source": "请选择独立模型配置",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
-      "src/scripts/agent/agent-configuration-service.js#ui-definition",
-      "src/scripts/agent/agent-configuration-service.js#ui-property"
+      "src/scripts/agent/agent-invocation.js#ui-definition"
     ]
   },
   {
@@ -29549,9 +29581,9 @@
     ]
   },
   {
-    "source": "圈选内容给女仆",
+    "source": "圈选",
     "references": [
-      "src/scripts/ui/maid-command-input-runtime-utils.js#html-attribute"
+      "src/scripts/ui/maid-command-input-runtime-utils.js#ui-call"
     ]
   },
   {
@@ -31911,6 +31943,18 @@
     "source": "删除图片参数预设「{value}」？",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "删除无法读取的记录",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "删除无法读取的技能记录？",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
     ]
   },
   {
@@ -34912,8 +34956,7 @@
   {
     "source": "输入建议请选择独立模型配置",
     "references": [
-      "src/scripts/agent/agent-configuration-service.js#ui-definition",
-      "src/scripts/agent/agent-configuration-service.js#ui-property"
+      "src/scripts/agent/agent-invocation.js#ui-definition"
     ]
   },
   {
@@ -37601,6 +37644,7 @@
       "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/scripts/ui/app.js#html-text",
       "src/scripts/ui/chat/creative-execution-lane-runtime-utils.js#ui-property",
+      "src/scripts/ui/maid-command-input-runtime-utils.js#ui-call",
       "src/scripts/ui/preset-prompt-inject-utils.js#ui-property"
     ]
   },
@@ -43137,6 +43181,12 @@
     ]
   },
   {
+    "source": "移除图片",
+    "references": [
+      "src/scripts/ui/maid-command-input-runtime-utils.js#ui-call"
+    ]
+  },
+  {
     "source": "移除写入预览工具",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -44718,6 +44768,12 @@
     ]
   },
   {
+    "source": "已添加 {count} 个反应；{failed} 个未添加：{reason}",
+    "references": [
+      "src/scripts/ui/chat/reaction-ui-utils.js#ui-call"
+    ]
+  },
+  {
     "source": "已添加「{name}」",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -44983,6 +45039,12 @@
     "references": [
       "src/scripts/ui/app.js#html-text",
       "src/scripts/ui/group-chat-panels.js#html-text"
+    ]
+  },
+  {
+    "source": "已选 {count} 个用于导出",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
     ]
   },
   {
@@ -46492,6 +46554,12 @@
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/scripts/ui/chat/custom-reaction-assets.js#ui-call"
+    ]
+  },
+  {
+    "source": "有 {count} 条技能记录无法读取，已暂时忽略；其他技能照常可用。",
+    "references": [
+      "src/scripts/ui/maid-skill-panel.js#ui-call"
     ]
   },
   {

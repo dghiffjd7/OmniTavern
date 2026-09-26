@@ -126,6 +126,18 @@ export const restoreMaidSkillContext = run => {
     const result = readMaidTaskSkill(state, record.id, record.source);
     if (!result.ok) throw skillError('skill_snapshot_unavailable');
   }
+  // 快照只存了已读取的正文；内置技能仍放回目录，续接后照样能搜索和读取
+  return mergeMaidSkillCatalog(state, builtinCatalog());
+};
+
+// 续接（确认 / 修订 / 重试）的任务：已读取过的技能保持当时的版本；其余技能按当前技能库提供（之后读到的是当前版本）
+export const mergeMaidSkillCatalog = (state, catalog = []) => {
+  if (!state?.catalog) return state;
+  const known = new Set(state.catalog.map(skill => skill.id));
+  for (const skill of Array.isArray(catalog) ? catalog : []) {
+    if (!skill?.id || known.has(skill.id)) continue;
+    known.add(skill.id); state.catalog.push(skillClone(skill));
+  }
   return state;
 };
 

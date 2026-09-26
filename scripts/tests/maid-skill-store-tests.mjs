@@ -38,3 +38,21 @@ test('invalid persistence is surfaced and replacement uses revision checks', asy
   assert.equal(saved.revision, 2);
   await assert.rejects(store.save(draft, { id: skill.id, expectedRevision: 1 }), { code: 'skill_revision_conflict' });
 });
+
+test('one unreadable record is set aside, kept on save and removable, without failing the library', async () => {
+  let disk = { schemaVersion: 1, storeRevision: 3, builtinOverrides: {}, skills: [
+    { id: 'custom:ok-1', revision: 1, ...draft },
+    { id: 'custom:bad-1', revision: 1, ...draft, name: 'Bad Name!' },
+  ] };
+  const options = { loadKv: async () => structuredClone(disk), saveKv: async (_key, value) => { disk = structuredClone(value); } };
+  const store = new MaidSkillStore(options); await store.ready;
+  assert.equal(store.list().filter(item => item.kind === 'custom').length, 1, 'the valid skill is still usable');
+  assert.equal(store.exportState().quarantined.length, 1);
+  await store.save({ ...draft, name: 'second-guide', title: '第二份' });
+  assert.equal(disk.skills.some(item => item.id === 'custom:bad-1'), true, 'saving other skills does not drop the unreadable record');
+  const reopened = new MaidSkillStore(options); await reopened.ready;
+  assert.equal(reopened.exportState().quarantined.length, 1);
+  assert.deepEqual(await reopened.removeQuarantined(), { count: 1 });
+  assert.equal(disk.skills.some(item => item.id === 'custom:bad-1'), false);
+  assert.equal(reopened.list().filter(item => item.kind === 'custom').length, 2);
+});

@@ -54,23 +54,82 @@ export const isReactionImageBytes = header => {
     return png || jpeg || webp;
 };
 
+// 从文件头读出宽高（PNG IHDR / WebP VP8 VP8L VP8X / JPEG SOF），读不出时返回 null
+export const readImageHeaderDimensions = bytes => {
+    const b = bytes;
+    const u16be = i => (b[i] << 8) | b[i + 1];
+    const u32be = i => ((b[i] << 24) >>> 0) + (b[i + 1] << 16) + (b[i + 2] << 8) + b[i + 3];
+    if (b.length >= 24 && b[0] === 137 && b[1] === 80 && b[2] === 78 && b[3] === 71) return { width: u32be(16), height: u32be(20) };
+    if (b.length >= 30 && String.fromCharCode(...b.slice(0, 4)) === 'RIFF' && String.fromCharCode(...b.slice(8, 12)) === 'WEBP') {
+        const chunk = String.fromCharCode(...b.slice(12, 16));
+        if (chunk === 'VP8 ') return { width: (b[26] | (b[27] << 8)) & 0x3fff, height: (b[28] | (b[29] << 8)) & 0x3fff };
+        if (chunk === 'VP8L') return { width: 1 + (b[21] | ((b[22] & 0x3f) << 8)), height: 1 + ((b[22] >> 6) | (b[23] << 2) | ((b[24] & 0x0f) << 10)) };
+        if (chunk === 'VP8X') return { width: 1 + (b[24] | (b[25] << 8) | (b[26] << 16)), height: 1 + (b[27] | (b[28] << 8) | (b[29] << 16)) };
+        return null;
+    }
+    if (b[0] === 255 && b[1] === 216) {
+        for (let i = 2; i + 9 < b.length;) {
+            if (b[i] !== 255) { i += 1; continue; }
+            const marker = b[i + 1];
+            if (marker === 216 || (marker >= 208 && marker <= 215) || marker === 1 || marker === 255) { i += marker === 255 ? 1 : 2; continue; }
+            const length = u16be(i + 2);
+            if (marker >= 192 && marker <= 207 && ![196, 200, 204].includes(marker)) return { width: u16be(i + 7), height: u16be(i + 5) };
+            i += 2 + length;
+        }
+    }
+    return null;
+};
+
+// APNG 在 IDAT 之前有 acTL 块；动图 WebP 在 VP8X 标志位里带 animation 位
+export const isAnimatedImageBytes = bytes => {
+    const b = bytes;
+    if (b.length >= 8 && b[0] === 137 && b[1] === 80 && b[2] === 78 && b[3] === 71) {
+        for (let i = 8; i + 8 <= b.length;) {
+            const length = ((b[i] << 24) >>> 0) + (b[i + 1] << 16) + (b[i + 2] << 8) + b[i + 3];
+            const type = String.fromCharCode(...b.slice(i + 4, i + 8));
+            if (type === 'acTL') return true;
+            if (type === 'IDAT' || type === 'IEND') return false;
+            i += 12 + length;
+        }
+        return false;
+    }
+    return b.length >= 21 && String.fromCharCode(...b.slice(0, 4)) === 'RIFF' && String.fromCharCode(...b.slice(8, 16)) === 'WEBPVP8X' && (b[20] & 0x02) !== 0;
+};
+
+// 反应只显示到 96px：像素上限压低到 1600 万，且在解码前按文件头检查，避免一张压得很小但尺寸极大的图把内存小的设备撑爆
+export const REACTION_SOURCE_MAX_PIXELS = 16_777_216;
+
 export const reactionDataUrlFromFile = async file => {
     if (!file || file.size > 8 * 1024 * 1024) throw new Error('请选择不超过 8MB 的 PNG、WebP 或 JPEG 图片');
-    const header = new Uint8Array(await file.slice(0, 12).arrayBuffer());
+    const header = new Uint8Array(await file.slice(0, 512 * 1024).arrayBuffer());
     if (!isReactionImageBytes(header)) throw new Error('自定义反应支持静态 PNG、WebP 或 JPEG 图片');
+    const declared = readImageHeaderDimensions(header);
+    if (declared && (!declared.width || !declared.height || declared.width * declared.height > REACTION_SOURCE_MAX_PIXELS)) throw new Error('图片尺寸过大，请选择较小的图片');
     const img = await loadImage(await readFileAsDataUrl(file));
     const width = img.naturalWidth, height = img.naturalHeight;
-    if (!width || !height || width * height > 32_000_000) throw new Error('图片尺寸过大，请选择较小的图片');
+    if (!width || !height || width * height > REACTION_SOURCE_MAX_PIXELS) throw new Error('图片尺寸过大，请选择较小的图片');
     const canvas = document.createElement('canvas');
     canvas.width = canvas.height = 96;
     const ctx = canvas.getContext('2d', { alpha: true });
     if (!ctx) throw new Error('图片处理不可用');
     const scale = Math.min(96 / width, 96 / height);
     ctx.drawImage(img, (96 - width * scale) / 2, (96 - height * scale) / 2, width * scale, height * scale);
+    const fits = result => /^data:image\/(webp|png);base64,/.test(result) && atob(result.split(',')[1]).length <= 30 * 1024;
     for (const quality of [.86, .7, .5, .3]) {
         const result = canvasToDataUrl(canvas, { mime: 'image/webp', quality, preserveAlpha: true });
-        if (!/^data:image\/(webp|png);base64,/.test(result)) continue;
-        if (atob(result.split(',')[1]).length <= 30 * 1024) return result;
+        if (fits(result)) return result;
+        // 没有 WebP 编码器时 toDataURL 退回 PNG 且忽略质量，重复尝试结果都一样
+        if (result.startsWith('data:image/png')) break;
+    }
+    // PNG 只能靠缩小画布来减小体积；透明留白保持居中
+    for (const size of [80, 64, 48]) {
+        const small = document.createElement('canvas');
+        small.width = small.height = size;
+        const smallCtx = small.getContext('2d', { alpha: true });
+        if (!smallCtx) break;
+        smallCtx.drawImage(canvas, 0, 0, size, size);
+        const result = canvasToDataUrl(small, { mime: 'image/png', preserveAlpha: true });
+        if (fits(result)) return result;
     }
     throw new Error('图片压缩后仍超过 30KB，请选择较简单的图片');
 };

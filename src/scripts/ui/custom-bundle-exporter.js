@@ -3239,8 +3239,9 @@ export class CustomBundleExporter {
   } = {}) {
     if (!roomPackage?.chatCurrent) return 0;
     const restoreStarted = getPerfNow();
+    let reactionImport = null;
     try {
-      const reactionImport = await customReactionAssets.import(roomPackage.roomConfig?.reactions, ref => this.getEntryDataUrl(packageData, ref));
+      reactionImport = await customReactionAssets.import(roomPackage.roomConfig?.reactions, ref => this.getEntryDataUrl(packageData, ref));
       if (reactionImport.failed.length) {
         const warning = customReactionImportWarning(reactionImport);
         diagnosticsNotes?.push?.(warning);
@@ -3250,6 +3251,8 @@ export class CustomBundleExporter {
         includeMemoryData: Boolean(packageData?.manifest?.options?.includeMemoryData),
       });
     } catch (err) {
+      // The conversation did not restore, so reactions added only for it would just occupy slots.
+      await customReactionAssets.rollbackImport(reactionImport);
       logger.warn(getCustomBundleRoomRestoreFailureLogMessage(restoreFailureKind), err);
       diagnosticsNotes?.push?.(buildCustomBundleRoomRestoreFailureNote({
         restoreFailureKind,

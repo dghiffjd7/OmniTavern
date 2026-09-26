@@ -50,7 +50,7 @@ const isAppModalPointerTarget = (target, path = null) => {
   const nodes = Array.isArray(path) && path.length ? path : [target];
   return nodes.some(node => {
     if (!node || typeof node !== 'object') return false;
-    if (typeof node.closest === 'function' && node.closest('.app-confirm-overlay, .app-confirm-modal, .maid-guide-step-bubble, .maid-spotlight-root, .maid-skill-dialog')) {
+    if (typeof node.closest === 'function' && node.closest('.app-confirm-overlay, .app-confirm-modal, .maid-guide-step-bubble, .maid-spotlight-root, .maid-skill-dialog, .lightbox')) {
       return true;
     }
     return isClassedNode(node, 'app-confirm-overlay') ||
@@ -72,6 +72,7 @@ const ICONS = Object.freeze({
   send: iconSvg('<path d="M5 12h13"/><path d="m13 6 6 6-6 6"/>'),
   stop: iconSvg('<rect x="7" y="7" width="10" height="10" rx="1.5"/>'),
   selection: iconSvg('<circle cx="12" cy="12" r="7"/><path d="M12 2v3"/><path d="M12 19v3"/><path d="M2 12h3"/><path d="M19 12h3"/>'),
+  image: iconSvg('<rect x="3.5" y="4.5" width="17" height="15" rx="3"/><circle cx="9" cy="10" r="1.6"/><path d="m20.5 16-4.8-4.8a1.5 1.5 0 0 0-2.1 0L5 19.5"/>'),
 });
 
 const injectStyle = (documentRef) => {
@@ -170,15 +171,20 @@ const injectStyle = (documentRef) => {
 }
 .maid-command-input-attachments {
   flex: 1 0 100%;
+  order: -1;
   display: none;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
   overflow-x: auto;
-  padding: 1px 0 2px;
+  padding: 6px 4px 2px;
   scrollbar-width: none;
 }
 .maid-command-input.has-attachments {
+  flex-wrap: wrap;
   border-radius: 18px;
+}
+.maid-command-input.has-attachments .maid-command-input-field {
+  flex-basis: 0;
 }
 .maid-command-input.has-attachments .maid-command-input-attachments {
   display: flex;
@@ -186,69 +192,165 @@ const injectStyle = (documentRef) => {
 .maid-command-input-attachments::-webkit-scrollbar {
   display: none;
 }
+/* 与生图参考图卡一致：小方卡、右上角移除，点图放大 */
 .maid-command-input-attachment {
   position: relative;
   flex: 0 0 auto;
-  width: 38px;
-  height: 38px;
+  width: 56px;
+  height: 56px;
+}
+.maid-command-input-attachment-preview {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  display: block;
   overflow: hidden;
+  border: 1px solid var(--app-border-default, rgba(148, 163, 184, 0.30));
   border-radius: 12px;
-  border: 1px solid rgba(148, 163, 184, 0.30);
   background: var(--app-surface-subtle, #f8fafc);
+  cursor: zoom-in;
+}
+.maid-command-input-attachment-preview:focus-visible {
+  outline: 2px solid rgba(var(--app-accent-rgb, 37, 99, 235), 0.45);
+  outline-offset: 2px;
 }
 .maid-command-input-attachment img {
   width: 100%;
   height: 100%;
   display: block;
   object-fit: cover;
+  pointer-events: none;
 }
 .maid-command-input-attachment-remove {
   position: absolute;
-  top: -1px;
-  right: -1px;
-  width: 16px;
-  height: 16px;
-  border: 0;
+  top: -6px;
+  right: -6px;
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--app-surface-card, #fff);
   border-radius: 999px;
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: rgba(15, 23, 42, 0.78);
-  color: #fff;
+  box-sizing: border-box;
+  background: var(--app-text-primary, #0f172a);
+  color: var(--app-surface-card, #fff);
   font-size: 12px;
   line-height: 1;
   cursor: pointer;
 }
-.maid-command-input-selection {
+.maid-command-input-more {
   position: relative;
+  background: var(--app-surface-subtle, #f8fafc);
 }
-.maid-command-input-selection.is-active {
-  border-color: rgba(var(--app-accent-rgb, 37, 99, 235), 0.45);
+.maid-command-input-more.is-open {
   background: rgba(var(--app-accent-rgb, 37, 99, 235), 0.14);
-  color: var(--app-accent-strong, #1d4ed8);
+  color: var(--app-accent-primary, #2563eb);
 }
-.maid-command-input-selection-count {
+.maid-command-input-more .maid-command-input-icon {
+  transition: transform 160ms ease;
+}
+.maid-command-input-more.is-open .maid-command-input-icon {
+  transform: rotate(45deg);
+}
+/* 已附图、已选技能或已圈选时的小圆点：收起的功能仍有状态提示 */
+.maid-command-input-more.has-state::after {
+  content: '';
   position: absolute;
-  top: -5px;
-  right: -5px;
-  min-width: 15px;
-  height: 15px;
-  padding: 0 4px;
-  border-radius: 999px;
+  top: 3px;
+  right: 3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
   background: var(--app-accent-primary, #2563eb);
-  color: var(--app-text-on-accent, #fff);
-  font-size: 10px;
-  font-weight: 700;
+  box-shadow: 0 0 0 2px var(--app-surface-card, #fff);
+}
+.maid-command-input-menu {
+  position: absolute;
+  left: 30px;
+  bottom: calc(100% + 8px);
+  z-index: 2;
+  min-width: 132px;
+  display: none;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px;
+  box-sizing: border-box;
+  border: 1px solid var(--app-border-default, rgba(148, 163, 184, 0.30));
+  border-radius: 14px;
+  background: var(--app-surface-card, #fff);
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.18);
+}
+.maid-command-input-menu.is-open {
+  display: flex;
+}
+.maid-command-input-menu.is-below {
+  top: calc(100% + 8px);
+  bottom: auto;
+}
+.maid-command-input[data-layout="sheet"] .maid-command-input-menu {
+  left: 10px;
+}
+.maid-command-input-menu > button {
+  position: relative;
+  width: 100%;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px 0 10px;
+  box-sizing: border-box;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--app-text-primary, #111827);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1;
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.maid-command-input-menu > button:hover,
+.maid-command-input-menu > button:focus-visible {
+  outline: none;
+  background: var(--app-surface-hover, rgba(148, 163, 184, 0.14));
+}
+.maid-command-input-menu > button svg {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+  color: var(--app-text-secondary, #475569);
+}
+.maid-command-input-menu > button.is-active,
+.maid-command-input-menu > button.is-active svg {
+  color: var(--app-accent-primary, #2563eb);
+}
+.maid-command-input-menu-label {
+  flex: 1 1 auto;
+}
+.maid-command-input-selection-count,
+.maid-command-input-skills-count {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: rgba(var(--app-accent-rgb, 37, 99, 235), 0.12);
+  color: var(--app-accent-primary, #2563eb);
+  font-size: 11px;
+  font-weight: 750;
   display: none;
   align-items: center;
   justify-content: center;
 }
-.maid-command-input-selection.has-items .maid-command-input-selection-count {
+.maid-command-input-selection.has-items .maid-command-input-selection-count,
+.maid-command-input-skills.has-skills .maid-command-input-skills-count {
   display: inline-flex;
 }
-.maid-command-input-selection,
-.maid-command-input-attach,
+.maid-command-input-more,
 .maid-command-input-settings,
 .maid-command-input-submit {
   flex: 0 0 auto;
@@ -265,9 +367,6 @@ const injectStyle = (documentRef) => {
   transition: background 120ms ease, color 120ms ease, transform 90ms ease;
   touch-action: manipulation;
 }
-.maid-command-input-attach {
-  background: var(--app-surface-subtle, #f8fafc);
-}
 .maid-command-input-settings {
   background: var(--app-surface-subtle, #f8fafc);
 }
@@ -275,8 +374,7 @@ const injectStyle = (documentRef) => {
   background: var(--app-accent-primary, #2563eb);
   color: var(--app-text-on-accent, #fff);
 }
-.maid-command-input-selection:hover,
-.maid-command-input-attach:hover,
+.maid-command-input-more:hover,
 .maid-command-input-settings:hover {
   background: rgba(var(--app-accent-rgb, 37, 99, 235), 0.10);
   color: var(--app-accent-primary, #2563eb);
@@ -290,14 +388,12 @@ const injectStyle = (documentRef) => {
 .maid-command-input.is-submitting .maid-command-input-submit:hover {
   background: color-mix(in srgb, rgb(var(--app-danger-rgb, 220, 38, 38)) 86%, #000);
 }
-.maid-command-input-selection:active,
-.maid-command-input-attach:active,
+.maid-command-input-more:active,
 .maid-command-input-settings:active,
 .maid-command-input-submit:active {
   transform: translateY(1px);
 }
-.maid-command-input-selection:focus-visible,
-.maid-command-input-attach:focus-visible,
+.maid-command-input-more:focus-visible,
 .maid-command-input-settings:focus-visible,
 .maid-command-input-submit:focus-visible {
   outline: 2px solid rgba(var(--app-accent-rgb, 37, 99, 235), 0.32);
@@ -318,7 +414,7 @@ const injectStyle = (documentRef) => {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.maid-command-input-attach:disabled,
+.maid-command-input-more:disabled,
 .maid-command-input-settings:disabled,
 .maid-command-input-submit:disabled {
   opacity: 0.55;
@@ -614,6 +710,23 @@ const injectStyle = (documentRef) => {
   documentRef.head.appendChild(style);
 };
 
+// Preparations run one at a time so tasks reach the queue in submit order. Pressing Enter again on the
+// draft that is already being prepared would only duplicate it, so that one is ignored (returns null);
+// programmatic submits such as a resume retry wait their turn instead of being dropped.
+export const createSubmissionPreparationQueue = () => {
+  let tail = Promise.resolve(), preparingDraft = false;
+  return (prepare, finish, { fromDraft = false } = {}) => {
+    if (fromDraft && preparingDraft) return null;
+    if (fromDraft) preparingDraft = true;
+    // finish() enqueues before the next preparation starts; its result is boxed so a task's
+    // completion promise does not hold up the next submit.
+    const done = tail.then(prepare).then(value => ({ ok: true, value }), error => ({ ok: false, error }))
+      .then(outcome => { if (fromDraft) preparingDraft = false; return { result: finish(outcome) }; });
+    tail = done.then(() => {}, () => {});
+    return done.then(box => box.result);
+  };
+};
+
 export const createMaidCommandInputRuntime = ({
   documentRef = globalThis?.document || null,
   modeSwitchEl = null,
@@ -626,6 +739,7 @@ export const createMaidCommandInputRuntime = ({
   onSettings = null,
   onAttachFiles = null,
   onToggleSelection = null,
+  onPreviewImage = null,
   onOpenStateChange = null,
   getVoiceState = () => ({}),
   onVoiceAction = null,
@@ -652,6 +766,8 @@ export const createMaidCommandInputRuntime = ({
   let attachmentsEl = null;
   let settingsBtn = null;
   let selectionBtn = null;
+  let moreBtn = null;
+  let menuEl = null;
   let submitBtn = null;
   let voiceButton = null;
   let resultEl = null;
@@ -708,12 +824,34 @@ export const createMaidCommandInputRuntime = ({
 
   const getMaxImages = () => Math.max(1, Math.trunc(Number(maxImageAttachments || 0)) || DEFAULT_MAX_IMAGE_ATTACHMENTS);
 
+  // “＋”收起图片、技能、圈选；有附图、技能或圈选内容时显示小圆点
+  const syncMoreState = () => {
+    if (!moreBtn) return;
+    const hasState = imageAttachments.length > 0
+      || Boolean(selectionBtn?.classList?.contains('has-items') || selectionBtn?.classList?.contains('is-active'))
+      || Boolean(menuEl?.querySelector?.('.maid-command-input-skills.has-skills'));
+    moreBtn.classList.toggle('has-state', hasState);
+  };
+  const setMenuOpen = (next) => {
+    if (!menuEl || !moreBtn) return;
+    const openMenu = Boolean(next) && isOpen;
+    if (openMenu) {
+      // 贴近屏幕顶部时向下展开，避免被裁掉
+      const rect = rootEl?.getBoundingClientRect?.() || {};
+      menuEl.classList.toggle('is-below', layout !== 'sheet' && Number(rect.top || 0) < 150);
+    }
+    menuEl.classList.toggle('is-open', openMenu);
+    moreBtn.classList.toggle('is-open', openMenu);
+    moreBtn.setAttribute('aria-expanded', openMenu ? 'true' : 'false');
+  };
+
   const renderAttachments = () => {
     voiceButton?.sync();
     if (!attachmentsEl || !rootEl) return;
     attachmentsEl.innerHTML = '';
     rootEl.classList.toggle('has-attachments', imageAttachments.length > 0);
     if (!imageAttachments.length) {
+      syncMoreState();
       position();
       return;
     }
@@ -722,22 +860,34 @@ export const createMaidCommandInputRuntime = ({
       if (!item) return;
       item.className = 'maid-command-input-attachment';
       item.dataset.attachmentId = attachment.id || '';
-      const img = documentRef.createElement?.('img');
-      if (img) {
-        img.src = attachment.url || attachment.llmUrl || '';
-        img.alt = attachment.name || 'image';
-        item.appendChild(img);
+      const url = attachment.url || attachment.llmUrl || '';
+      const preview = documentRef.createElement?.('button');
+      if (preview) {
+        preview.type = 'button';
+        preview.className = 'maid-command-input-attachment-preview';
+        preview.dataset.previewUrl = url;
+        preview.setAttribute?.('aria-label', t('点击查看大图'));
+        const img = documentRef.createElement?.('img');
+        if (img) {
+          img.src = url;
+          img.alt = attachment.name || 'image';
+          img.draggable = false;
+          preview.appendChild(img);
+        }
+        item.appendChild(preview);
       }
       const remove = documentRef.createElement?.('button');
       if (remove) {
         remove.type = 'button';
         remove.className = 'maid-command-input-attachment-remove';
         remove.dataset.attachmentId = attachment.id || '';
-        remove.textContent = 'x';
+        remove.setAttribute?.('aria-label', t('移除图片'));
+        remove.textContent = '×';
         item.appendChild(remove);
       }
       attachmentsEl.appendChild(item);
     });
+    syncMoreState();
     position();
   };
 
@@ -1479,11 +1629,21 @@ export const createMaidCommandInputRuntime = ({
       attachmentsEl.className = 'maid-command-input-attachments';
       attachmentsEl.setAttribute?.('aria-live', 'polite');
     }
+    moreBtn = documentRef.createElement?.('button');
+    moreBtn.className = 'maid-command-input-more';
+    moreBtn.type = 'button';
+    moreBtn.innerHTML = ICONS.attach;
+    moreBtn.setAttribute('aria-label', t('更多功能'));
+    moreBtn.setAttribute('aria-haspopup', 'menu');
+    moreBtn.setAttribute('aria-expanded', 'false');
+    menuEl = documentRef.createElement?.('div');
+    menuEl.className = 'maid-command-input-menu';
+    menuEl.setAttribute('role', 'menu');
     attachBtn = documentRef.createElement?.('button');
     attachBtn.className = 'maid-command-input-attach';
     attachBtn.type = 'button';
-    attachBtn.innerHTML = ICONS.attach;
-    attachBtn.setAttribute('aria-label', '附加图片');
+    attachBtn.setAttribute('role', 'menuitem');
+    attachBtn.innerHTML = `${ICONS.image}<span class="maid-command-input-menu-label">${t('图片')}</span>`;
     inputEl = documentRef.createElement?.('textarea');
     inputEl.className = 'maid-command-input-field';
     inputEl.dataset.maidGuideTarget = 'maid-command-input';
@@ -1499,9 +1659,8 @@ export const createMaidCommandInputRuntime = ({
     selectionBtn = documentRef.createElement?.('button');
     selectionBtn.className = 'maid-command-input-selection';
     selectionBtn.type = 'button';
-    selectionBtn.innerHTML = `${ICONS.selection}<span class="maid-command-input-selection-count"></span>`;
-    selectionBtn.setAttribute('aria-label', '圈选内容给女仆');
-    selectionBtn.title = '圈选内容给女仆';
+    selectionBtn.setAttribute('role', 'menuitem');
+    selectionBtn.innerHTML = `${ICONS.selection}<span class="maid-command-input-menu-label">${t('圈选')}</span><span class="maid-command-input-selection-count"></span>`;
     submitBtn = documentRef.createElement?.('button');
     submitBtn.className = 'maid-command-input-submit';
     submitBtn.type = 'submit';
@@ -1522,18 +1681,20 @@ export const createMaidCommandInputRuntime = ({
     if (dragHandleEl) rootEl.appendChild(dragHandleEl);
     if (fileInputEl) rootEl.appendChild(fileInputEl);
     if (attachmentsEl) rootEl.appendChild(attachmentsEl);
-    rootEl.appendChild(attachBtn);
-    rootEl.appendChild(selectionBtn);
+    rootEl.appendChild(moreBtn);
     rootEl.appendChild(inputEl);
     rootEl.appendChild(settingsBtn);
     rootEl.appendChild(submitBtn);
-    mountSkills?.(rootEl, settingsBtn);
+    menuEl.appendChild(attachBtn);
+    mountSkills?.(rootEl, menuEl, { onChange: syncMoreState });
+    menuEl.appendChild(selectionBtn);
+    rootEl.appendChild(menuEl);
     // 指令条以球心定位、整体盖住悬浮球：非交互区/拖柄按下即转发球拖拽；
     // 输入、附件、设置、发送等控件保持各自交互。
     rootEl.addEventListener?.('pointerdown', (event) => {
       const target = event?.target || null;
       const interactive = typeof target?.closest === 'function'
-        ? target.closest('textarea:not(:disabled), button:not(:disabled), input, a, .maid-command-input-result, .maid-onboarding-welcome')
+        ? target.closest('textarea:not(:disabled), button:not(:disabled), input, a, .maid-command-input-result, .maid-command-input-menu, .maid-onboarding-welcome')
         : null;
       if (interactive || layout === 'sheet') return;
       const ballDrag = typeof getBallDragRuntime === 'function' ? getBallDragRuntime() : null;
@@ -1549,6 +1710,28 @@ export const createMaidCommandInputRuntime = ({
       event.preventDefault?.();
       event.stopPropagation?.();
       void cancelActive();
+    });
+    moreBtn.addEventListener?.('click', (event) => {
+      event.preventDefault?.();
+      event.stopPropagation?.();
+      setMenuOpen(!menuEl.classList.contains('is-open'));
+    });
+    // 选中一项即收起菜单；Esc 先收菜单，再交给输入框关闭整条
+    menuEl.addEventListener?.('click', (event) => {
+      if (event?.target?.closest?.('button')) setMenuOpen(false);
+    });
+    rootEl.addEventListener?.('keydown', (event) => {
+      if (event.key !== 'Escape' || !menuEl.classList.contains('is-open')) return;
+      event.preventDefault?.();
+      event.stopPropagation?.();
+      setMenuOpen(false);
+      moreBtn.focus?.();
+    }, true);
+    rootEl.addEventListener?.('pointerdown', (event) => {
+      if (!menuEl.classList.contains('is-open')) return;
+      const target = event?.target || null;
+      if (containsNode(menuEl, target) || containsNode(moreBtn, target)) return;
+      setMenuOpen(false);
     });
     inputEl.addEventListener?.('keydown', (event) => {
       if (event.key === 'Escape') {
@@ -1590,6 +1773,12 @@ export const createMaidCommandInputRuntime = ({
     });
     attachmentsEl?.addEventListener?.('click', (event) => {
       const target = event?.target || null;
+      const preview = typeof target?.closest === 'function' ? target.closest('.maid-command-input-attachment-preview') : null;
+      if (preview) {
+        event.preventDefault?.();
+        if (preview.dataset?.previewUrl) onPreviewImage?.(preview.dataset.previewUrl);
+        return;
+      }
       const btn = typeof target?.closest === 'function'
         ? target.closest('.maid-command-input-attachment-remove')
         : target?.className === 'maid-command-input-attachment-remove'
@@ -1658,6 +1847,7 @@ export const createMaidCommandInputRuntime = ({
     voiceButton?.cancelGesture();
     void onCloseVoiceInput?.();
     clearCloseTimer();
+    setMenuOpen(false);
     const wasOpen = isOpen;
     const shouldPreserveResult = (preserve || isSubmitting) && (resultMessages.length > 0 || Boolean(liveStatus));
     isOpen = false;
@@ -1710,21 +1900,16 @@ export const createMaidCommandInputRuntime = ({
     else void processSubmissionQueue();
     return completion;
   };
-  let preparingSubmission = false;
-  const enqueueSubmission = (text, attachments, controls = {}) => {
+  const prepareInOrder = createSubmissionPreparationQueue();
+  const enqueueSubmission = (text, attachments, controls = {}, options = {}) => {
     if (!prepareSubmission || controls.skillsPrepared) return enqueuePreparedSubmission(text, attachments, controls);
     if (!text && !attachments.length) return false;
-    if (preparingSubmission) return false;
-    preparingSubmission = true;
-    return Promise.resolve().then(() => prepareSubmission(text, attachments, controls)).then(prepared => {
-      preparingSubmission = false;
-      return enqueuePreparedSubmission(text, prepared.attachments || attachments, prepared);
-    }, error => {
-      preparingSubmission = false;
+    return prepareInOrder(() => prepareSubmission(text, attachments, controls), ({ ok, value: prepared, error }) => {
+      if (ok) return enqueuePreparedSubmission(text, prepared.attachments || attachments, prepared);
       const message = maidSkillMessage(error);
       setResult(message, 'error');
       return { ok: false, status: 'failed', reason: error?.code, message };
-    });
+    }, options) ?? false;
   };
   const submit = () => {
     const text = trim(inputEl?.value), attachments = imageAttachments.slice();
@@ -1732,7 +1917,7 @@ export const createMaidCommandInputRuntime = ({
     if (getVoiceState?.().call && getVoiceState().call !== 'idle' && onVoiceTextSubmit) {
       return onVoiceTextSubmit(text || getLocalizedPromptText('maid.image_only_input', '请看这张图片。'), attachments);
     }
-    return enqueueSubmission(text, attachments);
+    return enqueueSubmission(text, attachments, {}, { fromDraft: true });
   };
 
   const setSelectionState = ({ active = false, count = 0 } = {}) => {
@@ -1741,6 +1926,7 @@ export const createMaidCommandInputRuntime = ({
     selectionBtn.classList.toggle('has-items', Number(count) > 0);
     const countEl = selectionBtn.querySelector?.('.maid-command-input-selection-count');
     if (countEl) countEl.textContent = String(count || '');
+    syncMoreState();
   };
 
   return {
@@ -1786,6 +1972,6 @@ export const createMaidCommandInputRuntime = ({
     cancelActive,
     isOpen: () => isOpen,
     isSubmitting: () => isSubmitting,
-    getElements: () => ({ rootEl, inputEl, attachBtn, fileInputEl, attachmentsEl, settingsBtn, submitBtn, resultEl }),
+    getElements: () => ({ rootEl, inputEl, moreBtn, menuEl, attachBtn, selectionBtn, fileInputEl, attachmentsEl, settingsBtn, submitBtn, resultEl }),
   };
 };

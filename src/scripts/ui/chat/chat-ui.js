@@ -45,6 +45,7 @@ import {
   recordReactionUse,
   resolveQuickReactionEmojis,
 } from './reaction-preference-utils.js';
+import { customReactionAssets, isCustomReaction } from './custom-reaction-assets.js';
 import { createMessageHeaderUiRuntime } from './message-header-ui-utils.js';
 import { createReplyDraftUiRuntime } from './reply-draft-ui-utils.js';
 import { createSelectionModeUiRuntime } from './selection-mode-ui-utils.js';
@@ -343,6 +344,7 @@ const getDefaultReplyAvatar = () => getDefaultAppIcon();
 export class ChatUI {
   constructor() {
     this.scrollEl = document.getElementById('chat-scroll');
+    window.addEventListener?.('custom-reactions-changed', () => this.refreshReactionQuickBars());
     this.inputEl = document.getElementById('composer-input');
     this.sendBtn = document.getElementById('send-button');
     this.inputContainer = document.querySelector('.chat-input-container');
@@ -797,7 +799,10 @@ export class ChatUI {
   }
 
   getQuickReactionEmojis() {
-    return resolveQuickReactionEmojis({ usage: readReactionUsage(), limit: 3 });
+    // 已移除的自定义反应不再出现在快捷栏（使用次数仍保留，重新添加同一张图后恢复）
+    const usage = Object.fromEntries(Object.entries(readReactionUsage())
+      .filter(([emoji]) => !isCustomReaction(emoji) || customReactionAssets.find(emoji)));
+    return resolveQuickReactionEmojis({ usage, limit: 3 });
   }
 
   refreshReactionQuickBars() {

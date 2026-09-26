@@ -72,3 +72,12 @@ import { renderMaidMarkdownHtml } from '../../src/scripts/ui/maid-markdown-utils
   assert.equal(plain, '<p>没有任何格式的普通句子。</p>', '纯文本只包一层段落');
   console.log('ok - maid markdown survives pathological nesting and passes plain text through');
 }
+
+{
+  // A 16000-character skill body of "> > > …" used to recurse once per level and overflow the stack.
+  const html = renderMaidMarkdownHtml(`${'> '.repeat(8000)}最深处`);
+  assert.equal((html.match(/<blockquote>/g) || []).length, 8, '引用最多嵌套 8 层');
+  assert.ok(html.includes('最深处'));
+  assert.ok(renderMaidMarkdownHtml('> 一层\n> > 两层').includes('<blockquote><p>一层</p><blockquote><p>两层</p></blockquote></blockquote>'));
+  console.log('ok - maid markdown caps blockquote depth');
+}

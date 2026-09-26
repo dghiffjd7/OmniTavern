@@ -6,6 +6,16 @@ export const normalizePresetBlockText = value =>
 export const presetBlockContentChanged = (baseText, draftText) =>
   normalizePresetBlockText(baseText) !== normalizePresetBlockText(draftText);
 
+// 草稿与已保存预设按内容比对：对象键顺序不算差异（分片落盘后键按字母排序，
+// 表单收集的键顺序不同），数组顺序仍算（区块顺序即注入顺序）。
+const stablePresetJson = value => {
+  if (Array.isArray(value)) return `[${value.map(item => stablePresetJson(item === undefined ? null : item)).join(',')}]`;
+  if (!value || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  return `{${Object.keys(value).filter(key => value[key] !== undefined).sort()
+    .map(key => `${JSON.stringify(key)}:${stablePresetJson(value[key])}`).join(',')}}`;
+};
+export const isSamePresetData = (a, b) => stablePresetJson(a) === stablePresetJson(b);
+
 export const buildPresetPreviewBlockMap = ({
   messageTexts = [],
   blocks = [],

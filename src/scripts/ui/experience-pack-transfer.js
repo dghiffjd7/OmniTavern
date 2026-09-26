@@ -1453,9 +1453,10 @@ export class ExperiencePackTransfer extends CharacterCardTransfer {
     const archivesPayload = normalizeExperiencePackChatArchivePayloads(packageData?.chatArchives);
     const session = this.chatStore?._ensureSession?.(sid);
     if (!session) return false;
+    // Build the restored state first so a malformed package fails before any reaction asset is written.
+    const restoredState = buildExperiencePackRestoredSessionChatState(chatSession, { includeMemoryData });
     const reactionImport = await customReactionAssets.import(packageData?.reactionAssets, ref => this.getEntryDataUrl(packageData, ref));
     if (reactionImport.failed.length) window.toastr?.warning?.(customReactionImportWarning(reactionImport));
-    const restoredState = buildExperiencePackRestoredSessionChatState(chatSession, { includeMemoryData });
     session.draft = restoredState.draft;
     session.detachedSummaries = restoredState.detachedSummaries;
     session.compactedSummary = restoredState.compactedSummary;

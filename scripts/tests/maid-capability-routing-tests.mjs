@@ -1334,3 +1334,22 @@ console.log('maid-capability-routing-tests passed');
   runtime.finishRequest(request.id, { ok: true });
   console.log('ok - a reply revising a pending delete list keeps that delete feature available');
 }
+
+{
+  // 技能引用的功能只补空位：不挤掉本句意图检索到的功能，也不单独触发候选模式
+  const { catalogFeatures, catalogRegistry } = createCatalogRoutingHarness();
+  const runtime = createMaidCapabilityRoutingRuntime({
+    features: catalogFeatures, toolRegistry: catalogRegistry,
+    permissionEvaluator: { evaluateTool: () => ({ decision: 'allow', checks: [] }) }, logger: { debug() {} },
+  });
+  const referenced = catalogFeatures.filter(feature => !/delete/.test(feature.id)).slice(0, 12).map(feature => feature.id);
+  const maidSkillContext = { catalog: [{ id: 's1', featureIds: referenced }], loaded: [{ id: 's1', revision: 1, source: 'user' }] };
+  const vague = runtime.prepareDecision({ input: '嗯嗯', phase: 'planner', configOverride: { mode: 'bounded' }, context: { maidSkillContext } });
+  assert.equal(vague.useCandidates, false, 'skill references alone are not a confident intent match');
+  const input = '现在一共有几个正则规则集？';
+  const withSkill = runtime.prepareDecision({ input, phase: 'planner', configOverride: { mode: 'bounded' }, context: { maidSkillContext } });
+  assert.equal(withSkill.candidateIds.has('regex.list'), true, 'the intent match keeps its slot');
+  const refs = withSkill.candidateRefs.filter(ref => ref.reasonCodes.length === 1 && ref.reasonCodes[0] === 'skill_reference');
+  assert.equal(refs.every(ref => ref.score < 45), true);
+  console.log('ok - skill references only fill spare candidate slots');
+}

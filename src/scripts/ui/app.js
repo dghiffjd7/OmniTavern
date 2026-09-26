@@ -811,7 +811,7 @@ import {
   normalizeReactionEntries,
   toggleReactionActor,
 } from './chat/message-interaction-utils.js';
-import { customReactionAssets } from './chat/custom-reaction-assets.js';
+import { customReactionAssets, isCustomReaction } from './chat/custom-reaction-assets.js';
 import { parseSpecialMessage } from './chat/message-parser.js';
 import {
   canDeleteCurrentSwipe,
@@ -24235,6 +24235,7 @@ const initApp = async () => {
     onChooseVoiceMode: () => maidVoiceRuntime?.chooseMode(),
     onCloseVoiceInput: () => maidVoiceRuntime?.cancelInput(),
     onToggleSelection: () => maidSelectionMode.toggle(),
+    onPreviewImage: url => ui.openLightbox?.(url),
     onOpenStateChange: ({ open, rootEl }) => {
       maidVoiceRuntime?.setInputOpen(open);
       executionFlowRuntime?.rearbitrateMaidTrace?.({ commandInputOpen: open });
@@ -27072,7 +27073,11 @@ const initApp = async () => {
   const utilityAgentRuntime = createUtilityAgentRuntime({ chatStore, configStore: agentConfigStore, getContext: getAgentExecutionContext,
     captureModel: customAgentRequests.captureModel, request: utilityRequests.request,
     onChange: () => window.dispatchEvent(new CustomEvent('agent-utility-changed')),
-    onArchiveNamed: () => { contactSettingsPanel.renderArchives?.(); groupSettingsPanel.renderArchives?.(); },
+    // Only the panel showing the renamed session needs its archive list refreshed.
+    onArchiveNamed: ({ sessionId }) => {
+      if (contactSettingsPanel.getSessionId?.() === sessionId) contactSettingsPanel.renderArchives?.();
+      if (groupSettingsPanel.groupId === sessionId) groupSettingsPanel.renderArchives?.();
+    },
   });
   Object.assign(agentConfigurationActions, {
     runUtilityAgent: options => utilityAgentRuntime.run(options),
@@ -32171,6 +32176,9 @@ const initApp = async () => {
       if (!emoji) return true;
       const current = chatStore.findMessage(message.id, sessionId) || message;
       const baseMeta = current?.meta && typeof current.meta === 'object' ? { ...current.meta } : {};
+      // 已移除的自定义反应不能新加到消息上；消息上已有的仍可点掉
+      if (isCustomReaction(emoji) && !customReactionAssets.find(emoji)
+        && !(baseMeta.reactions || []).some(entry => entry?.emoji === emoji && (entry.actors || []).includes(SELF_REACTION_ACTOR))) return true;
       baseMeta.reactions = toggleReactionActor(baseMeta.reactions, emoji, SELF_REACTION_ACTOR, { name: customReactionAssets.find(emoji)?.name });
       if (!baseMeta.reactions.length) delete baseMeta.reactions;
       else baseMeta.reactions = normalizeReactionEntries(baseMeta.reactions);

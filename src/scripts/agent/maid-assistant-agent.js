@@ -4269,7 +4269,8 @@ export const createMaidAssistantAgent = ({
           // 用户确认的正是这份写入清单：本轮按允许写入处理，不再额外弹“只读请求要不要写入”（删除本身的确认照常）
           context.operationIntentPolicy = { mode: 'write_allowed', source: 'confirmed_pending_action', reason: 'user_confirmed_pending_action' };
         } else {
-          closePending('superseded', 'cancelled', '用户改说其他事，待确认的删除清单已作废。');
+          // 此时还不知道是改说别的事还是修改清单（由模型判断），摘要措辞对两种情况都成立
+          closePending('superseded', 'cancelled', '收到新的指示，原待确认的删除清单已作废，未执行删除。');
           // 这句可能是对清单的修改（“确认，但保留乙”）：含义交给模型判断。本次任务允许使用原清单的删除功能，
           // 不因这句话没写“删除”二字被高风险检查挡掉；真正删除时 APP 的删除确认照常弹出。
           context.pendingActionRevision = {
@@ -5220,7 +5221,7 @@ export const createMaidAssistantAgent = ({
 
   // Called before queue acceptance as well as by direct agent callers. It only
   // resolves existing task ownership; natural-language execution stays with the planner.
-  const prepareSkillTaskContext = (input = '', context = {}, { hasDraftSkills = false } = {}) => {
+  const prepareSkillTaskContext = (input = '', context = {}) => {
     if (context.maidSkillContextPrepared) return { context, useDraftSkills: false };
     const sourceRunId = trim(context.runContinuation?.sourceRunId) || extractMaidResumeRunId(input);
     const runs = agentTaskRuntime?.listRuns?.({ kind: 'maid_assistant', limit: 100 }) || [];
@@ -5229,8 +5230,9 @@ export const createMaidAssistantAgent = ({
     const pending = deletion || imported;
     const reply = deletion ? classifyMaidPendingActionReply(input, { voice: Boolean(trim(context.voiceCallId)) })
       : imported ? classifyMaidImportedCardConfirmation(input) : 'none';
-    const explicitSelection = hasDraftSkills || context.maidSkillContext?.loaded?.some(item => item.source === 'user');
-    const inheritPending = !sourceRunId && pending && (context.pendingActionSubmissionId || reply !== 'none' || !explicitSelection);
+    // 任务归属由代码判断：只有结构化续接（语音确认指明了任务）或明确的确认 / 取消，才接回待确认任务的房间、附图与技能快照。
+    // 其他话（包括带条件的修改、无关的新请求）都是新任务：留在当前房间，含义交给模型判断，旧清单随后作废并把功能留给模型。
+    const inheritPending = !sourceRunId && pending && (context.pendingActionSubmissionId || reply === 'confirm' || reply === 'cancel');
     const restoreId = sourceRunId || (inheritPending ? pending.runId : '');
     if (!restoreId) return { context, useDraftSkills: true };
     const run = agentTaskRuntime?.getRun?.(restoreId) || runs.find(item => item.id === restoreId);

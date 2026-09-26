@@ -10,6 +10,12 @@ const withoutPendingAuthorization = (context) => {
   const { pendingActionSubmissionId, ...rest } = context;
   return rest;
 };
+// 引用旧任务交办的新请求：沿用它的目标房间与附图，但技能按本次通话当前的选择重新准备，不沿用旧任务冻结的技能
+const forNewTaskFrom = (context) => {
+  if (!context) return context;
+  const { maidSkillContext, maidSkillContextPrepared, maidTaskInputs, ...rest } = withoutPendingAuthorization(context);
+  return rest;
+};
 const publicTask = task => task ? { task_id: task.id, request: task.request, status: task.status, message: task.message, has_references: Boolean(task.attachments?.length || task.context?.userSelection?.length) } : null;
 
 // Owns accepted voice work independently of the microphone/session lifetime.
@@ -168,7 +174,7 @@ export const createMaidVoiceTaskRuntime = ({
       const reference = args.task_id ? findTask(text(args.task_id), target?.maidCallId) : null;
       if (args.task_id && !reference) return { ok: false, message: t('找不到引用的女仆任务，请重新说明目标') };
       return submit({ request: commandText, target, requestId, attachments: attachments?.length ? attachments : reference?.attachments,
-        context: withoutPendingAuthorization(reference?.context), preserveDraft, showInput });
+        context: forNewTaskFrom(reference?.context), preserveDraft, showInput });
     })();
     if (requestId) requests.set(key, operation);
     prune();

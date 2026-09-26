@@ -1,6 +1,6 @@
 import { stickerPackStore } from '../../storage/sticker-pack-store.js';
 import { safeInvoke } from '../../utils/tauri.js';
-import { reactionDataUrlFromFile, isReactionImageBytes } from '../../utils/image.js';
+import { reactionDataUrlFromFile, isAnimatedImageBytes, isReactionImageBytes, readImageHeaderDimensions } from '../../utils/image.js';
 import { t } from '../../i18n/index.js';
 
 export const CUSTOM_REACTION_LIMIT = 60;
@@ -14,6 +14,9 @@ const digestImage = async dataUrl => {
   const bytes = Uint8Array.from(atob(dataUrl.split(',')[1]), char => char.charCodeAt(0));
   if (!isReactionImageBytes(bytes)) throw new Error('反应素材格式无效');
   if (bytes.length > 30 * 1024) throw new Error('反应素材超过 30KB');
+  // 素材 ID 是内容哈希，导入时不能重新编码（会改变 ID、断开消息引用），只校验它确实是 96px 以内的静态图
+  const size = readImageHeaderDimensions(bytes);
+  if (!size || !size.width || !size.height || size.width > 96 || size.height > 96 || isAnimatedImageBytes(bytes)) throw new Error('反应素材需为 96px 以内的静态图片');
   return [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(byte => byte.toString(16).padStart(2, '0')).join('');
 };
 
@@ -25,7 +28,13 @@ const persistImage = async (dataUrl, id) => {
   return { path: result.path, dataUrl: '' };
 };
 
-export const createCustomReactionAssets = ({ store = stickerPackStore, saveImage = persistImage,
+// 记录里的原生文件是否还在（换设备恢复、清理附件后可能丢失）；读不出来就视为丢失
+const imageAvailable = async item => {
+  if (!item?.path || !native()) return true;
+  try { return Boolean((await safeInvoke('read_attachment_data_url', { sessionId: 'sticker_pack_assets', path: item.path }))?.dataUrl); } catch { return false; }
+};
+
+export const createCustomReactionAssets = ({ store = stickerPackStore, saveImage = persistImage, checkImage = imageAvailable,
   removeImage = path => native() ? safeInvoke('delete_attachment', { sessionId: 'sticker_pack_assets', path }) : null } = {}) => {
   const list = () => [...new Map(store.getReactionPacks().flatMap(pack => pack.stickers || [])
     .filter(item => /^[a-f0-9]{64}$/.test(item.id)).map(item => [item.id, { ...item, emoji: `custom:${item.id}` }])).values()];
@@ -40,7 +49,16 @@ export const createCustomReactionAssets = ({ store = stickerPackStore, saveImage
     const id = await digestImage(dataUrl);
     if (expectedId && expectedId !== id) throw new Error('反应素材与记录不匹配');
     const existing = find(`custom:${id}`);
-    if (existing) return existing;
+    if (existing) {
+      if (await checkImage(existing)) return existing;
+      // 同一张图的记录还在但文件丢了：重新保存并改写记录里的路径，消息里的反应随之恢复显示
+      const image = await saveImage(dataUrl, id);
+      for (const pack of store.getReactionPacks()) {
+        if (!pack.stickers.some(item => item.id === id)) continue;
+        store.updatePack(pack.id, { stickers: pack.stickers.map(item => (item.id === id ? { ...item, ...image } : item)) });
+      }
+      return find(`custom:${id}`);
+    }
     if (list().length >= CUSTOM_REACTION_LIMIT) throw new Error('最多保存 60 个自定义反应，请先移除不再使用的图片');
     const image = await saveImage(dataUrl, id);
     // Content IDs are independent of pack IDs, so importing a renamed pack cannot break message references.
@@ -51,7 +69,7 @@ export const createCustomReactionAssets = ({ store = stickerPackStore, saveImage
       stickers: [{ id, name: cleanName(name), ...image }] });
     return find(`custom:${id}`);
   };
-  return {
+  const assets = {
     list, find,
     addFile: file => serialize(async () => put(await reactionDataUrlFromFile(file), file.name?.replace(/\.[^.]+$/, ''))),
     addDataUrl: (dataUrl, name) => serialize(() => put(dataUrl, name)),
@@ -65,7 +83,12 @@ export const createCustomReactionAssets = ({ store = stickerPackStore, saveImage
         if (remaining.length) store.updatePack(pack.id, { stickers: remaining });
         else store.removePack(pack.id);
       }
-      for (const path of paths) await removeImage(path);
+      // 记录已移除；文件删除失败只留下无人引用的文件，不再让界面报错
+      for (const path of paths) {
+        try { await removeImage(path); } catch (error) { globalThis.console?.warn?.('remove custom reaction file failed', error); }
+      }
+      // 快捷栏等其他入口据此刷新，不再显示已移除的反应
+      try { globalThis.dispatchEvent?.(new CustomEvent('custom-reactions-changed', { detail: { removed: `custom:${id}` } })); } catch {}
     }),
     collect: (messages, assets, basePath = 'reactions') => {
       const ids = new Set((messages || []).flatMap(message => (message?.meta?.reactions || []).map(entry => entry.emoji)));
@@ -75,17 +98,26 @@ export const createCustomReactionAssets = ({ store = stickerPackStore, saveImage
         return { id: item.id, name: item.name, assetFile: assets.addSource(`${basePath}/${item.id}.${ext}`, source) };
       }).filter(item => item.assetFile);
     },
+    // added 只记录这次新建的素材，供调用方在后续恢复失败时回滚，不占用 60 个名额
     import: (records, readAsset) => serialize(async () => {
-      const failed = [];
+      const failed = [], added = [];
       for (const record of (Array.isArray(records) ? records : []).slice(0, CUSTOM_REACTION_LIMIT)) {
         try {
           if (!/^[a-f0-9]{64}$/.test(record?.id || '')) throw new Error('反应素材 ID 无效');
+          const existed = Boolean(find(`custom:${record.id}`));
           await put(await readAsset(record.assetFile), record.name, record.id);
+          if (!existed) added.push(`custom:${record.id}`);
         } catch (error) { failed.push({ id: record?.id, message: error.message }); }
       }
-      return { failed };
+      return { failed, added };
     }),
+    rollbackImport: async result => {
+      for (const emoji of result?.added || []) {
+        try { await assets.remove(emoji); } catch (error) { globalThis.console?.warn?.('roll back custom reaction import failed', error); }
+      }
+    },
   };
+  return assets;
 };
 
 export const customReactionAssets = createCustomReactionAssets();

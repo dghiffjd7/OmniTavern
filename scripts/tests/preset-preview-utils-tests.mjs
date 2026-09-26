@@ -4,6 +4,7 @@ import {
   applyPresetBlockHunk,
   buildPresetPreviewBlockMap,
   createLatestPreviewBuildQueue,
+  isSamePresetData,
   presetBlockContentChanged,
 } from '../../src/scripts/ui/preset-preview-utils.js';
 
@@ -104,4 +105,18 @@ import {
   await Promise.resolve();
   assert.deepEqual(calls, ['first', 'nested-late'], '任意微任务深度的尾端请求都必须触发新一轮 drain');
   console.log('ok - 预览队列完成窗口具备最终重启保障');
+}
+
+{
+  // 分片落盘后区块顺序条目的键按字母排序（enabled 在前），表单收集为 identifier 在前：
+  // 放弃修改后重绘再收集，不应被当成未保存更改
+  const saved = { name: 'Izumi', prompt_order: [{ character_id: 100001, order: [{ enabled: false, identifier: 'a' }, { enabled: true, identifier: 'b' }] }] };
+  const collected = { prompt_order: [{ order: [{ identifier: 'a', enabled: false }, { identifier: 'b', enabled: true }], character_id: 100001 }], name: 'Izumi' };
+  assert.equal(isSamePresetData(collected, saved), true, '键顺序不同不算修改');
+  const toggled = { ...collected, prompt_order: [{ character_id: 100001, order: [{ identifier: 'a', enabled: true }, { identifier: 'b', enabled: true }] }] };
+  assert.equal(isSamePresetData(toggled, saved), false, '开关变化仍算修改');
+  const reordered = { ...collected, prompt_order: [{ character_id: 100001, order: [{ identifier: 'b', enabled: true }, { identifier: 'a', enabled: false }] }] };
+  assert.equal(isSamePresetData(reordered, saved), false, '区块顺序变化仍算修改');
+  assert.equal(isSamePresetData({ a: 1, b: undefined }, { a: 1 }), true, 'undefined 字段与缺省一致（与 JSON 落盘一致）');
+  console.log('ok - 预设草稿比对忽略键顺序、保留数组顺序');
 }

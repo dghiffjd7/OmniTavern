@@ -4393,7 +4393,9 @@ export class AgentCenterPanel {
         const addButton = actions.createTextEditAgent ? `<div class="agent-center-card-actions"><button class="agent-center-card-action" data-add-text-agent>${escapeHtml(t('新增 · 修改文本'))}</button></div>` : '';
         const cards = this.renderCardList(this.getAgentCards(), '还没有可启用的 Agent');
         if (!this.getHopscotchPanel()) return runActions + addButton + cards;
-        return `${runActions}${addButton}<div data-agent-hopscotch-host></div><details class="hop-agent-library" data-agent-library${this.agentLibraryOpen ? ' open' : ''}><summary>${escapeHtml(t('全部 Agent'))}</summary>${cards}</details>`;
+        // 创意写作用跳房子的“+”新建并放到落点；聊天模式的流程只读，新建入口放在“全部 Agent”里。
+        const libraryAddButton = context?.place === 'writing' ? '' : addButton;
+        return `${runActions}<div data-agent-hopscotch-host></div><details class="hop-agent-library" data-agent-library${this.agentLibraryOpen ? ' open' : ''}><summary>${escapeHtml(t('全部 Agent'))}</summary>${libraryAddButton}${cards}</details>`;
     }
 
     renderPromptModules() {
