@@ -21,6 +21,9 @@ const COURT_ICONS = {
   summary_compaction: '<path class="hop-glyph-wash" d="m3 7 9-4 9 4-9 4Z"/><path d="m3 7 9-4 9 4-9 4ZM3 12l9 4 9-4M3 17l9 4 9-4"/>',
   format_review: '<circle class="hop-glyph-wash" cx="10.5" cy="10.5" r="7"/><circle cx="10.5" cy="10.5" r="7"/><path d="m16 16 5 5m-14-10 2.5 2.5 4-4"/>',
   text_completion: '<path d="M4 5h10M4 10h6M4 15h4m5 3 6-6 3 3-6 6h-3zM16 4v4m-2-2h4"/>',
+  archive_naming: '<rect class="hop-glyph-wash" x="3" y="4" width="18" height="5" rx="1.5"/><rect x="3" y="4" width="18" height="5" rx="1.5"/><path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9M10 13h4"/>',
+  moment_agent: '<path class="hop-glyph-wash" d="M4 5h16v11H9l-5 4Z"/><path d="M4 5h16v11H9l-5 4ZM8 10h8M8 13h5"/>',
+  reply_scoring: '<path d="M4 20h16M7 16v-4M12 16V8M17 16v-7"/>',
   finish: '<path d="m5 12 4.5 4.5L19 7"/>',
 };
 const courtIcon = kind => `<svg class="hop-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${COURT_ICONS[kind === 'variable_rules' ? 'variable' : kind] || COURT_ICONS.custom_prompt}</svg>`;
@@ -41,7 +44,18 @@ const resolveStoneRow = (board, states) => {
 };
 
 // 编辑器、运行面板共享一张板；DOM 与视觉均按执行顺序从上向下。
-export const renderHopscotchCourt = (board, { editable = false, states = {}, status = '', place = '', taskAttribute = 'data-hop-house', inputSuggestion = null, inputAgents = [], agentRuns = [], canAddInput = false, formatReview = null, activation = resolveHopscotchActivation(board) } = {}) => {
+// 卫星：手动作用于某个房子结果的 Agent，挂在正文旁的支线上；待命区：由事件触发、与每轮回复无关的 Agent，排在终点线之外。
+const renderSatellites = items => items.length ? `<div class="hop-satellites">${items.map(item => `<button type="button" class="hop-satellite${item.enabled ? '' : ' is-off'}" data-hop-standby="${e(item.id)}" aria-label="${e(`${item.title} · ${item.trigger} · ${item.enabled ? t('已开启') : t('已关闭')}`)}">${courtIcon(item.id)}<span class="hop-satellite-title" data-i18n-skip="true">${e(item.title)}</span><span class="hop-satellite-meta">${e(item.trigger)}</span><i class="hop-state-dot" aria-hidden="true"></i></button>`).join('')}</div>` : '';
+export const renderHopscotchStandby = (items = []) => items.length ? `<section class="hop-standby" aria-label="${e(t('随时待命'))}">
+    <div class="hop-standby-caption"><span>${e(t('随时待命'))}</span></div>
+    <div class="hop-standby-list">${items.map(item => `<button type="button" class="hop-standby-item${item.enabled ? '' : ' is-off'}" data-hop-standby="${e(item.id)}" data-hop-kind="${e(item.id)}" aria-label="${e(`${item.title} · ${item.trigger} · ${item.enabled ? t('已开启') : t('已关闭')}`)}">
+      <span class="hop-standby-icon">${courtIcon(item.id)}</span>
+      <span class="hop-standby-copy"><strong data-i18n-skip="true">${e(item.title)}</strong><small>${e(item.trigger)}</small></span>
+      <span class="hop-standby-state"><i class="hop-state-dot" aria-hidden="true"></i>${e(item.enabled ? t('已开启') : t('已关闭'))}</span>
+    </button>`).join('')}</div>
+  </section>` : '';
+
+export const renderHopscotchCourt = (board, { editable = false, states = {}, status = '', place = '', taskAttribute = 'data-hop-house', inputSuggestion = null, inputAgents = [], agentRuns = [], canAddInput = false, formatReview = null, satellites = [], standby = [], activation = resolveHopscotchActivation(board) } = {}) => {
   let number = 0;
   const live = Boolean(status) || Object.keys(states).length > 0;
   const stoneRow = live ? resolveStoneRow(board, states) : -1;
@@ -61,6 +75,7 @@ export const renderHopscotchCourt = (board, { editable = false, states = {}, sta
   const inactiveBadge = active => !visibleEnabled(active) ? `<span class="hop-disabled-mark" title="${e(hopscotchInactiveLabel(active.reason))}"><span aria-hidden="true">Ⅱ</span>${e(t('已停用'))}</span>` : active?.invocationMode ? `<span class="hop-input-stage-label">${e(t(agentInvocationLabel(active)))}</span>` : '';
   const dragAttrs = id => editable ? `data-hop-node="${e(id)}" draggable="false" aria-keyshortcuts="Space"` : '';
   const grip = editable ? `<span class="hop-drag-grip" data-hop-grip title="${e(t('按住拖动；空格键选择落点'))}" aria-hidden="true">⠿</span>` : '';
+  const bodyRow = board.rows.findIndex(row => row.houses.some(house => house.kind === 'body'));
   return `<div class="hop-court-scroll"><div class="hop-court${live ? ' is-live' : ''}" aria-label="${e(t('从上往下执行，同一行并行'))}">
     <div class="hop-origin" aria-hidden="true"></div>
     ${inputSuggestion || inputAgents.length ? `<div class="hop-input-stage"><div class="hop-cells">${[...(inputSuggestion ? [{ ...inputSuggestion, id: 'text_completion', title: t('文本建议') }] : []), ...inputAgents].map(config => `<button type="button" class="hop-cell${config.enabled ? '' : ' is-disabled'}${config.invocationMode === 'manual' ? ' is-manual' : ''}" data-hop-kind="text_completion" ${config.id === 'text_completion' ? 'data-hop-input-suggestion' : `data-hop-input-agent="${e(config.id)}"`} aria-label="${e(config.title)}" data-hop-enabled="${config.enabled === true}">${runBadge(config.id)}${courtIcon('text_completion')}<span class="hop-title">${e(config.title)}</span><span class="hop-input-stage-label">${e(config.enabled ? t(agentInvocationLabel(config)) : t('已停用'))}</span></button>`).join('')}</div>${canAddInput ? `<button type="button" class="hop-plus hop-side" data-hop-add-input aria-label="${e(t('新增输入 Agent'))}" title="${e(t('新增输入 Agent'))}">+</button>` : ''}</div>${editable ? '' : tick()}` : ''}
@@ -92,9 +107,9 @@ export const renderHopscotchCourt = (board, { editable = false, states = {}, sta
           ${statusHtml}
           ${inactiveBadge(active)}
         </button>`;
-      }).join('')}</div>${editable ? plus(ri, false) : ''}</div>`).join('')}
+      }).join('')}</div>${editable ? plus(ri, false) : ''}${ri === bodyRow ? renderSatellites(satellites) : ''}</div>`).join('')}
     ${editable ? plus(board.rows.length, true) : tick(true)}
     ${formatReview && !board.rows.some(row => row.houses.some(house => house.kind === 'format_review')) ? `<div class="hop-row hop-input-stage hop-review-stage"><button type="button" class="hop-cell${visibleEnabled(formatReview) ? '' : ' is-disabled'}${formatReview.invocationMode === 'manual' && formatReview.manualEnabled ? ' is-manual' : ''}" data-hop-kind="format_review" data-hop-format-review data-hop-enabled="${formatReview.enabled === true}" aria-label="${e(t('格式修复'))}" aria-description="${e(visibleEnabled(formatReview) ? t(agentInvocationLabel(formatReview)) : hopscotchInactiveLabel(formatReview.reason))}">${runBadge('reply_check')}${courtIcon('format_review')}<span class="hop-title">${e(t('格式修复'))}</span><span class="hop-input-stage-label">${e(visibleEnabled(formatReview) ? t(agentInvocationLabel(formatReview)) : t('已停用'))}</span></button>${editable ? plus(board.rows.length, false, 'format_review') : ''}</div>${editable ? plus(board.rows.length + 1, true, 'format_review') : tick(true)}` : ''}
     <div class="hop-roof is-${e(status || 'idle')}" aria-label="${e(hopscotchStatusLabel(status))}"><span aria-hidden="true">${roofGlyph}</span></div>
-  </div></div>`;
+  </div></div>${renderHopscotchStandby(standby)}`;
 };

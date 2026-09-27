@@ -209,49 +209,45 @@ const PANEL_CSS = `
     line-height: 1.2;
 }
 .agent-center-meta {
-    margin-top: 3px;
+    margin-top: 5px;
     display: flex;
     align-items: center;
+    gap: 6px;
     min-width: 0;
-    font-size: 10.5px;
-    color: var(--app-text-secondary);
-    white-space: nowrap;
-    overflow: hidden;
+    overflow-x: auto;
+    scrollbar-width: none;
 }
-.agent-center-meta-item {
+.agent-center-meta::-webkit-scrollbar { display: none; }
+.agent-center-meta-badge {
     display: inline-flex;
     align-items: center;
+    gap: 5px;
     flex: 0 0 auto;
-}
-.agent-center-meta-item b {
-    margin-left: 2px;
-    color: color-mix(in srgb, var(--app-text-primary) 72%, var(--app-text-secondary));
-    font-weight: 700;
-}
-.agent-center-meta-separator {
-    margin: 0 6px;
-    color: color-mix(in srgb, var(--app-text-secondary) 42%, transparent);
-}
-.agent-center-meta-dot {
-    width: 4px;
-    height: 4px;
-    margin-right: 4px;
+    height: 22px;
+    padding: 0 9px;
+    border: 1px solid var(--app-border-subtle);
     border-radius: 999px;
-    background: #94a3b8;
+    background: var(--app-surface-subtle);
+    color: var(--app-text-secondary);
+    font: inherit;
+    font-size: 11.5px;
+    font-weight: 650;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
 }
-.agent-center-meta-dot.is-active { background: #38bdf8; }
-.agent-center-meta-dot.is-danger { background: #fb7185; }
-.agent-center-meta-dot.is-agent { background: #818cf8; }
-.agent-center-meta-dot.is-prompt { background: #a78bfa; }
-.agent-center-meta-dot.is-diagnostic { background: #fbbf24; }
-.agent-center-meta-dot.is-resource { background: #34d399; }
-.agent-center-meta-dot.is-tool { background: #22d3ee; }
-.agent-center-meta-item.is-danger b { color: var(--app-danger-text, #f43f5e); }
-.agent-center-meta-item.is-on b { color: var(--app-success-text, #059669); }
-.agent-center-meta-tail {
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
+.agent-center-meta-badge b { color: var(--app-text-primary); font-weight: 800; font-variant-numeric: tabular-nums; }
+.agent-center-meta-badge:hover { border-color: var(--app-border-default); background: var(--app-surface-hover); }
+.agent-center-meta-badge:focus-visible { outline: 2px solid var(--app-accent-primary); outline-offset: 2px; }
+.agent-center-meta-badge.is-pending.has-value { border-color: color-mix(in srgb, var(--app-warning-text, #b45309) 30%, transparent); background: color-mix(in srgb, var(--app-warning-text, #b45309) 10%, var(--app-surface-card)); color: var(--app-warning-text, #b45309); }
+.agent-center-meta-badge.is-active.has-value { border-color: color-mix(in srgb, var(--app-accent-primary) 30%, transparent); background: var(--app-accent-soft); color: var(--app-accent-primary); }
+.agent-center-meta-badge.is-danger.has-value { border-color: var(--app-danger-border); background: var(--app-danger-soft); color: var(--app-danger-text); }
+.agent-center-meta-badge.has-value b { color: inherit; }
+.agent-center-meta-gate > i { width: 6px; height: 6px; border-radius: 50%; background: var(--app-text-muted); }
+.agent-center-meta-gate.is-on > i { background: var(--app-success-text, #2ea043); }
+.agent-center-meta-gate.is-on b { color: var(--app-success-text, #2ea043); }
+.agent-center-meta-surface { overflow: hidden; color: var(--app-text-muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .agent-center-actions {
     display: flex;
     align-items: center;
@@ -1545,6 +1541,72 @@ const PANEL_CSS = `
     transform: translateX(-44px);
     transition: opacity 240ms ease, transform 240ms cubic-bezier(0.32, 0.72, 0.24, 1), visibility 0s linear 240ms;
 }
+.agent-center-activity-list { gap: 8px; }
+.agent-center-activity-day { margin: 10px 2px 2px; color: var(--app-text-muted); font-size: 11.5px; font-weight: 750; letter-spacing: .04em; }
+.agent-center-activity-list > .agent-center-activity-day:first-child { margin-top: 0; }
+.agent-center-card.agent-center-activity-row { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; }
+.agent-center-activity-icon { display: grid; place-items: center; flex: none; width: 28px; height: 28px; margin-top: 1px; border-radius: 50%; border: 1px solid var(--app-border-default); background: var(--app-surface-subtle); color: var(--app-text-secondary); font-size: 13px; font-weight: 800; line-height: 1; }
+.agent-center-activity-row[data-run-status='succeeded'] .agent-center-activity-icon { border-color: color-mix(in srgb, var(--app-success-text, #2ea043) 30%, transparent); background: color-mix(in srgb, var(--app-success-text, #2ea043) 10%, var(--app-surface-card)); color: var(--app-success-text, #2ea043); }
+.agent-center-activity-row:is([data-run-status='failed'], [data-run-status='cancelled']) .agent-center-activity-icon { border-color: var(--app-danger-border); background: var(--app-danger-soft); color: var(--app-danger-text); }
+.agent-center-activity-row[data-run-status='waiting_permission'] .agent-center-activity-icon { border-color: color-mix(in srgb, var(--app-warning-text, #b45309) 30%, transparent); background: color-mix(in srgb, var(--app-warning-text, #b45309) 10%, var(--app-surface-card)); color: var(--app-warning-text, #b45309); }
+.agent-center-activity-row:is([data-run-status='running'], [data-run-status='queued']) .agent-center-activity-icon { border: 2px solid var(--app-accent-primary); background: var(--app-accent-soft); }
+.agent-center-activity-main { display: grid; gap: 4px; flex: 1; min-width: 0; }
+.agent-center-activity-main > * { margin: 0; }
+.agent-center-activity-meta { font-size: 11.5px; color: var(--app-text-muted); }
+.agent-center-activity-summary { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.agent-center-activity-more > summary { width: max-content; padding: 2px 0; color: var(--app-text-muted); font-size: 11.5px; font-weight: 650; cursor: pointer; }
+.agent-center-activity-more[open] { display: grid; gap: 6px; }
+.agent-center-usage-summary { display: grid; gap: 10px; }
+.agent-center-usage-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.agent-center-usage-tile { display: grid; align-content: start; gap: 2px; padding: 10px 12px; border: 1px solid var(--app-border-subtle); border-radius: 12px; background: var(--app-surface-card); }
+.agent-center-usage-tile > span { color: var(--app-text-muted); font-size: 11px; font-weight: 700; }
+.agent-center-usage-tile > b { color: var(--app-text-primary); font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.3; }
+.agent-center-usage-tile > small { color: var(--app-text-secondary); font-size: 11px; }
+.agent-center-usage-kinds { margin: 0; }
+.agent-center-resource-list { display: grid; gap: 18px; }
+.agent-center-resource-section { display: grid; gap: 10px; }
+.agent-center-resource-section-title { color: var(--app-text-muted); font-size: 12px; font-weight: 750; letter-spacing: .04em; }
+.agent-center-resource-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.agent-center-card.agent-center-resource-card { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 0; overflow: hidden; }
+.agent-center-resource-main { display: flex; align-items: center; gap: 12px; width: 100%; min-width: 0; padding: 14px; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.agent-center-resource-main:focus-visible { outline: 2px solid var(--app-accent-primary); outline-offset: -2px; border-radius: inherit; }
+.agent-center-resource-icon { display: grid; place-items: center; flex: none; width: 38px; height: 38px; border-radius: 12px; background: var(--app-accent-soft); color: var(--app-accent-primary); }
+.agent-center-resource-icon svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.agent-center-resource-copy { display: grid; gap: 2px; flex: 1; min-width: 0; }
+.agent-center-resource-copy .agent-center-card-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0; }
+.agent-center-resource-state { display: inline-flex; align-items: center; gap: 5px; flex: none; color: var(--app-text-muted); font-size: 11.5px; font-weight: 650; white-space: nowrap; }
+.agent-center-resource-state > i { width: 7px; height: 7px; border-radius: 50%; background: var(--app-success-text, #2ea043); }
+.agent-center-resource-state.is-busy { color: var(--app-warning-text, #b45309); }
+.agent-center-resource-state.is-busy > i { background: var(--app-warning-text, #b45309); }
+.agent-center-resource-actions > [data-resource-open] { display: none; }
+.agent-center-resource-actions:not(:has([data-resource-pending])) { display: none; }
+.agent-center-resource-actions, .agent-center-resource-shortcuts { padding: 0 14px 12px; }
+.agent-center-safety .agent-center-card { display: grid; gap: 10px; }
+.agent-center-safety-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.agent-center-safety-copy { display: grid; gap: 3px; min-width: 0; }
+.agent-center-safety-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.agent-center-safety-columns > div { padding: 10px 12px; border-radius: 12px; background: var(--app-surface-subtle); }
+.agent-center-safety-col-title { margin-bottom: 6px; color: var(--app-text-muted); font-size: 11.5px; font-weight: 750; }
+.agent-center-safety-caps { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: 12.5px; color: var(--app-text-primary); }
+.agent-center-safety-caps li { display: flex; align-items: baseline; gap: 6px; }
+.agent-center-safety-caps span { flex: none; font-weight: 800; }
+.agent-center-safety-caps.is-yes span { color: var(--app-success-text, #2ea043); }
+.agent-center-safety-caps.is-no span { color: var(--app-danger-text); }
+.agent-center-safety-divider { height: 1px; background: var(--app-border-subtle); }
+.agent-center-segmented { display: inline-flex; gap: 2px; width: max-content; max-width: 100%; padding: 3px; border-radius: 12px; background: var(--app-surface-subtle); }
+.agent-center-segment { min-height: 30px; padding: 0 14px; border: 0; border-radius: 9px; background: transparent; color: var(--app-text-secondary); font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; }
+.agent-center-segment.is-active { background: var(--app-surface-card); color: var(--app-accent-primary); box-shadow: 0 1px 3px color-mix(in srgb, var(--app-text-primary) 12%, transparent); }
+.agent-center-segment:focus-visible { outline: 2px solid var(--app-accent-primary); outline-offset: 1px; }
+@media (max-width: 600px) { .agent-center-safety-columns { grid-template-columns: minmax(0, 1fr); } }
+.agent-center-float-about { display: grid; gap: 8px; margin: -2px 0 14px; }
+.agent-center-float-about > .agent-center-chip-row, .agent-center-float-about > div:first-child { margin: 0; }
+.agent-center-float-about-detail { border: 1px solid var(--app-border-subtle); border-radius: 12px; background: var(--app-surface-subtle); }
+.agent-center-float-about-detail > summary { display: flex; align-items: center; gap: 6px; padding: 8px 12px; color: var(--app-text-secondary); font-size: 12px; font-weight: 700; cursor: pointer; list-style: none; }
+.agent-center-float-about-detail > summary::-webkit-details-marker { display: none; }
+.agent-center-float-about-detail > summary::after { content: ''; width: 6px; height: 6px; margin-left: auto; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg) translateY(-2px); opacity: .6; transition: transform 160ms ease; }
+.agent-center-float-about-detail[open] > summary::after { transform: rotate(225deg) translateY(-2px); }
+.agent-center-float-about-detail > p { margin: 0; padding: 0 12px 8px; color: var(--app-text-secondary); font-size: 12.5px; line-height: 1.65; }
+.agent-center-float-about-detail > p:last-child { padding-bottom: 12px; }
 .agent-center-floating-card.is-flipped .agent-center-floating-face-back {
     opacity: 1;
     visibility: visible;
@@ -2050,14 +2112,19 @@ const PANEL_CSS = `
     transition: background 120ms ease, border-color 120ms ease, color 120ms ease, transform 90ms ease, box-shadow 120ms ease;
 }
 .agent-center-card-action.is-primary {
-    border-color: rgba(14,165,233,0.34);
-    background: rgba(14,165,233,0.14);
-    color: #0369a1;
+    border-color: transparent;
+    background: var(--app-accent-primary);
+    color: var(--app-text-inverse, #fff);
+    box-shadow: 0 8px 16px -12px var(--app-accent-primary);
+}
+.agent-center-card-action.is-primary:hover:not(:disabled) {
+    border-color: transparent;
+    background: color-mix(in srgb, var(--app-accent-primary) 86%, var(--app-text-primary));
 }
 .agent-center-card-action.is-danger {
-    border-color: rgba(244,63,94,0.24);
-    background: rgba(244,63,94,0.08);
-    color: #be123c;
+    border-color: var(--app-danger-border);
+    background: var(--app-danger-soft);
+    color: var(--app-danger-text);
 }
 .agent-center-chip {
     display: inline-flex;
@@ -2071,36 +2138,10 @@ const PANEL_CSS = `
     font-weight: 600;
     white-space: nowrap;
 }
-.agent-center-resource-list {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 8px;
-}
-.agent-center-resource-card {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 8px 12px;
-    align-items: center;
-}
 .agent-center-resource-card:hover {
-    border-color: rgba(59,130,246,0.22);
-    box-shadow: 0 6px 18px rgba(15,23,42,0.08);
+    border-color: color-mix(in srgb, var(--app-accent-primary) 28%, var(--app-border-default));
+    box-shadow: 0 10px 22px -18px color-mix(in srgb, var(--app-accent-primary) 70%, transparent);
     transform: translateY(-1px);
-}
-.agent-center-resource-card .agent-center-card-head {
-    align-items: center;
-}
-.agent-center-resource-group {
-    margin-bottom: 2px;
-    color: var(--app-text-secondary);
-    font-size: 12px;
-    font-weight: 700;
-}
-.agent-center-resource-main {
-    min-width: 0;
-}
-.agent-center-resource-main .agent-center-card-sub {
-    margin-top: 2px;
 }
 .agent-center-resource-shortcuts {
     grid-column: 1 / -1;
@@ -2127,10 +2168,6 @@ const PANEL_CSS = `
 }
 .agent-center-resource-shortcut:active {
     transform: translateY(1px);
-}
-.agent-center-resource-actions {
-    margin-top: 0;
-    justify-content: flex-end;
 }
 .agent-center-chip.is-risk-high,
 .agent-center-chip.is-risk-medium {
@@ -2166,22 +2203,34 @@ const PANEL_CSS = `
 }
 .agent-center-usage-summary {
     margin: 4px 0 10px;
-    padding: 10px 12px;
-    border: 1px solid rgba(148,163,184,0.20);
-    border-radius: 12px;
-    background: var(--app-surface-card);
 }
 .agent-center-usage-summary-title {
-    margin-bottom: 4px;
+    margin-bottom: 0;
     font-size: 12px;
     font-weight: 700;
     color: var(--app-text-secondary);
 }
 .agent-center-empty {
-    padding: 28px 12px;
+    display: grid;
+    justify-items: center;
+    gap: 12px;
+    margin: 4px 0;
+    padding: 36px 20px;
+    border: 1px dashed var(--app-border-default);
+    border-radius: 18px;
+    background: color-mix(in srgb, var(--app-surface-subtle) 60%, transparent);
     color: var(--app-text-secondary);
     text-align: center;
     font-size: 13px;
+    line-height: 1.7;
+}
+.agent-center-empty::before {
+    content: '';
+    width: 44px;
+    height: 44px;
+    border-radius: 14px;
+    background: radial-gradient(circle, color-mix(in srgb, var(--app-accent-primary) 70%, transparent) 0 5px, transparent 6px), var(--app-accent-soft);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--app-accent-primary) 18%, transparent);
 }
 .agent-center-error {
     margin-bottom: 10px;
@@ -2484,6 +2533,17 @@ const renderChips = (chips = []) => {
     return html ? `<div class="agent-center-chip-row">${html}</div>` : '';
 };
 
+// 资源分页：按 id 分组与挑图标（记忆与资料 / 生成与规则）
+const RESOURCE_SECTION_BY_ID = Object.freeze({ memory_center: 'memory', worldbook: 'memory', variables: 'memory', contact_profiles: 'memory', image_templates: 'generate', regex_postprocess: 'generate' });
+const RESOURCE_ICON_BY_ID = Object.freeze({
+    memory_center: '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M4 10h16M10 10v10"/>',
+    worldbook: '<path d="M5 4h11l3 3v13H5z"/><path d="M9 10h6M9 14h6"/>',
+    variables: '<path d="M6 4v16M12 4v16M18 4v16"/><circle cx="6" cy="14" r="2"/><circle cx="12" cy="8" r="2"/><circle cx="18" cy="16" r="2"/>',
+    contact_profiles: '<circle cx="12" cy="9" r="3.5"/><path d="M5 20c1.5-3.5 4-5 7-5s5.5 1.5 7 5"/>',
+    image_templates: '<rect x="3" y="4" width="18" height="16" rx="3"/><path d="m4 17 5-5 4 4 3-3 4 4"/><circle cx="16" cy="9" r="1.4"/>',
+    regex_postprocess: '<path d="M4 7h10M4 12h16M4 17h7"/><circle cx="17" cy="7" r="2"/><circle cx="14" cy="17" r="2"/>',
+});
+
 const renderEmpty = message => `<div class="agent-center-empty" data-i18n-skip>${escapeHtml(translateUiText(message))}</div>`;
 
 // Phase B 只读用量：token/延迟的紧凑格式化，仅呈现真实计量，无估算。
@@ -2534,11 +2594,18 @@ const renderUsageProfileSummary = (profile = null) => {
         .filter(k => Number(k.runCount) > 0)
         .slice(0, 3)
         .map(k => `${translateUiText(displayAgentKind(k.kind))} ${Number(k.runCount)}${k.recordedCount ? ` (Token ${formatTokenCount(k.totalTokens)})` : ''}`);
+    void parts;
+    // 三个数字块：次数、Token、延迟；类型分布作为小标签
+    const tile = (label, value, sub = '') => `<div class="agent-center-usage-tile"><span>${escapeHtml(label)}</span><b data-i18n-skip>${escapeHtml(value)}</b>${sub ? `<small data-i18n-skip>${escapeHtml(sub)}</small>` : ''}</div>`;
     return `
         <div class="agent-center-usage-summary">
             <div class="agent-center-usage-summary-title">用量画像（当前活动列表 · 只读）</div>
-            <div class="agent-center-card-sub" data-i18n-skip>${escapeHtml(formatMeta(parts))}</div>
-            ${topKinds.length ? `<div class="agent-center-card-sub" data-i18n-skip>${escapeHtml(topKinds.join(' · '))}</div>` : ''}
+            <div class="agent-center-usage-tiles">
+                ${tile(t('运行'), String(Number(overall.runCount)), formatMeta([translateUiText(`已计量 ${Number(overall.recordedCount)}`), overall.unknownCount ? translateUiText(`未计量 ${Number(overall.unknownCount)}`) : '']))}
+                ${tile(t('Token 合计'), overall.recordedCount ? formatTokenCount(overall.totalTokens) : '—', overall.avgTotalTokens != null ? translateUiText(`均 ${formatTokenCount(overall.avgTotalTokens)}/次`) : '')}
+                ${tile(t('均延迟'), overall.avgLatencyMs != null ? formatLatencyMs(overall.avgLatencyMs) : '—', overall.degradedCount ? translateUiText(`降级 ${Number(overall.degradedCount)}`) : '')}
+            </div>
+            ${topKinds.length ? `<div class="agent-center-chip-row agent-center-usage-kinds" data-i18n-skip>${topKinds.map(kind => `<span class="agent-center-chip">${escapeHtml(kind)}</span>`).join('')}</div>` : ''}
         </div>`;
 };
 
@@ -3144,8 +3211,10 @@ export class AgentCenterPanel {
         getFailureSeenAt = () => 0,
         markFailureSeen = () => {},
         getHopscotchPanel = () => null,
+        resolveSessionLabel = sessionId => sessionId,
     } = {}) {
         this.getActions = getActions;
+        this.resolveSessionLabel = resolveSessionLabel;
         this.confirm = confirm;
         this.choice = choice;
         this.promptText = promptText;
@@ -3584,8 +3653,11 @@ export class AgentCenterPanel {
 
     renderTabs() {
         if (!this.tabsElement) return;
-        this.tabsElement.innerHTML = this.view.tabs.map((tab) => `
-            ${tab.id === 'activity' ? '<span class="agent-center-tab-divider" aria-hidden="true"></span>' : ''}
+        // 按用途分组显示：流程（Agent、提示词）｜运行（待处理、活动、诊断）｜设置（资源、安全）
+        const groups = { agents: 0, prompts: 0, global_prompts: 0, pending: 1, activity: 1, diagnostics: 1, resources: 2, safety: 2 };
+        const tabs = [...this.view.tabs].sort((a, b) => (groups[a.id] ?? 3) - (groups[b.id] ?? 3));
+        this.tabsElement.innerHTML = tabs.map((tab, index) => `
+            ${index && (groups[tab.id] ?? 3) !== (groups[tabs[index - 1].id] ?? 3) ? '<span class="agent-center-tab-divider" aria-hidden="true"></span>' : ''}
             <button
                 type="button"
                 class="agent-center-tab${tab.id === this.activeTab ? ' is-active' : ''}"
@@ -3599,28 +3671,25 @@ export class AgentCenterPanel {
         });
     }
 
+    // 标题栏只留需要留意的三项与工具开关；各类数量已显示在对应分页上
     renderMeta() {
         if (!this.metaElement) return;
         const meta = this.view.meta || {};
         const items = [
-            { label: '待确认', value: Number(meta.pending || 0), tone: 'muted' },
-            { label: '活动中', value: Number(meta.activeRuns || 0), tone: 'active' },
-            { label: '失败', value: Number(meta.failedRuns || 0), tone: 'danger' },
-            { label: 'Agent', value: `${Number(meta.enabledAgents || 0)}/${Number(meta.agents || 0)}`, tone: 'agent' },
-            { label: '提示词', value: `${Number(meta.enabledPromptModules || 0)}/${Number(meta.promptModules || 0)}`, tone: 'prompt' },
-            { label: '诊断', value: Number(meta.diagnosticViews || 0), tone: 'diagnostic' },
-            { label: '资源', value: Number(meta.resources || 0), tone: 'resource' },
-            { label: '工具', value: Number(meta.tools || 0), tone: 'tool' },
-            this.surface ? { label: '范围', value: this.surface, tone: 'muted', tail: true } : null,
-            { label: '当前会话', value: meta.sessionGateEnabled ? '已开启' : '未开启', tone: meta.sessionGateEnabled ? 'on' : 'muted', tail: true },
-        ].filter(Boolean);
-        this.metaElement.innerHTML = items.map((item, index) => `
-            ${index ? '<span class="agent-center-meta-separator" aria-hidden="true">·</span>' : ''}
-            <span class="agent-center-meta-item is-${escapeHtml(item.tone)}${item.tail ? ' agent-center-meta-tail' : ''}">
-                <i class="agent-center-meta-dot is-${escapeHtml(item.tone)}" aria-hidden="true"></i>
-                ${escapeHtml(item.label)} <b>${escapeHtml(item.value)}</b>
-            </span>
-        `).join('');
+            { label: '待确认', value: Number(meta.pending || 0), tone: 'pending', tab: 'pending' },
+            { label: '运行中', value: Number(meta.activeRuns || 0), tone: 'active', tab: 'activity' },
+            { label: '失败', value: Number(meta.failedRuns || 0), tone: 'danger', tab: 'activity', status: 'failure' },
+        ];
+        const gateOn = meta.sessionGateEnabled === true;
+        this.metaElement.innerHTML = items.map(item => `
+            <button type="button" class="agent-center-meta-badge is-${item.tone}${item.value ? ' has-value' : ''}" data-meta-tab="${item.tab}" ${item.status ? `data-meta-status="${item.status}"` : ''}>${escapeHtml(translateUiText(item.label))}<b>${item.value}</b></button>
+        `).join('') + `
+            <button type="button" class="agent-center-meta-badge agent-center-meta-gate${gateOn ? ' is-on' : ''}" data-meta-tab="safety" title="${escapeHtml(t('当前会话的 Agent 工具'))}"><i aria-hidden="true"></i>${escapeHtml(translateUiText('Agent 工具'))}<b>${escapeHtml(translateUiText(gateOn ? '已开启' : '未开启'))}</b></button>
+            ${this.surface ? `<span class="agent-center-meta-surface">${escapeHtml(this.surface)}</span>` : ''}`;
+        this.metaElement.querySelectorAll('[data-meta-tab]').forEach(button => button.addEventListener('click', () => {
+            this.setActiveTab(button.dataset.metaTab, { resetActivityStatus: !button.dataset.metaStatus });
+            if (button.dataset.metaStatus) this.setActivityStatus(button.dataset.metaStatus);
+        }));
     }
 
     getAgentModelSelectValue(agent = {}) {
@@ -4090,7 +4159,7 @@ export class AgentCenterPanel {
         const title = agent.title || displayAgentFeature(agent.id);
         return `
             <div class="agent-center-setting-row is-status">
-                <span class="agent-center-setting-label${agent.id === 'reply_check' ? ' has-help' : ''}" ${agent.id === 'reply_check' ? `data-help-mode="tap" data-help="${escapeHtml(t('启用与模型设置为全局共享；创意写作按各会话的格式要求检查。'))}"` : ''}>状态</span>
+                <span class="agent-center-setting-label${agent.id === 'reply_check' || agent.switchLabel ? ' has-help' : ''}" ${agent.id === 'reply_check' ? `data-help-mode="tap" data-help="${escapeHtml(t('启用与模型设置为全局共享；创意写作按各会话的格式要求检查。'))}"` : agent.switchLabel ? `data-help-mode="tap" data-help="${escapeHtml(translateUiText(agent.summary || ''))}"` : ''}>${escapeHtml(agent.switchLabel || t('状态'))}</span>
                 <span class="agent-center-setting-value">${agent.enabled ? '已开启' : '已关闭'}</span>
                 <button
                     type="button"
@@ -4224,6 +4293,18 @@ export class AgentCenterPanel {
         `;
     }
 
+    renderFloatingAgentAbout(agent = {}) {
+        if (agent.contextual) return '';
+        const detail = (Array.isArray(agent.detail) && agent.detail.length ? agent.detail : [agent.summary]).filter(Boolean);
+        const enabled = agent.workflowState ? agent.workflowState.enabled : agent.enabled;
+        const chips = renderChips([
+            agent.id === 'memory_table_agent' || trim(agent.cardGroup || agent.category) === 'diagnostic' ? null : { label: agent.workflowState ? (enabled ? t('已启用') : t('已停用')) : agent.statusLabel || (enabled ? '已开启' : '已关闭'), className: statusChipClass(enabled ? 'running' : agent.workflowState ? 'idle' : 'denied') },
+            agent.category ? { label: displayCardCategory(agent.category) } : null,
+            agent.implemented === false ? { label: '规划中', className: statusChipClass('pending') } : null,
+        ]);
+        return `<div class="agent-center-float-about">${chips}${detail.length ? `<details class="agent-center-float-about-detail"><summary>${escapeHtml(t('说明'))}</summary>${detail.map(line => `<p>${escapeHtml(line)}</p>`).join('')}</details>` : ''}</div>`;
+    }
+
     renderFloatingAgentBack(agent = {}, { configuration = this.renderAgentConfiguration(agent), subtitle = t(isConfigurableAgent(agent.id) || agent.promptRefs?.length || agent.id === 'memory_table_agent' ? '配置 · 保存后生效' : '配置 · 修改后即时生效'), toolbarExtra = '' } = {}) {
         return `
             <div class="agent-center-agent-title-row">
@@ -4240,6 +4321,7 @@ export class AgentCenterPanel {
                     <button type="button" class="agent-center-icon-button" data-agent-float-close data-maid-guide-target="agent-center-detail-close" data-maid-guide-back="agent-center-detail" title="关闭" aria-label="关闭">${ICONS.close}</button>
                 </div>
             </div>
+            ${this.renderFloatingAgentAbout(agent)}
             ${configuration}
         `;
     }
@@ -4261,9 +4343,9 @@ export class AgentCenterPanel {
         `;
     }
 
-    mountHopscotchAgentCard(host, { agentId = '', card, frontExtra = '', toolbarExtra = '', content, configure = false, readOnly = false, onClose, fusedConfigs = [], onOpenFused = null, buildPromptPreview = null, workflowState = null, configScope = 'local' } = {}) {
+    mountHopscotchAgentCard(host, { agentId = '', card, frontExtra = '', toolbarExtra = '', content, configure = false, readOnly = false, onClose, fusedConfigs = [], onOpenFused = null, buildPromptPreview = null, workflowState = null, configScope = 'local', featureSwitches = [] } = {}) {
         if (!host) return null;
-        const entry = { host, agentId, card, frontExtra, toolbarExtra, content, readOnly, onClose, fusedConfigs, onOpenFused, buildPromptPreview, workflowState, configScope, preview: null, flipped: configure, entering: true };
+        const entry = { host, agentId, card, frontExtra, toolbarExtra, content, readOnly, onClose, fusedConfigs, onOpenFused, buildPromptPreview, workflowState, configScope, featureSwitches, preview: null, flipped: configure, entering: true };
         this.sharedAgentConfig = entry;
         this.refreshSharedAgentConfig();
         return {
@@ -4299,9 +4381,12 @@ export class AgentCenterPanel {
         // 编排表单保留原节点；AC 后台刷新不得重建房子的未提交输入。
         entry.content?.remove();
         const fusedLinks = entry.fusedConfigs.length ? `<div class="agent-center-card-actions">${entry.fusedConfigs.map(config => `<button type="button" class="agent-center-card-action" data-hop-fused-open="${escapeHtml(config.id)}">${escapeHtml(config.label)}</button>`).join('')}</div>` : '';
-        const configuration = linkedAgent
+        // 房子里的附加开关：与 AC 中同名功能是同一个设置
+        const featureSwitchLabels = { write_preview: t('修改前先预览') };
+        const featureSwitches = (entry.featureSwitches || []).map(id => this.getAgentCardById(id)).filter(Boolean).map(feature => this.renderAgentEnabledSetting({ ...feature, switchLabel: featureSwitchLabels[feature.id] })).join('');
+        const configuration = featureSwitches + (linkedAgent
             ? this.renderAgentConfiguration(agent)
-            : agent.id === 'body' ? this.renderAgentPromptPreviewAction(agent) + (fusedLinks ? `<div class="agent-center-agent-section"><div class="agent-center-agent-section-title">${escapeHtml(t('配置'))}</div>${fusedLinks}</div>` : '') : '';
+            : agent.id === 'body' ? this.renderAgentPromptPreviewAction(agent) + (fusedLinks ? `<div class="agent-center-agent-section"><div class="agent-center-agent-section-title">${escapeHtml(t('配置'))}</div>${fusedLinks}</div>` : '') : '');
         entry.host.innerHTML = this.renderFloatingAgentCard({
             agent, flipped: entry.flipped, entering: entry.entering,
             toolbarExtra: entry.readOnly ? '' : entry.toolbarExtra,
@@ -4357,11 +4442,19 @@ export class AgentCenterPanel {
         const agents = Array.isArray(cards) ? cards : [];
         if (!agents.length) return renderEmpty(emptyMessage);
         if (this.getHopscotchPanel()) {
-            return `<div class="hop-agent-shelf">${agents.map(agent => `
-                <button type="button" class="agent-center-card agent-center-agent-card hop-cell hop-agent-tile" data-agent-accent="${escapeHtml(agent.accent || '')}" data-agent-card-open="${escapeHtml(agent.id)}" data-maid-guide-target="agent-center-card">
-                    <span class="hop-title">${escapeHtml(agent.title || displayAgentFeature(agent.id))}</span>
-                    <span class="hop-cell-status">${escapeHtml(translateUiText(trim(agent.cardGroup || agent.category) === 'diagnostic' ? '诊断视图' : !agent.implemented ? '规划中' : agent.enabled ? '已开启' : '已关闭'))}</span>
-                </button>`).join('')}</div>`;
+            // 索引卡：图标、名称、一行摘要与状态，点开即进设置
+            return `<div class="hop-agent-shelf">${agents.map(agent => {
+                const diagnostic = trim(agent.cardGroup || agent.category) === 'diagnostic';
+                const state = diagnostic ? 'view' : !agent.implemented ? 'planned' : agent.enabled ? 'on' : 'off';
+                return `
+                <button type="button" class="hop-agent-tile" data-agent-accent="${escapeHtml(agent.accent || '')}" data-agent-card-open="${escapeHtml(agent.id)}" data-maid-guide-target="agent-center-card" data-agent-state="${state}">
+                    <span class="hop-agent-tile-icon" data-i18n-skip>${displayAgentCardGlyph(agent)}</span>
+                    <span class="hop-agent-tile-copy">
+                        <span class="hop-title">${escapeHtml(agent.title || displayAgentFeature(agent.id))}</span>
+                        <span class="hop-agent-tile-summary">${escapeHtml(translateUiText(agent.summary || ''))}</span>
+                    </span>
+                    <span class="hop-agent-tile-state"><i aria-hidden="true"></i>${escapeHtml(translateUiText(diagnostic ? '诊断视图' : !agent.implemented ? '规划中' : agent.enabled ? '已开启' : '已关闭'))}</span>
+                </button>`; }).join('')}</div>`;
         }
         const animate = this.cardEntryAnimationUntil === Number.POSITIVE_INFINITY;
         if (animate) {
@@ -4775,7 +4868,8 @@ export class AgentCenterPanel {
         this.openFloatingAgentCard(agentId);
     }
 
-    openFloatingAgentCard(agentId = '', { messageId = '', scope = '', context = null } = {}) {
+    // 卡片打开即是设置面；说明收在设置面顶部。诊断视图没有设置，仍从正面开始。
+    openFloatingAgentCard(agentId = '', { messageId = '', scope = '', context = null, face = '' } = {}) {
         const id = trim(agentId);
         this.floatingRepairOptions = null;
         this.floatingAgentConfigScope = scope;
@@ -4785,7 +4879,8 @@ export class AgentCenterPanel {
         this.floatingAgentEntryPending = !mountedCard || this.floatingAgentId !== id;
         this.floatingAgentId = id;
         this.floatingAgentMessageId = messageId;
-        this.floatingAgentFlipped = false;
+        const diagnostic = trim(this.getAgentCardById(id)?.cardGroup || this.getAgentCardById(id)?.category) === 'diagnostic';
+        this.floatingAgentFlipped = face ? face === 'config' : !diagnostic;
         this.render();
     }
 
@@ -5332,23 +5427,44 @@ export class AgentCenterPanel {
         if (!runs.length) {
             return `${filterHtml}${usageSummary}${intro}${renderEmpty(activeStatus ? `没有${activityStatusLabel(activeStatus)} Agent 活动` : '还没有 Agent 活动记录。AI 检查、候选和后台任务会显示在这里。')}`;
         }
-        return `${filterHtml}${usageSummary}${intro}<div class="agent-center-list">${runs.map(run => {
+        // 时间线：按天分组，一条一行；错误与待处理操作直接显示，其余细节收进“详情”
+        const dayLabel = at => {
+            if (!at) return t('更早');
+            const date = new Date(at), today = new Date(), yesterday = new Date(); yesterday.setDate(today.getDate() - 1);
+            if (date.toDateString() === today.toDateString()) return translateUiText('今天');
+            if (date.toDateString() === yesterday.toDateString()) return translateUiText('昨天');
+            return date.toLocaleDateString();
+        };
+        const timeLabel = at => at ? new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+        const statusGlyph = status => ({ succeeded: '✓', failed: '✕', cancelled: '–', waiting_permission: '!', running: '…', queued: '…' })[trim(status)] ?? '·';
+        let lastDay = null;
+        return `${filterHtml}${usageSummary}${intro}<div class="agent-center-list agent-center-activity-list">${runs.map(run => {
             const failureDetail = trim(run.errorMessage || run.cancelReason || run.lastStep?.errorMessage);
-            return `
-            <article class="${escapeHtml(activityCardClass(run))}">
+            const at = Number(run.updatedAt || run.finishedAt || run.createdAt || 0);
+            const day = dayLabel(at);
+            const dayHeader = day !== lastDay ? `<div class="agent-center-activity-day">${escapeHtml(day)}</div>` : '';
+            lastDay = day;
+            const sessionLabel = run.sessionId ? trim(this.resolveSessionLabel?.(run.sessionId), run.sessionId) : '';
+            return `${dayHeader}
+            <article class="${escapeHtml(activityCardClass(run))} agent-center-activity-row" data-run-status="${escapeHtml(trim(run.status))}">
+                <span class="agent-center-activity-icon" aria-hidden="true">${escapeHtml(statusGlyph(run.status))}</span>
+                <div class="agent-center-activity-main">
                 <div class="agent-center-card-head">
                     <div>
                         <div class="agent-center-card-title" data-i18n-skip>${escapeHtml(translateUiText(run.title || run.kind || run.id))}</div>
-                        <div class="agent-center-card-sub" data-i18n-skip>${escapeHtml(formatMeta([
+                        <div class="agent-center-card-sub agent-center-activity-meta" data-i18n-skip>${escapeHtml(formatMeta([
                             translateUiText(displayAgentKind(run.kind)),
-                            run.sessionId ? translateUiText(`范围：${run.sessionId}`) : '',
+                            sessionLabel,
+                            timeLabel(at),
                         ]))}</div>
                     </div>
                     <span class="${escapeHtml(statusChipClass(run.status))}">${escapeHtml(displayRunStatusLabel(run))}</span>
                 </div>
-                <div class="agent-center-card-sub" data-i18n-skip>${escapeHtml(translateUiText(displayRunSummary(run)))}</div>
-                ${run.goal && run.goal !== run.title ? `<div class="agent-center-card-sub">${escapeHtml(translateUiText('目标：'))}<span data-i18n-skip>${escapeHtml(run.goal)}</span></div>` : ''}
+                <div class="agent-center-card-sub agent-center-activity-summary" data-i18n-skip>${escapeHtml(translateUiText(displayRunSummary(run)))}</div>
                 ${failureDetail ? `<div class="agent-center-card-sub agent-center-card-error">${escapeHtml(translateUiText('错误：'))}<span data-i18n-skip>${escapeHtml(failureDetail)}</span></div>` : ''}
+                <details class="agent-center-activity-more"><summary>${escapeHtml(translateUiText('详情'))}</summary>
+                ${run.goal && run.goal !== run.title ? `<div class="agent-center-card-sub">${escapeHtml(translateUiText('目标：'))}<span data-i18n-skip>${escapeHtml(run.goal)}</span></div>` : ''}
+                ${run.sessionId ? `<div class="agent-center-card-sub" data-i18n-skip>${escapeHtml(translateUiText(`范围：${run.sessionId}`))}</div>` : ''}
                 ${renderChips([
                     { label: `步骤 ${Number(run.stepCount || 0)}` },
                     { label: `工具 ${Number(run.toolCallCount || 0)}` },
@@ -5357,6 +5473,7 @@ export class AgentCenterPanel {
                     run.failureCode ? { label: `原因：${run.failureCode}` } : null,
                     run.lastStep ? { label: `最近：${displayAgentKind(run.lastStep.type)}` } : null,
                 ])}
+                </details>
                 ${renderChatFormatReview(run.review)}
                 ${run.status === 'waiting_permission' ? `
                     <div class="agent-center-card-actions">
@@ -5368,6 +5485,7 @@ export class AgentCenterPanel {
                         <button type="button" class="agent-center-card-action is-danger" data-agent-run-review-action="reject" data-run-id="${escapeHtml(run.id)}">打回</button>
                     </div>
                 ` : ''}
+                </div>
             </article>
         `; }).join('')}</div>`;
     }
@@ -5375,23 +5493,33 @@ export class AgentCenterPanel {
     renderResources() {
         const resources = this.view.resources || [];
         if (!resources.length) return renderEmpty('还没有可管理资源入口。');
-        return `<div class="agent-center-resource-list">${resources.map(resource => {
+        // 按用途分两组；卡片整块可点，分类名只在组标题出现一次
+        const sectionOf = resource => (RESOURCE_SECTION_BY_ID[trim(resource.id)] === 'generate' ? t('生成与规则') : RESOURCE_SECTION_BY_ID[trim(resource.id)] === 'memory' ? t('记忆与资料') : t('其他'));
+        const iconOf = resource => RESOURCE_ICON_BY_ID[trim(resource.id)] || '<circle cx="12" cy="12" r="7"/>';
+        const sections = [];
+        for (const resource of resources) {
+            const name = sectionOf(resource);
+            (sections.find(item => item.name === name) || sections[sections.push({ name, items: [] }) - 1]).items.push(resource);
+        }
+        return `<div class="agent-center-resource-list">${sections.map(section => `
+            <section class="agent-center-resource-section">
+                <div class="agent-center-resource-section-title">${escapeHtml(section.name)}</div>
+                <div class="agent-center-resource-grid">${section.items.map(resource => {
             const shortcuts = Array.isArray(resource.shortcuts) ? resource.shortcuts.filter(item => item?.label && item?.promptId) : [];
+            const busy = Number(resource.count || 0) > 0;
             return `
             <article class="agent-center-card agent-center-resource-card">
-                <div class="agent-center-resource-main">
-                    <div class="agent-center-card-head">
-                        <div>
-                            <div class="agent-center-resource-group" data-i18n-skip>${escapeHtml(translateUiText(resource.group || '资源'))}</div>
-                            <div class="agent-center-card-title" data-i18n-skip>${escapeHtml(translateUiText(resource.title || resource.id))}</div>
-                        </div>
-                        <span class="${escapeHtml(statusChipClass(Number(resource.count || 0) > 0 ? 'pending' : 'succeeded'))}" data-i18n-skip>${escapeHtml(translateUiText(resource.status || '就绪'))}</span>
-                    </div>
-                    ${resource.summary ? `<div class="agent-center-card-sub" data-i18n-skip>${escapeHtml(translateUiText(resource.summary))}</div>` : ''}
-                </div>
+                <button type="button" class="agent-center-resource-main" data-resource-open="${escapeHtml(resource.id)}">
+                    <span class="agent-center-resource-icon" aria-hidden="true"><svg viewBox="0 0 24 24">${iconOf(resource)}</svg></span>
+                    <span class="agent-center-resource-copy">
+                        <span class="agent-center-card-title" data-i18n-skip>${escapeHtml(translateUiText(resource.title || resource.id))}</span>
+                        ${resource.summary ? `<span class="agent-center-card-sub" data-i18n-skip>${escapeHtml(translateUiText(resource.summary))}</span>` : ''}
+                    </span>
+                    <span class="agent-center-resource-state${busy ? ' is-busy' : ''}" data-i18n-skip><i aria-hidden="true"></i>${escapeHtml(translateUiText(resource.status || '就绪'))}</span>
+                </button>
                 <div class="agent-center-card-actions agent-center-resource-actions">
                     <button type="button" class="agent-center-card-action is-primary" data-resource-open="${escapeHtml(resource.id)}" data-i18n-skip>${escapeHtml(translateUiText(resource.actionLabel || '打开'))}</button>
-                    ${Number(resource.count || 0) > 0 ? `<button type="button" class="agent-center-card-action" data-resource-pending="${escapeHtml(resource.id)}">待处理</button>` : ''}
+                    ${busy ? `<button type="button" class="agent-center-card-action" data-resource-pending="${escapeHtml(resource.id)}">待处理</button>` : ''}
                 </div>
                 ${shortcuts.length ? `<div class="agent-center-resource-shortcuts">${shortcuts.map(shortcut => `
                     <button
@@ -5402,7 +5530,8 @@ export class AgentCenterPanel {
                     data-i18n-skip>${escapeHtml(translateUiText(shortcut.label))}</button>
                 `).join('')}</div>` : ''}
             </article>
-        `; }).join('')}</div>`;
+        `; }).join('')}</div>
+            </section>`).join('')}</div>`;
     }
 
     async handleResourceOpen(resourceId = '', options = {}) {
@@ -6729,39 +6858,34 @@ export class AgentCenterPanel {
         const writePreview = gate.writePreviewTools || {};
         const writePreviewEnabled = writePreview.enabled === true;
         const defaultStrategy = normalizeContinuationCommitStrategy(policy.defaultStrategy);
-        return `<div class="agent-center-list">
+        // 两个开关、能力的“会做 / 不会做”两栏；按钮的 data 属性与原来一致
+        const safetySwitch = (on, attrs, label, title, sub) => `
+            <div class="agent-center-safety-row">
+                <div class="agent-center-safety-copy">
+                    <div class="agent-center-card-title">${escapeHtml(title)}</div>
+                    <div class="agent-center-card-sub">${escapeHtml(sub)}</div>
+                </div>
+                <button type="button" class="agent-center-switch${on ? ' is-on' : ''}" role="switch" aria-checked="${on}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}" ${attrs}><span class="agent-center-switch-track" aria-hidden="true"><span class="agent-center-switch-thumb"></span></span></button>
+            </div>`;
+        const willDo = list(gate.allowedTools).map(tool => displayToolName(tool));
+        const wontDo = [
+            gate.networkAllowed ? '' : '不会联网继续',
+            gate.realRunnerAllowed ? '' : '不会自动继续生成',
+            gate.writesChat ? '' : '不会自动写聊天',
+        ].filter(Boolean);
+        const allowedExtra = [gate.networkAllowed ? '允许联网继续' : '', gate.realRunnerAllowed ? '允许真实继续生成' : '', gate.writesChat ? '可写聊天' : ''].filter(Boolean);
+        const capabilityList = (items, mark, tone) => items.length ? `<ul class="agent-center-safety-caps is-${tone}">${items.map(item => `<li><span aria-hidden="true">${mark}</span>${escapeHtml(translateUiText(item))}</li>`).join('')}</ul>` : '';
+        return `<div class="agent-center-list agent-center-safety">
             <article class="agent-center-card">
-                <div class="agent-center-card-head">
-                    <div>
-                        <div class="agent-center-card-title">当前会话 Agent 工具</div>
-                        <div class="agent-center-card-sub">${escapeHtml(gateEnabled ? 'AI 可以请求已允许的工具，执行前仍会让你确认。' : 'AI 现在不会执行工具请求。')}</div>
-                    </div>
-                    <span class="${escapeHtml(statusChipClass(gateEnabled ? 'running' : 'denied'))}">${escapeHtml(gateEnabled ? '已开启' : '已关闭')}</span>
-                </div>
+                ${safetySwitch(gateEnabled, `data-session-gate-action="${escapeHtml(gateEnabled ? 'disable' : 'enable')}"`, gateEnabled ? t('关闭当前会话 Agent 工具') : t('开启当前会话 Agent 工具'), t('当前会话 Agent 工具'), gateEnabled ? t('AI 可以请求已允许的工具，执行前仍会让你确认。') : t('AI 现在不会执行工具请求。'))}
                 <div class="agent-center-card-sub">开启后仍不会自动继续生成，也不会直接写聊天正文。</div>
-                ${renderChips([
-                    { label: gate.networkAllowed ? '允许联网继续' : '不会联网继续' },
-                    { label: gate.realRunnerAllowed ? '允许真实继续生成' : '不会自动继续生成' },
-                    { label: gate.writesChat ? '可写聊天' : '不会自动写聊天' },
-                    ...list(gate.allowedTools).map(tool => ({ label: displayToolName(tool) })),
-                ])}
-                <div class="agent-center-card-sub">记忆/变量/世界书预览：${escapeHtml(writePreviewEnabled ? 'AI 可以请求预览' : 'AI 现在看不到这些预览工具')}。提交仍需要你手动确认。</div>
-                ${renderChips([
-                    { label: writePreviewEnabled ? '预览工具已加入' : '预览工具未加入', className: statusChipClass(writePreviewEnabled ? 'running' : 'denied') },
-                    ...list(writePreview.activeTools).map(tool => ({ label: displayToolName(tool) })),
-                ])}
-                <div class="agent-center-card-actions">
-                    <button
-                        type="button"
-                        class="agent-center-card-action${gateEnabled ? '' : ' is-primary'}"
-                        data-session-gate-action="${escapeHtml(gateEnabled ? 'disable' : 'enable')}"
-                    >${escapeHtml(gateEnabled ? '关闭当前会话 Agent 工具' : '开启当前会话 Agent 工具')}</button>
-                    <button
-                        type="button"
-                        class="agent-center-card-action${writePreviewEnabled ? '' : ' is-primary'}"
-                        data-write-preview-model-context-action="${escapeHtml(writePreviewEnabled ? 'disable' : 'enable')}"
-                    >${escapeHtml(writePreviewEnabled ? '移除预览工具' : '加入预览工具')}</button>
+                <div class="agent-center-safety-columns">
+                    <div><div class="agent-center-safety-col-title">${escapeHtml(t('会做'))}</div>${capabilityList([...allowedExtra, ...willDo], '✓', 'yes') || `<p class="agent-center-card-sub">${escapeHtml(t('暂无'))}</p>`}</div>
+                    <div><div class="agent-center-safety-col-title">${escapeHtml(t('不会做'))}</div>${capabilityList(wontDo, '✕', 'no') || `<p class="agent-center-card-sub">${escapeHtml(t('暂无'))}</p>`}</div>
                 </div>
+                <div class="agent-center-safety-divider"></div>
+                ${safetySwitch(writePreviewEnabled, `data-write-preview-model-context-action="${escapeHtml(writePreviewEnabled ? 'disable' : 'enable')}"`, writePreviewEnabled ? t('移除预览工具') : t('加入预览工具'), t('记忆/变量/世界书预览'), writePreviewEnabled ? t('AI 可以请求预览。提交仍需要你手动确认。') : t('AI 现在看不到这些预览工具。提交仍需要你手动确认。'))}
+                ${renderChips(list(writePreview.activeTools).map(tool => ({ label: displayToolName(tool) })))}
             </article>
             ${provider.enabled ? `
                 <article class="agent-center-card">
@@ -6776,13 +6900,13 @@ export class AgentCenterPanel {
                         <div class="agent-center-card-title">继续生成后的处理方式</div>
                         <div class="agent-center-card-sub">工具执行后如需继续生成，仍会先让你确认。</div>
                     </div>
-                    <span class="${escapeHtml(statusChipClass('pending'))}">${escapeHtml(continuationCommitStrategyLabel(defaultStrategy))}</span>
                 </div>
-                <div class="agent-center-card-actions">
+                <div class="agent-center-segmented" role="group" aria-label="${escapeHtml(translateUiText('继续生成后的处理方式'))}">
                     ${['preview_only', 'append_to_previous_bubble'].map(strategy => `
                         <button
                             type="button"
-                            class="agent-center-card-action${defaultStrategy === strategy ? ' is-primary' : ''}"
+                            class="agent-center-segment${defaultStrategy === strategy ? ' is-active' : ''}"
+                            aria-pressed="${defaultStrategy === strategy}"
                             data-continuation-policy-strategy="${escapeHtml(strategy)}"
                         >${escapeHtml(continuationCommitStrategyLabel(strategy))}</button>
                     `).join('')}
@@ -6809,14 +6933,13 @@ export class AgentCenterPanel {
             const result = await actions.createTextEditAgent?.({ scope: this.getHopscotchPanel()?.getConfigScope?.() || 'local' });
             if (!result?.ok) { this.lastError = t(result?.message || '创建失败'); this.render(); return; }
             this.getHopscotchPanel()?.addTextAgent?.(result.config);
-            await this.refresh(); this.openFloatingAgentCard(result.id); this.toggleFloatingAgentCard();
+            await this.refresh(); this.openFloatingAgentCard(result.id);
         }; });
         controls('[data-text-edit-run]').forEach(button => { button.onclick = () => this.getActions().openTextEditRun(button.dataset.textEditRun); });
         controls('[data-text-agent-result]').forEach(button => { button.onclick = () => {
             const actions = this.getActions(), job = (actions.listTextEditRuns?.() || []).find(item => item.id === button.dataset.textAgentResult);
             if (!job || job.outputMode !== 'note') return;
             this.openFloatingAgentCard(job.agentId, { messageId: job.messageId, context: job.context });
-            this.toggleFloatingAgentCard();
         }; });
         controls('[data-text-edit-cancel]').forEach(button => { button.onclick = () => this.getActions().cancelTextEditRun(button.dataset.textEditCancel); });
         controls('[data-agent-card-open]').forEach((card) => {

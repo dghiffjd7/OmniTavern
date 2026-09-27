@@ -2302,3 +2302,41 @@ console.log('ok - script runtime recognizes actual ESM import and export syntax'
   assert.equal(restarts, 2, 'dispatch timeout should restart the isolated worker');
   console.log('ok - warmup grace, sync_done clears warmup, dispatch_error restarts selectively');
 }
+
+{
+  // 脚本用 .hidden / .disabled 控制的浮层与按钮，要同步成页面上的 attribute（Izumi 快捷菜单曾因此在左上角露出空白横条）
+  const { sandbox, messages } = createWorkerHarness();
+  await sandbox.self.onmessage({
+    data: { type: 'sync', settings: { allowNetwork: false }, context: { sessionId: 'bool-attrs' }, scripts: [] },
+  });
+  const result = vm.runInContext(`(() => {
+    const menu = document.createElement('div');
+    menu.id = 'quick-menu';
+    menu.hidden = true;
+    menu.style.width = '420px';
+    document.body.appendChild(menu);
+    const button = document.createElement('button');
+    button.id = 'plan';
+    button.disabled = true;
+    document.body.appendChild(button);
+    const viaAttribute = document.createElement('div');
+    viaAttribute.setAttribute('hidden', '');
+    return {
+      hiddenReadsBack: menu.hidden === true && menu.hasAttribute('hidden'),
+      disabledReadsBack: button.disabled === true && button.getAttribute('disabled') === '',
+      attributeSetsProperty: viaAttribute.hidden === true,
+      selectorSees: document.querySelectorAll('[hidden]').length >= 1,
+    };
+  })()`, sandbox);
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), { hiddenReadsBack: true, disabledReadsBack: true, attributeSetsProperty: true, selectorSees: true });
+  await flushTimers();
+  let projected = messages.filter(msg => msg.type === 'ui_update').at(-1)?.payload?.roots?.join('') || '';
+  assert.match(projected, /id="quick-menu"[^>]*hidden=""/, '隐藏的浮层带着 hidden 同步到页面');
+  assert.match(projected, /id="plan"[^>]*disabled=""/);
+  vm.runInContext(`(() => { const menu = document.getElementById('quick-menu'); menu.hidden = false; document.getElementById('plan').disabled = false; })()`, sandbox);
+  await flushTimers();
+  projected = messages.filter(msg => msg.type === 'ui_update').at(-1)?.payload?.roots?.join('') || '';
+  assert.doesNotMatch(projected, /id="quick-menu"[^>]*hidden=/, '取消隐藏后移除 hidden');
+  assert.doesNotMatch(projected, /id="plan"[^>]*disabled=/);
+  console.log('ok - worker hidden/disabled properties reflect to projected attributes');
+}

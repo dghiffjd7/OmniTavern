@@ -3218,6 +3218,12 @@
     ]
   },
   {
+    "source": "保存存档时",
+    "references": [
+      "src/scripts/ui/app.js#ui-call"
+    ]
+  },
+  {
     "source": "保存到贴图包",
     "references": [
       "src/scripts/ui/app.js#html-text"
@@ -5271,6 +5277,12 @@
     "source": "不会自动写聊天",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "不会做",
+    "references": [
+      "src/scripts/ui/agent-center-panel.js#ui-call"
     ]
   },
   {
@@ -9148,7 +9160,6 @@
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/index.html#html-text",
-      "src/scripts/ui/agent-center-panel.js#ui-property",
       "src/scripts/ui/variable-panel.js#html-text"
     ]
   },
@@ -9156,7 +9167,7 @@
     "source": "当前会话 Agent 工具",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
-      "src/scripts/ui/agent-center-panel.js#html-text"
+      "src/scripts/ui/agent-center-panel.js#ui-call"
     ]
   },
   {
@@ -9218,6 +9229,12 @@
     "source": "当前会话不可用",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "当前会话的 Agent 工具",
+    "references": [
+      "src/scripts/ui/agent-center-panel.js#ui-call"
     ]
   },
   {
@@ -12974,6 +12991,12 @@
     ]
   },
   {
+    "source": "发布或评论动态时",
+    "references": [
+      "src/scripts/ui/app.js#ui-call"
+    ]
+  },
+  {
     "source": "发送",
     "references": [
       "src/index.html#html-attribute",
@@ -13308,7 +13331,6 @@
     "source": "范围",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
-      "src/scripts/ui/agent-center-panel.js#ui-property",
       "src/scripts/ui/memory-template-panel.js#html-text"
     ]
   },
@@ -15458,9 +15480,14 @@
     ]
   },
   {
+    "source": "更早",
+    "references": [
+      "src/scripts/ui/agent-center-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "工具",
     "references": [
-      "src/scripts/ui/agent-center-panel.js#ui-property",
       "src/scripts/ui/maid-run-card-dom.js#ui-call"
     ]
   },
@@ -16006,7 +16033,8 @@
   {
     "source": "关闭当前会话 Agent 工具",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-center-panel.js#ui-call"
     ]
   },
   {
@@ -16580,7 +16608,8 @@
   {
     "source": "规划中",
     "references": [
-      "src/scripts/ui/agent-center-panel.js#html-text"
+      "src/scripts/ui/agent-center-panel.js#html-text",
+      "src/scripts/ui/agent-center-panel.js#ui-property"
     ]
   },
   {
@@ -17825,6 +17854,12 @@
     ]
   },
   {
+    "source": "会做",
+    "references": [
+      "src/scripts/ui/agent-center-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "绘图",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -17852,12 +17887,6 @@
     "source": "活动任务记忆不可归档",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
-    ]
-  },
-  {
-    "source": "活动中",
-    "references": [
-      "src/scripts/ui/agent-center-panel.js#ui-property"
     ]
   },
   {
@@ -18163,6 +18192,12 @@
     "source": "记忆：摘要",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "记忆/变量/世界书预览",
+    "references": [
+      "src/scripts/ui/agent-center-panel.js#ui-call"
     ]
   },
   {
@@ -18625,6 +18660,12 @@
     ]
   },
   {
+    "source": "记忆与资料",
+    "references": [
+      "src/scripts/ui/agent-center-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "记忆注入外壳",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -18816,7 +18857,8 @@
   {
     "source": "加入预览工具",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-center-panel.js#ui-call"
     ]
   },
   {
@@ -21328,6 +21370,12 @@
     ]
   },
   {
+    "source": "均延迟",
+    "references": [
+      "src/scripts/ui/agent-center-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "均延迟 {latency}",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -21431,7 +21479,8 @@
   {
     "source": "开启当前会话 Agent 工具",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-center-panel.js#ui-call"
     ]
   },
   {
@@ -26801,6 +26850,7 @@
   {
     "source": "其他",
     "references": [
+      "src/scripts/ui/agent-center-panel.js#ui-call",
       "src/scripts/ui/app.js#html-text"
     ]
   },
@@ -33068,6 +33118,12 @@
     ]
   },
   {
+    "source": "生成与规则",
+    "references": [
+      "src/scripts/ui/agent-center-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "生成语音中",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -34535,6 +34591,7 @@
     "references": [
       "src/scripts/agent/agent-invocation.js#ui-definition",
       "src/scripts/ui/agent-configuration-editor.js#ui-definition",
+      "src/scripts/ui/app.js#ui-call",
       "src/scripts/ui/chat/hopscotch-activation-utils.js#ui-call",
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call",
       "src/scripts/ui/variable-panel-runtime.js#html-text"
@@ -35415,6 +35472,7 @@
     "source": "说明",
     "references": [
       "src/scripts/ui/agent-center-panel.js#html-text",
+      "src/scripts/ui/agent-center-panel.js#ui-call",
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
   },
@@ -35974,6 +36032,12 @@
     ]
   },
   {
+    "source": "随时待命",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-court-view.js#ui-call"
+    ]
+  },
+  {
     "source": "随预设保存",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
@@ -36195,7 +36259,6 @@
     "source": "提示词",
     "references": [
       "src/scripts/ui/agent-center-panel.js#html-text",
-      "src/scripts/ui/agent-center-panel.js#ui-property",
       "src/scripts/ui/agent-center-view-model.js#ui-property",
       "src/scripts/ui/app.js#html-text",
       "src/scripts/ui/chat/agent-prompt-fields.js#ui-call",
@@ -42062,6 +42125,12 @@
     ]
   },
   {
+    "source": "修改前先预览",
+    "references": [
+      "src/scripts/ui/agent-center-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "修改群聊成员",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -43201,7 +43270,8 @@
   {
     "source": "移除预览工具",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-center-panel.js#ui-call"
     ]
   },
   {
@@ -44053,7 +44123,8 @@
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/scripts/ui/agent-toolbox-view.js#ui-call",
-      "src/scripts/ui/agent-toolbox.js#ui-definition"
+      "src/scripts/ui/agent-toolbox.js#ui-definition",
+      "src/scripts/ui/chat/hopscotch-court-view.js#ui-call"
     ]
   },
   {
@@ -44332,7 +44403,8 @@
     "source": "已开启",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
-      "src/scripts/ui/agent-toolbox.js#ui-definition"
+      "src/scripts/ui/agent-toolbox.js#ui-definition",
+      "src/scripts/ui/chat/hopscotch-court-view.js#ui-call"
     ]
   },
   {
@@ -47765,6 +47837,7 @@
   {
     "source": "运行",
     "references": [
+      "src/scripts/ui/agent-center-panel.js#ui-call",
       "src/scripts/ui/variable-panel-runtime.js#dom-assignment"
     ]
   },
@@ -47835,6 +47908,7 @@
   {
     "source": "运行中",
     "references": [
+      "src/scripts/ui/agent-center-panel.js#ui-property",
       "src/scripts/ui/agent-center-status-chip.js#ui-property",
       "src/scripts/ui/extensions-panel.js#html-text",
       "src/scripts/ui/maid-settings-panel.js#dom-assignment",
@@ -48109,6 +48183,7 @@
   {
     "source": "暂无",
     "references": [
+      "src/scripts/ui/agent-center-panel.js#ui-call",
       "src/scripts/ui/chat/lineage-graph-view-utils.js#html-text"
     ]
   },
@@ -49786,7 +49861,6 @@
   {
     "source": "诊断",
     "references": [
-      "src/scripts/ui/agent-center-panel.js#ui-property",
       "src/scripts/ui/agent-center-view-model.js#ui-property"
     ]
   },
@@ -52190,7 +52264,7 @@
   {
     "source": "状态",
     "references": [
-      "src/scripts/ui/agent-center-panel.js#html-text"
+      "src/scripts/ui/agent-center-panel.js#ui-call"
     ]
   },
   {
@@ -52391,7 +52465,6 @@
   {
     "source": "资源",
     "references": [
-      "src/scripts/ui/agent-center-panel.js#ui-property",
       "src/scripts/ui/agent-center-view-model.js#ui-property"
     ]
   },
@@ -53959,13 +54032,20 @@
   {
     "source": "AI 可以请求已允许的工具，执行前仍会让你确认。",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-center-panel.js#ui-call"
     ]
   },
   {
     "source": "AI 可以请求预览",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "AI 可以请求预览。提交仍需要你手动确认。",
+    "references": [
+      "src/scripts/ui/agent-center-panel.js#ui-call"
     ]
   },
   {
@@ -54086,13 +54166,20 @@
   {
     "source": "AI 现在不会执行工具请求。",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/agent-center-panel.js#ui-call"
     ]
   },
   {
     "source": "AI 现在看不到这些预览工具",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "AI 现在看不到这些预览工具。提交仍需要你手动确认。",
+    "references": [
+      "src/scripts/ui/agent-center-panel.js#ui-call"
     ]
   },
   {
@@ -55918,6 +56005,12 @@
     "references": [
       "src/scripts/ui/image-generation-params-utils.js#ui-definition",
       "src/scripts/ui/image-generation-params-utils.js#ui-property"
+    ]
+  },
+  {
+    "source": "Token 合计",
+    "references": [
+      "src/scripts/ui/agent-center-panel.js#ui-call"
     ]
   },
   {

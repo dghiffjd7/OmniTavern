@@ -40,6 +40,7 @@ export const createHopscotchBoardPanel = ({
   getAgentRuns = () => [], getInputAgents = () => [], createInputAgent = null, openInputAgent = null,
   getFormatReview = () => null, openFormatReview = null,
   createTextAgent = null, openTextAgent = null, listTextAgents = () => [], onScopeChange = () => {},
+  getStandbyAgents = () => ({ satellites: [], standby: [] }), openStandbyAgent = null, getWritePreviewSwitch = () => false,
 } = {}) => {
   const doc = documentRef;
   const panel = doc.createElement(embedded ? 'section' : 'dialog');
@@ -259,7 +260,7 @@ export const createHopscotchBoardPanel = ({
         ${embedded ? '' : iconBtn('close', t('关闭'))}
         ${place === 'writing' ? `<div class="hop-menu hop-secondary-actions" role="menu" hidden>${button('settings', t('执行规则'), 'role="menuitem"' + (editable ? '' : ' disabled'))}${button('transfer', t('导入 / 导出'), 'role="menuitem"' + (editable ? '' : ' disabled'))}${button('reset', target !== 'global' ? t('跟随默认') : t('恢复推导'), 'role="menuitem"' + (editable ? '' : ' disabled'))}</div>` : ''}
       </div></div>
-      ${renderHopscotchCourt(live ? latest.board : draft, { editable, states, place, activation, inputSuggestion: live ? null : getInputSuggestion(target), inputAgents: live ? [] : getInputAgents(target), agentRuns: getAgentRuns(), canAddInput: !live && !saving && Boolean(createInputAgent), formatReview: live ? null : getFormatReview(target), status: live ? latest.result?.status || 'running' : '' })}
+      ${renderHopscotchCourt(live ? latest.board : draft, { editable, states, place, activation, inputSuggestion: live ? null : getInputSuggestion(target), inputAgents: live ? [] : getInputAgents(target), agentRuns: getAgentRuns(), canAddInput: !live && !saving && Boolean(createInputAgent), formatReview: live ? null : getFormatReview(target), ...(live ? {} : getStandbyAgents(target) || {}), status: live ? latest.result?.status || 'running' : '' })}
       <p class="hop-error" role="alert">${e(error)}</p>
       ${place === 'writing' ? `<div class="hop-footer hop-board-footer">${undoStack.length ? iconBtn('undo', t('撤销上一步'), editable ? '' : 'disabled') : ''}${button('save', saveLabel, `class="hop-primary" ${saveDisabled ? 'disabled' : ''}`)}</div>` : ''}`;
     fitCourt();
@@ -352,11 +353,13 @@ export const createHopscotchBoardPanel = ({
         fusedConfigs: house.kind === 'body' && !member ? house.fused.map(kind => ({ id: kind, label: hopscotchFusedLabel(kind), agentId: fusedAgents[kind] })) : [],
         onOpenFused: async kind => {
           if (sharedConfig?.hasDraft() && !await confirmSharedDiscard()) return;
-          openHouse(id, false, kind);
+          openHouse(id, true, kind);
         },
         buildPromptPreview: !turn && (agentId || house.kind === 'body') && buildPromptPreview
           ? promptDraft => buildPromptPreview({ sessionId:previewSessionId, place:previewPlace, agentId, house, member, draft:promptDraft }) : null,
-        content: place === 'writing' || variableCard ? boardContent : null, configure, readOnly: Boolean(turn) || busy() || saving, onClose: () => { void requestDetailClose(); },
+        // 记忆与变量的写入预览并入这两个房子（与原“预览记忆和变量变更”是同一开关）
+        featureSwitches: getWritePreviewSwitch() && (variableCard || member === 'memory_table' || house.kind === 'memory_table') ? ['write_preview'] : [],
+        content: place === 'writing' || variableCard ? boardContent : null, configure: configure && !turn, readOnly: Boolean(turn) || busy() || saving, onClose: () => { void requestDetailClose(); },
       });
       showDetail();
     } else {
@@ -524,10 +527,12 @@ export const createHopscotchBoardPanel = ({
         finally { addInput.disabled = false; }
       })(); return;
     }
+    const standbyAgent = event.target.closest('[data-hop-standby]');
+    if (standbyAgent) { openStandbyAgent?.(standbyAgent.dataset.hopStandby); return; }
     if (event.target.closest('[data-hop-input-suggestion]')) { openInputSuggestion?.(); return; }
     if (event.target.closest('[data-hop-format-review]')) { openFormatReview?.(); return; }
     const cell = event.target.closest('[data-hop-house]');
-    if (cell) { openHouse(cell.dataset.hopHouse, false, event.target.closest('[data-hop-part]')?.dataset.hopPart); return; }
+    if (cell) { openHouse(cell.dataset.hopHouse, true, event.target.closest('[data-hop-part]')?.dataset.hopPart); return; }
     const add = event.target.closest('[data-hop-add]');
     if (add) { openPicker(Number(add.dataset.hopAdd), add.dataset.hopNew === '1', add.dataset.hopAnchor); return; }
     const action = event.target.closest('[data-action]')?.dataset.action;

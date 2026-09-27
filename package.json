@@ -1,6 +1,6 @@
 {
   "name": "omnitavern",
-  "version": "0.7.3-diagnose-2",
+  "version": "0.7.3-diagnose-3",
   "description": "A cross-platform chat application with LLM integration",
   "type": "module",
   "scripts": {
@@ -10,7 +10,7 @@
     "pretest:chat": "npm run test:reply-notifications",
     "test:legacy-clone": "node scripts/tests/clone-data-tests.mjs && node scripts/tests/legacy-workflow-clone-tests.mjs",
     "pretest:hopscotch": "npm run test:legacy-clone",
-    "test:hopscotch": "node scripts/tests/hopscotch-drag-tests.mjs && node scripts/tests/hopscotch-sidecar-tests.mjs && node scripts/tests/variable-workflow-tests.mjs && node scripts/tests/hopscotch-activation-tests.mjs && node scripts/tests/creative-format-review-tests.mjs && node scripts/tests/hopscotch-board-utils-tests.mjs && node scripts/tests/hopscotch-board-store-tests.mjs && node scripts/tests/hopscotch-scoped-store-tests.mjs && node scripts/tests/creative-turn-orchestrator-tests.mjs && node scripts/tests/hopscotch-turn-runtime-tests.mjs && node scripts/tests/hopscotch-board-editor-tests.mjs && node scripts/tests/hopscotch-lifecycle-tests.mjs && node scripts/tests/agent-center-hopscotch-tests.mjs && node scripts/tests/agent-center-migration-tests.mjs",
+    "test:hopscotch": "node scripts/tests/hopscotch-drag-tests.mjs && node scripts/tests/hopscotch-sidecar-tests.mjs && node scripts/tests/variable-workflow-tests.mjs && node scripts/tests/hopscotch-activation-tests.mjs && node scripts/tests/creative-format-review-tests.mjs && node scripts/tests/hopscotch-board-utils-tests.mjs && node scripts/tests/hopscotch-board-store-tests.mjs && node scripts/tests/hopscotch-scoped-store-tests.mjs && node scripts/tests/creative-turn-orchestrator-tests.mjs && node scripts/tests/hopscotch-turn-runtime-tests.mjs && node scripts/tests/hopscotch-board-editor-tests.mjs && node scripts/tests/hopscotch-lifecycle-tests.mjs && node scripts/tests/agent-center-hopscotch-tests.mjs && node scripts/tests/agent-center-migration-tests.mjs && node scripts/tests/agent-center-redesign-tests.mjs",
     "pretest:all": "npm run test:hopscotch",
     "test:brand": "node scripts/tests/omnitavern-brand-contract-tests.mjs",
     "test:bubble-selection": "node scripts/tests/bubble-selection-edit-tests.mjs && node scripts/tests/agent-rendered-target-tests.mjs && node scripts/tests/long-press-ui-utils-tests.mjs && node scripts/tests/chat-store-format-repair-envelope-tests.mjs",

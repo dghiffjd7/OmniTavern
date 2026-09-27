@@ -4269,6 +4269,13 @@ const initApp = async () => {
   let hasRejectedFormatRepairAgentRunCandidate = () => false;
   const agentCenterPanel = new AgentCenterPanel({
     getHopscotchPanel: () => hopscotchBoardPanel,
+    // 活动记录显示会话名称：RP 会话取角色名，聊天会话取联系人名
+    resolveSessionLabel: sessionId => {
+      const sid = String(sessionId || '').trim();
+      if (!sid) return '';
+      if (sid.startsWith('rp:')) return String(window.appBridge?.getRpCharacterNameForSession?.(sid) || '').trim() || sid;
+      return String(contactsStore.getContact?.(sid)?.name || '').trim() || sid;
+    },
     getFailureSeenAt: ({ surface = '' } = {}) => getAgentFailureSeenAt({ surface }),
     markFailureSeen: ({ surface = '', at = Date.now() } = {}) => markAgentFailuresSeen({ surface, at }),
     openConfig: (options = {}) => configPanel.show({ tab: 'chat', ...(options || {}) }),
@@ -27270,18 +27277,24 @@ const initApp = async () => {
     createInputAgent: options => agentConfigurationActions.createInputAgent(options),
     openInputAgent: (id, options = {}) => {
       agentCenterPanel.openFloatingAgentCard(id, { ...options, context: getAgentConfigContext() });
-      agentCenterPanel.toggleFloatingAgentCard();
     },
     createTextAgent: options => agentConfigurationActions.createTextEditAgent(options),
     listTextAgents: target => agentConfigStore.list(getAgentConfigContext(), target === 'global' ? 'global' : 'effective').filter(item => item.config.kind === 'text_edit').map(item => item.config),
     onScopeChange: () => agentCenterPanel.refresh(),
-    openTextAgent: (id, options = {}) => { agentCenterPanel.openFloatingAgentCard(id, { ...options, context: getAgentConfigContext() }); agentCenterPanel.toggleFloatingAgentCard(); },
+    openTextAgent: (id, options = {}) => { agentCenterPanel.openFloatingAgentCard(id, { ...options, context: getAgentConfigContext() }); },
     openInputSuggestion: () => agentCenterPanel.openFloatingAgentCard(AGENT_FEATURE_IDS.textCompletion),
     getFormatReview: target => {
       const config = agentConfigStore.read('reply_check', getAgentConfigContext(), target === 'global' ? 'global' : 'effective').config;
       return { ...resolveFormatReviewAvailability(config, { place: uiMode === 'rp' ? 'writing' : 'chat', hasFormatGuide: Boolean(config.formatGuide.trim()) }), manualEnabled: allowsAgentInvocation(config, 'manual'), invocationMode: config.invocationMode };
     },
     openFormatReview: () => agentCenterPanel.openFloatingAgentCard(AGENT_FEATURE_IDS.replyCheck),
+    // 与流程无关的默认 Agent：正文评分挂在正文旁（手动），小管家与动态 Agent 排进“随时待命”
+    getStandbyAgents: () => {
+      const item = (id, trigger) => { const card = agentCenterPanel.getAgentCardById(id); return card?.implemented ? { id, title: card.title, enabled: card.enabled === true, trigger } : null; };
+      return { satellites: [item('reply_scoring', t('手动'))].filter(Boolean), standby: [item('archive_naming', t('保存存档时')), item('moment_agent', t('发布或评论动态时'))].filter(Boolean) };
+    },
+    openStandbyAgent: id => agentCenterPanel.openFloatingAgentCard(id),
+    getWritePreviewSwitch: () => Boolean(agentCenterPanel.getAgentCardById(AGENT_FEATURE_IDS.writePreview)),
     getEnabled: () => appSettings.get().creativeHopscotchEnabled === true,
     enable: value => appSettings.update({ creativeHopscotchEnabled: value === true }),
   });

@@ -1095,6 +1095,8 @@ const getCompatAttribute = (node, name) => {
     if (node.dataset && Object.prototype.hasOwnProperty.call(node.dataset, dsKey)) return String(node.dataset[dsKey]);
   }
   if (node.attributes && Object.prototype.hasOwnProperty.call(node.attributes, key)) return String(node.attributes[key]);
+  // hidden / disabled 是反射到 attribute 的访问器，不能按普通属性回读
+  if (key === 'hidden' || key === 'disabled') return null;
   if (Object.prototype.hasOwnProperty.call(node, key)) return String(node[key]);
   return null;
 };
@@ -1919,7 +1921,9 @@ const makeCompatElement = (tagName = 'div') => {
       else if (key === 'style') element.style.cssText = text;
       else if (key === 'value') element.value = text;
       else if (key === 'checked') element.checked = text !== 'false';
-      else if (key.startsWith('data-')) {
+      else if (key === 'hidden' || key === 'disabled') {
+        // 布尔属性由 attribute 是否存在决定，见下方的属性访问器
+      } else if (key.startsWith('data-')) {
         const dsKey = key.slice(5).replace(/-([a-z])/g, (_m, c) => c.toUpperCase());
         element.dataset[dsKey] = text;
       } else {
@@ -1940,7 +1944,9 @@ const makeCompatElement = (tagName = 'div') => {
       if (key === 'id') element.id = '';
       else if (key === 'class') element.className = '';
       else if (key === 'style') element.style.cssText = '';
-      else if (key.startsWith('data-')) {
+      else if (key === 'hidden' || key === 'disabled') {
+        // 布尔属性由 attribute 是否存在决定，见下方的属性访问器
+      } else if (key.startsWith('data-')) {
         const dsKey = key.slice(5).replace(/-([a-z])/g, (_m, c) => c.toUpperCase());
         delete element.dataset[dsKey];
       } else {
@@ -2200,6 +2206,20 @@ const makeCompatElement = (tagName = 'div') => {
     return '<' + tag + attrText + styleText + '>' + element.innerHTML + '</' + tag + '>';
   };
   installCompatEventTarget(element);
+  // 与浏览器一致：.hidden / .disabled 与同名 attribute 双向同步。脚本常用 el.hidden = true 隐藏浮层，
+  // 只改属性不写 attribute 时同步到页面的节点会漏掉 hidden，本应隐藏的空浮层就会显示出来。
+  ['hidden', 'disabled'].forEach((key) => {
+    Object.defineProperty(element, key, {
+      enumerable: true,
+      configurable: false,
+      get: () => Object.prototype.hasOwnProperty.call(attrs, key),
+      set: (value) => {
+        if (Boolean(value) === Object.prototype.hasOwnProperty.call(attrs, key)) return;
+        if (value) element.setAttribute(key, '');
+        else element.removeAttribute(key);
+      },
+    });
+  });
   const nodeId = String(++compatUiNodeSeq);
   Object.defineProperty(element, '__chatappNodeId', { value: nodeId, configurable: true });
   return element;
