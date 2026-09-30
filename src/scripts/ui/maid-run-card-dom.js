@@ -313,6 +313,7 @@ export const createMaidRunCardView = ({
   let model = null;
   let extras = { thoughts: [], liveText: '', approval: null, voice: false, touch: false };
   let ticker = null;
+  let visible = true;
   let headSignature = '';
   let liveSignature = '';
   let approvalSignature = '';
@@ -420,7 +421,7 @@ export const createMaidRunCardView = ({
   };
 
   const syncTicker = () => {
-    const needTicker = Boolean(model && !model.terminal && model.startedAt && setIntervalFn);
+    const needTicker = Boolean(visible && model && !model.terminal && model.startedAt && setIntervalFn);
     if (needTicker && ticker == null) {
       ticker = setIntervalFn(() => {
         const target = el.querySelector?.('[data-mrc-elapsed]');
@@ -530,7 +531,9 @@ export const createMaidRunCardView = ({
     handleAction,
     getModel: () => (model ? { ...model } : null),
     getUiState: () => ({ expanded: [...ui.expanded], foldOpen: ui.foldOpen, thoughtOpen: ui.thoughtOpen, collapsed: isCollapsed() }),
+    setVisible: value => { visible = value === true; syncTicker(); },
     destroy: () => {
+      visible = false;
       if (ticker != null) clearIntervalFn?.(ticker);
       ticker = null;
       el.remove?.();

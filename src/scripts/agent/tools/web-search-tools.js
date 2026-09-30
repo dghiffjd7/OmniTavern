@@ -1,4 +1,4 @@
-import { annotateMaidResearchResult } from '../maid-source-grounding.js';
+import { annotateMaidSearchResult } from '../maid-source-grounding.js';
 
 const trim = (value, fallback = '') => {
   const text = String(value ?? '').trim();
@@ -13,6 +13,28 @@ const clone = (value) => {
   } catch {
     return Array.isArray(value) ? value.slice() : { ...value };
   }
+};
+
+const SEARCH_TARGET_PROPERTIES = {
+  target: {
+    type: 'string',
+    maxLength: 160,
+    description: 'Specific work, product, person or topic to match by name. Use the actual subject, not its store, platform or domain. A name match does not verify prices, dates or other facts; omit for broad discovery to report target_not_checked.',
+  },
+  targetAliases: {
+    type: 'array',
+    maxItems: 8,
+    items: { type: 'string', minLength: 1, maxLength: 120 },
+    description: 'Alternate names for the same target, not separate subjects, store names or domains.',
+  },
+};
+
+const summarizeSearchEvidence = (result, { research = false } = {}) => {
+  const label = research ? 'web research' : 'web search';
+  const evidence = `evidence=${trim(result?.evidenceStatus, 'target_not_checked')} factVerification=not_performed`;
+  if (result?.ok === false) return `${label} failed: ${trim(result?.reason || result?.message, 'no_results')} ${evidence}`;
+  const counts = `results=${Number(result?.results?.length || 0)}${research ? ` documents=${Number(result?.documents?.length || 0)}` : ''}`;
+  return `${label}${result?.evidenceStatus === 'no_relevant_sources' ? ' no target-relevant evidence:' : ''} ${counts} query=${trim(result?.query, '-')} ${evidence}`;
 };
 
 const truncate = (value = '', max = 4000) => {
@@ -931,7 +953,7 @@ export const createWebSearchAgentTools = ({
     {
       name: 'web.search',
       title: 'Search the web',
-      description: 'Search public web information when the user asks for current or external facts. Do not use it for private APP data.',
+      description: 'Search public web information when the user asks for current or external facts. Pass a specific target when checking a known subject. Successful retrieval and target-name matches do not verify facts; use relevant source content for claims. Do not use it for private APP data.',
       source: 'maid-web',
       permissions: [],
       riskLevel: 'low',
@@ -952,6 +974,7 @@ export const createWebSearchAgentTools = ({
           query: { type: 'string', minLength: 1, maxLength: 240 },
           limit: { type: 'integer', minimum: 1, maximum: 10 },
           locale: { type: 'string', maxLength: 20 },
+          ...clone(SEARCH_TARGET_PROPERTIES),
         },
       },
       execute: async (args = {}, context = {}) => {
@@ -970,26 +993,24 @@ export const createWebSearchAgentTools = ({
             query,
             limit,
           });
-          return normalizeSearchOutput({
+          return annotateMaidSearchResult(normalizeSearchOutput({
             query,
             provider: config.provider,
             results,
-          });
+          }), args);
         } catch (error) {
           if (error?.name === 'AbortError') throw error;
-          return {
+          return annotateMaidSearchResult({
             ok: false,
             query,
             provider: config.provider,
             reason: error?.code || 'search_request_failed',
             message: error?.message || '搜索请求失败。',
             results: [],
-          };
+          }, args);
         }
       },
-      summarizeResult: result => result?.ok === false
-        ? `web search failed: ${trim(result?.reason || result?.message, 'no_results')}`
-        : `web search results=${Number(result?.results?.length || 0)} query=${trim(result?.query, '-')}`,
+      summarizeResult: result => summarizeSearchEvidence(result),
     },
     {
       name: 'web.search_images',
@@ -1147,7 +1168,7 @@ export const createWebSearchAgentTools = ({
     {
       name: 'web.research',
       title: 'Search and read web sources',
-      description: 'Search public web information and fetch readable text from top results in one controlled tool call. Use it for current public facts that need citations.',
+      description: 'Search public web information and fetch readable text from top results in one controlled tool call. Use it for current public facts that need citations. Pass a specific target when checking a known subject; matching its name indicates relevance only, not verification of the requested facts.',
       source: 'maid-web',
       permissions: [],
       riskLevel: 'low',
@@ -1170,17 +1191,7 @@ export const createWebSearchAgentTools = ({
           fetchTop: { type: 'integer', minimum: 0, maximum: 5 },
           locale: { type: 'string', maxLength: 20 },
           maxTextLength: { type: 'integer', minimum: 500, maximum: 12000 },
-          target: {
-            type: 'string',
-            maxLength: 160,
-            description: 'Named work/person/topic whose identity must be checked before the sources can support canon facts.',
-          },
-          targetAliases: {
-            type: 'array',
-            maxItems: 8,
-            items: { type: 'string', minLength: 1, maxLength: 120 },
-            description: 'Known alternate titles/names used to match sources to target.',
-          },
+          ...clone(SEARCH_TARGET_PROPERTIES),
         },
       },
       execute: async (args = {}, context = {}) => {
@@ -1248,7 +1259,7 @@ export const createWebSearchAgentTools = ({
             }
           }
         }
-        return annotateMaidResearchResult({
+        return annotateMaidSearchResult({
           ...search,
           documents,
           sources: search.sources || search.results?.map(item => ({
@@ -1258,9 +1269,7 @@ export const createWebSearchAgentTools = ({
           })) || [],
         }, args);
       },
-      summarizeResult: result => result?.ok === false
-        ? `web research failed: ${trim(result?.reason || result?.message, 'no_results')}`
-        : `web research results=${Number(result?.results?.length || 0)} documents=${Number(result?.documents?.length || 0)} query=${trim(result?.query, '-')}`,
+      summarizeResult: result => summarizeSearchEvidence(result, { research: true }),
     },
   ];
 };

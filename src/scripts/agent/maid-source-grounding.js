@@ -63,7 +63,11 @@ const matchTargetTerms = (value, terms = []) => {
   });
 };
 
-export const annotateMaidResearchResult = (result = {}, args = {}) => {
+// A source URL (including a title that falls back to that URL) identifies where
+// a page lives. Its domain/path does not establish which subject it discusses.
+const sourceMatchText = value => trim(value).replace(/https?:\/\/[^\s<>"']+/giu, '');
+
+export const annotateMaidSearchResult = (result = {}, args = {}) => {
   const target = trim(args?.target);
   const targetAliases = unique(args?.targetAliases);
   const targetTerms = unique([target, ...targetAliases]);
@@ -77,17 +81,17 @@ export const annotateMaidResearchResult = (result = {}, args = {}) => {
     const previous = searchableByUrl.get(url) || '';
     searchableByUrl.set(url, [
       previous,
-      trim(item?.title),
-      trim(item?.snippet || item?.description),
-      trim(item?.text),
+      sourceMatchText(item?.title),
+      sourceMatchText(item?.snippet || item?.description),
+      sourceMatchText(item?.text),
     ].filter(Boolean).join('\n'));
   });
   const annotate = item => {
     const next = clone(item) || {};
     const searchable = [
-      trim(next.title),
-      trim(next.snippet || next.description),
-      trim(next.text),
+      sourceMatchText(next.title),
+      sourceMatchText(next.snippet || next.description),
+      sourceMatchText(next.text),
       searchableByUrl.get(trim(next.url)) || '',
     ].filter(Boolean).join('\n');
     const matchedTargetTerms = checked ? matchTargetTerms(searchable, targetTerms) : [];
@@ -107,20 +111,29 @@ export const annotateMaidResearchResult = (result = {}, args = {}) => {
         source: trim(item?.source),
       }));
   const sources = sourceInput.map(annotate);
+  const relevantSourceCount = sources.filter(source => source.targetRelevant === true).length;
   return {
     ...clone(result),
     results: annotatedResults,
     documents: annotatedDocuments,
     sources,
+    // Request success and readable pages do not establish evidence for the target.
+    evidenceStatus: checked ? (relevantSourceCount > 0 ? 'target_matched' : 'no_relevant_sources') : 'target_not_checked',
+    // Name matching is a relevance hint, not verification of prices, dates or claims.
+    factVerification: 'not_performed',
     targetCheck: {
       checked,
+      method: 'normalized_name_match',
       target,
       targetAliases,
-      relevantSourceCount: sources.filter(source => source.targetRelevant === true).length,
+      relevantSourceCount,
       unrelatedSourceCount: sources.filter(source => source.targetRelevant === false).length,
     },
   };
 };
+
+// Existing callers and saved research flows share the same annotation contract.
+export const annotateMaidResearchResult = annotateMaidSearchResult;
 
 export const buildMaidSourceGroundingContext = ({
   input = '',
@@ -140,12 +153,21 @@ export const buildMaidSourceGroundingContext = ({
     candidates.forEach(item => {
       const url = trim(item?.url);
       if (!url) return;
-      const existing = sourceMap.get(url);
+      const target = trim(output?.targetCheck?.target || step?.args?.target || item?.target);
+      const targetAliases = unique(output?.targetCheck?.targetAliases || step?.args?.targetAliases || item?.targetAliases);
+      // One page can be relevant to A and unrelated to B. Keep that distinction
+      // even when both searches refer to the exact same source URL.
+      const scope = target
+        ? ['target', normalizeMatchText(target)]
+        : ['aliases', ...unique(targetAliases.map(normalizeMatchText)).sort()];
+      const key = JSON.stringify([url, scope]);
+      const existing = sourceMap.get(key);
       const next = {
         url,
         title: trim(item?.title || existing?.title || url),
         query: trim(output?.query || step?.args?.query),
-        target: trim(output?.targetCheck?.target || step?.args?.target),
+        target,
+        targetAliases,
         targetRelevant: item?.targetRelevant === true
           ? true
           : (existing?.targetRelevant === true ? true : (item?.targetRelevant === false ? false : null)),
@@ -154,7 +176,7 @@ export const buildMaidSourceGroundingContext = ({
           ...list(item?.matchedTargetTerms),
         ]),
       };
-      sourceMap.set(url, next);
+      sourceMap.set(key, next);
     });
   });
   const sources = Array.from(sourceMap.values()).slice(0, 24);
@@ -162,9 +184,9 @@ export const buildMaidSourceGroundingContext = ({
     policy,
     targetCheckPerformed,
     sources,
-    allowedCanonRefs: sources
+    allowedCanonRefs: unique(sources
       .filter(source => source.targetRelevant === true)
-      .map(source => source.url),
+      .map(source => source.url)),
   };
 };
 
@@ -253,6 +275,7 @@ export const buildMaidSourceGroundingPromptBlock = ({
   if (!state.policy.requiresLayering && !state.sources.length) return '';
   const sourceLines = state.sources.slice(0, 8).map((source, index) => [
     `${index + 1}. ${source.targetRelevant === true ? 'relevant' : (source.targetRelevant === false ? 'unrelated' : 'unchecked')}`,
+    `target=${source.target || source.targetAliases.join(' / ') || '(unspecified)'}`,
     source.title,
     source.url,
   ].filter(Boolean).join(' | '));

@@ -3,7 +3,12 @@ import { validateMaidWorldbookSourcePlan } from '../maid-source-grounding.js';
 import { BUILTIN_PHONE_FORMAT_WORLDBOOK_ID } from '../../storage/builtin-worldbooks.js';
 import { resolveWorldSessionBindingMutation } from '../../storage/world-session-binding-utils.js';
 import { createWorldbookPersonaBindingTool } from './worldbook-persona-binding-tool.js';
+import { createWorldbookWriteBoundary } from './worldbook-write-boundary.js';
+import { findKeptSimilarWorldbooks, formatKeptSimilarWorldbooks } from './worldbook-delete-name-hints.js';
+import { t } from '../../i18n/index.js';
+import { captureWorldbookResourceOwnership, resolveWorldbookCurrentPersona } from '../worldbook-resource-ownership.js';
 import { createProfileUpdateTool } from './profile-update-tool.js';
+import { describeWorldbookEntryContent, getWorldbookEntrySearchText, resolveWorldbookEntryContentPatch } from './worldbook-entry-content.js';
 import {
   buildWorldbookEntryGenerationPrompt,
   readWorldAiGenerationSettings,
@@ -192,6 +197,101 @@ const buildSwitchProfileResult = async ({
   };
 };
 
+// 数组元素必须完整声明字段：Gemini 原生函数调用严格按 schema 生成参数，未声明字段的对象只能生成 {}
+const WORLDBOOK_SOURCE_FIELDS = {
+  sourceLayer: { type: 'string', enum: ['canon', 'user_original', 'creative_extension'] },
+  sourceRefs: { type: 'array', items: { type: 'string' } },
+  sourceNotes: { type: 'string' },
+};
+
+const WORLDBOOK_CREATE_ENTRY_SCHEMA = {
+  type: 'object',
+  description: 'One new entry. title and content are both required.',
+  properties: {
+    title: { type: 'string', description: 'Entry title, e.g. the character name.' },
+    content: { type: 'string', description: 'Complete entry text written out in full.' },
+    keys: { type: 'array', items: { type: 'string' }, description: 'Trigger keywords.' },
+    constant: { type: 'boolean', description: 'Always inject (blue light). Default true.' },
+    order: { type: 'number' },
+    ...WORLDBOOK_SOURCE_FIELDS,
+  },
+};
+
+const WORLDBOOK_UPDATE_ENTRY_SCHEMA = {
+  type: 'object',
+  description: 'Select an existing entry with entryId, entryTitle or query, then give only the fields to change. With createMissing:true an unmatched item becomes a new entry and needs title and content.',
+  properties: {
+    entryId: { type: 'string', description: 'Existing entry id to update.' },
+    entryTitle: { type: 'string', description: 'Existing entry title to update.' },
+    query: { type: 'string', description: 'Text to find the existing entry when id/title are unknown.' },
+    title: { type: 'string', description: 'Title to set; with createMissing it is the new entry title.' },
+    newTitle: { type: 'string', description: 'Rename the matched entry.' },
+    content: { type: 'string', description: 'Replacement text. For multiple prompt blocks, select promptBlockId from worldbook.read.' },
+    promptBlockId: { type: 'string', description: 'Id of the prompt block to update, as returned by worldbook.read.' },
+    keys: { type: 'array', items: { type: 'string' } },
+    secondaryKeys: { type: 'array', items: { type: 'string' } },
+    constant: { type: 'boolean' },
+    disabled: { type: 'boolean' },
+    order: { type: 'number' },
+    ...WORLDBOOK_SOURCE_FIELDS,
+  },
+};
+
+const WORLDBOOK_ENTRY_SELECTOR_SCHEMA = {
+  type: ['object', 'string'],
+  description: 'Entry to delete: an entry title string, or an object with entryId, entryTitle or query.',
+  properties: {
+    entryId: { type: 'string' },
+    entryTitle: { type: 'string' },
+    query: { type: 'string' },
+  },
+};
+
+// 条目缺标题或正文时不写入：否则会被补成标题/正文都是 entry-N 的常驻空壳条目
+const listIncompleteWorldEntries = (entries = []) => (Array.isArray(entries) ? entries : [])
+  .map((entry, index) => {
+    const source = isPlainObject(entry) ? entry : {};
+    const missing = [];
+    if (!trim(source.title || source.comment || source.name || source.id)) missing.push('title');
+    if (!trim(source.content || source.description)) missing.push('content');
+    return missing.length ? { index, missing } : null;
+  })
+  .filter(Boolean);
+
+const describeIncompleteWorldEntries = (incomplete = [], field = 'entries') => `${incomplete
+  .slice(0, 5)
+  .map(item => `${field}[${item.index}] 缺少 ${item.missing.join('、')}`)
+  .join('；')}。每个条目都要填写 title 和完整 content 后重新调用；长正文可改用 worldbook.generate_entries 按大纲生成。`;
+
+const WORLDBOOK_INVALID_UPDATES_MESSAGE = 'updates 中的项目是空的或缺少 title/content：先用 entryId、entryTitle 或 query 指定要改的条目并写出要改的字段；新增条目请用 worldbook.create 并填写 title 和完整 content。';
+
+// 不可能生效的更新项：空对象；或 createMissing 下匹配不到现有条目、又缺标题/正文的新建项
+const checkWorldbookUpdateItem = (entries = [], update = {}, createMissing = false) => {
+  if (!isPlainObject(update)) return { reason: 'invalid_update' };
+  if (!Object.values(update).some(value => trim(Array.isArray(value) ? value.join('') : value))) {
+    return { reason: 'empty_update' };
+  }
+  const matchIndex = findWorldbookEntryIndex(entries, update);
+  if (createMissing && matchIndex < 0) {
+    const incomplete = listIncompleteWorldEntries([update])[0];
+    if (incomplete) return { reason: 'incomplete_entry', missing: incomplete.missing };
+    const contentPatch = resolveWorldbookEntryContentPatch({}, update);
+    if (contentPatch.ok === false) return contentPatch;
+  }
+  if (matchIndex >= 0) {
+    const contentPatch = resolveWorldbookEntryContentPatch(entries[matchIndex], update);
+    if (contentPatch.ok === false) return contentPatch;
+  }
+  return null;
+};
+
+const listInvalidWorldbookUpdates = (entries = [], args = {}) => (Array.isArray(args.updates) ? args.updates : [])
+  .map((update, index) => {
+    const issue = checkWorldbookUpdateItem(entries, update, args.createMissing === true);
+    return issue ? { index, ...issue } : null;
+  })
+  .filter(Boolean);
+
 const normalizeWorldEntry = (entry = {}, index = 0) => {
   const source = isPlainObject(entry) ? entry : {};
   const title = trim(source.title || source.comment || source.name || source.id, `entry-${index + 1}`);
@@ -332,16 +432,12 @@ const normalizeWorldbookEntrySummary = (entry = {}, index = 0, { includeContent 
     constant: source.constant === true,
     order: Number.isFinite(Number(source.order ?? source.priority)) ? Number(source.order ?? source.priority) : undefined,
     position: Number.isFinite(Number(source.position)) ? Number(source.position) : undefined,
-    contentLength: trim(source.content || source.description || '').length,
+    ...describeWorldbookEntryContent({ ...source, content: source.content ?? source.description }, { includeContent, maxContentLength }),
     sourceLayer: trim(source.sourceLayer || source.provenance?.layer),
     sourceRefs: Array.from(new Set(normalizeStringList(source.sourceRefs || source.provenance?.refs))),
   };
   const sourceNotes = trim(source.sourceNotes || source.provenance?.notes);
   if (sourceNotes) summary.sourceNotes = truncateText(sourceNotes, 500);
-  if (includeContent === true) {
-    summary.content = truncateText(source.content || source.description || '', maxContentLength);
-    summary.contentTruncated = trim(source.content || source.description || '').length > maxContentLength;
-  }
   return summary;
 };
 
@@ -375,7 +471,7 @@ const worldbookEntryMatches = (entry = {}, index = 0, args = {}) => {
   const query = trim(args.query);
   if (query) {
     const target = normalizeKey(query);
-    const haystack = [id, title, ...keys, trim(source.content || source.description || '')]
+    const haystack = [id, title, ...keys, getWorldbookEntrySearchText(source)]
       .map(normalizeKey)
       .join('\n');
     return haystack.includes(target);
@@ -385,17 +481,15 @@ const worldbookEntryMatches = (entry = {}, index = 0, args = {}) => {
 
 const findWorldbookEntryIndex = (entries = [], update = {}) => {
   const source = isPlainObject(update) ? update : {};
-  const exactTargets = [
-    source.entryId,
-    source.entry,
-    source.entryName,
-    source.entryTitle,
-    source.target,
-    source.id,
-    source.title,
-    source.comment,
-    source.name,
-  ].map(value => normalizeKey(value)).filter(Boolean);
+  // An explicit id is an identity, never a title/keyword search or a rename value.
+  const entryId = trim(source.entryId);
+  if (entryId) return entries.findIndex(entry => (trim(entry?.id) || trim(entry?.uid)) === entryId);
+  const explicitTargets = [source.entry, source.entryName, source.entryTitle, source.target]
+    .map(normalizeKey).filter(Boolean);
+  const query = normalizeKey(source.query);
+  const exactTargets = explicitTargets.length
+    ? explicitTargets
+    : (query ? [] : [source.id, source.title, source.comment, source.name].map(normalizeKey).filter(Boolean));
   if (exactTargets.length) {
     const exactIndex = entries.findIndex((entry, index) => {
       const title = trim(entry?.title || entry?.comment || entry?.name || entry?.id, `entry-${index + 1}`);
@@ -411,8 +505,8 @@ const findWorldbookEntryIndex = (entries = [], update = {}) => {
         .some(value => value && exactTargets.includes(value));
     });
     if (exactIndex >= 0) return exactIndex;
+    if (explicitTargets.length) return -1;
   }
-  const query = normalizeKey(source.query);
   if (!query) return -1;
   return entries.findIndex((entry, index) => {
     const title = trim(entry?.title || entry?.comment || entry?.name || entry?.id, `entry-${index + 1}`);
@@ -422,7 +516,7 @@ const findWorldbookEntryIndex = (entries = [], update = {}) => {
       ...normalizeStringList(entry?.key),
       ...normalizeStringList(entry?.keys),
       ...normalizeStringList(entry?.triggers),
-      trim(entry?.content || entry?.description || ''),
+      getWorldbookEntrySearchText(entry),
     ].map(value => normalizeKey(value)).join('\n');
     return haystack.includes(query);
   });
@@ -554,8 +648,8 @@ const applyWorldbookEntryUpdate = (entry = {}, update = {}, index = 0) => {
   } else if (!trim(next.id)) {
     next.id = trim(next.title || next.comment || next.name, `entry-${index + 1}`);
   }
-  if (hasOwn(source, 'content')) next.content = trim(source.content);
-  if (!hasOwn(source, 'content') && hasOwn(source, 'description')) next.content = trim(source.description);
+  const contentPatch = resolveWorldbookEntryContentPatch(entry, source);
+  if (contentPatch.ok === true) Object.assign(next, contentPatch.patch);
   const keys = hasOwn(source, 'keys') ? source.keys : (hasOwn(source, 'key') ? source.key : source.triggers);
   if (hasOwn(source, 'keys') || hasOwn(source, 'key') || hasOwn(source, 'triggers')) {
     const normalizedKeys = normalizeStringList(keys);
@@ -586,7 +680,11 @@ const applyWorldbookEntryUpdate = (entry = {}, update = {}, index = 0) => {
   if (hasOwn(source, 'provenance') && isPlainObject(source.provenance)) {
     next.provenance = clone(source.provenance);
   }
-  return normalizeWorldEntry(next, index);
+  const normalized = normalizeWorldEntry(next, index);
+  // Metadata edits must preserve a deliberately empty body as well as an
+  // explicit content replacement or the first-block mirror.
+  if (typeof next.content === 'string') normalized.content = next.content;
+  return normalized;
 };
 
 const sameSerializableValue = (left, right) => {
@@ -821,7 +919,9 @@ export const createAppContentAgentTools = ({
     conflictMode: 'return',
   });
 
-  const saveWorldbookSnapshot = async (worldbookId, payload, snapshot = {}) => {
+  const saveWorldbookSnapshot = async (worldbookId, payload, snapshot = {}, context = {}) => {
+    const boundaryFailure = await worldbookWriteBoundary.validateCommit(worldbookId, context);
+    if (boundaryFailure) return boundaryFailure;
     const result = await saveWorldInfo(worldbookId, payload, getWorldbookWriteOptions(snapshot));
     if (result?.ok === false) return result;
     return { ok: true, ...(result && typeof result === 'object' ? result : {}) };
@@ -845,34 +945,74 @@ export const createAppContentAgentTools = ({
     return await readWorldbookSnapshot(worldbookId);
   };
 
-  const resolveWorldbookId = async (args = {}) => {
-    const explicit = trim(args.worldbookId || args.id || args.name);
-    if (explicit) return explicit;
-    const sessionIds = await getSessionWorldIds(args.sessionId);
-    if (sessionIds.length) return sessionIds[0];
-    return (await getGlobalWorlds())[0] || '';
+  // 当前角色卡自己绑定的世界书（卡上 source.worldbookId）：RP 会话 rp:<卡 id> 取对应卡，否则取当前启用的卡
+  const getCurrentCardPersona = (sessionId = '') => resolveWorldbookCurrentPersona({ personaStore, chatStore, sessionId });
+
+  const getCurrentCardWorldbookId = (sessionId = '') => trim(getCurrentCardPersona(sessionId)?.source?.worldbookId);
+
+  const capturePersonaWorldBinding = persona => ({
+    personaId: trim(persona?.id),
+    generation: readPersonaGenerationToken(persona),
+    worldbookId: trim(persona?.source?.worldbookId),
+    enabled: persona?.source?.worldbookEnabled !== false,
+  });
+
+  const validateCreatePersonaIdentity = (binding = {}) => {
+    if (!binding?.personaId) return null;
+    const persona = findStoreItem(personaStore, binding.personaId);
+    if (trim(persona?.id) === binding.personaId
+      && (!binding.generation || readPersonaGenerationToken(persona) === binding.generation)) return null;
+    return { ok: false, created: false, worldbookSaved: false, reason: 'persona_target_changed', personaId: binding.personaId };
   };
+
+  // 未指定名称时的目标顺序：会话绑定 → 当前角色卡的世界书 → 全局；resolvedFrom 让模型知道落到了哪本
+  const resolveWorldbookTarget = async (args = {}) => {
+    const explicit = trim(args.worldbookId || args.id || args.name);
+    if (explicit) return { worldbookId: explicit, resolvedFrom: 'explicit' };
+    const sessionIds = await getSessionWorldIds(args.sessionId);
+    if (sessionIds.length) return { worldbookId: sessionIds[0], resolvedFrom: 'session' };
+    const cardWorldbookId = getCurrentCardWorldbookId(args.sessionId);
+    if (cardWorldbookId) return { worldbookId: cardWorldbookId, resolvedFrom: 'current_card' };
+    return { worldbookId: (await getGlobalWorlds())[0] || '', resolvedFrom: 'global_fallback' };
+  };
+
+  const resolveWorldbookId = async (args = {}) => (await resolveWorldbookTarget(args)).worldbookId;
 
   const resolveWorldbookCreateTarget = async (args = {}) => {
     const personaQuery = trim(args.personaId || args.personaName);
+    const sessionId = trim(args.sessionId || chatStore?.getCurrent?.());
+    const isRpTarget = sessionId.startsWith('rp:');
+    const rpPersonaId = isRpTarget ? sessionId.slice(3) : '';
     const persona = personaQuery
       ? findStoreItem(personaStore, personaQuery)
-      : getActiveStoreItem(personaStore);
-    const fallbackWorldName = trim(persona?.name || persona?.id)
+      : (isRpTarget ? findStoreItem(personaStore, rpPersonaId) : getCurrentCardPersona(sessionId));
+    if ((personaQuery && !persona) || (!personaQuery && isRpTarget && (!persona || trim(persona.id) !== rpPersonaId))) {
+      return { error: {
+        ok: false, created: false, worldbookSaved: false, reason: 'persona_not_found',
+        personaQuery: personaQuery || rpPersonaId, sessionId,
+      } };
+    }
+    const personaBinding = capturePersonaWorldBinding(persona);
+    // 未给名称时写入这张卡已绑定的世界书；卡还没有世界书时才新建「卡名 世界书」
+    const fallbackWorldName = trim(persona?.source?.worldbookId) || (trim(persona?.name || persona?.id)
       ? `${trim(persona?.name || persona?.id)} 世界书`
-      : '女仆创建的世界书';
+      : '女仆创建的世界书');
     const explicitName = trim(args.name);
     const name = trim(explicitName, fallbackWorldName);
     const snapshot = await readWorldbookSnapshot(name);
     const existing = snapshot.data;
     const existingEntries = getWorldEntries(existing);
     const requestedMode = trim(args.mode, 'append');
-    const mode = requestedMode === 'replace'
+    // An unbound card gets its own book even when another card uses the same name.
+    const mode = !explicitName && personaBinding.personaId && !personaBinding.worldbookId
+      ? 'create_new'
+      : requestedMode === 'replace'
       ? 'replace'
       : (requestedMode === 'create_new' ? 'create_new' : 'append');
     return {
       personaQuery,
       persona,
+      personaBinding,
       explicitName,
       name,
       existing,
@@ -1104,6 +1244,7 @@ export const createAppContentAgentTools = ({
       requested,
       items,
       plannedCount: items.filter(item => item.status === 'planned').length,
+      keptSimilarWorldbooks: findKeptSimilarWorldbooks({ storedIds, items }),
     };
   };
 
@@ -1300,6 +1441,49 @@ export const createAppContentAgentTools = ({
       items,
     };
   };
+
+  const worldbookWriteBoundary = createWorldbookWriteBoundary({
+    getCurrentPersona: () => getCurrentCardPersona(),
+    getCurrentSessionId: () => trim(chatStore?.getCurrent?.()),
+    listPersonas: () => listStoreItems(personaStore),
+    personaIdentity: readPersonaGenerationToken,
+    waitForReady: waitForWorldStoreReady,
+    readSnapshot: readWorldbookSnapshot,
+    getGlobalIds: getGlobalWorlds,
+    getSessionMap: getWorldSessionMap,
+    resolveTargets: {
+      'worldbook.create': async args => {
+        await waitForWorldStoreReady?.();
+        if (listIncompleteWorldEntries(args.entries).length) return [];
+        const target = await resolveWorldbookCreateTarget(args);
+        if (target.error) return [];
+        const bind = args.bindToPersona === true || Boolean(target.personaQuery) || !target.explicitName;
+        return [{ worldbookId: target.name, newBook: target.mode === 'create_new', allowNewCopy: target.mode === 'replace',
+          bindPersonaId: bind ? trim(target.persona?.id) : '' }];
+      },
+      'worldbook.generate_entries': async args => {
+        await waitForWorldStoreReady?.();
+        return [{ worldbookId: trim(args.name) }];
+      },
+      'worldbook.update_entries': async args => {
+        await waitForWorldStoreReady?.();
+        const target = await resolveWorldbookUpdateTarget(args);
+        return target.worldbookId ? [{ worldbookId: target.worldbookId }] : [];
+      },
+      'worldbook.delete_entries': async args => {
+        await waitForWorldStoreReady?.();
+        const target = await resolveWorldbookDeleteTarget(args);
+        return target.worldbookId && target.deletePlan.deleteCount
+          ? [{ worldbookId: target.worldbookId }] : [];
+      },
+      'worldbook.delete_many': async args => {
+        if (args.preview === true) return [];
+        const snapshot = worldbookDeleteSnapshots.get(args) || await buildWorldbookDeleteSnapshot(args);
+        return snapshot.items.filter(item => item.status === 'planned')
+          .map(item => ({ worldbookId: item.worldbookId }));
+      },
+    },
+  });
 
   return [
   {
@@ -1929,7 +2113,7 @@ export const createAppContentAgentTools = ({
           updatedBy: 'maid',
           updatedAt: Number(now?.() || Date.now()) || Date.now(),
         };
-        const saveResult = await saveWorldbookSnapshot(worldbookName, payload, workingSnapshot);
+        const saveResult = await saveWorldbookSnapshot(worldbookName, payload, workingSnapshot, context);
         if (saveResult.ok !== false) {
           return {
             ok: true,
@@ -1984,7 +2168,8 @@ export const createAppContentAgentTools = ({
       additionalProperties: false,
       properties: {
         name: { type: 'string', minLength: 1, maxLength: 120 },
-        entries: { type: 'array', minItems: 1, maxItems: 50 },
+        entries: { type: 'array', minItems: 1, maxItems: 50, items: WORLDBOOK_CREATE_ENTRY_SCHEMA },
+        sessionId: { type: 'string', maxLength: 160, description: 'Resolve the current card for this session when personaId/personaName is omitted.' },
         mode: { type: 'string', enum: ['append', 'create_new', 'replace'] },
         personaId: { type: 'string', maxLength: 160 },
         personaName: { type: 'string', maxLength: 160 },
@@ -1995,12 +2180,22 @@ export const createAppContentAgentTools = ({
       operationType: 'append_or_replace_worldbook',
       destructive: 'conditional',
       preflight: async (args = {}) => {
+        // 不完整条目由 execute 直接拒绝，不能为它弹出覆盖确认
+        if (listIncompleteWorldEntries(args.entries).length) {
+          return { destructive: false, operationType: 'incomplete_entries' };
+        }
         const target = await resolveWorldbookCreateTarget(args);
+        if (target.error) {
+          worldbookCreateTargets.set(args, { error: target.error });
+          return { destructive: false, operationType: 'invalid_persona_target' };
+        }
         worldbookCreateTargets.set(args, Object.freeze({
           name: target.name,
           personaId: trim(target.persona?.id),
           personaQuery: target.personaQuery,
           explicitName: target.explicitName,
+          mode: target.mode,
+          personaBinding: target.personaBinding,
           revision: target.snapshot?.revision ?? null,
           generation: target.snapshot?.generation ?? null,
           exists: target.snapshot?.exists === true,
@@ -2020,6 +2215,9 @@ export const createAppContentAgentTools = ({
           details: {
             worldbookId: target.name,
             personaId: trim(target.persona?.id),
+            personaBinding: target.personaBinding,
+            personaQuery: target.personaQuery,
+            explicitName: target.explicitName,
             baseRevision: target.snapshot?.revision ?? null,
             baseGeneration: target.snapshot?.generation ?? null,
             currentEntryCount: target.existingEntries.length,
@@ -2037,23 +2235,46 @@ export const createAppContentAgentTools = ({
       },
     },
     execute: async (args = {}, context = {}) => {
+      const incompleteEntries = listIncompleteWorldEntries(args.entries);
+      if (incompleteEntries.length) {
+        return {
+          ok: false,
+          created: false,
+          reason: 'incomplete_entries',
+          incompleteEntries,
+          message: describeIncompleteWorldEntries(incompleteEntries),
+        };
+      }
       const sourceValidation = validateMaidWorldbookSourcePlan({
         toolName: 'worldbook.create',
         args,
         grounding: context?.maidSourceGrounding,
       });
       if (!sourceValidation.ok) return sourceValidation;
-      const resolvedTarget = await resolveWorldbookCreateTarget(args);
       const pinnedTarget = worldbookCreateTargets.get(args);
+      if (pinnedTarget?.error) return pinnedTarget.error;
       const confirmedDetails = context?.toolSafety?.request?.details || {};
-      const name = trim(pinnedTarget?.name || confirmedDetails.worldbookId || resolvedTarget.name);
       const pinnedPersonaId = trim(pinnedTarget?.personaId || confirmedDetails.personaId);
+      const frozenPersonaBinding = pinnedTarget?.personaBinding ?? confirmedDetails.personaBinding;
+      const frozenPersonaFailure = validateCreatePersonaIdentity(frozenPersonaBinding);
+      if (frozenPersonaFailure) return frozenPersonaFailure;
+      if (frozenPersonaBinding?.personaId && !sameSerializableValue(
+        frozenPersonaBinding, capturePersonaWorldBinding(findStoreItem(personaStore, frozenPersonaBinding.personaId)),
+      )) {
+        return { ok: false, created: false, worldbookSaved: false, reason: 'persona_binding_changed', personaId: frozenPersonaBinding.personaId };
+      }
+      const resolvedTarget = await resolveWorldbookCreateTarget(pinnedPersonaId ? { ...args, personaId: pinnedPersonaId } : args);
+      if (resolvedTarget.error) return resolvedTarget.error;
+      const name = trim(pinnedTarget?.name || confirmedDetails.worldbookId || resolvedTarget.name);
       const persona = pinnedPersonaId
         ? findStoreItem(personaStore, pinnedPersonaId)
         : resolvedTarget.persona;
-      const personaQuery = pinnedTarget?.personaQuery ?? resolvedTarget.personaQuery;
-      const explicitName = pinnedTarget?.explicitName ?? resolvedTarget.explicitName;
-      const mode = resolvedTarget.mode;
+      const personaQuery = pinnedTarget?.personaQuery ?? confirmedDetails.personaQuery ?? resolvedTarget.personaQuery;
+      const explicitName = pinnedTarget?.explicitName ?? confirmedDetails.explicitName ?? resolvedTarget.explicitName;
+      const personaBinding = frozenPersonaBinding ?? resolvedTarget.personaBinding;
+      const mode = hasFallbackToolSafety(context, 'worldbook.replace')
+        ? 'create_new'
+        : (pinnedTarget?.mode ?? resolvedTarget.mode);
       const initialSnapshot = await readWorldbookSnapshot(name);
       const existing = initialSnapshot.data;
       const existingEntries = getWorldEntries(existing);
@@ -2112,6 +2333,8 @@ export const createAppContentAgentTools = ({
       let savedState = null;
       let workingSnapshot = await readWorldbookSnapshot(targetName);
       for (let attempt = 0; attempt < 4; attempt += 1) {
+        const personaFailure = validateCreatePersonaIdentity(personaBinding);
+        if (personaFailure) return personaFailure;
         if ((mode === 'create_new' || fallbackCreated) && workingSnapshot.exists) {
           targetName = await makeUniqueWorldbookName(name, { listWorlds, getWorldInfo, worldInfoExists });
           workingSnapshot = await readWorldbookSnapshot(targetName);
@@ -2138,7 +2361,7 @@ export const createAppContentAgentTools = ({
           updatedBy: 'maid',
           updatedAt: Number(now?.() || Date.now()) || Date.now(),
         };
-        const saveResult = await saveWorldbookSnapshot(targetName, payload, workingSnapshot);
+        const saveResult = await saveWorldbookSnapshot(targetName, payload, workingSnapshot, context);
         if (saveResult.ok !== false) {
           savedState = { targetExisting, targetExistingEntries, incomingEntries, nextEntries };
           break;
@@ -2153,13 +2376,43 @@ export const createAppContentAgentTools = ({
       }
       if (!savedState) return { ok: false, created: false, reason: 'worldbook_busy', worldbookId: targetName };
       let boundPersonaId = '';
-      const shouldBindPersona = args.bindToPersona === true || Boolean(personaQuery) || (!explicitName && persona?.id);
-      if (shouldBindPersona && persona?.id && typeof assignWorldToPersona === 'function') {
-        await assignWorldToPersona(persona.id, targetName, { enabled: true });
-        boundPersonaId = trim(persona.id);
+      let bindingFailure = null;
+      const shouldBindPersona = args.bindToPersona === true || Boolean(personaQuery) || (!explicitName && personaBinding.personaId);
+      if (shouldBindPersona && personaBinding.personaId) {
+        const currentPersona = personaStore?.get?.(personaBinding.personaId);
+        const currentBinding = capturePersonaWorldBinding(currentPersona);
+        if (!currentPersona || (personaBinding.generation && personaBinding.generation !== currentBinding.generation)) {
+          bindingFailure = { reason: 'persona_target_changed', currentBinding };
+        } else if (personaBinding.worldbookId !== currentBinding.worldbookId || personaBinding.enabled !== currentBinding.enabled) {
+          bindingFailure = { reason: 'persona_binding_changed', currentBinding };
+        } else if (currentBinding.worldbookId !== targetName) {
+          // The production bridge updates the in-memory binding before its first
+          // await, so no user action can interleave this check and the mutation.
+          if (typeof assignWorldToPersona !== 'function') {
+            bindingFailure = { reason: 'persona_binding_unavailable', currentBinding };
+          } else {
+            try {
+              // An empty binding has no existing book toggle to preserve. The
+              // first book must be enabled; later replacements keep user intent.
+              const enabled = personaBinding.worldbookId ? personaBinding.enabled : true;
+              const saved = await assignWorldToPersona(personaBinding.personaId, targetName, { enabled });
+              if (saved === false || saved?.ok === false) bindingFailure = { reason: 'persona_binding_save_failed', currentBinding };
+              else boundPersonaId = personaBinding.personaId;
+            } catch {
+              bindingFailure = { reason: 'persona_binding_save_failed', currentBinding };
+            }
+          }
+        }
       }
       return {
-        ok: true,
+        ok: !bindingFailure,
+        ...(bindingFailure ? {
+          ...bindingFailure,
+          partial: true,
+          worldbookSaved: true,
+          expectedBinding: personaBinding,
+          message: `世界书「${targetName}」的条目已保存，但角色卡绑定未完成（${bindingFailure.reason}）。请勿重复追加这些条目；需要绑定时请重新确认当前角色卡绑定。`,
+        } : {}),
         created: !savedState.targetExisting,
         overwritten,
         fallbackCreated,
@@ -2168,14 +2421,28 @@ export const createAppContentAgentTools = ({
         previousWorldbookId: targetName === name ? '' : name,
         previousEntryCount: savedState.targetExistingEntries.length,
         addedEntryCount: savedState.incomingEntries.length,
+        // 新增条目的标题与正文长度，供读回核对“正文确实写入”，不只是条目数变了
+        addedEntries: savedState.incomingEntries
+          .slice(0, 20)
+          .map(entry => {
+            const { id, title, contentLength } = normalizeWorldbookEntrySummary(entry);
+            return { id, title, contentLength };
+          }),
         entryCount: savedState.nextEntries.length,
         boundPersonaId,
+        ...(!savedState.targetExisting && boundPersonaId
+          ? { notice: `为角色卡「${trim(persona?.name || boundPersonaId)}」新建并绑定了世界书「${targetName}」；回复用户时要说明这一点。` }
+          : {}),
       };
     },
     // 取消覆盖会创建安全副本——摘要必须点名副本，模型才不会漏报这个副作用
-    summarizeResult: result => (result?.fallbackCreated
+    summarizeResult: result => (result?.partial && result?.worldbookSaved
+      ? `saved worldbook ${trim(result.worldbookId)}; character binding incomplete: ${trim(result.reason)}. Entries are already saved; do not append them again.`
+      : result?.ok === false
+      ? `create worldbook failed: ${trim(result?.reason, 'unknown')}`
+      : result?.fallbackCreated
       ? `replace cancelled; created safety copy ${trim(result?.worldbookId, '-')} (${Number(result?.entryCount || 0)} entries), original ${trim(result?.previousWorldbookId, '-')} untouched`
-      : `saved worldbook ${trim(result?.worldbookId, '-')} (${Number(result?.entryCount || 0)} entries)`),
+      : `${result?.created ? 'created new worldbook' : 'saved worldbook'} ${trim(result?.worldbookId, '-')} (${Number(result?.entryCount || 0)} entries)${result?.boundPersonaId ? '; bound it to the character card' : ''}`),
   },
   {
     name: 'worldbook.update_entries',
@@ -2202,7 +2469,7 @@ export const createAppContentAgentTools = ({
         worldbookId: { type: 'string', maxLength: 160 },
         name: { type: 'string', maxLength: 160 },
         sessionId: { type: 'string', maxLength: 160 },
-        updates: { type: 'array', minItems: 1, maxItems: 50 },
+        updates: { type: 'array', minItems: 1, maxItems: 50, items: WORLDBOOK_UPDATE_ENTRY_SCHEMA },
         createMissing: { type: 'boolean' },
       },
     },
@@ -2216,8 +2483,10 @@ export const createAppContentAgentTools = ({
           revision: target.snapshot?.revision ?? null,
           generation: target.snapshot?.generation ?? null,
           exists: target.snapshot?.exists === true,
+          entries: clone(target.existingEntries),
         }));
-        if (!target.worldbookId || !target.existingEntries.length || !hasWorldbookEntryOverwriteFields(target.updates)) {
+        const validUpdates = target.updates.filter(update => !checkWorldbookUpdateItem(target.existingEntries, update, target.createMissing));
+        if (!target.worldbookId || !target.existingEntries.length || !hasWorldbookEntryOverwriteFields(validUpdates)) {
           return { destructive: false, operationType: 'update_worldbook_entries' };
         }
         return {
@@ -2255,6 +2524,11 @@ export const createAppContentAgentTools = ({
       const target = await resolveWorldbookUpdateTarget(
         pinnedWorldbookId ? { ...args, worldbookId: pinnedWorldbookId } : args,
       );
+      const confirmationSnapshot = pinnedTarget || {
+        generation: target.snapshot?.generation ?? null,
+        exists: target.snapshot?.exists === true,
+        entries: clone(target.existingEntries),
+      };
       if (!Array.isArray(args.updates) || !args.updates.length) {
         return { ok: false, updated: false, reason: 'missing_updates' };
       }
@@ -2265,7 +2539,20 @@ export const createAppContentAgentTools = ({
       if (!target.existing) {
         return { ok: false, updated: false, reason: 'worldbook_not_found', worldbookId: target.worldbookId };
       }
-      const requiresConfirmation = target.existingEntries.length > 0 && hasWorldbookEntryOverwriteFields(args.updates);
+      // 全部更新项都不可能生效时直接退回，不为它弹出修改确认
+      const invalidUpdates = listInvalidWorldbookUpdates(target.existingEntries, args);
+      if (invalidUpdates.length === args.updates.length) {
+        return {
+          ok: false,
+          updated: false,
+          reason: 'invalid_updates',
+          worldbookId: target.worldbookId,
+          skippedUpdates: invalidUpdates,
+          message: invalidUpdates.find(item => item.message)?.message || WORLDBOOK_INVALID_UPDATES_MESSAGE,
+        };
+      }
+      const validUpdates = args.updates.filter((_, index) => !invalidUpdates.some(item => item.index === index));
+      const requiresConfirmation = target.existingEntries.length > 0 && hasWorldbookEntryOverwriteFields(validUpdates);
       if (requiresConfirmation && !isWorldbookUpdateAllowed(context)) {
         const confirmed = typeof confirmDestructiveWrite === 'function'
           ? await confirmDestructiveWrite({
@@ -2297,13 +2584,26 @@ export const createAppContentAgentTools = ({
           return { ok: false, updated: false, reason: 'worldbook_not_found', worldbookId: target.worldbookId };
         }
         const workingEntries = getWorldEntries(workingSnapshot.data);
+        if (confirmationSnapshot.exists !== workingSnapshot.exists
+          || (confirmationSnapshot.generation != null && workingSnapshot.generation != null
+            && confirmationSnapshot.generation !== workingSnapshot.generation)
+          || worldbookSelectorsOverlapChanges(confirmationSnapshot.entries, workingEntries, args.updates)) {
+          return {
+            ok: false,
+            updated: false,
+            reason: 'worldbook_changed_since_confirmation',
+            worldbookId: target.worldbookId,
+            currentRevision: workingSnapshot.revision,
+          };
+        }
         const nextEntries = workingEntries.map(entry => clone(entry));
         const skippedUpdates = [];
         const updatedEntries = [];
         let createdEntryCount = 0;
         args.updates.forEach((update, index) => {
-          if (!isPlainObject(update)) {
-            skippedUpdates.push({ index, reason: 'invalid_update' });
+          const issue = checkWorldbookUpdateItem(nextEntries, update, args.createMissing === true);
+          if (issue) {
+            skippedUpdates.push({ index, ...issue });
             return;
           }
           const matchIndex = findWorldbookEntryIndex(nextEntries, update);
@@ -2329,12 +2629,15 @@ export const createAppContentAgentTools = ({
         });
 
         if (!updatedEntries.length && !createdEntryCount) {
+          const invalidOnly = skippedUpdates.length
+            && skippedUpdates.every(item => item.reason !== 'entry_not_found');
           return {
             ok: false,
             updated: false,
-            reason: 'no_matching_entries',
+            reason: invalidOnly ? 'invalid_updates' : 'no_matching_entries',
             worldbookId: target.worldbookId,
             skippedUpdates,
+            ...(invalidOnly ? { message: skippedUpdates.find(item => item.message)?.message || WORLDBOOK_INVALID_UPDATES_MESSAGE } : {}),
           };
         }
         const payload = {
@@ -2344,7 +2647,7 @@ export const createAppContentAgentTools = ({
           updatedBy: 'maid',
           updatedAt: Number(now?.() || Date.now()) || Date.now(),
         };
-        const saveResult = await saveWorldbookSnapshot(target.worldbookId, payload, workingSnapshot);
+        const saveResult = await saveWorldbookSnapshot(target.worldbookId, payload, workingSnapshot, context);
         if (saveResult.ok !== false) {
           return {
             ok: true,
@@ -2354,6 +2657,10 @@ export const createAppContentAgentTools = ({
             createdEntryCount,
             entryCount: nextEntries.length,
             skippedUpdates,
+            ...(skippedUpdates.length ? {
+              partial: true,
+              message: `已保存有效更新；另有 ${skippedUpdates.length} 项未写入，请检查 skippedUpdates，不要重复提交已保存的项目。`,
+            } : {}),
             updatedEntries,
           };
         }
@@ -2377,7 +2684,7 @@ export const createAppContentAgentTools = ({
     },
     summarizeResult: result => result?.ok === false
       ? `update worldbook entries failed: ${trim(result?.reason, 'unknown')}`
-      : `updated worldbook ${trim(result?.worldbookId, '-')} (${Number(result?.updatedEntryCount || 0)} updated, ${Number(result?.createdEntryCount || 0)} created)`,
+      : `updated worldbook ${trim(result?.worldbookId, '-')} (${Number(result?.updatedEntryCount || 0)} updated, ${Number(result?.createdEntryCount || 0)} created${result?.skippedUpdates?.length ? `, ${result.skippedUpdates.length} skipped; do not repeat saved updates` : ''})`,
   },
   {
     name: 'worldbook.delete_entries',
@@ -2407,20 +2714,22 @@ export const createAppContentAgentTools = ({
           type: 'array',
           minItems: 1,
           maxItems: 100,
+          items: WORLDBOOK_ENTRY_SELECTOR_SCHEMA,
           description: 'Explicit deletion selectors. Do not combine with dedupeByTitle:true.',
         },
         deletes: {
           type: 'array',
           minItems: 1,
           maxItems: 100,
+          items: WORLDBOOK_ENTRY_SELECTOR_SCHEMA,
           description: 'Explicit deletion selectors. Do not combine with dedupeByTitle:true.',
         },
         dedupeByTitle: {
           type: 'boolean',
           description: 'Deduplicate by duplicateTitles/titles while preserving keep:first/last. Do not combine with entries/deletes.',
         },
-        duplicateTitles: { type: 'array', maxItems: 50 },
-        titles: { type: 'array', maxItems: 50 },
+        duplicateTitles: { type: 'array', maxItems: 50, items: { type: 'string' } },
+        titles: { type: 'array', maxItems: 50, items: { type: 'string' } },
         keep: { type: 'string', enum: ['first', 'last'] },
       },
     },
@@ -2553,7 +2862,7 @@ export const createAppContentAgentTools = ({
         updatedBy: 'maid',
         updatedAt: Number(now?.() || Date.now()) || Date.now(),
       };
-      const saveResult = await saveWorldbookSnapshot(target.worldbookId, payload, workingSnapshot);
+      const saveResult = await saveWorldbookSnapshot(target.worldbookId, payload, workingSnapshot, context);
       if (saveResult.ok === false) {
         return {
           ok: false,
@@ -2610,7 +2919,10 @@ export const createAppContentAgentTools = ({
           kind: 'worldbook.delete_many',
           operationType: 'delete_worldbooks',
           title: '批量删除世界书',
-          message: `将永久删除 ${snapshot.plannedCount} 本世界书；现有聊天室、全局与角色卡绑定会自动解除。请确认列表与绑定影响。`,
+          message: [
+            t('将永久删除 {value} 本世界书；现有聊天室、全局与角色卡绑定会自动解除。请确认列表与绑定影响。', { value: snapshot.plannedCount }),
+            formatKeptSimilarWorldbooks(snapshot.keptSimilarWorldbooks),
+          ].filter(Boolean).join('\n\n'),
           confirmText: '确认删除',
           cancelText: '取消',
           danger: true,
@@ -2619,6 +2931,7 @@ export const createAppContentAgentTools = ({
             resource: 'worldbook',
             requestedCount: snapshot.requested.length,
             plannedCount: snapshot.plannedCount,
+            keptSimilarWorldbooks: snapshot.keptSimilarWorldbooks,
             items: snapshot.items.map(item => ({
               id: item.worldbookId || item.target,
               label: item.name,
@@ -2665,6 +2978,7 @@ export const createAppContentAgentTools = ({
           requestedCount: snapshot.requested.length,
           plannedCount: snapshot.plannedCount,
           results: snapshot.items.map(compactWorldbookDeleteItem),
+          keptSimilarWorldbooks: snapshot.keptSimilarWorldbooks,
         };
       }
       if (snapshot.plannedCount > 0 && !hasAllowedToolSafety(context, 'worldbook.delete_many')) {
@@ -2715,6 +3029,11 @@ export const createAppContentAgentTools = ({
           continue;
         }
         try {
+          const boundaryFailure = await worldbookWriteBoundary.validateCommit(worldbookId, context);
+          if (boundaryFailure) {
+            results.push(compactWorldbookDeleteItem({ ...item, status: 'skipped', reason: boundaryFailure.reason }));
+            continue;
+          }
           const deleteResult = await deleteWorldInfo(worldbookId, {
             ...(item.revision !== null && item.revision !== undefined
               ? { expectedRevision: item.revision }
@@ -2838,15 +3157,15 @@ export const createAppContentAgentTools = ({
           entriesCount: metadata?.entriesCount,
           boundToCurrentSession: sessionIds.includes(id),
           global: globalIds.includes(id),
-        }), personaBindings: listStoreItems(personaStore)
-          .filter(persona => trim(persona?.source?.worldbookId) === id)
-          .map(persona => ({ personaId: trim(persona.id), personaName: trim(persona.name || persona.id), enabled: persona.source.worldbookEnabled !== false })),
-        });
+        }) });
       }
+      await personaStore?.ready;
+      const ownership = captureWorldbookResourceOwnership({ personaStore, chatStore, sessionId: args.sessionId });
       return {
         ok: true,
         count: ids.length,
-        worldbooks,
+        ...ownership.context,
+        worldbooks: worldbooks.map(book => ({ ...book, ...ownership.project(book.id) })),
       };
     },
     summarizeResult: result => `listed ${Number(result?.worldbooks?.length || 0)} worldbook(s)`,
@@ -3502,7 +3821,7 @@ export const createAppContentAgentTools = ({
     },
     execute: async (args = {}) => {
       await waitForWorldStoreReady?.();
-      const worldbookId = await resolveWorldbookId(args);
+      const { worldbookId, resolvedFrom } = await resolveWorldbookTarget(args);
       if (!worldbookId) return { ok: false, reason: 'missing_worldbook_id' };
       if (typeof getWorldInfo !== 'function') {
         return { ok: false, reason: 'worldbook_store_unavailable', worldbookId };
@@ -3516,9 +3835,16 @@ export const createAppContentAgentTools = ({
       const includeContent = args.includeContent === true || hasWorldbookEntryFilter(args);
       const matchedEntries = entries.filter((entry, index) => worldbookEntryMatches(entry, index, args));
       const returnedEntries = matchedEntries.slice(0, maxEntries);
+      await personaStore?.ready;
+      const ownership = captureWorldbookResourceOwnership({ personaStore, chatStore, sessionId: args.sessionId });
       return {
         ok: true,
         ...summarizeWorldbook(worldbookId, data),
+        resolvedFrom,
+        ...ownership.project(worldbookId),
+        ...(resolvedFrom === 'global_fallback'
+          ? { targetHint: '当前角色卡没有绑定自己的世界书，这是全局世界书。给当前角色卡加内容时不要写进这本，改为不传 name 调用 worldbook.create，为角色卡新建并绑定世界书。' }
+          : {}),
         contentMode: includeContent ? 'content' : 'summary',
         contentHint: includeContent ? '' : '世界书正文默认省略；需要正文时再次读取并传 includeContent:true、entryId、entryTitle 或 query。',
         returnedEntryCount: returnedEntries.length,
@@ -3904,7 +4230,7 @@ export const createAppContentAgentTools = ({
       return `switched ${trim(result?.scope, '-')} profile to ${trim(result?.to?.name, '-')}`;
     },
   },
-  ];
+  ].map(tool => worldbookWriteBoundary.wrap(tool));
 };
 
 export const registerAppContentAgentTools = (registry, deps = {}) => {

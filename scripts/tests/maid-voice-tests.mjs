@@ -58,27 +58,34 @@ for (const [state, expected] of [
   const settings = new MaidSettingsStore(noStorage); await settings.load();
   await settings.setMaidPrompt('只属于女仆的人设');
   const command = { syncVoiceState() {}, submitVoiceTask: async text => ({ queued: text }) };
-  let finalized = null, prepared = 0, sequence = 0;
+  let finalized = null, prepared = 0, sequence = 0, preparedOptions = null;
+  const projectedTranscripts = [{ messageId: 'previous-caption', revision: 2 }];
   const finalize = store.finalizeRealtimeConversation.bind(store);
   store.finalizeRealtimeConversation = async id => { finalized = id; return finalize(id); };
   const voice = createMaidVoiceRuntime({ settingsStore: settings, conversationStore: store, getCommandRuntime: () => command,
-    makeId: () => `call-${++sequence}`, prepareConversationContext: async () => { prepared++; return { memoryText: '女仆记忆', historyText: '女仆历史' }; } });
+    makeId: () => `call-${++sequence}`, prepareConversationContext: async options => { prepared++; preparedOptions = options; return { memoryText: '女仆记忆', historyText: '女仆历史', realtimeTranscripts: projectedTranscripts }; } });
   const target = voice.getTarget();
   assert.notEqual(realtimeTargetBindingKey(target), realtimeTargetBindingKey({ ...target, uiMode: 'chat' }));
   await voice.beforeRealtimeStart(target);
   voice.onCallState({ status: 'listening', target });
-  const snapshot = await voice.buildSemanticSnapshot({ target, inputText: '你好' });
+  const realtimeHistory = { sessionId: 'actual-model-session', connectionGeneration: 2,
+    includedTranscripts: [{ messageId: 'already-held', revision: 1 }] };
+  const snapshot = await voice.buildSemanticSnapshot({ target, inputText: '你好', realtimeHistory });
   assert.equal(prepared, 1);
+  assert.deepEqual(preparedOptions, { input: '你好', realtimeHistory });
+  assert.deepEqual(snapshot.realtimeTranscripts, projectedTranscripts);
   assert.match(snapshot.instructions, /只属于女仆的人设/); assert.match(snapshot.instructions, /女仆记忆/); assert.match(snapshot.instructions, /女仆历史/);
-  assert.match(snapshot.instructions, /不得声称已执行操作/);
+  assert.match(snapshot.instructions, /没有本次任务的真实结果，就不说完成/);
   await voice.commitUserMessage({ target, text: '你好', meta: { realtimeItemId: 'u1' } });
   await voice.commitUserMessage({ target, text: '你好', meta: { realtimeItemId: 'u1' } });
   await voice.commitAssistantMessage({ target, text: '欢迎回来', meta: { realtimeResponseId: 'a1' } });
   assert.equal(store.state.turns.length, 2, 'repeated provider events do not duplicate history');
   const group = { id: 'live-1', role: 'assistant', text: '实时字幕', messageId: '', savedText: '' };
   const committed = await voice.commitLiveTranscript({ target, group, meta: {} });
+  assert.equal(committed.revision, 1);
   group.messageId = committed.messageId; group.savedText = group.text; group.text += '修订';
-  await voice.commitLiveTranscript({ target, group, meta: {} });
+  const revised = await voice.commitLiveTranscript({ target, group, meta: {} });
+  assert.equal(revised.revision, 2);
   assert.equal(store.state.turns.length, 3); assert.equal(store.state.turns.at(-1).message, '实时字幕修订');
   assert.ok(store.state.turns.every(turn => turn.compactionProtection === 'realtime_transcript'));
   group.savedText = '旧版本'; group.text = '不得覆盖手动修改';
@@ -134,11 +141,13 @@ for (const [state, expected] of [
 
 assert.ok(buildMaidVoiceSnapshot({ conversationContext: {} }).instructions.length > 0);
 {
-  // 语音模型直接交办、不自行先确认（授权由 APP 权限请求发起）；汇报只依据本次任务的实际结果，不沿用历史里的旧结果
+  // Voice prompts keep conversation flowing while preserving real APP approval
+  // and task-specific result authority; generic text-mode warnings stay separate.
   const { instructions } = buildMaidVoiceSnapshot({ conversationContext: {} });
-  assert.match(instructions, /不要在交给女仆前自己先问用户要不要执行/);
-  assert.match(instructions, /需要授权时 APP 会发来权限请求/);
-  assert.match(instructions, /不能沿用历史里相似的结果/);
+  assert.match(instructions, /交办后接着聊用户刚才的话题/);
+  assert.match(instructions, /收到当前权限请求后/);
+  assert.match(instructions, /该任务的最新结果/);
+  assert.doesNotMatch(instructions, /工具返回 accepted 只代表已接收/);
 }
 
 {

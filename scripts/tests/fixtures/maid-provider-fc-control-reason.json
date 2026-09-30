@@ -1,0 +1,22 @@
+{
+  "source": {
+    "file": "maid_testset_tools/live-results-20260930-clarification-flow/D10-gemini.json",
+    "sha256": "db13e07674a6198ce00a9941ecd01fa3820ba9217a6b48737c9f4c92d8cea26b",
+    "pointer": "/execution/records/0/modelCalls/4/toolDeltas/0/0/candidates/0/content/parts/0/functionCall",
+    "note": "Minimized captured function call. Opaque provider signature and unrelated response fields are intentionally omitted."
+  },
+  "config": {
+    "provider": "makersuite",
+    "model": "gemini-3.8-flash",
+    "baseUrl": "https://generativelanguage.googleapis.com"
+  },
+  "functionCall": {
+    "name": "maid_planner_control",
+    "args": {
+      "action": "clarify",
+      "reason": "matched worldbook entry belongs to another persona card (邻家篇) and current card is unbound; clarify target option before writing",
+      "message": "当前角色卡「测试」尚未绑定世界书，但在角色卡「邻家篇」的世界书《邻家篇世界书》中找到了“林念初”的设定条目。请问您是希望直接修改《邻家篇世界书》中的该条目，还是为当前角色卡新建并绑定一本世界书来记录呢？"
+    },
+    "id": "call_220164"
+  }
+}

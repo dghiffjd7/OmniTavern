@@ -74,6 +74,10 @@ export const createRealtimeCallRuntime = ({
   let activeResponseId = '';
   let completedInputItems = new Set();
   let committedMessageIds = new Set();
+  let includedTranscripts = new Map();
+  let contextGeneration = 0;
+  let retainedContextVerified = false;
+  let previousContextTokens = 0;
   let eventQueue = Promise.resolve();
   let timeoutTimer = null;
   let lastActivityAt = 0;
@@ -104,6 +108,51 @@ export const createRealtimeCallRuntime = ({
     try { onStateChange?.({ ...state }); } catch {}
   };
 
+  const invalidateTranscriptContext = () => {
+    includedTranscripts.clear();
+    contextGeneration += 1;
+    retainedContextVerified = false;
+    previousContextTokens = 0;
+  };
+  const updateSessionId = sessionId => {
+    const id = String(sessionId || '').trim();
+    if (!id || id === state.sessionId) return;
+    invalidateTranscriptContext();
+    emitState(state.status, { sessionId: id });
+  };
+  const realtimeHistory = () => ({
+    sessionId: state.sessionId,
+    connectionGeneration: String(contextGeneration),
+    includedTranscripts: retainedContextVerified
+      ? Array.from(includedTranscripts, ([messageId, revision]) => ({ messageId, revision })) : [],
+  });
+  const checkContextRetention = usage => {
+    if (target?.uiMode !== 'maid' || isNatural() || isLive()) return;
+    const input = Number(usage?.input_tokens), output = Number(usage?.output_tokens);
+    const tokens = input + output;
+    const safeBudget = Number(connection?.settings?.postInstructionsTokens) * Number(connection?.settings?.retentionRatio);
+    // Automatic token eviction has no guaranteed item-deleted notification.
+    // When usage cannot establish headroom, fall back to bounded local history.
+    // A sudden drop can also mean retained server context has been discarded.
+    if (!Number.isFinite(tokens) || !Number.isFinite(safeBudget) || tokens >= safeBudget
+      || (previousContextTokens && input < previousContextTokens)) {
+      invalidateTranscriptContext();
+      return;
+    }
+    previousContextTokens = tokens;
+    retainedContextVerified = true;
+  };
+  const rememberTranscript = (committed, generation) => {
+    const messageId = String(committed?.messageId || committed?.id || '').trim();
+    if (messageId) committedMessageIds.add(messageId);
+    // Only actual conversation items belong here. Instructions are replaced on
+    // session.update, so history seen in an earlier snapshot must stay injectable.
+    if (generation === contextGeneration && state.sessionId && messageId
+      && Number.isInteger(committed?.revision) && committed.revision > 0 && !committed.ignored) {
+      includedTranscripts.set(messageId, committed.revision);
+    }
+  };
+
   const touchActivity = () => {
     lastActivityAt = now();
     idleWarned = false;
@@ -130,6 +179,7 @@ export const createRealtimeCallRuntime = ({
     let record = responseRecords.get(id);
     if (!record && create) {
       record = makeResponseRecord(id);
+      record.contextGeneration = contextGeneration;
       responseRecords.set(id, record);
     }
     return record || null;
@@ -167,6 +217,7 @@ export const createRealtimeCallRuntime = ({
         realtimeVoice: connection?.settings?.voice || '',
         realtimeSessionId: state.sessionId || '',
         realtimeResponseId: record.id,
+        ...(record.taskContext || maidTaskSession?.takeResponseContext?.(record.id) || {}),
         realtimeInterrupted: record.interrupted === true,
         transcriptApproximate: record.interrupted === true,
         ...(record.usage ? { usage: record.usage } : {}),
@@ -174,12 +225,12 @@ export const createRealtimeCallRuntime = ({
     });
     if (!committed) { const error = new Error(t('语音回复保存失败')); error.code = 'assistant_message_commit_failed'; throw error; }
     record.committed = true;
-    const committedId = String(committed?.messageId || committed?.id || '').trim();
-    if (committedId) committedMessageIds.add(committedId);
+    rememberTranscript(committed, record.contextGeneration);
     return true;
   };
 
   const handleInputTranscriptionCompleted = async event => {
+    const generation = contextGeneration;
     const itemId = String(event?.item_id || event?.item?.id || '').trim();
     const transcript = String(event?.transcript || event?.text || '').trim();
     if (!itemId || completedInputItems.has(itemId)) return;
@@ -193,11 +244,13 @@ export const createRealtimeCallRuntime = ({
     touchActivity();
     emitState('thinking');
     try { onCaption?.({ role: 'user', text: transcript, final: true }); } catch {}
-    const snapshot = isNatural() ? null : await buildSemanticSnapshot?.({
+    let snapshotGeneration = generation;
+    let snapshot = isNatural() ? null : await buildSemanticSnapshot?.({
       target,
       inputText: transcript,
       realtimeSessionId: state.sessionId || '',
       excludeMessageIds: Array.from(committedMessageIds),
+      realtimeHistory: realtimeHistory(),
     });
     if (state.status === 'ending' || state.status === 'idle') return;
     if (!isCapturedTargetCurrent()) return;
@@ -223,11 +276,20 @@ export const createRealtimeCallRuntime = ({
       error.code = 'user_message_commit_failed';
       throw error;
     }
-    const committedId = String(committed?.messageId || committed?.id || '').trim();
-    if (committedId) committedMessageIds.add(committedId);
+    rememberTranscript(committed, generation);
     if (state.status === 'ending' || state.status === 'idle') return;
     if (!isCapturedTargetCurrent()) return;
     if (isNatural()) { pendingNaturalInputs.delete(itemId); await flushNaturalResponses(); return; }
+    // Snapshot assembly and persistence can both await while the server removes
+    // context. Rebuild exclusions after either race, without committing twice.
+    while (snapshotGeneration !== contextGeneration) {
+      snapshotGeneration = contextGeneration;
+      snapshot = await buildSemanticSnapshot?.({
+        target, inputText: transcript, realtimeSessionId: state.sessionId || '',
+        excludeMessageIds: Array.from(committedMessageIds), realtimeHistory: realtimeHistory(),
+      });
+      if (state.status === 'ending' || state.status === 'idle' || !isCapturedTargetCurrent()) return;
+    }
     const instructions = String(snapshot?.instructions || '').trim();
     if (!instructions) throw new Error('本轮语义上下文为空，已停止生成');
     sessionClient?.sendEvent?.({
@@ -259,10 +321,12 @@ export const createRealtimeCallRuntime = ({
     if (type === 'usage.delta') { onUsage?.({ type: 'response', usage: event.usage }); return; }
     if (type === 'input.transcript.preview') { onCaption?.({ role: 'user', text: event.text, final: false }); return; }
     if (type === 'session.created' || type === 'session.updated') {
-      const realtimeSessionId = String(event?.session?.id || state.sessionId || '').trim();
-      if (realtimeSessionId && realtimeSessionId !== state.sessionId) {
-        emitState(state.status, { sessionId: realtimeSessionId });
-      }
+      updateSessionId(event?.session?.id);
+      return;
+    }
+    if (type === 'conversation.item.deleted' || type === 'conversation.item.truncated') {
+      // A removed or edited server item invalidates our proof of retained text.
+      invalidateTranscriptContext();
       return;
     }
     if (type === 'input_audio_buffer.speech_started') {
@@ -303,7 +367,8 @@ export const createRealtimeCallRuntime = ({
       const responseId = String(event?.response?.id || '').trim();
       if (responseId) {
         activeResponseId = responseId;
-        getResponseRecord(responseId);
+        const record = getResponseRecord(responseId);
+        record.taskContext = maidTaskSession?.takeResponseContext?.(responseId) || null;
       }
       emitState('thinking');
       return;
@@ -330,6 +395,7 @@ export const createRealtimeCallRuntime = ({
     }
     if (type === 'response.done') {
       const response = event?.response || {};
+      checkContextRetention(response.usage);
       const responseId = String(response?.id || event?.response_id || activeResponseId || '').trim();
       const record = getResponseRecord(responseId);
       if (record) {
@@ -428,6 +494,7 @@ export const createRealtimeCallRuntime = ({
     responseRecords = new Map();
     completedInputItems = new Set();
     committedMessageIds = new Set();
+    invalidateTranscriptContext();
     activeResponseId = '';
     connection = null;
     eventTimeline.length = 0;
@@ -451,6 +518,7 @@ export const createRealtimeCallRuntime = ({
         target,
         inputText: '',
         excludeMessageIds: [],
+        realtimeHistory: realtimeHistory(),
       });
       assertStartCurrent();
       const snapshotInstructions = String(snapshot?.instructions || '').trim();
@@ -458,9 +526,14 @@ export const createRealtimeCallRuntime = ({
       const instructions = applyRealtimeReplyLanguage(snapshotInstructions, connection.settings);
       if (isLive()) {
         if (typeof commitLiveTranscript !== 'function') throw new Error(t('语音字幕保存功能不可用'));
-        liveEvents = createOpenAiLiveCallEvents({ target, settings: connection.settings, commitTranscript: commitLiveTranscript,
+        liveEvents = createOpenAiLiveCallEvents({ target, settings: connection.settings, commitTranscript: async payload => {
+          const generation = contextGeneration;
+          const committed = await commitLiveTranscript(payload);
+          rememberTranscript(committed, generation);
+          return committed;
+        },
           isTargetCurrent, onCaption, onUsage, onError, onWarning, enqueue, onActivity: touchActivity,
-          onStarted: sessionId => emitState(state.status, { sessionId }),
+          onStarted: updateSessionId,
           onEnded: reason => { if (state.status !== 'ending') void end(reason); },
         });
       }
@@ -475,6 +548,7 @@ export const createRealtimeCallRuntime = ({
       if (maidTasks) maidTaskSession = createRealtimeMaidTaskSession({
         target: { ...target }, live: isLive(), provider: connection.config.provider || 'openai',
         getClient: () => sessionClient, handleTaskRequest: handleMaidTaskRequest,
+        isOutputAudible: () => !state.outputMuted,
         getLiveGroups: () => liveEvents?.getGroups() || [], onError,
       });
       emitState('connecting', { startedAt, elapsedMs: 0, provider: connection.config.provider || 'openai', openaiBackend: isLive() ? 'live' : 'realtime' });
@@ -555,6 +629,7 @@ export const createRealtimeCallRuntime = ({
       activeResponseId = '';
       completedInputItems.clear();
       committedMessageIds.clear();
+      invalidateTranscriptContext();
       emitState('idle', {
         target: null,
         sessionId: '',

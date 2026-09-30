@@ -7,7 +7,7 @@ import { createMaidAssistantAgent } from '../../src/scripts/agent/maid-assistant
 import { createAgentTaskRuntime } from '../../src/scripts/agent/agent-task-runtime.js';
 import { AgentRunStore } from '../../src/scripts/storage/agent-run-store.js';
 import { buildMaidPendingActionFromSteps } from '../../src/scripts/agent/maid-pending-action.js';
-import { createMaidSkillContext, serializeMaidSkillContext } from '../../src/scripts/agent/maid-skill-context.js';
+import { createMaidSkillContext, serializeMaidSkillContext, searchMaidTaskSkills, readMaidTaskSkill } from '../../src/scripts/agent/maid-skill-context.js';
 import { buildMaidRunResumeSubmission, createMaidTaskInputPersistence } from '../../src/scripts/ui/maid-run-resume-utils.js';
 import { setPromptLocale } from '../../src/scripts/i18n/prompt-locale.js';
 
@@ -146,6 +146,56 @@ test('a resumed task keeps loaded skill versions and regains the rest of the lib
   const catalog = prepared.context.maidSkillContext.catalog;
   assert.equal(catalog.find(item => item.id === skill.id).content, '旧版本', 'the loaded version stays frozen');
   assert.equal(catalog.find(item => item.id === other.id)?.content, '其他正文', 'unloaded skills come from the current library');
+});
+
+test('retry preparation keeps unread builtin availability and leaves next-task choices intact', async () => {
+  const { store, skill } = await setup();
+  const [disabled, manual] = store.list().filter(item => item.kind === 'builtin');
+  await store.setAvailability(disabled.id, { enabled: false });
+  await store.setAvailability(manual.id, { invocationMode: 'manual' });
+  const run = { id: 'saved-overrides', kind: 'maid_assistant', status: 'failed', metadata: {
+    maidSkills: serializeMaidSkillContext(createMaidSkillContext({ catalog: store.list() })),
+  } };
+  const agent = createMaidAssistantAgent({ agentTaskRuntime: { getRun: () => run, listRuns: () => [run] } });
+  const runtime = createMaidSkillRuntime({ store, resolveTaskContext: agent.prepareSkillTaskContext });
+  runtime.setSelected([skill.id]);
+  const retry = buildMaidRunResumeSubmission(run);
+  const prepared = await runtime.prepare(retry.text, [], retry.controls);
+  prepared.onAccepted?.();
+  assert.deepEqual(runtime.getSelected(), [skill.id]);
+  assert.equal(searchMaidTaskSkills(prepared.context.maidSkillContext).skills.some(item => item.kind === 'builtin'), false);
+  assert.equal(readMaidTaskSkill(prepared.context.maidSkillContext, disabled.id).reason, 'skill_disabled');
+  assert.equal(searchMaidTaskSkills(prepared.context.maidSkillContext, { includeManualOnly: true }).skills.some(item => item.id === manual.id), true);
+  delete run.metadata.maidSkills;
+  const legacy = await runtime.prepare(retry.text, [], retry.controls);
+  assert.equal(searchMaidTaskSkills(legacy.context.maidSkillContext).skills.some(item => item.kind === 'builtin'), false, 'pre-Skill task records still respect current availability');
+});
+
+test('direct retries refresh unread skills once and preserve accepted and loaded versions', async () => {
+  const { store, skill } = await setup();
+  const [loaded, unread] = store.list().filter(item => item.kind === 'builtin');
+  const original = createMaidSkillContext({ catalog: store.list(), selectedIds: [loaded.id] });
+  const tasks = createAgentTaskRuntime({ store: new AgentRunStore(), logger: { warn() {} } });
+  tasks.startRun({ id: 'direct-retry', kind: 'maid_assistant', status: 'failed', metadata: { maidSkills: serializeMaidSkillContext(original), goal: '整理资料' } });
+  await store.setAvailability(loaded.id, { enabled: false });
+  await store.setAvailability(unread.id, { invocationMode: 'manual' });
+  let seen, reads = 0;
+  const agent = createMaidAssistantAgent({ agentTaskRuntime: tasks,
+    getSkillCatalog: async () => { reads++; return store.list(); },
+    planner: async (_text, context) => { seen = context.maidSkillContext; return { ok: true, action: 'final', source: 'maid_provider_fc', message: '完成' }; },
+    logger: { warn() {}, debug() {} },
+  });
+  const retry = buildMaidRunResumeSubmission(tasks.getRun('direct-retry'));
+  await agent.runPrompt(retry.text, retry.controls.context);
+  assert.equal(reads, 1);
+  assert.equal(seen.catalog.find(item => item.id === unread.id).invocationMode, 'manual');
+  assert.equal(readMaidTaskSkill(seen, loaded.id).alreadyLoaded, true);
+  const runtime = createMaidSkillRuntime({ store, resolveTaskContext: agent.prepareSkillTaskContext });
+  const prepared = await runtime.prepare('整理新的资料'); prepared.onAccepted();
+  await store.save({ ...skill, content: 'changed after acceptance' }, { id: skill.id, expectedRevision: skill.revision });
+  await agent.runPrompt('整理新的资料', prepared.context);
+  assert.equal(reads, 1, 'an accepted task never refreshes its frozen catalog at execution');
+  assert.equal(seen.catalog.find(item => item.id === skill.id).content, skill.content);
 });
 
 test('a voice follow-up that references an old task prepares skills from the current call selection', async () => {

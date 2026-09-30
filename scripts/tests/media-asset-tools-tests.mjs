@@ -22,6 +22,26 @@ const attachment = {
 };
 
 {
+  // A real 1x1 PNG represents providers returning bytes with automatic size,
+  // as the captured BytePlus response did. No preset dimensions are available.
+  const dataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==';
+  const args = { prompt: '小雪，头像', subject: '小雪', target: '小雪', purpose: 'avatar',
+    appearance: '黑发', outfit: '白色衬衫', style: '动漫', targetAspectRatio: '1:1' };
+  const make = result => getTool(createMaidMediaAssetTools({
+    generateImageAttachment: async () => result,
+  }), 'media.generate_image');
+  const automatic = await make({ dataUrl, mime: 'image/png' }).execute(args);
+  assert.equal(automatic.ok, true, 'automatic sizing must verify the returned image bytes');
+  const mismatch = await make({ dataUrl, width: 2, height: 1,
+    generationContext: { width: 2, height: 1 } }).execute({ ...args, targetAspectRatio: '2:1' });
+  assert.equal(mismatch.reason, 'visual_aspect_mismatch', 'actual image dimensions override configured or claimed dimensions');
+  const unknown = await make({ dataUrl: 'data:image/png;base64,AAAA',
+    generationContext: { width: 1024, height: 1024 } }).execute(args);
+  assert.equal(unknown.reason, 'visual_dimensions_unverified', 'a preset cannot stand in for output dimensions');
+  console.log('ok - generated image dimensions come from output bytes, not the preset');
+}
+
+{
   const cache = createPreparedImageCache({ createId: () => 'prepared-1' });
   const tools = createMaidMediaAssetTools({
     preparedImageCache: cache,
@@ -360,6 +380,8 @@ const attachment = {
         dataUrl: 'data:image/png;base64,R0VORVJBVEVE',
         mime: 'image/png',
         bytes: 9,
+        width: 1344,
+        height: 768,
         name: 'generated-wallpaper.png',
         generationContext: {
           profileId: 'image-profile-1',
@@ -442,6 +464,8 @@ const attachment = {
         dataUrl: 'data:image/png;base64,AAAA',
         mime: 'image/png',
         bytes: 4,
+        width: 1024,
+        height: 1024,
         generationContext: {
           provider: 'novelai',
           promptDialect: 'nai_tags',

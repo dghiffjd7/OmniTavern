@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 
 import { AGENT_PERMISSION_DECISIONS, createAgentPermissionEvaluator } from '../../src/scripts/agent/agent-permissions.js';
 import { createAgentToolRegistry } from '../../src/scripts/agent/agent-tool-registry.js';
+import { createMaidAssistantAgent } from '../../src/scripts/agent/maid-assistant-agent.js';
 import {
   compileRegexSource,
   createPresetRegexScriptAgentTools,
@@ -148,12 +149,13 @@ const setup = ({ scriptEnabled = false, lightweight = false } = {}) => {
   });
   registry.registerMany(tools);
   const requests = [];
-  const run = (name, args, { allow = true } = {}) => registry.executeTool(name, args, {
+  const run = (name, args, { allow = true, signal = null, onConfirm = null } = {}) => registry.executeTool(name, args, {
     sessionId: 'sess_1',
+    signal,
     operationIntentPolicy: { mode: 'write_allowed' },
-    requestToolConfirmation: request => { requests.push(request); return allow ? { decision: 'allow' } : { decision: 'deny' }; },
+    requestToolConfirmation: request => { requests.push(request); return onConfirm ? onConfirm(request) : allow ? { decision: 'allow' } : { decision: 'deny' }; },
   });
-  return { presetStore, regexStore, scriptStore, events, run, requests };
+  return { presetStore, regexStore, scriptStore, events, run, requests, registry };
 };
 
 {
@@ -163,6 +165,137 @@ const setup = ({ scriptEnabled = false, lightweight = false } = {}) => {
   assert.equal(compileRegexSource('/<status>(.*?)<\\/status>/gs').ok, true);
   assert.equal(compileRegexSource('').reason, 'empty_regex');
   console.log('ok - target resolution and regex compile check');
+}
+
+// Each stop lands after the first persistent write, while the real registry is
+// still awaiting the tool. No later item may start, and completed work stays visible.
+{
+  const failures = [];
+  const check = async (name, test) => {
+    try { await test(); console.log(`ok - ${name}`); }
+    catch (error) { failures.push(error); console.error(`not ok - ${name}: ${error.message}`); }
+  };
+  const cases = [
+    { tool: 'script.delete_many', args: { scripts: ['sc_ok', 'sc_card'] }, store: 'scriptStore', method: 'deleteScript', event: 'scripts-changed',
+      verify: env => assert.ok(env.scriptStore.state.character.card1.some(item => item.id === 'sc_card')) },
+    { tool: 'script.toggle_many', args: { scripts: ['sc_ok', 'sc_card'], enabled: false }, store: 'scriptStore', method: 'toggleScript', event: 'scripts-changed',
+      prepare: env => { env.scriptStore.state.global[0].enabled = true; },
+      verify: env => assert.equal(env.scriptStore.state.character.card1[0].enabled, true) },
+    { tool: 'regex.delete_many', args: { targets: ['s_card', 's_shared'] }, store: 'regexStore', method: 'removeLocalSet', event: 'regex-changed',
+      verify: env => assert.ok(env.regexStore.state.sets.s_shared) },
+    { tool: 'regex.toggle', args: { targets: ['s_card', 's_shared'], enabled: false }, store: 'regexStore', method: 'upsertLocalSet', event: 'regex-changed',
+      verify: env => assert.equal(env.regexStore.state.sets.s_shared.manualEnabled, true) },
+    { tool: 'preset.delete_many', args: { type: 'openai', presets: ['p_main', 'p_alt'] }, store: 'presetStore', method: 'remove', event: 'preset-changed',
+      verify: env => assert.ok(env.presetStore.state.presets.openai.p_alt) },
+  ];
+  for (const item of cases) await check(`${item.tool} stops between persistent writes`, async () => {
+    const env = setup(); item.prepare?.(env);
+    const controller = new AbortController();
+    const write = env[item.store][item.method]; let writes = 0;
+    env[item.store][item.method] = async (...args) => { const result = await write(...args); writes++; controller.abort(); return result; };
+    const output = await env.run(item.tool, item.args, { signal: controller.signal });
+    assert.equal(writes, 1, 'stop must prevent the second write');
+    item.verify(env);
+    assert.equal(output.result.cancelled, true);
+    assert.equal(output.result.reason, 'user_aborted');
+    assert.equal(output.result.partial, true);
+    assert.equal(output.result.succeededCount, 1);
+    assert.equal(output.result.cancelledCount, 1);
+    assert.equal(output.result.retry, null);
+    assert.equal(output.result.results[0].status, 'succeeded');
+    assert.equal(output.result.results[1].status, 'cancelled');
+    assert.ok(env.events.includes(item.event), 'completed writes still refresh app state');
+  });
+  await check('preset cleanup stops before other dependencies and the parent preset', async () => {
+    const env = setup(); const controller = new AbortController();
+    const remove = env.regexStore.removeLocalSet;
+    env.regexStore.removeLocalSet = async id => { await remove(id); controller.abort(); };
+    env.scriptStore.state.preset.p_alt = [{ id: 'bound', name: 'Bound script' }];
+    const output = await env.run('preset.delete_many', { type: 'openai', presets: ['p_alt'], includeBound: true }, { signal: controller.signal });
+    assert.ok(env.presetStore.state.presets.openai.p_alt);
+    assert.ok(env.scriptStore.state.preset.p_alt);
+    assert.deepEqual(env.regexStore.state.sets.s_shared.bind.presetIds, ['p_alt', 'p_main']);
+    assert.equal(output.result.cancelled, true);
+    assert.equal(output.result.partial, true, 'already removed dependency must be reported');
+    assert.equal(output.result.results[0].changed, true);
+    assert.ok(env.events.includes('regex-changed'));
+  });
+  await check('cancelled store rejection does not retry or continue a batch', async () => {
+    const env = setup(); const controller = new AbortController(); let writes = 0;
+    env.scriptStore.deleteScript = async () => { writes++; controller.abort(); throw new Error('storage interrupted'); };
+    const output = await env.run('script.delete_many', { scripts: ['sc_ok', 'sc_card'] }, { signal: controller.signal });
+    assert.equal(writes, 1);
+    assert.equal(output.result.cancelled, true);
+    assert.equal(output.result.cancelledCount, 2);
+    assert.equal(output.result.retry, null);
+  });
+  await check('new regex set cancellation preserves the empty set without writing rules', async () => {
+    const env = setup(); const controller = new AbortController(); const upsert = env.regexStore.upsertLocalSet;
+    let writes = 0;
+    env.regexStore.upsertLocalSet = async args => { const id = await upsert(args); writes++; controller.abort(); return id; };
+    const output = await env.run('regex.upsert_rules', { newSetName: 'cancelled creation', rules: [{ scriptName: 'a', findRegex: 'a' }] }, { signal: controller.signal });
+    assert.equal(writes, 1);
+    const created = env.regexStore.listLocalSets().find(set => set.name === 'cancelled creation');
+    assert.deepEqual(created.rules, []);
+    assert.equal(output.result.cancelled, true);
+    assert.equal(output.result.partial, true);
+    assert.equal(output.result.target, created.id, 'partial creation retains its stable id');
+    assert.ok(env.events.includes('regex-changed'));
+  });
+  for (const removed of [false, true]) await check(`regex update rejects a ${removed ? 'removed' : 'changed'} confirmed target`, async () => {
+    const env = setup();
+    const output = await env.run('regex.upsert_rules', { target: 'global', rules: [{ id: 'g1', replaceString: 'requested' }] }, {
+      onConfirm: () => {
+        if (removed) env.regexStore.state.global.rules = [];
+        else Object.assign(env.regexStore.state.global.rules[0], { findRegex: 'manual edit', disabled: true });
+        return { decision: 'allow' };
+      },
+    });
+    assert.equal(output.result.ok, false);
+    assert.equal(output.result.results[0].reason, removed ? 'target_removed_during_confirmation' : 'target_changed_during_confirmation');
+    assert.equal(output.result.succeededCount, 0);
+    if (removed) assert.deepEqual(env.regexStore.state.global.rules, [], 'removed rule is never resurrected');
+    else {
+      assert.equal(env.regexStore.state.global.rules[0].findRegex, 'manual edit');
+      assert.equal(env.regexStore.state.global.rules[0].disabled, true);
+      assert.equal(env.regexStore.state.global.rules[0].replaceString, '');
+    }
+  });
+  await check('regex target check preserves unrelated edits and ignores object key order', async () => {
+    const env = setup();
+    const output = await env.run('regex.upsert_rules', { target: 'global', rules: [{ id: 'g1', replaceString: 'requested' }] }, {
+      onConfirm: () => {
+        const rule = env.regexStore.state.global.rules[0];
+        env.regexStore.state.global.rules = [Object.fromEntries(Object.entries(rule).reverse()), { id: 'other', scriptName: 'new', findRegex: 'other' }];
+        return { decision: 'allow' };
+      },
+    });
+    assert.equal(output.result.ok, true);
+    assert.equal(env.regexStore.state.global.rules[0].replaceString, 'requested');
+    assert.equal(env.regexStore.state.global.rules[1].id, 'other');
+  });
+  await check('maid cancellation retains successful batch items without replanning', async () => {
+    const env = setup(); const controller = new AbortController(); const remove = env.scriptStore.deleteScript;
+    env.scriptStore.deleteScript = async (...args) => { await remove(...args); controller.abort(); return true; };
+    let replans = 0;
+    const agent = createMaidAssistantAgent({
+      toolRegistry: env.registry,
+      planner: async () => ({ ok: true, toolName: 'script.delete_many', featureId: 'script.delete_many', args: { scripts: ['sc_ok', 'sc_card'] } }),
+      reactPlanner: async () => { replans++; return { ok: true, action: 'final', message: 'done' }; },
+      logger: { warn() {}, debug() {} },
+    });
+    const result = await agent.runPrompt('Delete scripts sc_ok and sc_card', {
+      sessionId: 'sess_1', signal: controller.signal,
+      requestToolConfirmation: () => ({ decision: 'allow' }),
+    });
+    assert.equal(result.status, 'cancelled');
+    assert.equal(result.steps[0].status, 'cancelled');
+    assert.equal(result.steps[0].output.results[0].status, 'succeeded');
+    assert.equal(result.steps[0].output.results[1].status, 'cancelled');
+    assert.equal(replans, 0);
+    assert.ok(env.scriptStore.state.character.card1.some(item => item.id === 'sc_card'));
+  });
+  assert.equal(failures.length, 0, `${failures.length} regression case(s) failed`);
 }
 
 {

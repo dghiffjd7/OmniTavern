@@ -25,7 +25,10 @@ import {
   validateMaidImportedCardWorkflowSnapshot,
 } from './maid-imported-card-workflow.js';
 import { buildMaidSourceGroundingContext } from './maid-source-grounding.js';
-import { createMaidSkillContext, restoreMaidSkillContext, serializeMaidSkillContext, stripMaidSkillObservationBodies } from './maid-skill-context.js';
+import { findUnsupportedMaidWebAmounts } from './maid-web-observations.js';
+import { applyMaidResultPresentation } from './maid-result-presentation.js';
+import { createMaidAppDiscoveryPlan, shouldRecoverMaidAppDiscovery } from './maid-app-discovery-recovery.js';
+import { createMaidSkillContext, mergeMaidSkillCatalog, restoreMaidSkillContext, serializeMaidSkillContext, stripMaidSkillObservationBodies } from './maid-skill-context.js';
 import {
   buildConfirmedPendingActionPlan,
   cancelPendingMaidAction,
@@ -34,10 +37,21 @@ import {
   resolvePendingMaidAction,
 } from './maid-pending-action.js';
 import {
+  MAID_GROUP_PREVIEW_KIND,
+  buildMaidGroupPreviewFromSteps,
+  resolvePendingMaidGroupPreview,
+  classifyMaidGroupPreviewReply,
+  buildConfirmedGroupPreviewPlan,
+  buildGroupPreviewMessage,
+  buildGroupCreationMessage,
+  isMaidGroupPreviewRequest,
+} from './maid-group-preview-workflow.js';
+import {
   ALREADY_DELETED_REASON,
   appendAlreadyDeletedResults,
   buildAlreadyDeletedExecution,
   countConsecutiveSameAction,
+  countRunSameFailedAction,
   findAlreadyDeletedTargets,
   resolveMaidRunOutcome,
   stripAlreadyDeletedTargets,
@@ -88,6 +102,7 @@ const buildMaidCancelledResult = ({ input = '', steps = [] } = {}) => {
 };
 
 const MAID_READ_INTENT_PATTERN = /(查询|查看|检查|确认|核对|读取|只读|只查|列出|列表|清单|统计|比较|分析|告诉我|有哪些|哪些|是否|有没有|当前(?:状态|情况)?|状态|情况|是什么|怎么样|如何|\b(?:show|list|read|check|inspect|verify|status|what|which|whether|inventory|identit(?:y|ies))\b)/iu;
+const MAID_COMPLETION_QUESTION_PATTERN = /(?:(?:弄好|做好|做完|办好|完成|结束)(?:了)?(?:吗|没(?:有)?|没有啊)|\b(?:is|was|has)\b[^.!?\n]{0,80}\b(?:done|finished|completed)\b)/iu;
 const MAID_NO_TOOL_INTENT_PATTERN = /(?:(?:不要|不得|禁止|无需|不用|不必)\s*(?:再)?(?:调用|使用|动用|执行)\s*(?:任何|任意|任一)?\s*工具|(?:不调用|不使用)\s*(?:任何|任意|任一)?\s*工具|\b(?:do\s+not|don't|dont|never)\s+(?:use|call)\s+(?:any\s+)?tools?\b|\bwithout\s+(?:using\s+)?tools?\b)/iu;
 const MAID_WRITE_VERB_PATTERN = /(创建|新建|添加|追加|新增|写入|保存|绑(?:定|上|到)|启用|禁用|修改|更改|更新|编辑|替换|覆盖|删除|删掉|移除|清空|清理|发布|发送|设置|切换|应用|修复|优化|生成|上传|导入|回复)/gu;
 const MAID_WRITE_COMMAND_CUE_PATTERN = /(?:^|[，,。；;！？!?])(?:请|麻烦|帮我|替我|给我|给(?:这些|那些|所有|全部|多个|每个|各个|上述|前述)|为我|我要|我想|需要|把|将|然后|接着|随后|再|并且|并|同时|顺便|之后|后再|就|分别|直接|立即|现在|若没有|如果没有|没有才|没有就|没有则|没有的话|缺少就|缺少才|缺少的|缺的|不存在时才|不存在则|不存在就|不存在再|不存在的话|若无|如无|执行|先执行).{0,48}$/u;
@@ -153,7 +168,7 @@ const hasExplicitMaidWriteIntent = (input = '') => {
 export const classifyMaidOperationIntent = (input = '') => {
   const text = String(input ?? '').normalize('NFKC').trim();
   const noToolIntent = MAID_NO_TOOL_INTENT_PATTERN.test(text);
-  const readIntent = MAID_READ_INTENT_PATTERN.test(text);
+  const readIntent = MAID_READ_INTENT_PATTERN.test(text) || MAID_COMPLETION_QUESTION_PATTERN.test(text);
   const writeIntent = hasExplicitMaidWriteIntent(text);
   return {
     mode: noToolIntent
@@ -169,7 +184,7 @@ export const classifyMaidOperationIntent = (input = '') => {
 };
 
 const MAID_BACKGROUND_PRESENTATION_PATTERN = /(后台(?:执行|处理|完成)?|保持当前位置|留在当前(?:页面|界面|聊天室|会话)?|不要打开|别打开|无需打开|不用打开|不要进入|别进入|无需进入|不用进入|不要跳转|别跳转|不要切换(?:页面|界面|聊天室|会话))/iu;
-const MAID_SCOPED_NEGATED_NAVIGATION_PATTERN = /(?:不要|不得|别|无需|不用|禁止|避免|不可|不能)(?!\s*(?:忘(?:记|了)?|漏(?:掉)?|阻止|妨碍|拒绝|不))(?:(?![，,。；;！？!?\n]|但|但是|不过|然而).){0,32}?(?:打开|进入|跳转|切(?:换)?到)/iu;
+const MAID_SCOPED_NEGATED_NAVIGATION_PATTERN = /(?:不要|不得|别|无需|不用|禁止|避免|不可|不能|不(?=\s*(?:打开|进入|跳转|切(?:换)?到)))(?!\s*(?:忘(?:记|了)?|漏(?:掉)?|阻止|妨碍|拒绝|不))(?:(?![，,。；;！？!?\n]|但|但是|不过|然而).){0,32}?(?:打开|进入|跳转|切(?:换)?到)/iu;
 const MAID_GUIDE_PRESENTATION_PATTERN = /(一步一步|一步步|逐步|教我|指导我|引导我|带着我|手把手|怎么(?:操作|设置|配置|创建|使用)|如何(?:操作|设置|配置|创建|使用))/iu;
 const MAID_NEGATED_GUIDE_PATTERN = /(?:不要|别|无需|不用|取消|停止)\s*(?:再)?(?:引导|指导|教学|教程|一步一步|一步步)/iu;
 const MAID_REVEAL_PRESENTATION_PATTERN = /(打开(?:给我看)?|进入(?:这个|该|对应)?(?:界面|页面|聊天室|会话)?|跳转(?:到)?|带我(?:去)?看(?:看)?|带我去|切到(?:对应)?(?:界面|页面|聊天室|会话)|(?:做完|完成|处理完|创建后|结束后).{0,16}(?:打开|进入|跳转|带我去|显示(?:界面|页面)))/iu;
@@ -452,8 +467,10 @@ const createMaidRunTracker = ({ agentTaskRuntime = null, input = '', context = {
         goal: trackedGoal,
         maidSkills: serializeMaidSkillContext(context.maidSkillContext),
         ...(context.maidTaskInputs ? { maidTaskInputs: clone(context.maidTaskInputs) } : {}),
+        ...(context.pendingGroupPreviewRevision ? { groupPreviewRevision: clone(context.pendingGroupPreviewRevision) } : {}),
         ...(executionModel ? { executionModel } : {}),
-        ...(context.source === 'maid_realtime' ? { submissionSource: context.source, submissionId: context.submissionId, voiceCallId: context.voiceCallId } : {}),
+        ...(trim(context.submissionId) ? { submissionId: trim(context.submissionId) } : {}),
+        ...(context.source === 'maid_realtime' ? { submissionSource: context.source, voiceCallId: context.voiceCallId } : {}),
         ...(trim(continuation?.sourceRunId) ? {
           resumedFromRunId: trim(continuation.sourceRunId),
           continuationVersion: trim(continuation.version),
@@ -766,8 +783,32 @@ const resolveReactStepBudget = ({
 // 按名称删和按 ID 删、按名称停用和按 ID 停用都算同一操作。
 const getConsecutiveRepeatedFailure = (steps = []) => countConsecutiveSameAction(steps, 'failed');
 
+// 连续失败，或整轮中同一失败操作累计达到上限（中间夹着读取也算）：取次数较多的一方
+const getRepeatedFailure = (steps = []) => {
+  const consecutive = getConsecutiveRepeatedFailure(steps);
+  const acrossRun = countRunSameFailedAction(steps);
+  return acrossRun.count > consecutive.count ? { ...acrossRun, acrossRun: true } : consecutive;
+};
+
 // 同一工具同一目标连续成功调用（如反复 maid.todo.read）说明模型在原地转圈，不产出实际进展。
 const getConsecutiveRepeatedSuccess = (steps = []) => countConsecutiveSameAction(steps, 'succeeded');
+
+const countConsecutiveSearchWithoutEvidence = (steps = []) => {
+  let count = 0;
+  let targetTerms = null;
+  for (let index = steps.length - 1; index >= 0; index -= 1) {
+    const step = steps[index];
+    const check = unwrapToolOutputResult(step?.output)?.targetCheck;
+    if (!['web.search', 'web.research'].includes(step?.toolName) || step?.status !== 'succeeded'
+      || check?.checked !== true || check.relevantSourceCount !== 0) break;
+    const terms = [step.args?.target, ...(Array.isArray(step.args?.targetAliases) ? step.args.targetAliases : [])]
+      .map(value => trim(value).toLowerCase().replace(/[\s\p{P}\p{S}_]+/gu, '')).filter(Boolean);
+    if (!terms.length || (targetTerms && !terms.some(term => targetTerms.has(term)))) break;
+    if (!targetTerms) targetTerms = new Set(terms);
+    count += 1;
+  }
+  return count;
+};
 
 // 同一工具连续调用（参数可不同）超过上限 = 在单一工具上打转（如反复换词搜索），无编排进展。
 const getConsecutiveSameToolCount = (steps = []) => {
@@ -1645,6 +1686,7 @@ export const buildContinueHint = ({
 const isContinuableReactStop = (reason = '') => {
   const normalized = trim(reason);
   return [
+    'provider_request_failed',
     'max_steps_reached',
     'invalid_model_plan',
     'feature_not_found',
@@ -1709,7 +1751,8 @@ const buildCatalogVerificationPlan = (plan = {}, result = {}) => {
     action: 'tool',
     toolName: verification.tool,
     args,
-    featureId: trim(feature.id),
+    featureId: trim(verification.featureId),
+    skipGuide: true,
     title: '验证执行结果',
     response: '我再读回确认一下结果。',
     metadata: {
@@ -1720,7 +1763,10 @@ const buildCatalogVerificationPlan = (plan = {}, result = {}) => {
   };
 };
 
-const buildAutoVerificationPlan = (plan = {}, output = {}) => {
+const buildAutoVerificationPlan = (plan = {}, output = {}, toolDefinition = null) => {
+  // Features can expose auxiliary reads alongside their write action. Only the
+  // executed tool's capabilities determine whether there was a write to verify.
+  if (toolDefinition?.capabilities?.write === false) return null;
   const toolName = trim(plan?.toolName);
   if (trim(plan?.metadata?.verificationFor) || plan?.metadata?.skipAutoVerification === true) return null;
   const result = unwrapToolOutputResult(output);
@@ -1743,6 +1789,7 @@ const buildAutoVerificationPlan = (plan = {}, output = {}) => {
         ...(includeContent ? { maxContentLength: 4000 } : {}),
       },
       featureId: 'worldbook.read',
+      skipGuide: true,
       title: '验证世界书内容',
       response: '我再读回世界书确认是否已经保存。',
       metadata: {
@@ -1758,7 +1805,9 @@ const resolveCrossRunResumePlan = ({
   plan = {},
   continuation = null,
   steps = [],
+  toolDefinition = null,
 } = {}) => {
+  if (toolDefinition?.capabilities?.write === false) return null;
   if (!isPlainObject(continuation) || !trim(plan?.toolName)) return null;
   const previous = findMaidRunContinuationSuccess(
     continuation,
@@ -1778,7 +1827,7 @@ const resolveCrossRunResumePlan = ({
   const verificationPlan = buildAutoVerificationPlan(plan, {
     status: 'succeeded',
     result: previous.result || {},
-  });
+  }, toolDefinition);
   if (!verificationPlan) return null;
   return {
     status: 'verify',
@@ -2080,7 +2129,7 @@ const getGeneratedMediaWriteTools = (purpose = '') => {
   return new Set();
 };
 
-const findAppliedGeneratedMedia = ({
+const findGeneratedMediaAtQuota = ({
   input = '',
   plan = {},
   steps = [],
@@ -2089,15 +2138,17 @@ const findAppliedGeneratedMedia = ({
   const key = getGeneratedMediaKey(plan?.args);
   const purpose = trim(plan?.args?.purpose).toLowerCase();
   const writeTools = getGeneratedMediaWriteTools(purpose);
-  if (!key || !writeTools.size) return null;
+  if (!key) return null;
   const source = Array.isArray(steps) ? steps : [];
   const targetQuota = resolveGeneratedMediaTargetQuota(input, plan.args);
-  const appliedMatches = [];
-  const appliedAttachmentIds = new Set();
+  const generatedMatches = [];
+  const generatedAttachmentIds = new Set();
   for (let index = source.length - 1; index >= 0; index -= 1) {
     const generatedStep = source[index];
     if (
       generatedStep?.status !== 'succeeded' ||
+      generatedStep?.output?.ok === false ||
+      generatedStep?.output?.localToolExecutionSkipped === true ||
       trim(generatedStep?.toolName) !== 'media.generate_image' ||
       getGeneratedMediaKey(generatedStep?.args) !== key
     ) continue;
@@ -2108,15 +2159,16 @@ const findAppliedGeneratedMedia = ({
       writeTools.has(trim(step?.toolName)) &&
       trim(step?.args?.attachmentId) === attachmentId
     ));
-    if (appliedStep && !appliedAttachmentIds.has(attachmentId)) {
-      appliedAttachmentIds.add(attachmentId);
-      appliedMatches.push({ generatedStep, appliedStep, attachmentId });
+    if (!generatedAttachmentIds.has(attachmentId)) {
+      generatedAttachmentIds.add(attachmentId);
+      generatedMatches.push({ generatedStep, appliedStep, attachmentId });
     }
   }
-  if (appliedMatches.length < targetQuota) return null;
+  if (generatedMatches.length < targetQuota) return null;
   return {
-    ...appliedMatches[0],
-    appliedCount: appliedMatches.length,
+    ...generatedMatches[0],
+    generatedCount: generatedMatches.length,
+    appliedCount: generatedMatches.filter(match => match.appliedStep).length,
     targetQuota,
   };
 };
@@ -2131,14 +2183,19 @@ const buildReusedGeneratedMediaExecution = (match = {}) => ({
       attachmentId: trim(match?.attachmentId),
       reusedVerifiedAction: true,
       localToolExecutionSkipped: true,
-      alreadyApplied: true,
+      alreadyApplied: Boolean(match?.appliedStep),
       appliedByTool: trim(match?.appliedStep?.toolName),
       appliedVariantCount: Number(match?.appliedCount || 0),
+      generatedVariantCount: Number(match?.generatedCount || 0),
       requestedVariantQuota: Number(match?.targetQuota || 1),
-      reason: 'generated_media_already_applied',
-      message: '同一对象与用途已完成用户要求的图片数量并成功写回；本次未重复产生计费生图调用，请继续下一个未完成目标。',
+      reason: match?.appliedStep ? 'generated_media_already_applied' : 'generated_media_quota_reached',
+      message: match?.appliedStep
+        ? '同一对象与用途已完成用户要求的图片数量并成功写回；本次未重复产生计费生图调用，请继续下一个未完成目标。'
+        : 'The requested number of images for this target and purpose has already been generated. Reuse this attachment for the preview, or apply it only if authorized. No additional billed generation was performed.',
     },
-    summary: 'generated media already applied; duplicate billed generation skipped',
+    summary: match?.appliedStep
+      ? 'generated media already applied; duplicate billed generation skipped'
+      : 'requested media already generated; duplicate billed generation skipped',
   },
   guided: false,
   guide: null,
@@ -2859,10 +2916,31 @@ export const createMaidAssistantAgent = ({
   prepareConversationContext = null,
   getCapabilityRoutingConfigOverride = null,
   getSkillCatalog = null,
+  getCurrentContext = null,
   maxReactSteps = 48,
   repeatedFailureLimit = 3,
   logger = console,
 } = {}) => {
+  const groupScopeKeys = ['roleCardId', 'sessionId', 'uiMode', 'contactsScopeId', 'chatScopeId', 'contactsScopeToken', 'chatScopeToken'];
+  const currentGroupContext = context => {
+    let current;
+    try { current = getCurrentContext?.(); } catch {}
+    if (!current || !trim(context.roleCardId) || !trim(context.uiMode)
+      || ['roleCardId', 'sessionId', 'uiMode'].some(key => trim(current[key]) !== trim(context[key]))) return null;
+    return { ...context, ...Object.fromEntries(groupScopeKeys.map(key => [key, current[key]])) };
+  };
+  const closeGroupPreview = (pending, state) => {
+    const closed = agentTaskRuntime?.finishRun?.(pending.runId, {
+      status: state === 'consumed' ? 'succeeded' : 'cancelled',
+      cancelReason: state === 'consumed' ? undefined : 'group_preview_' + state,
+      metadata: { maidStatus: state === 'consumed' ? 'responded' : 'cancelled',
+        pendingWorkflow: { ...pending.snapshot, state, closedAt: Date.now() } },
+    });
+    return closed !== false && closed !== null && closed !== undefined;
+  };
+  const groupReplyResult = (input, reason, message, status = 'responded') => ({
+    ok: status !== 'failed', status, responseType: 'workflow', source: 'app_group_preview', input: trim(input), reason, message,
+  });
   const runPlannedTool = async (plan, context = {}, tracker = null) => {
     throwIfMaidAborted(context?.signal);
     if (tracker?.canTrack && typeof agentTaskRuntime?.executeTool === 'function') {
@@ -2994,8 +3072,13 @@ export const createMaidAssistantAgent = ({
     }
     if (guidedActionRuntime && typeof guidedActionRuntime.run === 'function') {
       throwIfMaidAborted(context?.signal);
+      const toolDefinition = toolRegistry?.get?.(executablePlan.toolName);
+      const feature = findAppFeature(executablePlan.featureId);
+      const guidePlan = toolDefinition?.capabilities?.write === false && feature?.writes === true
+        ? { ...executablePlan, skipGuide: true }
+        : executablePlan;
       return guidedActionRuntime.run({
-        plan: executablePlan,
+        plan: guidePlan,
         context,
         execute: () => runPlannedTool(executablePlan, context, tracker),
       });
@@ -3959,10 +4042,12 @@ export const createMaidAssistantAgent = ({
     };
   };
 
-  const runPromptWithTracker = async (input = '', context = {}, tracker = null) => {
+  const runPromptWithTracker = async (input = '', context = {}, tracker = null, groupWorkflow = null) => {
     // 每轮独立的视觉附件池：工具可把截图加入同一轮 ReAct，但不会回写输入框或跨 run 留存。
     context = {
       ...(isPlainObject(context) ? context : {}),
+      // Planner/ReAct context copies share this state; each run gets a fresh ref.
+      maidProviderFcState: { fallbackReason: '', diagnostics: null },
       operationIntentPolicy: classifyMaidOperationIntent(input),
       presentationIntent: classifyMaidPresentationIntent(input),
       maidUserInput: trim(input),
@@ -4147,7 +4232,7 @@ export const createMaidAssistantAgent = ({
     };
 
     let pendingImportedCardWorkflow = null;
-    if (!context.runContinuation && typeof agentTaskRuntime?.listRuns === 'function') {
+    if (!groupWorkflow && !context.runContinuation && typeof agentTaskRuntime?.listRuns === 'function') {
       try {
         pendingImportedCardWorkflow = resolvePendingMaidImportedCardWorkflow(
           agentTaskRuntime.listRuns({ kind: 'maid_assistant', limit: 20 }),
@@ -4203,7 +4288,7 @@ export const createMaidAssistantAgent = ({
       });
     }
     const importedCardIntent = classifyMaidImportedCardWorkflowIntent(input);
-    if (importedCardIntent.matched && typeof importedCardClassifier === 'function') {
+    if (!groupWorkflow && importedCardIntent.matched && typeof importedCardClassifier === 'function') {
       return runImportedCardPreviewWorkflow({
         input,
         intent: importedCardIntent,
@@ -4215,7 +4300,7 @@ export const createMaidAssistantAgent = ({
 
     // 上一轮留下的“待确认删除清单”：明确确认则原样执行，取消则作废，说了别的就视为放弃
     let confirmedPendingPlan = null;
-    if (!context.runContinuation && typeof agentTaskRuntime?.listRuns === 'function') {
+    if (!groupWorkflow && !context.runContinuation && typeof agentTaskRuntime?.listRuns === 'function') {
       let pendingAction = null;
       try {
         pendingAction = resolvePendingMaidAction(agentTaskRuntime.listRuns({ kind: 'maid_assistant', limit: 100 }), { context });
@@ -4285,7 +4370,21 @@ export const createMaidAssistantAgent = ({
       }
     }
 
-    let plan = confirmedPendingPlan || await callRoutedPlanner({ plannerFn: planner, phase: 'planner', label: 'maid_planner' });
+    let plan = (groupWorkflow?.mode === 'confirm'
+      ? authorizeDeterministicWorkflowPlan(groupWorkflow.plan, []) : confirmedPendingPlan)
+      || await callRoutedPlanner({ plannerFn: planner, phase: 'planner', label: 'maid_planner' });
+    if (typeof reactPlanner === 'function'
+      && typeof capabilityRoutingRuntime?.authorizeDiscovery === 'function'
+      && shouldRecoverMaidAppDiscovery({ input, decision: plan, context })) {
+      const discovery = capabilityRoutingRuntime.authorizeDiscovery({
+        requestId: trim(context.capabilityRequestId), parentPlan: plan, context,
+        discoveryPlan: createMaidAppDiscoveryPlan({ input, decision: plan, title: findAppFeature('app.capabilities.search')?.title }),
+      });
+      if (discovery?.ok) {
+        context.maidDiscoveryRecovery = clone(discovery.metadata.discoveryRecovery);
+        plan = discovery;
+      }
+    }
     if (
       plan?.ok === true &&
       plan?.action === 'final' &&
@@ -4421,12 +4520,13 @@ export const createMaidAssistantAgent = ({
         };
       }
     }
-    plan = applyMaidPresentationPolicy(plan, context.presentationIntent);
+    plan = groupWorkflow?.mode === 'confirm' ? plan : applyMaidPresentationPolicy(plan, context.presentationIntent);
     let currentPlan = plan;
     let lastExecution = null;
     let lastOutput = null;
     let lastOk = false;
     let cyclesUsed = 0;
+    let webEvidenceCorrectionUsed = false;
     const steps = [];
     const crossRunFallbackPlans = new Map();
     let stepBudget = resolveReactStepBudget({
@@ -4465,6 +4565,25 @@ export const createMaidAssistantAgent = ({
         throwIfMaidAborted(context?.signal);
         cyclesUsed += 1;
         loopProbe(`step-${stepIndex}:start`);
+        if (groupWorkflow) {
+          const fresh = currentGroupContext(context);
+          if (!fresh || groupScopeKeys.some(key => fresh[key] !== groupWorkflow.scope[key])) {
+            return { ...groupReplyResult(input, 'group_preview_scope_changed',
+              t('页面或角色卡已变化，原建群清单不能继续使用。请重新预览。'), 'cancelled'), steps: clone(steps) };
+          }
+          if (groupWorkflow.mode === 'preview') {
+            if (currentPlan.toolName === 'group.create') {
+              const originalModelPlan = clone(currentPlan);
+              currentPlan = { ...currentPlan, args: { ...currentPlan.args, preview: true,
+                open: ['reveal', 'guide'].includes(context.presentationIntent.mode) },
+                metadata: { ...currentPlan.metadata, workflowTransition: 'group_preview_only', originalModelPlan } };
+            } else if (toolRegistry?.get?.(currentPlan.toolName)?.capabilities?.write !== false) {
+              return { ...groupReplyResult(input, 'group_preview_write_blocked',
+                t('这轮只整理建群预览，未执行其他写入。请补充已有联系人或调整清单。'), 'failed'),
+                plan: clone(currentPlan), steps: clone(steps) };
+            }
+          }
+        }
         currentPlan = advanceRepeatedWorldbookPreviewToApply({
           input,
           plan: currentPlan,
@@ -4477,6 +4596,7 @@ export const createMaidAssistantAgent = ({
           plan: currentPlan,
           continuation: context.runContinuation,
           steps,
+          toolDefinition: toolRegistry?.get?.(currentPlan.toolName),
         });
         if (crossRunResumeMatch?.status === 'verify') {
           const originalPlan = currentPlan;
@@ -4511,7 +4631,7 @@ export const createMaidAssistantAgent = ({
 
         let execution = null;
         const reusableSessionCreate = findVerifiedIdempotentSessionCreate(currentPlan, steps);
-        const reusableGeneratedMedia = findAppliedGeneratedMedia({
+        const reusableGeneratedMedia = findGeneratedMediaAtQuota({
           input,
           plan: currentPlan,
           steps,
@@ -4534,7 +4654,11 @@ export const createMaidAssistantAgent = ({
             throwIfMaidAborted(context?.signal);
             execution = await executePlan(
               alreadyDeleted ? stripAlreadyDeletedTargets(currentPlan, alreadyDeleted) : currentPlan,
-              context,
+              groupWorkflow?.mode === 'preview' && currentPlan.toolName === 'group.create'
+                ? { ...context, operationIntentPolicy: { mode: 'unspecified', source: 'group_preview_only' } }
+                : groupWorkflow?.mode === 'confirm'
+                  ? { ...context, operationIntentPolicy: { mode: 'write_allowed', source: 'confirmed_group_preview' } }
+                  : context,
               tracker,
             );
             if (alreadyDeleted) {
@@ -4566,9 +4690,35 @@ export const createMaidAssistantAgent = ({
           output,
           ok,
         }));
+        if (ok && currentPlan.toolName === 'group.create' && currentPlan.args?.preview === true) {
+          const fresh = currentGroupContext(context);
+          const pending = fresh && buildMaidGroupPreviewFromSteps(steps, {
+            input: groupWorkflow?.originalGoal || input,
+            context: { ...fresh, runId: tracker?.getRunId(), submissionId: context.submissionId },
+          });
+          if (pending) return {
+            ok: true, status: 'awaiting_confirmation', responseType: 'workflow', source: 'app_group_preview',
+            input: trim(input), plan: clone(currentPlan), output: clone(output), steps: clone(steps),
+            modelDraft: clone(currentPlan.metadata?.originalModelPlan || currentPlan),
+            pendingWorkflow: pending, message: buildGroupPreviewMessage(pending),
+          };
+          if (groupWorkflow?.mode === 'preview') return {
+            ...groupReplyResult(input, 'group_preview_unavailable',
+              t('建群预览缺少有效的目标或作用域，未创建群聊。请重新预览。'), 'failed'),
+            output: clone(output), steps: clone(steps),
+          };
+        }
+        if (groupWorkflow?.mode === 'confirm' && currentPlan.toolName === 'group.create') {
+          const cancelled = isToolOutputCancelled(output);
+          return { ok: ok && !cancelled, status: cancelled ? 'cancelled' : ok ? 'succeeded' : 'failed',
+            responseType: 'workflow', source: 'confirmed_group_preview', input: trim(input),
+            plan: clone(currentPlan), output: clone(output), steps: clone(steps),
+            reason: ok ? '' : summarizeToolFailure(output),
+            message: ok ? (buildGroupCreationMessage(output) || buildSuccessMessage({ plan: currentPlan, output, execution })) : summarizeToolFailure(output) };
+        }
         if (ok && reactPlanner) {
           loopProbe(`step-${stepIndex}:verify-check`);
-          let verificationPlan = buildAutoVerificationPlan(currentPlan, output, steps);
+          let verificationPlan = buildAutoVerificationPlan(currentPlan, output, toolRegistry?.get?.(currentPlan.toolName));
           if (
             verificationPlan &&
             capabilityRoutingRuntime &&
@@ -4804,6 +4954,24 @@ export const createMaidAssistantAgent = ({
           };
         }
 
+        if (countConsecutiveSearchWithoutEvidence(steps) >= 3) {
+          const reason = 'search_no_relevant_evidence';
+          return {
+            ok: false,
+            status: 'interrupted',
+            responseType: 'react',
+            reason,
+            reactStoppedReason: reason,
+            input: trim(input),
+            plan: clone(observedPlan),
+            output: clone(observedOutput),
+            steps: clone(steps),
+            partial: true,
+            continuable: false,
+            failureCode: reason,
+            message: t('连续查询未找到与目标相关的来源，所需信息仍未确认。已停止重复搜索；可以补充更准确的名称或指定来源后再查。'),
+          };
+        }
         const sameTool = getConsecutiveSameToolCount(steps);
         if (sameTool.count >= 8) {
           const reason = 'same_tool_overuse';
@@ -4861,10 +5029,10 @@ export const createMaidAssistantAgent = ({
             message,
           };
         }
-        const repeatedFailure = getConsecutiveRepeatedFailure(steps);
+        const repeatedFailure = getRepeatedFailure(steps);
         if (repeatedFailure.count >= failureLimit) {
           const reason = 'repeated_tool_failure';
-          const message = `同一工具「${repeatedFailure.toolName || '未知工具'}」用相同参数连续失败 ${repeatedFailure.count} 次，已停止继续重试。`;
+          const message = `同一工具「${repeatedFailure.toolName || '未知工具'}」用相同参数${repeatedFailure.acrossRun ? '反复' : '连续'}失败 ${repeatedFailure.count} 次，已停止继续重试。`;
           return {
             ok: false,
             status: 'failed',
@@ -4952,7 +5120,7 @@ export const createMaidAssistantAgent = ({
         loopProbe(`step-${stepIndex}:react-call`);
         throwIfMaidAborted(context?.signal);
         const modelReactSteps = projectMaidReactStepsForModel(steps);
-        const decision = await callRoutedPlanner({
+        let decision = await callRoutedPlanner({
           plannerFn: reactPlanner,
           phase: 'react',
           label: 'maid_react',
@@ -4964,6 +5132,63 @@ export const createMaidAssistantAgent = ({
           },
         });
         loopProbe(`step-${stepIndex}:react-done`);
+        if (decision?.ok && decision.action === 'final') {
+          const pendingWorkflowPlan = buildPendingWorldbookPreviewApplyPlan({
+            input,
+            steps,
+            decision,
+            operationIntentPolicy: context.operationIntentPolicy,
+          }) ||
+            buildPendingExplicitMaidChatPlan({ input, steps, decision }) ||
+            buildPendingMaidFinalStatePlan({ input, steps, decision }) ||
+            buildPendingMaidResultRevealPlan({
+              presentationIntent: context.presentationIntent,
+              steps,
+              decision,
+            });
+          if (pendingWorkflowPlan) {
+            currentPlan = applyMaidPresentationPolicy(
+              authorizeDeterministicWorkflowPlan(pendingWorkflowPlan, steps),
+              context.presentationIntent,
+            );
+            expandStepBudget(currentPlan);
+            continue;
+          }
+        }
+        // Monetary coverage is advisory: historical comparisons and arithmetic
+        // need model interpretation. Never let it override APP writes or pending workflows.
+        const onlyWebReads = context.operationIntentPolicy.mode !== 'write_allowed' &&
+          steps.length > 0 && steps.every(step => ['web.search', 'web.research', 'web.fetch_url'].includes(step.toolName));
+        const unsupportedAmounts = onlyWebReads && decision?.ok && decision.action === 'final'
+          ? findUnsupportedMaidWebAmounts({ input, steps, message: decision.message }) : [];
+        if (unsupportedAmounts.length && !webEvidenceCorrectionUsed) {
+          webEvidenceCorrectionUsed = true;
+          throwIfMaidAborted(context?.signal);
+          const originalDecision = decision;
+          let correctedDecision = null;
+          try {
+            correctedDecision = await callRoutedPlanner({
+              plannerFn: reactPlanner, phase: 'react', label: 'maid_react_evidence_correction',
+              extraContext: {
+                maidReactSteps: modelReactSteps,
+                lastPlan: clone(observedPlan), lastOutput: clone(modelReactSteps.at(-1)?.output ?? observedOutput), lastToolOk: ok,
+                maidWebEvidenceFeedback: { reason: 'web_amount_evidence_missing', unsupportedAmounts },
+              },
+            });
+          } catch (error) {
+            if (isMaidAbortError(error, context?.signal)) throw error;
+            logger?.debug?.('maid optional amount review unavailable', error);
+          }
+          if (isMaidAbortError(correctedDecision, context?.signal)) {
+            const error = new Error(trim(correctedDecision?.message, 'Maid task stopped by user'));
+            error.code = 'user_aborted';
+            throw error;
+          }
+          decision = correctedDecision?.ok ? correctedDecision : {
+            ...originalDecision,
+            message: `${t('以下金额未能完成额外核对：{amounts}。', { amounts: unsupportedAmounts.join('、') })}\n${trim(originalDecision.message)}`,
+          };
+        }
         if (!decision?.ok) {
           if (ok) {
             const stoppedReason = decision?.reason || 'react_stopped';
@@ -4982,7 +5207,7 @@ export const createMaidAssistantAgent = ({
               continuable,
               continueHint: continuable ? buildContinueHint({
                 input,
-                pendingPlan: observedPlan,
+                pendingPlan: stoppedReason === 'provider_request_failed' ? null : observedPlan,
                 steps,
                 reason: stoppedReason,
               }) : '',
@@ -5013,27 +5238,6 @@ export const createMaidAssistantAgent = ({
           };
         }
         if (decision.action === 'final') {
-          const pendingWorkflowPlan = buildPendingWorldbookPreviewApplyPlan({
-            input,
-            steps,
-            decision,
-            operationIntentPolicy: context.operationIntentPolicy,
-          }) ||
-            buildPendingExplicitMaidChatPlan({ input, steps, decision }) ||
-            buildPendingMaidFinalStatePlan({ input, steps, decision }) ||
-            buildPendingMaidResultRevealPlan({
-              presentationIntent: context.presentationIntent,
-              steps,
-              decision,
-            });
-          if (pendingWorkflowPlan) {
-            currentPlan = applyMaidPresentationPolicy(
-              authorizeDeterministicWorkflowPlan(pendingWorkflowPlan, steps),
-              context.presentationIntent,
-            );
-            expandStepBudget(currentPlan);
-            continue;
-          }
           // 删除预览后收尾：本轮结束为“待确认”，冻结清单等用户下一句确认
           const pendingAction = buildMaidPendingActionFromSteps(steps, { context });
           if (pendingAction) {
@@ -5238,7 +5442,7 @@ export const createMaidAssistantAgent = ({
     const run = agentTaskRuntime?.getRun?.(restoreId) || runs.find(item => item.id === restoreId);
     if (!run && !agentTaskRuntime) return { context: { ...context, maidSkillContext: context.maidSkillContext || createMaidSkillContext(), maidSkillContextPrepared: true }, useDraftSkills: false };
     if (!run) throw Object.assign(new Error('skill_snapshot_unavailable'), { code: 'skill_snapshot_unavailable' });
-    const maidSkillContext = restoreMaidSkillContext(run) || createMaidSkillContext();
+    const maidSkillContext = restoreMaidSkillContext(run) || { ...createMaidSkillContext(), catalogNeedsRefresh: true };
     return { context: { ...context, ...(run.metadata?.maidTaskInputs?.context || {}), maidSkillContext, maidSkillContextPrepared: true,
       ...(run.metadata?.maidTaskInputs ? { maidTaskInputs: clone(run.metadata.maidTaskInputs) } : {}),
       ...(inheritPending && run.metadata?.submissionId ? { pendingActionSubmissionId: run.metadata.submissionId } : {}) }, useDraftSkills: false };
@@ -5246,10 +5450,59 @@ export const createMaidAssistantAgent = ({
 
   const runPrompt = async (input = '', context = {}) => {
     const promptStartedAt = Date.now();
+    const rawUserInput = trim(input);
     try {
       throwIfMaidAborted(context?.signal);
     } catch {
       return buildMaidCancelledResult({ input, steps: [] });
+    }
+    let groupWorkflow = null;
+    const textTask = context.source !== 'maid_realtime' && !context.voiceCallId && !context.voiceRequestId
+      && !context.runContinuation && !extractMaidResumeRunId(input);
+    if (textTask) {
+      const runs = agentTaskRuntime?.listRuns?.({ kind: 'maid_assistant', limit: 100 }) || [];
+      const fresh = currentGroupContext(context);
+      if (fresh) {
+        for (const run of runs) {
+          const snapshot = run?.metadata?.pendingWorkflow;
+          if (run?.status !== 'waiting_permission' || snapshot?.kind !== MAID_GROUP_PREVIEW_KIND
+            || snapshot.state !== 'pending' || snapshot.origin?.runId !== run.id
+            || ['roleCardId', 'sessionId', 'uiMode', 'contactsScopeId', 'chatScopeId'].some(key => snapshot.scope?.[key] !== fresh[key])) continue;
+          if (Number(snapshot.expiresAt) <= Date.now()
+            || ['contactsScopeToken', 'chatScopeToken'].some(key => snapshot.scope?.[key] !== fresh[key])) {
+            closeGroupPreview({ runId: run.id, snapshot }, 'expired');
+          }
+        }
+      }
+      const pending = fresh && resolvePendingMaidGroupPreview(runs, { context: fresh });
+      if (pending) {
+        const reply = classifyMaidGroupPreviewReply(input, pending.snapshot);
+        if (reply === 'unclear') return groupReplyResult(input, 'group_preview_reply_unclear',
+          t('这份建群清单仍待确认。请明确确认、修改要求，或回复“不要”取消。'));
+        if (!closeGroupPreview(pending, reply === 'confirm' ? 'consumed' : reply === 'cancel' ? 'cancelled' : 'superseded')) {
+          return groupReplyResult(input, 'group_preview_unavailable', t('这份建群清单已失效，请重新预览。'), 'cancelled');
+        }
+        if (reply === 'cancel') return groupReplyResult(input, 'group_preview_cancelled', t('已取消这份建群清单，没有创建群聊。'), 'cancelled');
+        if (reply === 'confirm') {
+          groupWorkflow = { mode: 'confirm', scope: pending.snapshot.scope, plan: buildConfirmedGroupPreviewPlan(pending) };
+          if (!groupWorkflow.plan) return groupReplyResult(input, 'group_preview_unavailable', t('这份建群清单已失效，请重新预览。'), 'cancelled');
+        } else if (reply === 'revise') {
+          const correction = trim(input);
+          input = `${pending.snapshot.input}\n\n${t('用户修正：')}${correction}`;
+          context = { ...context, pendingGroupPreviewRevision: { originalGoal: pending.snapshot.input, correction,
+            planningInput: input, runId: pending.runId, submissionId: pending.snapshot.origin.submissionId } };
+          groupWorkflow = { mode: 'preview', scope: pending.snapshot.scope, originalGoal: input };
+        }
+      } else if (runs.some(run => run?.status === 'waiting_permission' && run?.metadata?.pendingWorkflow?.kind === MAID_GROUP_PREVIEW_KIND)
+        && classifyMaidGroupPreviewReply(input) !== 'none'
+        && !resolvePendingMaidAction(runs, { context }) && !resolvePendingMaidImportedCardWorkflow(runs, { context })) {
+        return groupReplyResult(input, 'group_preview_unavailable', t('这份建群清单已失效，请重新预览。'), 'cancelled');
+      }
+      if (!groupWorkflow && isMaidGroupPreviewRequest(input)) {
+        if (!fresh || !trim(context.submissionId)) return groupReplyResult(input, 'group_preview_scope_unavailable',
+          t('建群预览缺少有效的目标或作用域，未创建群聊。请重新预览。'), 'failed');
+        groupWorkflow = { mode: 'preview', scope: fresh, originalGoal: trim(input) };
+      }
     }
     let runContinuation = isPlainObject(context?.runContinuation)
       ? context.runContinuation
@@ -5280,10 +5533,16 @@ export const createMaidAssistantAgent = ({
       maidConversationContextRef,
     };
     try {
-      Object.assign(requestContext, prepareSkillTaskContext(input, requestContext).context);
+      if (!groupWorkflow) Object.assign(requestContext, prepareSkillTaskContext(input, requestContext).context);
       if (!requestContext.maidSkillContext) {
         const catalog = typeof getSkillCatalog === 'function' ? await getSkillCatalog() : undefined;
         requestContext.maidSkillContext = createMaidSkillContext({ catalog });
+      } else if (requestContext.maidSkillContext.catalogNeedsRefresh) {
+        // Direct continuations share the input runtime's restoration rules.
+        // Already accepted task catalogs remain frozen while waiting in queues.
+        let catalog;
+        try { catalog = typeof getSkillCatalog === 'function' ? await getSkillCatalog() : undefined; } catch {}
+        mergeMaidSkillCatalog(requestContext.maidSkillContext, catalog);
       }
     } catch (error) {
       return { ok: false, status: 'failed', reason: error.code || 'skill_store_unavailable', message: t('这次任务的技能版本已无法恢复，请重新发起任务') };
@@ -5327,10 +5586,15 @@ export const createMaidAssistantAgent = ({
         if (usage.outcome !== 'provider_request_failed') tracker?.noteModel?.(usage.model);
       },
     };
-    tracker = createMaidRunTracker({ agentTaskRuntime, input, context: routedContext, promptStartedAt });
+    tracker = createMaidRunTracker({ agentTaskRuntime, input: rawUserInput, context: routedContext, promptStartedAt });
     if (routedContext.maidSkillContext?.loaded?.length) tracker.ensureRun();
     try {
-      const result = await runPromptWithTracker(input, routedContext, tracker);
+      const rawResult = await runPromptWithTracker(input, routedContext, tracker, groupWorkflow);
+      const result = applyMaidResultPresentation(rawResult, {
+        input,
+        context: { ...routedContext, operationIntentPolicy: classifyMaidOperationIntent(input) },
+        isWriteTool: name => toolRegistry?.get?.(name)?.capabilities?.write,
+      });
       let capabilityRouting = null;
       if (capabilityRequest?.id && typeof capabilityRoutingRuntime?.finishRequest === 'function') {
         try {
@@ -5339,7 +5603,9 @@ export const createMaidAssistantAgent = ({
           logger?.debug?.('maid capability request finish skipped', error);
         }
       }
-      const finalResult = capabilityRouting ? { ...result, capabilityRouting } : result;
+      const finalResult = { ...result, input: rawUserInput,
+        ...(rawUserInput !== trim(input) ? { planningInput: trim(input) } : {}),
+        ...(capabilityRouting ? { capabilityRouting } : {}) };
       tracker.finish(finalResult, modelUsageEntries);
       return finalResult;
     } catch (error) {

@@ -3,6 +3,16 @@ import assert from 'node:assert/strict';
 import { listMaidIntentChips, matchMaidIntent } from '../../src/scripts/ui/maid-intent-presets.js';
 
 assert.equal(matchMaidIntent('教我配置 API')?.flowId, 'setup-api');
+for (const input of ['怎么配置 API', 'API key 要怎么填', '第一次连接 API', '给女仆接 API']) {
+  assert.equal(matchMaidIntent(input)?.flowId, 'setup-api', `explicit setup tutorial: ${input}`);
+}
+for (const input of [
+  '怎么又报错了烦死了\nError: 401 Unauthorized {"error":{"message":"Invalid API key"}}',
+  'API 怎么又报错了，401 Unauthorized',
+  '怎么配置 API 都报401，帮我看看原因',
+  '如何修复 Invalid API key',
+  '怎么理解 API 和 key 的区别',
+]) assert.equal(matchMaidIntent(input), null, `diagnosis or concepts must reach the agent: ${input}`);
 assert.equal(matchMaidIntent('我想添加好友')?.flowId, 'add-friend');
 assert.equal(matchMaidIntent('怎么发消息')?.flowId, 'first-chat');
 assert.equal(matchMaidIntent('教我怎么用 Agent Center')?.flowId, 'meet-maid');

@@ -15,6 +15,12 @@ const clip = (value, max = 120) => {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 };
 const uniqueStrings = values => [...new Set((Array.isArray(values) ? values : [values]).map(trim).filter(Boolean))];
+const cancelledItem = (item, extra = {}) => ({ ...item, ...extra, status: 'cancelled', reason: 'user_aborted' });
+const ruleFingerprint = value => JSON.stringify(value, (_, child) => (
+  child && typeof child === 'object' && !Array.isArray(child)
+    ? Object.fromEntries(Object.entries(child).sort(([a], [b]) => a.localeCompare(b)))
+    : child
+));
 
 export const PRESET_TYPES = Object.freeze(['openai', 'sysprompt', 'context', 'instruct', 'reasoning']);
 const PRESET_TYPE_LABELS = Object.freeze({
@@ -95,22 +101,25 @@ export const compileRegexSource = (source = '') => {
 const batchResult = (toolName, results, { requestedCount, retryArgs = null, extra = {} } = {}) => {
   const succeededCount = results.filter(item => item.status === 'succeeded').length;
   const failed = results.filter(item => item.status === 'failed');
+  const cancelledCount = results.filter(item => item.status === 'cancelled').length;
+  const cancelled = cancelledCount > 0;
   return {
-    ok: failed.length === 0 && results.some(item => item.status === 'succeeded' || item.status === 'skipped'),
-    partial: failed.length > 0 && succeededCount > 0,
+    ok: !cancelled && failed.length === 0 && results.some(item => item.status === 'succeeded' || item.status === 'skipped'),
+    partial: (failed.length > 0 || cancelled) && (succeededCount > 0 || results.some(item => item.changed === true)),
+    ...(cancelled ? { cancelled: true, status: 'cancelled', reason: 'user_aborted', cancelledCount } : {}),
     requestedCount: requestedCount ?? results.length,
     succeededCount,
     skippedCount: results.filter(item => ['skipped', 'protected', 'missing', 'ambiguous'].includes(item.status)).length,
     failedCount: failed.length,
     results,
-    retry: failed.length && retryArgs ? { toolName, args: retryArgs(failed) } : null,
+    retry: !cancelled && failed.length && retryArgs ? { toolName, args: retryArgs(failed) } : null,
     ...extra,
   };
 };
 
 const summarizeBatch = label => result => (result?.reason && !Array.isArray(result?.results)
   ? `${label} failed: ${trim(result.reason)}`
-  : `${label} ${result?.ok ? 'completed' : 'incomplete'}; ${Number(result?.succeededCount || 0)} succeeded; ${Number(result?.skippedCount || 0)} skipped; ${Number(result?.failedCount || 0)} failed`);
+  : `${label} ${result?.cancelled ? 'cancelled' : result?.ok ? 'completed' : 'incomplete'}; ${Number(result?.succeededCount || 0)} succeeded; ${Number(result?.skippedCount || 0)} skipped; ${Number(result?.failedCount || 0)} failed${result?.cancelled ? `; ${result.cancelledCount} cancelled` : ''}`);
 
 const confirmRequest = ({
   kind, operationType, title, message, confirmText, danger = true, allowAlways = false, items = [], denyReason, denyResult = {},
@@ -288,6 +297,7 @@ export const createPresetRegexScriptAgentTools = ({
       if (snap.error) return snap.error;
       const base = { type: snap.type, scope: snap.scope, presetId: snap.presetId, name: snap.name, previousId: snap.previousId };
       if (snap.previousId === snap.presetId) return { ok: true, changed: false, ...base };
+      if (context.signal?.aborted) return { ok: false, changed: false, cancelled: true, reason: 'user_aborted', ...base };
       if (!isAllowed(context, 'preset.switch')) return { ok: false, reason: 'confirmation_required', ...base };
       if (!presetSummaries(snap.type).some(item => item.id === snap.presetId)) return { ok: false, reason: 'preset_deleted_during_operation', ...base };
       if (snap.scope === 'session') await presetStore.setSessionBinding(snap.type, snap.ctx.sessionId, snap.presetId);
@@ -368,6 +378,9 @@ export const createPresetRegexScriptAgentTools = ({
       if (snap.error) return snap.error;
       const pending = snap.items.filter(item => item.status === 'planned');
       if (pending.length && !isAllowed(context, 'preset.prompt_entries.toggle')) return { ok: false, reason: 'confirmation_required', presetId: snap.presetId };
+      if (pending.length && context.signal?.aborted) return batchResult('preset.prompt_entries.toggle', snap.items.map(item => (
+        item.status === 'planned' ? cancelledItem(item) : item
+      )), { extra: { presetId: snap.presetId, presetName: snap.presetName, enabled: snap.enabled } });
       const current = presetById('openai', snap.presetId);
       if (!current) return { ok: false, reason: 'preset_deleted_during_operation', presetId: snap.presetId };
       if (pending.length) {
@@ -468,27 +481,47 @@ export const createPresetRegexScriptAgentTools = ({
       if (snap.plannedCount && !isAllowed(context, 'preset.delete_many')) return { ok: false, reason: 'confirmation_required', type: snap.type };
       const results = [];
       let regexTouched = false;
+      let scriptsTouched = false;
       for (const item of snap.items) {
         const base = { target: item.target, presetId: item.presetId, name: item.name };
         if (item.status !== 'planned') { results.push({ ...base, status: item.status, reason: item.reason }); continue; }
+        if (context.signal?.aborted) { results.push(cancelledItem(base)); continue; }
         if (!presetSummaries(snap.type).some(preset => preset.id === item.presetId)) {
           results.push({ ...base, status: 'skipped', reason: 'already_absent' });
           continue;
         }
         const warnings = [];
+        const cleanup = { removedRegexSetIds: [], detachedRegexSetIds: [], removedScriptScope: false };
         if (snap.includeBound) {
           try {
             for (const set of regexStore?.listLocalSets?.() || []) {
+              if (context.signal?.aborted) break;
               const detached = detachRegexPresetBind(set?.bind, { presetType: snap.type, presetId: item.presetId });
               if (!detached.matched) continue;
-              if (detached.bind) await regexStore.upsertLocalSet({ ...set, enabled: set.manualEnabled !== false, bind: detached.bind });
-              else await regexStore.removeLocalSet(set.id);
+              if (detached.bind) {
+                await regexStore.upsertLocalSet({ ...set, enabled: set.manualEnabled !== false, bind: detached.bind });
+                cleanup.detachedRegexSetIds.push(set.id);
+              } else {
+                await regexStore.removeLocalSet(set.id);
+                cleanup.removedRegexSetIds.push(set.id);
+              }
               regexTouched = true;
             }
           } catch { warnings.push('regex_cleanup_failed'); }
           try {
-            if (snap.type === 'openai') await scriptStore?.removeScope?.('preset', item.presetId);
+            if (!context.signal?.aborted && snap.type === 'openai') {
+              cleanup.removedScriptScope = await scriptStore?.removeScope?.('preset', item.presetId) === true;
+              scriptsTouched ||= cleanup.removedScriptScope;
+            }
           } catch { warnings.push('script_cleanup_failed'); }
+        }
+        if (context.signal?.aborted) {
+          results.push(cancelledItem(base, {
+            changed: cleanup.removedRegexSetIds.length > 0 || cleanup.detachedRegexSetIds.length > 0 || cleanup.removedScriptScope,
+            cleanup,
+            ...(warnings.length ? { warnings } : {}),
+          }));
+          continue;
         }
         try {
           await presetStore.remove(snap.type, item.presetId);
@@ -497,10 +530,13 @@ export const createPresetRegexScriptAgentTools = ({
             ? { ...base, status: 'succeeded', ...(warnings.length ? { warnings } : {}) }
             : { ...base, status: 'failed', reason: 'verification_failed' });
         } catch (error) {
-          results.push({ ...base, status: 'failed', reason: 'delete_failed', errorMessage: clip(error?.message || error) });
+          results.push(context.signal?.aborted
+            ? cancelledItem(base, { errorMessage: clip(error?.message || error) })
+            : { ...base, status: 'failed', reason: 'delete_failed', errorMessage: clip(error?.message || error) });
         }
       }
       if (regexTouched) notify(onRegexChanged);
+      if (scriptsTouched) notify(onScriptsChanged);
       if (results.some(item => item.status === 'succeeded')) notify(onPresetsChanged);
       return batchResult('preset.delete_many', results, {
         requestedCount: snap.items.length,
@@ -646,6 +682,7 @@ export const createPresetRegexScriptAgentTools = ({
         for (const item of snap.items) {
           const base = { target: item.target, type: item.type, id: item.id, name: item.name };
           if (item.status !== 'planned') { results.push({ ...base, status: item.status, reason: item.reason }); continue; }
+          if (context.signal?.aborted) { results.push(cancelledItem(base)); continue; }
           if (item.type === 'set') {
             const set = regexStore.getLocalSet(item.id);
             if (!set) { results.push({ ...base, status: 'skipped', reason: 'already_absent' }); continue; }
@@ -664,7 +701,14 @@ export const createPresetRegexScriptAgentTools = ({
           results.push({ ...base, status: ok ? 'succeeded' : 'failed', ...(ok ? {} : { reason: 'verification_failed' }) });
         }
       } catch (error) {
-        return { ok: false, reason: trim(error?.message) === 'regex_store_read_unavailable' ? 'regex_store_read_unavailable' : 'regex_write_failed', errorMessage: clip(error?.message), results };
+        if (!context.signal?.aborted) {
+          if (results.some(item => item.status === 'succeeded')) notify(onRegexChanged);
+          return { ok: false, reason: trim(error?.message) === 'regex_store_read_unavailable' ? 'regex_store_read_unavailable' : 'regex_write_failed', errorMessage: clip(error?.message), results };
+        }
+        results.push(...snap.items.slice(results.length).map(item => {
+          const base = { target: item.target, type: item.type, id: item.id, name: item.name };
+          return item.status === 'planned' ? cancelledItem(base) : { ...base, status: item.status, reason: item.reason };
+        }));
       }
       if (results.some(item => item.status === 'succeeded')) notify(onRegexChanged);
       return batchResult('regex.toggle', results, {
@@ -725,6 +769,7 @@ export const createPresetRegexScriptAgentTools = ({
       if (!compiled.ok) return { index, label, status: 'failed', reason: compiled.reason, errorMessage: compiled.message };
       return {
         index, label, status: 'planned', reason: '', action: previous ? 'update' : 'create', ruleId: trim(previous?.id), rule: merged,
+        previousFingerprint: previous ? ruleFingerprint(previous) : '',
         before: previous ? `${clip(previous.findRegex, 60)} → ${clip(previous.replaceString, 40) || t('（空）')}` : '',
         after: `${clip(merged.findRegex, 60)} → ${clip(merged.replaceString, 40) || t('（空）')}`,
       };
@@ -790,35 +835,70 @@ export const createPresetRegexScriptAgentTools = ({
       const planned = snap.items.filter(item => item.status === 'planned');
       let containerKey = snap.containerKey;
       const results = snap.items.filter(item => item.status !== 'planned').map(item => ({ index: item.index, name: item.label, status: item.status, reason: item.reason, ...(item.errorMessage ? { errorMessage: item.errorMessage } : {}) }));
+      let createdSetId = '';
+      let regexTouched = false;
+      const itemResult = item => ({ index: item.index, name: item.label, action: item.action, ruleId: item.ruleId });
+      const cancelUnfinished = () => {
+        const finished = new Set(results.map(item => item.index));
+        planned.filter(item => !finished.has(item.index)).forEach(item => results.push(cancelledItem(itemResult(item), {
+          ...(createdSetId ? { changed: true, createdSetId } : {}),
+        })));
+      };
       if (planned.length) {
         try {
           let rules;
-          if (containerKey === 'new_set') {
+          if (context.signal?.aborted) {
+            cancelUnfinished();
+          } else if (containerKey === 'new_set') {
             const setId = await regexStore.upsertLocalSet({ name: snap.newSetName, enabled: true, bind: null, rules: [] });
+            createdSetId = setId;
+            regexTouched = true;
             containerKey = `set:${setId}`;
             rules = [];
           } else {
             rules = readContainerRules(containerKey, snap.sessionId);
           }
-          const next = rules.slice();
-          planned.forEach(item => {
-            const index = item.ruleId ? next.findIndex(rule => trim(rule.id) === item.ruleId) : -1;
-            if (index >= 0) next[index] = { ...next[index], ...item.rule };
-            else next.push({ ...item.rule });
-          });
-          await writeContainerRules(containerKey, snap.sessionId, next);
-          const after = readContainerRules(containerKey, snap.sessionId);
-          planned.forEach(item => {
-            const found = item.ruleId
-              ? after.find(rule => trim(rule.id) === item.ruleId)
-              : after.find(rule => rule.findRegex === item.rule.findRegex && trim(rule.scriptName) === trim(item.rule.scriptName));
-            const ok = Boolean(found) && found.findRegex === item.rule.findRegex && String(found.replaceString ?? '') === String(item.rule.replaceString ?? '');
-            results.push({ index: item.index, name: item.label, action: item.action, ruleId: trim(found?.id), status: ok ? 'succeeded' : 'failed', ...(ok ? {} : { reason: 'verification_failed' }) });
-          });
+          if (context.signal?.aborted) {
+            cancelUnfinished();
+          } else {
+            // Revalidate the individual rule, not the whole container: other rules
+            // may have been edited while this confirmation was open.
+            const writable = planned.filter(item => {
+              if (!item.ruleId) return true;
+              const current = rules.find(rule => trim(rule.id) === item.ruleId);
+              const reason = !current ? 'target_removed_during_confirmation'
+                : ruleFingerprint(current) !== item.previousFingerprint ? 'target_changed_during_confirmation' : '';
+              if (!reason) return true;
+              results.push({ ...itemResult(item), status: 'failed', reason });
+              return false;
+            });
+            if (writable.length) {
+              const next = rules.slice();
+              writable.forEach(item => {
+                const index = item.ruleId ? next.findIndex(rule => trim(rule.id) === item.ruleId) : -1;
+                if (index >= 0) next[index] = { ...next[index], ...item.rule };
+                else next.push({ ...item.rule });
+              });
+              await writeContainerRules(containerKey, snap.sessionId, next);
+              regexTouched = true;
+              const after = readContainerRules(containerKey, snap.sessionId);
+              writable.forEach(item => {
+                const found = item.ruleId
+                  ? after.find(rule => trim(rule.id) === item.ruleId)
+                  : after.find(rule => rule.findRegex === item.rule.findRegex && trim(rule.scriptName) === trim(item.rule.scriptName));
+                const ok = Boolean(found) && found.findRegex === item.rule.findRegex && String(found.replaceString ?? '') === String(item.rule.replaceString ?? '');
+                results.push({ ...itemResult(item), ruleId: trim(found?.id), status: ok ? 'succeeded' : 'failed', ...(ok ? {} : { reason: 'verification_failed' }) });
+              });
+            }
+          }
         } catch (error) {
-          return { ok: false, reason: trim(error?.message) === 'regex_store_read_unavailable' ? 'regex_store_read_unavailable' : 'regex_write_failed', errorMessage: clip(error?.message), results };
+          if (!context.signal?.aborted) {
+            if (regexTouched) notify(onRegexChanged);
+            return { ok: false, reason: trim(error?.message) === 'regex_store_read_unavailable' ? 'regex_store_read_unavailable' : 'regex_write_failed', errorMessage: clip(error?.message), results };
+          }
+          cancelUnfinished();
         }
-        notify(onRegexChanged);
+        if (regexTouched) notify(onRegexChanged);
       }
       results.sort((a, b) => a.index - b.index);
       return batchResult('regex.upsert_rules', results, {
@@ -869,6 +949,7 @@ export const createPresetRegexScriptAgentTools = ({
         for (const item of snap.items) {
           const base = { target: item.target, type: item.type, id: item.id, name: item.name };
           if (item.status !== 'planned') { results.push({ ...base, status: item.status, reason: item.reason }); continue; }
+          if (context.signal?.aborted) { results.push(cancelledItem(base)); continue; }
           if (item.type === 'set') {
             if (!regexStore.getLocalSet(item.id)) { results.push({ ...base, status: 'skipped', reason: 'already_absent' }); continue; }
             await regexStore.removeLocalSet(item.id);
@@ -887,7 +968,14 @@ export const createPresetRegexScriptAgentTools = ({
           results.push({ ...base, status: ok ? 'succeeded' : 'failed', ...(ok ? {} : { reason: 'verification_failed' }) });
         }
       } catch (error) {
-        return { ok: false, reason: trim(error?.message) === 'regex_store_read_unavailable' ? 'regex_store_read_unavailable' : 'regex_write_failed', errorMessage: clip(error?.message), results };
+        if (!context.signal?.aborted) {
+          if (results.some(item => item.status === 'succeeded')) notify(onRegexChanged);
+          return { ok: false, reason: trim(error?.message) === 'regex_store_read_unavailable' ? 'regex_store_read_unavailable' : 'regex_write_failed', errorMessage: clip(error?.message), results };
+        }
+        results.push(...snap.items.slice(results.length).map(item => {
+          const base = { target: item.target, type: item.type, id: item.id, name: item.name };
+          return item.status === 'planned' ? cancelledItem(base) : { ...base, status: item.status, reason: item.reason };
+        }));
       }
       if (results.some(item => item.status === 'succeeded')) notify(onRegexChanged);
       return batchResult('regex.delete_many', results, {
@@ -1024,6 +1112,7 @@ export const createPresetRegexScriptAgentTools = ({
       for (const item of snap.items) {
         const base = { target: item.target, id: item.id, name: item.name, scope: item.scope, scopeId: item.scopeId };
         if (item.status !== 'planned') { results.push({ ...base, status: item.status, reason: item.reason }); continue; }
+        if (context.signal?.aborted) { results.push(cancelledItem(base)); continue; }
         if (!readScript(item)) { results.push({ ...base, status: 'skipped', reason: 'already_absent' }); continue; }
         try {
           const changed = await scriptStore.toggleScript(item.scope, item.scopeId, item.id, snap.enabled);
@@ -1031,7 +1120,9 @@ export const createPresetRegexScriptAgentTools = ({
           const ok = changed !== false && Boolean(after) && (after.enabled === true) === snap.enabled;
           results.push({ ...base, status: ok ? 'succeeded' : 'failed', ...(ok ? {} : { reason: changed === false && snap.enabled ? 'blocked_by_compatibility' : 'verification_failed' }) });
         } catch (error) {
-          results.push({ ...base, status: 'failed', reason: 'toggle_failed', errorMessage: clip(error?.message) });
+          results.push(context.signal?.aborted
+            ? cancelledItem(base, { errorMessage: clip(error?.message) })
+            : { ...base, status: 'failed', reason: 'toggle_failed', errorMessage: clip(error?.message) });
         }
       }
       if (results.some(item => item.status === 'succeeded')) notify(onScriptsChanged);
@@ -1079,13 +1170,16 @@ export const createPresetRegexScriptAgentTools = ({
       for (const item of snap.items) {
         const base = { target: item.target, id: item.id, name: item.name, scope: item.scope, scopeId: item.scopeId };
         if (item.status !== 'planned') { results.push({ ...base, status: item.status, reason: item.reason }); continue; }
+        if (context.signal?.aborted) { results.push(cancelledItem(base)); continue; }
         if (!readScript(item)) { results.push({ ...base, status: 'skipped', reason: 'already_absent' }); continue; }
         try {
           await scriptStore.deleteScript(item.scope, item.scopeId, item.id);
           const ok = !readScript(item);
           results.push({ ...base, status: ok ? 'succeeded' : 'failed', ...(ok ? {} : { reason: 'verification_failed' }) });
         } catch (error) {
-          results.push({ ...base, status: 'failed', reason: 'delete_failed', errorMessage: clip(error?.message) });
+          results.push(context.signal?.aborted
+            ? cancelledItem(base, { errorMessage: clip(error?.message) })
+            : { ...base, status: 'failed', reason: 'delete_failed', errorMessage: clip(error?.message) });
         }
       }
       if (results.some(item => item.status === 'succeeded')) notify(onScriptsChanged);

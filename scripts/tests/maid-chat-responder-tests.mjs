@@ -5,6 +5,7 @@ import {
   createMaidChatResponder,
 } from '../../src/scripts/agent/maid-chat-responder.js';
 import { setPromptLocale } from '../../src/scripts/i18n/prompt-locale.js';
+import { DEFAULT_MAID_PROMPT } from '../../src/scripts/agent/maid-prompt-defaults.js';
 
 {
   setPromptLocale('en');
@@ -244,4 +245,38 @@ import { setPromptLocale } from '../../src/scripts/i18n/prompt-locale.js';
   assert.equal(result.status, 'failed');
   assert.match(result.reason, /provider timeout aborted/);
   console.log('ok - provider AbortError with a live caller signal is reported as a chat failure');
+}
+
+{
+  const options = {
+    input: '继续刚才的安排',
+    context: {
+      sessionId: 'voice-session', uiMode: 'chat', activePage: 'contacts', voiceCallId: 'call-1',
+      maidToolObservation: { output: { message: '已取得实际查询结果' } },
+      maidAttachments: [{ kind: 'image', url: 'data:image/png;base64,abc', name: 'scene.png' }],
+    },
+    conversationContext: { historyText: '用户刚才在讨论旅行', memoryText: '用户偏好安静的地方' },
+  };
+  const ordinary = buildMaidChatResponderMessages(options);
+  const voice = buildMaidChatResponderMessages({ ...options, voiceConversation: true });
+  assert.match(ordinary[0].content, /也可以简短说明 APP 操作状态/);
+  assert.match(ordinary[0].content, /必须在执行前用自然语言提醒影响范围/);
+  assert.doesNotMatch(voice[0].content, /也可以简短说明 APP 操作状态|必须在执行前用自然语言提醒影响范围/);
+  assert.match(voice[0].content, /女仆助手/);
+  assert.match(voice[0].content, /收到当前权限请求后/);
+  assert.match(voice[0].content, /未确认时保留原内容/);
+  assert.match(voice[0].content, /持久开启能力/);
+  assert.match(voice[0].content, /一次操作许可只用于当前确认项/);
+  assert.match(voice[0].content, /先用工具重新读取/);
+  assert.match(voice[0].content, /工具观察结果/);
+  assert.deepEqual(voice[1], ordinary[1], 'voice mode keeps memory, history, app context, observations and image attachments');
+  console.log('ok - explicit voice mode selects conversational defaults and real confirmations while preserving context');
+}
+
+{
+  const custom = `${DEFAULT_MAID_PROMPT}\n我叫雨音，请保持我的说话习惯。`;
+  const voice = buildMaidChatResponderMessages({ input: '你好', maidPrompt: custom, voiceConversation: true });
+  assert.equal(voice[0].content.startsWith(`${custom}\n`), true, 'custom persona text is never filtered by matching a default sentence');
+  assert.match(voice[0].content, /收到当前权限请求后/);
+  console.log('ok - voice mode preserves customized persona prompts including default-looking status sentences');
 }

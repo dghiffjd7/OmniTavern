@@ -1,3 +1,5 @@
+import { t } from '../../i18n/index.js';
+
 const trim = (value, fallback = '') => {
   const text = String(value ?? '').trim();
   return text || fallback;
@@ -145,6 +147,7 @@ const makeTime = (now = Date.now) => {
 export const createGroupChatAgentTools = ({
   contactsStore = null,
   chatStore = null,
+  getCurrentContext = null,
   enterChatRoom = null,
   refreshChatAndContacts = null,
   setActiveSession = null,
@@ -154,6 +157,41 @@ export const createGroupChatAgentTools = ({
 } = {}) => {
   const createSnapshots = new WeakMap();
   const updateSnapshots = new WeakMap();
+
+  const captureMaidScope = (context = {}) => {
+    if (context.source !== 'maid-assistant') return null;
+    let current;
+    try { current = getCurrentContext?.(); } catch {}
+    if (!trim(context.roleCardId) || !trim(context.uiMode) || !trim(current?.roleCardId)
+      || !trim(current?.uiMode) || typeof current?.scopeId !== 'string'
+      || typeof contactsStore?.scopeId !== 'string' || typeof chatStore?.scopeId !== 'string'
+      || !Number.isSafeInteger(contactsStore?._scopeToken) || !Number.isSafeInteger(chatStore?._scopeToken)) {
+      return { reason: 'group_scope_unavailable' };
+    }
+    if (trim(context.roleCardId) !== trim(current.roleCardId)
+      || trim(context.sessionId) !== trim(current.sessionId) || trim(context.uiMode) !== trim(current.uiMode)
+      || current.scopeId !== contactsStore.scopeId || current.scopeId !== chatStore.scopeId) {
+      return { reason: 'target_scope_changed' };
+    }
+    return {
+      scope: { roleCardId: trim(current.roleCardId), sessionId: trim(current.sessionId), uiMode: trim(current.uiMode),
+        contactsScopeId: contactsStore.scopeId, chatScopeId: chatStore.scopeId,
+        contactsScopeToken: contactsStore._scopeToken, chatScopeToken: chatStore._scopeToken },
+      contactsReady: contactsStore.ready, chatReady: chatStore.ready,
+    };
+  };
+  const validateMaidScope = (context, captured) => {
+    if (context?.source !== 'maid-assistant') return '';
+    if (captured?.reason) return captured.reason;
+    const current = captureMaidScope(context);
+    if (current?.reason) return current.reason;
+    if (!captured?.scope || Object.keys(current.scope).some(key => current.scope[key] !== captured.scope[key])
+      || current.contactsReady !== captured.contactsReady || current.chatReady !== captured.chatReady) {
+      return 'target_scope_changed';
+    }
+    return '';
+  };
+  const groupScopeFailure = (reason, args = {}) => ({ ok: false, created: false, preview: args.preview === true, reason });
 
   const openGroup = async (group = {}) => {
     const groupId = trim(group?.id);
@@ -207,6 +245,7 @@ export const createGroupChatAgentTools = ({
       existingSame: Boolean(existingSame),
       reason,
       ready: !reason && !existingSame,
+      open: args.open === true,
     };
   };
 
@@ -220,10 +259,17 @@ export const createGroupChatAgentTools = ({
     plannedCount: snapshot.plannedIds.length,
     results: snapshot.items.map(compactResolutionItem),
     ...(snapshot.conflict ? { existingGroup: summarizeGroup(snapshot.conflict, contactsStore) } : {}),
+    ...(snapshot.ready && snapshot.authority?.scope ? { groupPreview: {
+      version: 1, name: snapshot.name, open: snapshot.open,
+      members: snapshot.items.filter(item => item.status === 'planned').map(item => ({ id: item.memberId, name: item.name })),
+      scope: { ...snapshot.authority.scope },
+    } } : {}),
   });
 
   const executeCreate = async (args = {}, context = {}) => {
     const snapshot = createSnapshots.get(args) || buildCreateSnapshot(args);
+    const scopeReason = validateMaidScope(context, snapshot.authority);
+    if (scopeReason) return groupScopeFailure(scopeReason, args);
     if (args.preview === true) return createPreviewResult(snapshot);
     if (snapshot.existingSame) {
       return {
@@ -251,7 +297,9 @@ export const createGroupChatAgentTools = ({
     }
     for (const memberId of snapshot.plannedIds) {
       const current = contactsStore?.getContact?.(memberId);
-      if (!current || isGroup(current) || isRp(current)) {
+      const planned = snapshot.items.find(item => item.memberId === memberId && item.status === 'planned');
+      if (!current || isGroup(current) || isRp(current)
+        || (snapshot.authority && trim(current.name || current.id) !== planned?.name)) {
         return {
           ok: false,
           created: false,
@@ -291,6 +339,8 @@ export const createGroupChatAgentTools = ({
       time,
     }, snapshot.groupId);
     await refreshChatAndContacts?.({ immediate: true });
+    const changedScope = validateMaidScope(context, snapshot.authority);
+    if (changedScope) return { ok: false, created: true, verified: false, reason: changedScope };
     const stored = contactsStore?.getContact?.(snapshot.groupId);
     const verified = Boolean(
       stored &&
@@ -298,16 +348,16 @@ export const createGroupChatAgentTools = ({
       trim(stored.name) === snapshot.name &&
       sameList(unique(stored.members), snapshot.plannedIds)
     );
-    const opened = args.open === true && stored ? await openGroup(stored) : null;
-    return {
+    const receipt = {
       ok: verified,
       created: true,
       verified,
       ...(verified ? {} : { reason: 'group_create_verification_failed' }),
       group: summarizeGroup(stored || group, contactsStore),
       memberResults: snapshot.items.map(compactResolutionItem),
-      ...(opened ? { opened } : {}),
     };
+    const opened = snapshot.open && stored ? await openGroup(stored) : null;
+    return { ...receipt, ...(opened ? { opened } : {}) };
   };
 
   const buildUpdateSnapshot = (args = {}) => {
@@ -348,6 +398,15 @@ export const createGroupChatAgentTools = ({
       ...addedIds.map(id => ({ action: 'add', contact: contactsStore?.getContact?.(id) || { id, name: id } })),
       ...removedIds.map(id => ({ action: 'remove', contact: contactsStore?.getContact?.(id) || { id, name: id } })),
     ];
+    // Keep the preflight evidence for requested removals that need no write.
+    // Resolve identity in this captured scope, never from a later receipt read.
+    const skippedMembers = removeItems
+      .filter(item => item.status === 'skipped' && item.reason === 'member_not_in_group')
+      .map(item => {
+        const observed = resolveMember(contactsStore, item.target).contact;
+        if (!observed || baselineIds.includes(trim(observed.id))) return compactResolutionItem(item);
+        return compactResolutionItem({ ...item, memberId: trim(observed.id), name: trim(observed.name || observed.id) });
+      });
     return {
       target,
       group,
@@ -357,6 +416,7 @@ export const createGroupChatAgentTools = ({
       addedIds,
       removedIds,
       changes,
+      skippedMembers,
       resolutionItems: [...exactItems, ...addItems, ...removeItems],
       changed: changes.length > 0,
       reason,
@@ -375,8 +435,10 @@ export const createGroupChatAgentTools = ({
 
   const executeUpdate = async (args = {}, context = {}) => {
     const snapshot = updateSnapshots.get(args) || buildUpdateSnapshot(args);
+    const scopeReason = validateMaidScope(context, snapshot.authority);
+    if (scopeReason) return { ok: false, changed: false, preview: args.preview === true, reason: scopeReason };
     if (args.preview === true) return updatePreviewResult(snapshot);
-    if (snapshot.reason) return { ...updatePreviewResult(snapshot), preview: false };
+    if (snapshot.reason) return { ...updatePreviewResult(snapshot), preview: false, changed: false };
     if (!snapshot.changed) {
       return {
         ok: true,
@@ -385,13 +447,14 @@ export const createGroupChatAgentTools = ({
         group: summarizeGroup(snapshot.group, contactsStore),
         addedMembers: [],
         removedMembers: [],
+        skippedMembers: snapshot.skippedMembers.map(compactResolutionItem),
       };
     }
     if (
       context?.toolSafety?.decision !== 'allow' ||
       context?.toolSafety?.request?.kind !== 'group.update_members'
     ) {
-      return { ...updatePreviewResult(snapshot), preview: false, ok: false, reason: 'confirmation_required' };
+      return { ...updatePreviewResult(snapshot), preview: false, changed: false, ok: false, reason: 'confirmation_required' };
     }
     const currentGroup = contactsStore?.getContact?.(snapshot.groupId);
     if (!currentGroup || !isGroup(currentGroup)) {
@@ -443,10 +506,11 @@ export const createGroupChatAgentTools = ({
       }, snapshot.groupId);
     }
     await refreshChatAndContacts?.({ immediate: true });
+    const changedScope = validateMaidScope(context, snapshot.authority);
+    if (changedScope) return { ok: false, changed: true, verified: false, reason: changedScope };
     const stored = contactsStore?.getContact?.(snapshot.groupId);
     const verified = Boolean(stored && isGroup(stored) && sameList(unique(stored.members), snapshot.desiredIds));
-    const opened = args.open === true && stored ? await openGroup(stored) : null;
-    return {
+    const receipt = {
       ok: verified,
       changed: true,
       verified,
@@ -457,15 +521,17 @@ export const createGroupChatAgentTools = ({
         const prior = snapshot.changes.find(change => trim(change.contact?.id) === id)?.contact;
         return compactMember(prior || { id, name: id });
       }),
-      ...(opened ? { opened } : {}),
+      skippedMembers: snapshot.skippedMembers.map(compactResolutionItem),
     };
+    const opened = args.open === true && stored ? await openGroup(stored) : null;
+    return { ...receipt, ...(opened ? { opened } : {}) };
   };
 
   return [
     {
       name: 'group.create',
       title: 'Create group chat',
-      description: 'Create a real group chat from explicit existing private-contact members. The active user participates implicitly and must not be included in members.',
+      description: 'Create a real group chat from explicit existing private-contact members with one APP approval. Use preview:true only when the user asks to see the proposed details first; this does not create or approve the group. The active user participates implicitly and must not be included in members.',
       source: 'maid-group-chat',
       permissions: [],
       riskLevel: 'medium',
@@ -481,8 +547,19 @@ export const createGroupChatAgentTools = ({
       safety: {
         operationType: 'create_group_chat',
         destructive: 'conditional',
-        preflight: async (args = {}) => {
+        preflight: async (args = {}, context = {}) => {
+          const authority = captureMaidScope(context);
+          if (authority && !authority.reason) {
+            try { await Promise.all([authority.contactsReady, authority.chatReady]); }
+            catch { authority.reason = 'group_scope_unavailable'; }
+          }
+          const scopeReason = validateMaidScope(context, authority);
+          if (scopeReason) {
+            createSnapshots.set(args, { authority: { reason: scopeReason } });
+            return { destructive: false, operationType: 'create_group_chat' };
+          }
           const snapshot = buildCreateSnapshot(args);
+          snapshot.authority = authority;
           createSnapshots.set(args, snapshot);
           if (args.preview === true || !snapshot.ready) {
             return { destructive: false, operationType: 'create_group_chat' };
@@ -535,9 +612,19 @@ export const createGroupChatAgentTools = ({
         },
       },
       execute: executeCreate,
-      summarizeResult: result => result?.created
-        ? `created and verified group ${trim(result?.group?.name || result?.group?.id, '-')}`
-        : `group creation ${result?.ok ? 'reused existing group' : `failed: ${trim(result?.reason, 'unknown')}`}`,
+      summarizeResult: result => {
+        const name = trim(result?.group?.name || result?.name || result?.group?.id, '-');
+        const reason = trim(result?.reason, 'unknown');
+        if (result?.preview === true) return result.ok
+          ? t('已预览群聊「{name}」，本次未创建。', { name })
+          : t('建群预览失败：{reason}', { reason });
+        if (result?.created) return result.verified
+          ? t('已创建并核对群聊「{name}」。', { name })
+          : t('群聊已写入，但未完成核对：{reason}', { reason });
+        return result?.ok && result.existing
+          ? t('已核对现有群聊「{name}」。', { name })
+          : t('创建群聊失败：{reason}', { reason });
+      },
     },
     {
       name: 'group.update_members',
@@ -558,8 +645,19 @@ export const createGroupChatAgentTools = ({
       safety: {
         operationType: 'update_group_members',
         destructive: 'conditional',
-        preflight: async (args = {}) => {
+        preflight: async (args = {}, context = {}) => {
+          const authority = captureMaidScope(context);
+          if (authority && !authority.reason) {
+            try { await Promise.all([authority.contactsReady, authority.chatReady]); }
+            catch { authority.reason = 'group_scope_unavailable'; }
+          }
+          const scopeReason = validateMaidScope(context, authority);
+          if (scopeReason) {
+            updateSnapshots.set(args, { authority: { reason: scopeReason } });
+            return { destructive: false, operationType: 'update_group_members' };
+          }
           const snapshot = buildUpdateSnapshot(args);
+          snapshot.authority = authority;
           updateSnapshots.set(args, snapshot);
           if (args.preview === true || snapshot.reason || !snapshot.changed) {
             return { destructive: false, operationType: 'update_group_members' };
@@ -629,9 +727,16 @@ export const createGroupChatAgentTools = ({
         ],
       },
       execute: executeUpdate,
-      summarizeResult: result => result?.ok
-        ? `group members ${result.changed ? 'updated and verified' : 'unchanged'}`
-        : `group member update failed: ${trim(result?.reason, 'unknown')}`,
+      summarizeResult: result => {
+        const reason = trim(result?.reason, 'unknown');
+        if (result?.preview === true) return result.ok
+          ? t('已预览群成员变更，本次未修改。')
+          : t('群成员预览失败：{reason}', { reason });
+        if (result?.changed) return result.verified
+          ? t('已修改并核对群成员。')
+          : t('群成员已写入，但未完成核对：{reason}', { reason });
+        return result?.ok ? t('群成员无需修改。') : t('群成员修改失败：{reason}', { reason });
+      },
     },
   ];
 };

@@ -196,13 +196,17 @@ export const createAppSessionAgentTools = ({
     const existing = contactsStore?.getContact?.(sessionName) || findContact(contactsStore, sessionName);
     if (existing) {
       const sid = trim(existing.id || sessionName);
+      const contact = {
+        ...summarizeContact(existing),
+        description: typeof existing.description === 'string' ? existing.description : '',
+      };
       const opened = args.open === true ? await openSession(sid) : null;
       return {
         ok: true,
         created: false,
         existing: true,
         sessionId: sid,
-        contact: summarizeContact(existing),
+        contact,
         opened,
       };
     }
@@ -347,19 +351,28 @@ export const createAppSessionAgentTools = ({
         additionalProperties: false,
         properties: {
           limit: { type: 'integer', minimum: 1, maximum: 100 },
+          offset: { type: 'integer', minimum: 0 },
           includeGroups: { type: 'boolean' },
+          groupsOnly: { type: 'boolean' },
         },
       },
       execute: async (args = {}) => {
         const limit = Math.max(1, Math.min(100, Math.trunc(Number(args.limit) || 30)));
+        const offset = Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.trunc(Number(args.offset) || 0)));
         const includeGroups = args.includeGroups !== false;
-        const contacts = resolveContactList(contactsStore)
+        const matching = resolveContactList(contactsStore)
           .filter(contact => !isRpLikeId(contact?.id))
           .filter(contact => includeGroups || !(contact?.isGroup === true || isGroupLikeId(contact?.id)))
-          .slice(0, limit)
-          .map(summarizeContact);
+          .filter(contact => args.groupsOnly !== true || contact?.isGroup === true || isGroupLikeId(contact?.id));
+        const contacts = matching.slice(offset, offset + limit).map(summarizeContact);
+        const hasMore = offset + contacts.length < matching.length;
         return {
           count: contacts.length,
+          total: matching.length,
+          offset,
+          limit,
+          hasMore,
+          nextOffset: hasMore ? offset + contacts.length : null,
           contacts,
           currentSessionId: trim(chatStore?.getCurrent?.()),
         };

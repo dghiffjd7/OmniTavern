@@ -17,10 +17,14 @@ export const MAID_OPERATION_SAFETY_PROMPT = [
 const samePromptText = (left, right) => String(left ?? '').replace(/\r\n?/g, '\n')
   === String(right ?? '').replace(/\r\n?/g, '\n');
 
-export const getLocalizedMaidPrompt = (value = DEFAULT_MAID_PROMPT) => {
+export const getLocalizedMaidPrompt = (value = DEFAULT_MAID_PROMPT, { voiceConversation = false } = {}) => {
   const prompt = String(value || '').trim() || DEFAULT_MAID_PROMPT;
-  return samePromptText(prompt, DEFAULT_MAID_PROMPT)
-    ? getLocalizedPromptText('maid.default')
+  // Select a voice default only for a complete official prompt. Custom persona
+  // text remains intact even when it repeats sentences from the default.
+  const isOfficialDefault = samePromptText(prompt, DEFAULT_MAID_PROMPT)
+    || (voiceConversation === true && samePromptText(prompt, getLocalizedPromptText('maid.default')));
+  return isOfficialDefault
+    ? getLocalizedPromptText(voiceConversation === true ? 'maid.voice.default' : 'maid.default')
     : prompt;
 };
 
@@ -30,8 +34,10 @@ export const canonicalizeMaidPrompt = (value = DEFAULT_MAID_PROMPT) => {
   return samePromptText(prompt, localized) ? DEFAULT_MAID_PROMPT : prompt;
 };
 
-export const getLocalizedMaidOperationSafetyPrompt = () =>
-  getLocalizedPromptText('maid.safety', MAID_OPERATION_SAFETY_PROMPT);
+export const getLocalizedMaidOperationSafetyPrompt = ({ voiceConversation = false } = {}) =>
+  voiceConversation === true
+    ? getLocalizedPromptText('maid.voice.safety')
+    : getLocalizedPromptText('maid.safety', MAID_OPERATION_SAFETY_PROMPT);
 
 export const getLocalizedMaidOutputLanguagePrompt = () =>
   getLocalizedPromptText('maid.output_language_guard');

@@ -13,7 +13,7 @@ export const buildGeminiLiveSetup = (profile, instructions, resumeHandle = '') =
 export const createGeminiLiveProtocol = ({ profile, instructions, send, emit, ready, play, clear, renew, resumeHandle = '', onResumeHandle }) => {
   let responseId = '', userText = '', assistantText = '', suppressed = false;
   const begin = () => { if (!responseId) { responseId = `gemini_${crypto.randomUUID()}`; emit({ type: 'response.created', response: { id: responseId } }); } };
-  const user = () => { if (userText.trim()) emit({ type: 'conversation.item.input_audio_transcription.completed', item_id: `gemini_input_${crypto.randomUUID()}`, transcript: userText }); userText = ''; };
+  const user = () => { if (userText.trim()) emit({ type: 'conversation.item.input_audio_transcription.completed', item_id: `gemini_input_${crypto.randomUUID()}`, response_id: responseId, transcript: userText }); userText = ''; };
   return {
     start: () => send(buildGeminiLiveSetup(profile, instructions, resumeHandle)),
     audio: data => send({ realtimeInput: { audio: { mimeType: 'audio/pcm;rate=16000', data } } }),
@@ -33,8 +33,8 @@ export const createGeminiLiveProtocol = ({ profile, instructions, send, emit, re
       if (message.goAway) renew();
       if (message.error) { emit({ type: 'error', error: { message: 'Gemini Live 返回错误，请检查模型和账号权限', code: String(message.error.code || '') } }); return; }
       if (message.toolCall?.functionCalls?.length) {
-        user();
-        emit({ type: 'maid.tools.requested', calls: message.toolCall.functionCalls.map(call => ({ id: call.id, name: call.name, arguments: call.args })) });
+        begin(); user();
+        emit({ type: 'maid.tools.requested', response_id: responseId, calls: message.toolCall.functionCalls.map(call => ({ id: call.id, name: call.name, arguments: call.args })) });
       }
       if (message.toolCallCancellation) emit({ type: 'maid.tools.cancelled', ids: message.toolCallCancellation.ids || [] });
       const content = message.serverContent || {};
@@ -51,7 +51,7 @@ export const createGeminiLiveProtocol = ({ profile, instructions, send, emit, re
         const audio = part.inlineData;
         if (audio?.data && audio.mimeType?.startsWith('audio/pcm')) {
           begin(); if (!suppressed) play(audio.data, Number(/rate=(\d+)/.exec(audio.mimeType)?.[1] || 24000));
-          emit({ type: 'response.output_audio.delta', response_id: responseId });
+          emit({ type: 'response.output_audio.delta', response_id: responseId, playbackSuppressed: suppressed });
         }
       }
       if (content.turnComplete) {

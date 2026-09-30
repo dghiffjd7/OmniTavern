@@ -154,6 +154,34 @@ test('image dimensions are read from the file header before decoding', async () 
   assert.deepEqual(readImageHeaderDimensions(jpeg), { width: 200, height: 120 });
 });
 
+test('reaction uploads inspect JPEG dimensions beyond the first read and never decode unknown or oversized images', async () => {
+  const { reactionDataUrlFromFile } = await import('../../src/scripts/utils/image.js');
+  const originals = { Image: globalThis.Image, FileReader: globalThis.FileReader, document: globalThis.document };
+  let decodes = 0;
+  const jpeg = size => {
+    const metadata = new Uint8Array(65537); metadata.set([255, 225, 255, 255]);
+    const sof = Uint8Array.from([255, 192, 0, 11, 8, size >> 8, size & 255, size >> 8, size & 255, 1, 1, 17, 0]);
+    return new Blob([Uint8Array.from([255, 216]), ...Array(9).fill(metadata), sof]);
+  };
+  globalThis.FileReader = class { readAsDataURL() { this.result = png; this.onload(); } };
+  globalThis.Image = class {
+    naturalWidth = 96; naturalHeight = 96;
+    set src(value) { decodes++; this.onload(); }
+  };
+  globalThis.document = { createElement: () => ({ getContext: () => ({ drawImage() {} }), toDataURL: () => png }) };
+  try {
+    await assert.rejects(reactionDataUrlFromFile(jpeg(5000)), /尺寸/);
+    await assert.rejects(reactionDataUrlFromFile(new Blob([Uint8Array.from([255, 216, 255, 225, 0, 1])])), /尺寸|格式/);
+    assert.equal(decodes, 0, 'rejected images must not reach the browser decoder');
+    assert.equal(await reactionDataUrlFromFile(jpeg(96)), png, 'valid images with long metadata remain supported');
+    assert.equal(decodes, 1);
+  } finally {
+    for (const [key, value] of Object.entries(originals)) {
+      if (value === undefined) delete globalThis[key]; else globalThis[key] = value;
+    }
+  }
+});
+
 test('imported assets must be static images within 96px; the upload keeps the batch going', async () => {
   const { isAnimatedImageBytes } = await import('../../src/scripts/utils/image.js');
   const bytes = Uint8Array.from(atob(png.split(',')[1]), char => char.charCodeAt(0));

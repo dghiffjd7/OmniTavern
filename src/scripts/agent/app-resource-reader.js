@@ -1,5 +1,6 @@
 import { extractSafeRegexFormatEvidence } from '../storage/maid-format-profile-evidence-utils.js';
 import { readWorldAiGenerationSettings as readSharedWorldAiGenerationSettings } from '../utils/world-ai-generation.js';
+import { captureWorldbookResourceOwnership } from './worldbook-resource-ownership.js';
 
 export const SUPPORTED_APP_RESOURCES = Object.freeze([
   'chat',
@@ -255,6 +256,7 @@ const createChatReader = deps => async (args = {}) => {
 const createWorldbookReader = deps => async (args = {}) => {
   const bridge = getBridgeFromDeps(deps);
   await callMethod(bridge, 'waitForWorldStoreReady');
+  await deps.personaStore?.ready;
   const session = await resolveSessionId(deps, args, { useId: false });
   const sid = session.sessionId;
   const ids = [];
@@ -290,9 +292,11 @@ const createWorldbookReader = deps => async (args = {}) => {
       })),
     });
   }
+  const ownership = captureWorldbookResourceOwnership({ ...deps, sessionId: sid });
   return {
     ok: true,
     resource: 'worldbook',
+    ...ownership.context,
     contentMode: includeContent ? 'content' : 'summary',
     contentHint: includeContent ? '' : '世界书正文默认省略；需要正文时再次读取并传 includeContent:true、entryId、entryTitle 或 query。',
     sessionId: sid,
@@ -303,7 +307,7 @@ const createWorldbookReader = deps => async (args = {}) => {
     globalSettings: sanitizeAppResourceValue(await callMethod(bridge, 'getWorldGlobalSettings') || {}),
     aiGeneration: readWorldAiGenerationSettings(),
     count: uniqueIds.length,
-    worldbooks,
+    worldbooks: worldbooks.map(book => ({ ...book, ...ownership.project(book.id) })),
   };
 };
 
@@ -453,7 +457,21 @@ const createConfigReader = deps => async () => {
 const createSessionReader = deps => async (args = {}) => {
   const chatStore = deps.chatStore || {};
   const contactsStore = deps.contactsStore || {};
-  const ids = asArray(await callMethod(chatStore, 'listSessions'));
+  const listedSessionIds = normalizeStringList(await callMethod(chatStore, 'listSessions'));
+  const sessionIds = new Set(listedSessionIds);
+  const hasContactListing = typeof contactsStore.listContacts === 'function';
+  const contacts = hasContactListing ? asArray(await callMethod(contactsStore, 'listContacts')) : [];
+  const contactIds = new Set(contacts.map(contact => toText(contact?.id)).filter(Boolean));
+  // Both lists already enforce their store's visibility/scope rules. Preserve
+  // listed RP sessions, but omit ordinary orphan sessions after contact deletion.
+  const ids = listedSessionIds.filter(id => !hasContactListing || contactIds.has(id) || id.startsWith('rp:'));
+  for (const id of contactIds) {
+    if (sessionIds.has(id)) continue;
+    // A persisted session excluded by listSessions is hidden, not contact-only.
+    if (Object.hasOwn(chatStore.state?.sessions || {}, id) || await callMethod(chatStore, 'hasSession', id)) continue;
+    ids.push(id);
+  }
+  const explicitSessionId = toText(args.sessionId);
   const target = normalizeLookupText(
     args.sessionName || args.chatName || args.name || args.target || args.query || args.id,
   );
@@ -462,12 +480,17 @@ const createSessionReader = deps => async (args = {}) => {
     .map(field => field.toLowerCase());
   const includeMembers = requestedFields.includes('members');
   const includeWorldbooks = requestedFields.includes('worldbooks');
+  const includeDescription = requestedFields.includes('description');
+  const maxDescriptionLength = Math.max(120, Math.min(12000, Math.trunc(Number(args.maxTextLength) || 2000)));
   const includedFields = [
+    ...(includeDescription ? ['description'] : []),
     ...(includeMembers ? ['members'] : []),
     ...(includeWorldbooks ? ['worldbooks'] : []),
   ];
   const sessions = [];
   for (const id of ids) {
+    // An explicit ID never falls back to a display name or the full list.
+    if (explicitSessionId && toText(id) !== explicitSessionId) continue;
     const contact = await callMethod(contactsStore, 'getContact', id) || null;
     const names = [
       id,
@@ -478,16 +501,25 @@ const createSessionReader = deps => async (args = {}) => {
       contact?.source?.name,
       contact?.source?.characterName,
     ].map(normalizeLookupText).filter(Boolean);
-    if (target && !names.includes(target)) continue;
-    const messages = asArray(await callMethod(chatStore, 'getMessages', id));
+    if (!explicitSessionId && target && !names.includes(target)) continue;
+    const hasChatSession = sessionIds.has(id);
+    // Production getters lazily create a chat. Merely reading a newly added
+    // contact must leave its first session and settings uncreated.
+    const messages = hasChatSession ? asArray(await callMethod(chatStore, 'getMessages', id)) : [];
     const projected = {
       id,
       name: contact?.name || id,
       isGroup: contact?.isGroup === true,
       hasAvatar: Boolean(contact?.avatar),
       messageCount: messages.length,
-      settings: await callMethod(chatStore, 'getSessionSettings', id) || null,
+      settings: hasChatSession ? await callMethod(chatStore, 'getSessionSettings', id) || null : null,
     };
+    if (includeDescription) {
+      const description = toText(contact?.description);
+      projected.description = description.slice(0, maxDescriptionLength);
+      projected.descriptionLength = description.length;
+      projected.descriptionTruncated = description.length > maxDescriptionLength;
+    }
     if (includeMembers) {
       const memberIds = contact?.isGroup === true
         ? normalizeStringList(contact?.members)
@@ -502,7 +534,10 @@ const createSessionReader = deps => async (args = {}) => {
         });
       }
     }
-    if (includeWorldbooks) {
+    if (includeWorldbooks && !hasChatSession) {
+      // Binding resolution may also call the lazy session settings getter.
+      projected.worldbooks = null;
+    } else if (includeWorldbooks) {
       const bridge = getBridgeFromDeps(deps);
       const directWorldIds = normalizeStringList(await callMethod(bridge, 'getWorldIdsForSession', id));
       const resolved = await callMethod(bridge, 'getResolvedWorldState', id) || {};

@@ -13,6 +13,14 @@ const trim = (value, fallback = '') => {
 
 export const MAID_CONFIRMATION_ACTIONS = Object.freeze(['deny', 'allow_once', 'allow_always']);
 
+const BINDING_KEYS = ['submissionId', 'roleCardId', 'sessionId', 'uiMode'];
+const SCOPE_KEYS = ['roleCardId', 'sessionId', 'uiMode'];
+const readBinding = (options) => {
+  if (!options || !BINDING_KEYS.every(key => Object.hasOwn(options, key))) return null;
+  const binding = Object.fromEntries(BINDING_KEYS.map(key => [key, trim(options[key])]));
+  return binding.submissionId && binding.roleCardId && binding.uiMode ? Object.freeze(binding) : null;
+};
+
 // 按工具声明的 operationType 分两档：删除 / 归档 / 覆盖为高风险，其余写入为需要确认；另给一个动作短标签
 const DANGER_OPERATION_PATTERN = /^(delete|archive|replace)/;
 const OPERATION_ACTION_LABELS = [
@@ -56,10 +64,12 @@ export const createMaidToolConfirmationRuntime = ({
   allowStore = null,
   choose = null,
   canShowInline = () => false,
+  getCurrentScope = null,
   onChange = () => {},
   makeId = () => `maid_confirm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
 } = {}) => {
   const entries = new Map();
+  let activeModalId = '';
 
   const notify = () => { try { onChange(); } catch {} };
 
@@ -74,7 +84,7 @@ export const createMaidToolConfirmationRuntime = ({
 
   const openModal = (request, { signal = null } = {}) => {
     const info = describeRequest(request);
-    return Promise.resolve(choose?.({
+    return choose?.({
       title: info.title,
       message: info.message,
       items: info.items,
@@ -88,13 +98,14 @@ export const createMaidToolConfirmationRuntime = ({
         { id: 'deny', label: info.cancelLabel, variant: 'ghost' },
         { id: 'allow_once', label: info.confirmLabel, primary: true },
       ],
-    }));
+    });
   };
 
   const settle = (entry, action) => {
     if (!entry || entry.settled) return false;
     entry.settled = true;
     entries.delete(entry.id);
+    if (activeModalId === entry.id) activeModalId = '';
     entry.cleanup?.();
     entry.modalController?.abort?.();
     entry.resolve(toDecision(MAID_CONFIRMATION_ACTIONS.includes(action) ? action : 'deny', entry.request));
@@ -105,41 +116,64 @@ export const createMaidToolConfirmationRuntime = ({
   const moveToModal = (entry) => {
     if (!entry || entry.settled || entry.mode === 'modal') return;
     entry.mode = 'modal';
+    entry.modalVisible = false;
     entry.modalController = typeof AbortController === 'function' ? new AbortController() : null;
+    activeModalId = entry.id;
+    let result;
+    try {
+      result = openModal(entry.request, { signal: entry.modalController?.signal || null });
+    } catch {
+      settle(entry, 'deny');
+      return;
+    }
+    if (!result || typeof result.then !== 'function') {
+      settle(entry, result);
+      return;
+    }
+    void Promise.resolve(result).then(action => settle(entry, action)).catch(() => settle(entry, 'deny'));
+    if (entry.settled) return;
+    entry.modalVisible = activeModalId === entry.id;
     notify();
-    void openModal(entry.request, { signal: entry.modalController?.signal || null })
-      .then(action => settle(entry, action))
-      .catch(() => settle(entry, 'deny'));
   };
 
-  const request = async (rawRequest, { signal = null, runId = '' } = {}) => {
+  const request = async (rawRequest, options = {}) => {
+    const { signal = null, runId = '' } = options;
     const info = describeRequest(rawRequest);
     if (info.allowAlways && allowStore?.isAllowed?.(rawRequest)) {
       return { decision: 'allow', remembered: true };
     }
     if (signal?.aborted) return { decision: 'deny' };
     const targetRunId = trim(runId);
-    if (!targetRunId || canShowInline(targetRunId) !== true) {
-      return toDecision(await openModal(rawRequest, { signal }), rawRequest);
-    }
     return new Promise((resolve) => {
       const entry = {
         id: makeId(),
         runId: targetRunId,
+        binding: readBinding(options),
+        toolName: trim(rawRequest?.toolName),
+        groupName: trim(rawRequest?.details?.groupName),
+        members: (Array.isArray(rawRequest?.details?.items) ? rawRequest.details.items : [])
+          .filter(item => item?.status === 'planned' && trim(item.id))
+          .map(item => ({ id: trim(item.id), name: trim(item.label) })),
         request: rawRequest,
-        mode: 'inline',
+        mode: 'pending',
         settled: false,
         resolve,
         cleanup: null,
         modalController: null,
+        modalVisible: false,
+        signal,
       };
+      entries.set(entry.id, entry);
       if (signal?.addEventListener) {
         const onAbort = () => settle(entry, 'deny');
         signal.addEventListener('abort', onAbort, { once: true });
         entry.cleanup = () => signal.removeEventListener?.('abort', onAbort);
       }
-      entries.set(entry.id, entry);
-      notify();
+      if (signal?.aborted) { settle(entry, 'deny'); return; }
+      if (targetRunId && canShowInline(targetRunId) === true) {
+        entry.mode = 'inline';
+        notify();
+      } else moveToModal(entry);
     });
   };
 
@@ -168,9 +202,47 @@ export const createMaidToolConfirmationRuntime = ({
     return null;
   };
 
+  const visible = (entry) => {
+    if (entry.settled || entry.signal?.aborted) return false;
+    if (entry.mode === 'modal') return entry.modalVisible && activeModalId === entry.id;
+    try { return entry.mode === 'inline' && canShowInline(entry.runId) === true; } catch { return false; }
+  };
+  const pendingForRun = runId => [...entries.values()].filter(entry => !entry.settled && entry.runId === runId);
+  const getPendingForRun = (runId) => {
+    const target = trim(runId);
+    if (!target) return null;
+    const pending = pendingForRun(target);
+    if (pending.length > 1) return { ambiguous: true, runId: target };
+    if (!pending.length) return null;
+    const entry = pending[0];
+    return {
+      id: entry.id, runId: entry.runId, binding: entry.binding ? { ...entry.binding } : null,
+      visible: visible(entry), toolName: entry.toolName,
+      title: describeRequest(entry.request).title, message: describeRequest(entry.request).message,
+      groupName: entry.groupName, members: entry.members.map(item => ({ ...item })),
+    };
+  };
+  const resolveBound = (target, action) => {
+    if (!['allow_once', 'deny'].includes(action) || typeof getCurrentScope !== 'function') return false;
+    const entry = entries.get(trim(target?.id)), supplied = readBinding(target?.binding);
+    if (!entry || !entry.binding || !supplied || entry.toolName !== 'group.create'
+      || !entry.runId || entry.runId !== trim(target?.runId)
+      || !BINDING_KEYS.every(key => entry.binding[key] === supplied[key])) return false;
+    let currentScope;
+    try { currentScope = getCurrentScope(); } catch { return false; }
+    if (!currentScope || !SCOPE_KEYS.every(key => Object.hasOwn(currentScope, key)
+      && trim(currentScope[key]) === entry.binding[key])) return false;
+    // The getter and visibility callbacks may settle or replace a request synchronously.
+    if (entries.get(entry.id) !== entry || pendingForRun(entry.runId).length !== 1 || !visible(entry)
+      || entry.settled || entry.signal?.aborted) return false;
+    return settle(entry, action);
+  };
+
   return {
     request,
     getInline,
+    getPendingForRun,
+    resolveBound,
     hasInline: runId => Boolean(getInline(runId)),
     resolve: (id, action) => settle(entries.get(trim(id)), action),
     // 语音确认只允许一次；只作用于指定 run 集合（当前通话接下的任务）里正在卡内等待的确认

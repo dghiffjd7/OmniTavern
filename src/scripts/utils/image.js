@@ -72,8 +72,10 @@ export const readImageHeaderDimensions = bytes => {
             if (b[i] !== 255) { i += 1; continue; }
             const marker = b[i + 1];
             if (marker === 216 || (marker >= 208 && marker <= 215) || marker === 1 || marker === 255) { i += marker === 255 ? 1 : 2; continue; }
+            if (marker === 217 || marker === 218) return null;
             const length = u16be(i + 2);
-            if (marker >= 192 && marker <= 207 && ![196, 200, 204].includes(marker)) return { width: u16be(i + 7), height: u16be(i + 5) };
+            if (length < 2 || i + 2 + length > b.length) return null;
+            if (marker >= 192 && marker <= 207 && ![196, 200, 204].includes(marker)) return length >= 8 ? { width: u16be(i + 7), height: u16be(i + 5) } : null;
             i += 2 + length;
         }
     }
@@ -103,8 +105,11 @@ export const reactionDataUrlFromFile = async file => {
     if (!file || file.size > 8 * 1024 * 1024) throw new Error('请选择不超过 8MB 的 PNG、WebP 或 JPEG 图片');
     const header = new Uint8Array(await file.slice(0, 512 * 1024).arrayBuffer());
     if (!isReactionImageBytes(header)) throw new Error('自定义反应支持静态 PNG、WebP 或 JPEG 图片');
-    const declared = readImageHeaderDimensions(header);
-    if (declared && (!declared.width || !declared.height || declared.width * declared.height > REACTION_SOURCE_MAX_PIXELS)) throw new Error('图片尺寸过大，请选择较小的图片');
+    let declared = readImageHeaderDimensions(header);
+    // JPEG 的 metadata 可以超过首段；只在需要时补读，仍受上面的 8MiB 文件上限约束。
+    if (!declared && file.size > header.length) declared = readImageHeaderDimensions(new Uint8Array(await file.arrayBuffer()));
+    if (!declared) throw new Error('无法读取图片尺寸，请选择其他图片');
+    if (!declared.width || !declared.height || declared.width * declared.height > REACTION_SOURCE_MAX_PIXELS) throw new Error('图片尺寸过大，请选择较小的图片');
     const img = await loadImage(await readFileAsDataUrl(file));
     const width = img.naturalWidth, height = img.naturalHeight;
     if (!width || !height || width * height > REACTION_SOURCE_MAX_PIXELS) throw new Error('图片尺寸过大，请选择较小的图片');

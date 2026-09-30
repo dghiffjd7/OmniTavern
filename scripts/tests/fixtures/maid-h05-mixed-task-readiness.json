@@ -1,0 +1,207 @@
+{
+  "source_file": "../maid_testset_tools/live-results-20260930-target-blocks-mixed-fixes/H05-gemini.json",
+  "source_sha256": "727ce9a10d793058f5a480ad3c5f3a5420e039e6271dda5374c039d1a1011b1b",
+  "evidence_boundary": "LLMClient.chat input, not provider wire serialization; extracted without model calls",
+  "input": "看看我有几个群，没人的删了，然后新建一个",
+  "groups": [
+    {
+      "id": "group:eval_H05_api_1790735615183_H05_group_empty_test",
+      "name": "测试",
+      "memberCount": 0,
+      "messageCount": 0
+    },
+    {
+      "id": "group:eval_H05_api_1790735615183_H05_group_empty_new",
+      "name": "新群聊",
+      "memberCount": 0,
+      "messageCount": 0
+    },
+    {
+      "id": "group:eval_H05_api_1790735615183_H05_group_empty_copy",
+      "name": "新群聊(1)",
+      "memberCount": 0,
+      "messageCount": 0
+    },
+    {
+      "id": "group:eval_H05_api_1790735615183_H05_group_weekend",
+      "name": "周末出游群",
+      "memberCount": 2,
+      "messageCount": 0
+    }
+  ],
+  "calls": [
+    {
+      "userMessage": "<app_features>\n- id: session.compare\n  title: 比较同名联系人并提出方案\n  summary: 只读比较疑似重复联系人的真实资料与聊天数量，给出保留建议和待确认的删除目标；不自动合并或删除。\n  tools: [session.list, app.read_resource]\n  schemas: {\"session.list\":{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{\"limit\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":100},\"offset\":{\"type\":\"integer\",\"minimum\":0},\"includeGroups\":{\"type\":\"boolean\"},\"groupsOnly\":{\"type\":\"boolean\"}}},\"app.read_resource\":{\"type\":\"object\",\"required\":[\"resource\"],\"additionalProperties\":false,\"properties\":{\"resource\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":80},\"id\":{\"type\":\"string\",\"maxLength\":200},\"name\":{\"type\":\"string\",\"maxLength\":200},\"worldbookId\":{\"type\":\"string\",\"maxLength\":200},\"entryId\":{\"type\":\"string\",\"maxLength\":200},\"entryTitle\":{\"type\":\"string\",\"maxLength\":200},\"sessionId\":{\"type\":\"string\",\"maxLength\":200},\"sessionName\":{\"type\":\"string\",\"maxLength\":200},\"target\":{\"type\":\"string\",\"maxLength\":200},\"chatName\":{\"type\":\"string\",\"maxLength\":200},\"scope\":{\"type\":\"string\",\"maxLength\":80},\"includeContent\":{\"type\":\"boolean\"},\"include\":{\"type\":\"array\",\"description\":\"Optional fields to expand. For persona/user use associations, description, avatar, or details. For session use description, members and/or worldbooks; descriptionLength and descriptionTruncated distinguish empty from truncated contact descriptions. For regex use rules only when the user explicitly asks to debug raw regex bodies; format inference must use formatEvidence instead.\",\"items\":{\"type\":\"string\",\"maxLength\":80},\"maxItems\":30},\"query\":{\"type\":\"string\",\"maxLength\":200},\"limit\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":200},\"maxEntries\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":200},\"maxTextLength\":{\"type\":\"integer\",\"minimum\":120,\"maximum\":12000,\"description\":\"Maximum returned text length, including each requested session description (default 2000 for descriptions).\"},\"maxContentLength\":{\"type\":\"integer\",\"minimum\":120,\"maximum\":12000}}}}\n  args: \"先用 session.list 定位候选及真实 ID，再按 ID 用 app.read_resource(resource:\\\"session\\\",include:[\\\"description\\\"]) 读取 description、messageCount、hasAvatar；descriptionTruncated 为 true 时不能把截断简介当完整资料。同名或名称含副本、导入、编号不等于资料重复，messageCount 只表示消息数量，不证明哪份是原版；证据不足时明确保留不确定项。列出各候选 ID、简介差异、聊天数量、建议保留对象及理由；没有可靠依据不能认定重复或擅自选删除目标。删除对应联系人/会话会丢失其聊天及内部归档，并非把历史合并到保留对象。本流程仅提出方案；后续用户明确选择准确目标后，仍由原删除工具的 APP 确认通过才执行，读过本说明不授予删除权限。\"\n  panel: session\n  path: 联系人 -> 聊天列表\n- id: app.capabilities.search\n  title: 检索女仆能力\n  summary: 按用户说法检索已登记的 APP 能力和使用说明，返回候选条目和对应工具；目录并非完整 APP 功能清单，无匹配不能说明 APP 不支持。应区分 APP 功能是否存在、女仆是否有执行工具、是否已核实。\n  tools: [app.search_feature, app.read_feature_doc, app.read_skill, app.search_skills]\n  schemas: {\"app.search_feature\":{\"type\":\"object\",\"required\":[\"query\"],\"additionalProperties\":false,\"properties\":{\"query\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":160},\"limit\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":20}}},\"app.read_feature_doc\":{\"type\":\"object\",\"required\":[\"featureId\"],\"additionalProperties\":false,\"properties\":{\"featureId\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":80}}},\"app.read_skill\":{\"type\":\"object\",\"required\":[\"skillId\"],\"additionalProperties\":false,\"properties\":{\"skillId\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":80}}},\"app.search_skills\":{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{\"query\":{\"type\":\"string\",\"maxLength\":200},\"includeManualOnly\":{\"type\":\"boolean\"},\"cursor\":{\"type\":\"string\",\"maxLength\":1500},\"limit\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":20}}}}\n  args: \"app.search_feature: query 必填、limit 可选，返回候选功能；app.read_feature_doc: featureId 必填，返回功能说明与工具参数；app.read_skill: skillId 必填，按需读取技能流程，仅提供说明，不执行或授权；app.search_skills: query/limit/cursor 可选，查询或翻页查找技能；includeManualOnly:true 仅用于用户明确点名的技能\"\n</app_features>\n<maid_skills_data>\nWorkflow directory (reference data): 2 automatic workflows; 2 shown. Search app.search_skills for more or for an explicitly named manual-only workflow.\n{\"id\":\"avatar.create_and_set\",\"revision\":1,\"title\":\"生成并设置头像\",\"description\":\"为角色卡、联系人或用户生成头像，保持人物设计一致，并写回正确的目标。\",\"invocationMode\":\"auto\",\"kind\":\"builtin\"}\n{\"id\":\"worldbook.from_sources\",\"revision\":1,\"title\":\"按资料编写世界书\",\"description\":\"整理作品资料或用户设定，区分原作、原创与扩写，生成世界书条目并按要求绑定。\",\"invocationMode\":\"auto\",\"kind\":\"builtin\"}\n</maid_skills_data>\n用户请求：看看我有几个群，没人的删了，然后新建一个\n当前会话：-\nUI 模式：chat\n当前页面：contacts\n界面呈现意图：background\n<maid_memory today=\"2026-09-30\">\n（空）\n</maid_memory>\n<maid_history>\n（空）\n</maid_history>",
+      "offeredToolNames": [],
+      "response": "{\"ok\":true,\"toolName\":\"session.list\",\"args\":{\"groupsOnly\":true},\"featureId\":\"session.compare\",\"title\":\"查看群聊列表\",\"response\":\"我先为您查看当前的群聊列表与各群情况。\"}"
+    },
+    {
+      "userMessage": "<app_features>\n- id: session.compare\n  title: 比较同名联系人并提出方案\n  summary: 只读比较疑似重复联系人的真实资料与聊天数量，给出保留建议和待确认的删除目标；不自动合并或删除。\n  tools: [session.list, app.read_resource]\n  args: \"先用 session.list 定位候选及真实 ID，再按 ID 用 app.read_resource(resource:\\\"session\\\",include:[\\\"description\\\"]) 读取 description、messageCount、hasAvatar；descriptionTruncated 为 true 时不能把截断简介当完整资料。同名或名称含副本、导入、编号不等于资料重复，messageCount 只表示消息数量，不证明哪份是原版；证据不足时明确保留不确定项。列出各候选 ID、简介差异、聊天数量、建议保留对象及理由；没有可靠依据不能认定重复或擅自选删除目标。删除对应联系人/会话会丢失其聊天及内部归档，并非把历史合并到保留对象。本流程仅提出方案；后续用户明确选择准确目标后，仍由原删除工具的 APP 确认通过才执行，读过本说明不授予删除权限。\"\n  panel: session\n  path: 联系人 -> 聊天列表\n- id: maid.todo\n  title: 女仆任务清单\n  summary: 记录和查看当前女仆任务的待办清单与进度；只给跨功能域且含写入、生成或较长处理链的复杂任务使用，多个资源的只读比较不需要清单。\n  tools: [maid.todo.write, maid.todo.read]\n  args: \"maid.todo.write: todos[] 每项含 content 和 status(pending/in_progress/completed)，整体替换当前清单；只在状态实际变化时写入，相同清单会返回 todo_unchanged；maid.todo.read 无参数\"\n- id: group.members.update\n  title: 编修群聊成员\n  summary: 按现有联系人 ID 替换、加入或移出一个群聊的成员，并读回验证最终成员集合。\n  tools: [group.update_members]\n  args: \"group/groupId/target/name 指定群聊。二选一：members[] 表示完整目标成员集合；或 addMembers[]/removeMembers[] 表示增量修改，不能混用。成员会先解析并冻结成 ID，单次列表确认后复验；确认期间群成员有变化会中止，不覆盖新状态。open 默认 false，明确要求查看主要结果时才传 true\"\n  writes: true\n  risk: medium\n  panel: group-settings\n  path: 群聊 -> 群聊设置 -> 成员管理\n- id: app.resource.read\n  title: 读取 APP 结构化资源\n  summary: 读取聊天消息、世界书设置、正则、变量、记忆、预设、配置、会话、角色卡或用户等结构化 APP 数据。\n  tools: [app.read_resource]\n  args: \"resource 指定 chat/worldbook/regex/variables/memory/preset/config/session/persona/user；worldbook 返回条目索引、全局设置、AI 生成模板及 currentCard/ownerCards/personaBindings 归属，需正文时传 includeContent:true、entryId、entryTitle 或 query；targetSelectionEvidence 提供当前绑定状态与可选目标；用户目标有歧义且归属不明或跨卡时，结合这些证据澄清；已明确指定的目标仍须遵守写入确认。persona/user 默认只返回 id/name/active；persona 关联资源引用用 include:[\\\"associations\\\"]，描述/头像/完整档案用 include:[\\\"description\\\"]/[\\\"avatar\\\"]/[\\\"details\\\"]。session 默认含 messageCount/hasAvatar，用 include:[\\\"description\\\"] 读取真实联系人简介（独立于 contact_profile 档案），maxTextLength 控制简介长度，descriptionTruncated 标明截断；include:[\\\"members\\\"] 读精确群成员，include:[\\\"worldbooks\\\"] 区分继承与直接绑定。sessionId/sessionName/target/chatName/id/name/limit/include 可选；聊天可按聊天室名称定位\"\n- id: app.capabilities.search\n  title: 检索女仆能力\n  summary: 按用户说法检索已登记的 APP 能力和使用说明，返回候选条目和对应工具；目录并非完整 APP 功能清单，无匹配不能说明 APP 不支持。应区分 APP 功能是否存在、女仆是否有执行工具、是否已核实。\n  tools: [app.search_feature, app.read_feature_doc, app.read_skill, app.search_skills]\n  args: \"app.search_feature: query 必填、limit 可选，返回候选功能；app.read_feature_doc: featureId 必填，返回功能说明与工具参数；app.read_skill: skillId 必填，按需读取技能流程，仅提供说明，不执行或授权；app.search_skills: query/limit/cursor 可选，查询或翻页查找技能；includeManualOnly:true 仅用于用户明确点名的技能\"\n</app_features>\n<maid_skills_data>\nWorkflow directory (reference data): 2 automatic workflows; 2 shown. Search app.search_skills for more or for an explicitly named manual-only workflow.\n{\"id\":\"avatar.create_and_set\",\"revision\":1,\"title\":\"生成并设置头像\",\"description\":\"为角色卡、联系人或用户生成头像，保持人物设计一致，并写回正确的目标。\",\"invocationMode\":\"auto\",\"kind\":\"builtin\"}\n{\"id\":\"worldbook.from_sources\",\"revision\":1,\"title\":\"按资料编写世界书\",\"description\":\"整理作品资料或用户设定，区分原作、原创与扩写，生成世界书条目并按要求绑定。\",\"invocationMode\":\"auto\",\"kind\":\"builtin\"}\n</maid_skills_data>\n用户请求：看看我有几个群，没人的删了，然后新建一个\n当前会话：-\nUI 模式：chat\n当前页面：contacts\n界面呈现意图：background\n<maid_memory today=\"2026-09-30\">\n（空）\n</maid_memory>\n<maid_history>\n（空）\n</maid_history>\n成功读取账本：\n1. session.list args={\"groupsOnly\":true} facts={\"summary\":\"listed 4 session(s)\"}\n已执行步骤与观察结果：\n最近步骤观察（可能按预算省略；truncated 等字段为工具原始状态，不表示正文已全部呈现）：\n[\n{\"index\":1,\"toolName\":\"session.list\",\"featureId\":\"session.compare\",\"title\":\"查看群聊列表\",\"args\":{\"groupsOnly\":true},\"status\":\"succeeded\",\"guided\":false,\"guide\":null,\"guideMessage\":\"\",\"summary\":\"listed 4 session(s)\",\"output\":{\"count\":4,\"total\":4,\"offset\":0,\"limit\":30,\"hasMore\":false,\"nextOffset\":null,\"contacts\":[{\"id\":\"group:eval_H05_api_1790735615183_H05_group_empty_test\",\"name\":\"测试\",\"isGroup\":true,\"memberCount\":0},{\"id\":\"group:eval_H05_api_1790735615183_H05_group_empty_new\",\"name\":\"新群聊\",\"isGroup\":true,\"memberCount\":0},{\"id\":\"group:eval_H05_api_1790735615183_H05_group_empty_copy\",\"name\":\"新群聊(1)\",\"isGroup\":true,\"memberCount\":0},{\"id\":\"group:eval_H05_api_1790735615183_H05_group_weekend\",\"name\":\"周末出游群\",\"isGroup\":true,\"memberCount\":2}],\"currentSessionId\":\"\"},\"metadata\":null,\"candidateSnapshotId\":\"cap-snapshot:a5abadd6-8981-4280-9f69-21805742ff79\",\"retrieverVersion\":\"maid-capability-retriever-v4\",\"selectedCapabilityId\":\"session.compare\",\"candidateHit\":true,\"errorMessage\":\"\",\"failureCode\":\"\"}\n]",
+      "offeredToolNames": [
+        "session_list",
+        "app_read_resource",
+        "maid_todo_write",
+        "maid_todo_read",
+        "group_update_members",
+        "worldbook_list",
+        "worldbook_read",
+        "app_open_panel",
+        "app_search_feature",
+        "app_read_feature_doc",
+        "app_read_skill",
+        "app_search_skills",
+        "maid_planner_control"
+      ],
+      "response": ""
+    },
+    {
+      "userMessage": "<app_features>\n- id: session.compare\n  title: 比较同名联系人并提出方案\n  summary: 只读比较疑似重复联系人的真实资料与聊天数量，给出保留建议和待确认的删除目标；不自动合并或删除。\n  tools: [session.list, app.read_resource]\n  args: \"先用 session.list 定位候选及真实 ID，再按 ID 用 app.read_resource(resource:\\\"session\\\",include:[\\\"description\\\"]) 读取 description、messageCount、hasAvatar；descriptionTruncated 为 true 时不能把截断简介当完整资料。同名或名称含副本、导入、编号不等于资料重复，messageCount 只表示消息数量，不证明哪份是原版；证据不足时明确保留不确定项。列出各候选 ID、简介差异、聊天数量、建议保留对象及理由；没有可靠依据不能认定重复或擅自选删除目标。删除对应联系人/会话会丢失其聊天及内部归档，并非把历史合并到保留对象。本流程仅提出方案；后续用户明确选择准确目标后，仍由原删除工具的 APP 确认通过才执行，读过本说明不授予删除权限。\"\n  panel: session\n  path: 联系人 -> 聊天列表\n- id: session.delete_many\n  title: 批量删除聊天室\n  summary: 一次确认后删除多个明确的可见普通聊天室，并逐项报告成功、受保护、跳过与失败；当前会话和 RP 会话不会被批量删除。\n  tools: [session.delete_many]\n  args: \"sessions[] 必填，传明确的聊天室 id 或名称。用户明确要求删除且目标准确唯一时，省略 preview 或传 preview:false，由 APP 确认通过后才删除；preview:true 仅用于预览、方案或明确先看清单再回复的偏好，不执行删除。候选域与 session.list 的可见普通会话一致，RP 会话不进入删除域；当前会话是批量专属保护项，即使手动单删允许删除当前会话，批量也会跳过。删除基础会话会连同其内部归档，并复用单删的壁纸、派生世界书孤儿、映射、checkpoint 与联系人完整清理链；确认后目标若已不存在则 skipped(already_absent)\"\n  writes: true\n  risk: high\n  panel: session\n  path: 女仆 -> 批量删除聊天室确认列表\n- id: maid.todo\n  title: 女仆任务清单\n  summary: 记录和查看当前女仆任务的待办清单与进度；只给跨功能域且含写入、生成或较长处理链的复杂任务使用，多个资源的只读比较不需要清单。\n  tools: [maid.todo.write, maid.todo.read]\n  args: \"maid.todo.write: todos[] 每项含 content 和 status(pending/in_progress/completed)，整体替换当前清单；只在状态实际变化时写入，相同清单会返回 todo_unchanged；maid.todo.read 无参数\"\n- id: worldbook.delete_many\n  title: 批量删除世界书\n  summary: 一次确认后删除多本明确世界书；确认列表显示绑定数量，删除会解除聊天室、全局和角色卡绑定，内建手机格式世界书不可删除。\n  tools: [worldbook.delete_many]\n  args: \"worldbooks[] 必填，传明确的世界书 id 或名称。用户明确要求删除且目标准确唯一时，省略 preview 或传 preview:false，由 APP 确认通过后才删除；preview:true 仅用于预览、方案或明确先看清单再回复的偏好，不执行删除。唯一准确名称之外的未选近似名仅提示保留，不自动加入删除目标。绑定中的世界书会显示“绑定中 ×N”，确认后仍可删除并由现有 lifecycle 自动解绑；内建「手机-格式」始终受保护；确认后目标若已不存在则 skipped(already_absent)。这是整本删除，不用于删除条目或去重\"\n  writes: true\n  risk: high\n  panel: worldbook\n  path: 女仆 -> 批量删除世界书确认列表\n- id: app.capabilities.search\n  title: 检索女仆能力\n  summary: 按用户说法检索已登记的 APP 能力和使用说明，返回候选条目和对应工具；目录并非完整 APP 功能清单，无匹配不能说明 APP 不支持。应区分 APP 功能是否存在、女仆是否有执行工具、是否已核实。\n  tools: [app.search_feature, app.read_feature_doc, app.read_skill, app.search_skills]\n  args: \"app.search_feature: query 必填、limit 可选，返回候选功能；app.read_feature_doc: featureId 必填，返回功能说明与工具参数；app.read_skill: skillId 必填，按需读取技能流程，仅提供说明，不执行或授权；app.search_skills: query/limit/cursor 可选，查询或翻页查找技能；includeManualOnly:true 仅用于用户明确点名的技能\"\n</app_features>\n<maid_skills_data>\nWorkflow directory (reference data): 2 automatic workflows; 2 shown. Search app.search_skills for more or for an explicitly named manual-only workflow.\n{\"id\":\"avatar.create_and_set\",\"revision\":1,\"title\":\"生成并设置头像\",\"description\":\"为角色卡、联系人或用户生成头像，保持人物设计一致，并写回正确的目标。\",\"invocationMode\":\"auto\",\"kind\":\"builtin\"}\n{\"id\":\"worldbook.from_sources\",\"revision\":1,\"title\":\"按资料编写世界书\",\"description\":\"整理作品资料或用户设定，区分原作、原创与扩写，生成世界书条目并按要求绑定。\",\"invocationMode\":\"auto\",\"kind\":\"builtin\"}\n</maid_skills_data>\n用户请求：看看我有几个群，没人的删了，然后新建一个\n当前会话：-\nUI 模式：chat\n当前页面：contacts\n界面呈现意图：background\n<maid_memory today=\"2026-09-30\">\n（空）\n</maid_memory>\n<maid_history>\n（空）\n</maid_history>\n成功读取账本：\n1. session.list args={\"groupsOnly\":true} facts={\"summary\":\"listed 4 session(s)\"}\n已执行步骤与观察结果：\n最近步骤观察（可能按预算省略；truncated 等字段为工具原始状态，不表示正文已全部呈现）：\n[\n{\"index\":1,\"toolName\":\"session.list\",\"featureId\":\"session.compare\",\"title\":\"查看群聊列表\",\"args\":{\"groupsOnly\":true},\"status\":\"succeeded\",\"guided\":false,\"guide\":null,\"guideMessage\":\"\",\"summary\":\"listed 4 session(s)\",\"output\":{\"count\":4,\"total\":4,\"offset\":0,\"limit\":30,\"hasMore\":false,\"nextOffset\":null,\"contacts\":[{\"id\":\"group:eval_H05_api_1790735615183_H05_group_empty_test\",\"name\":\"测试\",\"isGroup\":true,\"memberCount\":0},{\"id\":\"group:eval_H05_api_1790735615183_H05_group_empty_new\",\"name\":\"新群聊\",\"isGroup\":true,\"memberCount\":0},{\"id\":\"group:eval_H05_api_1790735615183_H05_group_empty_copy\",\"name\":\"新群聊(1)\",\"isGroup\":true,\"memberCount\":0},{\"id\":\"group:eval_H05_api_1790735615183_H05_group_weekend\",\"name\":\"周末出游群\",\"isGroup\":true,\"memberCount\":2}],\"currentSessionId\":\"\"},\"metadata\":null,\"candidateSnapshotId\":\"cap-snapshot:a5abadd6-8981-4280-9f69-21805742ff79\",\"retrieverVersion\":\"maid-capability-retriever-v4\",\"selectedCapabilityId\":\"session.compare\",\"candidateHit\":true,\"errorMessage\":\"\",\"failureCode\":\"\"},\n{\"index\":2,\"toolName\":\"app.read_feature_doc\",\"featureId\":\"app.capabilities.search\",\"title\":\"检索女仆能力\",\"args\":{\"featureId\":\"session.delete_many\"},\"status\":\"succeeded\",\"guided\":false,\"guide\":null,\"guideMessage\":\"\",\"summary\":\"feature doc: session.delete_many\",\"output\":{\"ok\":true,\"feature\":{\"id\":\"session.delete_many\",\"title\":\"批量删除聊天室\",\"aliases\":[\"批量删除聊天室\",\"批量删除会话\",\"清理测试用的房间\",\"删除这些聊天室\",\"删除多个聊天室\",\"清理测试聊天室\"],\"summary\":\"一次确认后删除多个明确的可见普通聊天室，并逐项报告成功、受保护、跳过与失败；当前会话和 RP 会话不会被批量删除。\",\"uiPath\":[\"女仆\",\"批量删除聊天室确认列表\"],\"tools\":[\"session.delete_many\"],\"argsHint\":\"sessions[] 必填，传明确的聊天室 id 或名称。用户明确要求删除且目标准确唯一时，省略 preview 或传 preview:false，由 APP 确认通过后才删除；preview:true 仅用于预览、方案或明确先看清单再回复的偏好，不执行删除。候选域与 session.list 的可见普通会话一致，RP 会话不进入删除域；当前会话是批量专属保护项，即使手动单删允许删除当前会话，批量也会跳过。删除基础会话会连同其内部归档，并复用单删的壁纸、派生世界书孤儿、映射、checkpoint 与联系人完整清理链；确认后目标若已不存在则 skipped(already_absent)\",\"panel\":\"session\",\"riskLevel\":\"high\",\"writes\":true,\"confirmation\":\"required\",\"firstRunGuide\":\"\",\"directAction\":\"session.delete_many\",\"verification\":null,\"doc\":\"一次确认后删除多个明确的可见普通聊天室，并逐项报告成功、受保护、跳过与失败；当前会话和 RP 会话不会被批量删除。\\n界面路径：女仆 -> 批量删除聊天室确认列表\\n可用工具：session.delete_many\\n参数提示：sessions[] 必填，传明确的聊天室 id 或名称。用户明确要求删除且目标准确唯一时，省略 preview 或传 preview:false，由 APP 确认通过后才删除；preview:true 仅用于预览、方案或明确先看清单再回复的偏好，不执行删除。候选域与 session.list 的可见普通会话一致，RP 会话不进入删除域；当前会话是批量专属保护项，即使手动单删允许删除当前会话，批量也会跳过。删除基础会话会连同其内部归档，并复用单删的壁纸、派生世界书孤儿、映射、checkpoint 与联系人完整清理链；确认后目标若已不存在则 skipped(already_absent)\\n风险等级：high\\n会写入 APP 数据。\\n确认策略：required\"}},\"metadata\":null,\"candidateSnapshotId\":\"cap-snapshot:0e708c70-b1f1-4d78-b601-11e9d3382599\",\"retrieverVersion\":\"maid-capability-retriever-v4\",\"selectedCapabilityId\":\"app.capabilities.search\",\"candidateHit\":true,\"errorMessage\":\"\",\"failureCode\":\"\"}\n]",
+      "offeredToolNames": [
+        "session_list",
+        "app_read_resource",
+        "session_delete_many",
+        "maid_todo_write",
+        "maid_todo_read",
+        "worldbook_delete_many",
+        "worldbook_list",
+        "worldbook_read",
+        "app_search_feature",
+        "app_read_feature_doc",
+        "app_read_skill",
+        "app_search_skills",
+        "maid_planner_control"
+      ],
+      "response": ""
+    }
+  ],
+  "readSteps": [
+    {
+      "index": 1,
+      "toolName": "session.list",
+      "featureId": "session.compare",
+      "title": "查看群聊列表",
+      "args": {
+        "groupsOnly": true
+      },
+      "status": "succeeded",
+      "guided": false,
+      "guide": null,
+      "guideMessage": "",
+      "summary": "listed 4 session(s)",
+      "output": {
+        "count": 4,
+        "total": 4,
+        "offset": 0,
+        "limit": 30,
+        "hasMore": false,
+        "nextOffset": null,
+        "contacts": [
+          {
+            "id": "group:eval_H05_api_1790735615183_H05_group_empty_test",
+            "name": "测试",
+            "isGroup": true,
+            "memberCount": 0
+          },
+          {
+            "id": "group:eval_H05_api_1790735615183_H05_group_empty_new",
+            "name": "新群聊",
+            "isGroup": true,
+            "memberCount": 0
+          },
+          {
+            "id": "group:eval_H05_api_1790735615183_H05_group_empty_copy",
+            "name": "新群聊(1)",
+            "isGroup": true,
+            "memberCount": 0
+          },
+          {
+            "id": "group:eval_H05_api_1790735615183_H05_group_weekend",
+            "name": "周末出游群",
+            "isGroup": true,
+            "memberCount": 2
+          }
+        ],
+        "currentSessionId": ""
+      },
+      "metadata": null,
+      "candidateSnapshotId": "cap-snapshot:a5abadd6-8981-4280-9f69-21805742ff79",
+      "retrieverVersion": "maid-capability-retriever-v4",
+      "selectedCapabilityId": "session.compare",
+      "candidateHit": true,
+      "errorMessage": "",
+      "failureCode": ""
+    },
+    {
+      "index": 2,
+      "toolName": "app.read_feature_doc",
+      "featureId": "app.capabilities.search",
+      "title": "检索女仆能力",
+      "args": {
+        "featureId": "session.delete_many"
+      },
+      "status": "succeeded",
+      "guided": false,
+      "guide": null,
+      "guideMessage": "",
+      "summary": "feature doc: session.delete_many",
+      "output": {
+        "ok": true,
+        "feature": {
+          "id": "session.delete_many",
+          "title": "批量删除聊天室",
+          "aliases": [
+            "批量删除聊天室",
+            "批量删除会话",
+            "清理测试用的房间",
+            "删除这些聊天室",
+            "删除多个聊天室",
+            "清理测试聊天室"
+          ],
+          "summary": "一次确认后删除多个明确的可见普通聊天室，并逐项报告成功、受保护、跳过与失败；当前会话和 RP 会话不会被批量删除。",
+          "uiPath": [
+            "女仆",
+            "批量删除聊天室确认列表"
+          ],
+          "tools": [
+            "session.delete_many"
+          ],
+          "argsHint": "sessions[] 必填，传明确的聊天室 id 或名称。用户明确要求删除且目标准确唯一时，省略 preview 或传 preview:false，由 APP 确认通过后才删除；preview:true 仅用于预览、方案或明确先看清单再回复的偏好，不执行删除。候选域与 session.list 的可见普通会话一致，RP 会话不进入删除域；当前会话是批量专属保护项，即使手动单删允许删除当前会话，批量也会跳过。删除基础会话会连同其内部归档，并复用单删的壁纸、派生世界书孤儿、映射、checkpoint 与联系人完整清理链；确认后目标若已不存在则 skipped(already_absent)",
+          "panel": "session",
+          "riskLevel": "high",
+          "writes": true,
+          "confirmation": "required",
+          "firstRunGuide": "",
+          "directAction": "session.delete_many",
+          "verification": null,
+          "doc": "一次确认后删除多个明确的可见普通聊天室，并逐项报告成功、受保护、跳过与失败；当前会话和 RP 会话不会被批量删除。\n界面路径：女仆 -> 批量删除聊天室确认列表\n可用工具：session.delete_many\n参数提示：sessions[] 必填，传明确的聊天室 id 或名称。用户明确要求删除且目标准确唯一时，省略 preview 或传 preview:false，由 APP 确认通过后才删除；preview:true 仅用于预览、方案或明确先看清单再回复的偏好，不执行删除。候选域与 session.list 的可见普通会话一致，RP 会话不进入删除域；当前会话是批量专属保护项，即使手动单删允许删除当前会话，批量也会跳过。删除基础会话会连同其内部归档，并复用单删的壁纸、派生世界书孤儿、映射、checkpoint 与联系人完整清理链；确认后目标若已不存在则 skipped(already_absent)\n风险等级：high\n会写入 APP 数据。\n确认策略：required"
+        }
+      },
+      "metadata": null,
+      "candidateSnapshotId": "cap-snapshot:0e708c70-b1f1-4d78-b601-11e9d3382599",
+      "retrieverVersion": "maid-capability-retriever-v4",
+      "selectedCapabilityId": "app.capabilities.search",
+      "candidateHit": true,
+      "errorMessage": "",
+      "failureCode": ""
+    }
+  ],
+  "selectedDelete": {
+    "sessions": [
+      "group:eval_H05_api_1790735615183_H05_group_empty_test",
+      "group:eval_H05_api_1790735615183_H05_group_empty_new",
+      "group:eval_H05_api_1790735615183_H05_group_empty_copy"
+    ],
+    "preview": false
+  },
+  "approvalDecision": {
+    "ok": false,
+    "approved": false,
+    "requestId": "maid_confirm_munhrc5y_r4a6fq",
+    "reason": "observe_only"
+  },
+  "changedStateFields": [
+    "at",
+    "conversation",
+    "runs"
+  ]
+}

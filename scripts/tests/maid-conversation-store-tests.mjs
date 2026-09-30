@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { webcrypto } from 'node:crypto';
+import { createMaidVoiceRuntime } from '../../src/scripts/ui/maid-voice-runtime.js';
+import { createOpenAiLiveCallEvents } from '../../src/scripts/ui/realtime/openai-live-call-events.js';
 
 import {
   MAID_CONTEXT_MEMORY_TOKEN_LIMIT,
@@ -18,6 +21,42 @@ import {
 import {
   MaidSemanticMemoryStore,
 } from '../../src/scripts/storage/maid-semantic-memory-store.js';
+
+if (!globalThis.crypto) globalThis.crypto = webcrypto;
+
+// Live keeps exact deltas, while maid history normalizes the persisted text.
+// Exercise their actual adapter so a harmless space cannot detach the group.
+for (const role of ['user', 'assistant']) {
+  const persisted = new Map();
+  const dependencies = { storage: null, loadKv: async key => persisted.get(key) || null,
+    saveKv: async (key, value) => persisted.set(key, structuredClone(value)), compactionTurnThreshold: 1000 };
+  const store = new MaidConversationStore(dependencies);
+  await store.load();
+  const voice = createMaidVoiceRuntime({ conversationStore: store, settingsStore: {}, createOrb: () => null,
+    getCommandRuntime: () => null, getCallAppRuntime: () => null, makeId: () => 'live-whitespace-call' });
+  const target = voice.getTarget();
+  await voice.beforeRealtimeStart(target);
+  const events = createOpenAiLiveCallEvents({ target, settings: {}, isTargetCurrent: voice.isTargetCurrent,
+    commitTranscript: voice.commitLiveTranscript, enqueue: task => task(), setTimeoutFn: () => 1, clearTimeoutFn() {} });
+  const append = async (delta, index) => {
+    events.handle({ type: `session.${role === 'user' ? 'input' : 'output'}_transcript.delta`,
+      event_id: `fragment-${index}`, delta, start_ms: index * 100, end_ms: (index + 1) * 100 });
+    await events.flush();
+  };
+  for (const [index, delta] of [' [s', 'igh] checking ', 'the current room.  '].entries()) await append(delta, index);
+  const group = events.getGroups()[0], field = role === 'user' ? 'input' : 'message';
+  assert.equal(group.detached, false, 'normalizing leading/trailing spaces does not look like a manual edit');
+  assert.equal(store.exportState().turns[0][field], group.text.trim(), 'all fragments reach maid history');
+  const reloaded = new MaidConversationStore(dependencies);
+  await reloaded.load();
+  assert.equal(reloaded.exportState().turns[0][field], group.text.trim(), 'the full caption survives reloading');
+  await store.upsertRealtimeTranscript({ id: group.messageId, callId: target.maidCallId, role, text: 'Manual content edit' });
+  await append(' Late provider fragment', 3);
+  assert.equal(group.detached, true, 'real content edits still detach provider updates');
+  assert.equal(store.exportState().turns[0][field], 'Manual content edit');
+  events.dispose();
+}
+console.log('ok - Live maid transcript revisions normalize saved text comparisons and preserve content edits');
 
 // 清历史时已经排队、但尚未写入的结构化/模型提取结果都必须失效。
 for (const mode of ['structured', 'extracted']) {
@@ -64,6 +103,108 @@ const createStorage = () => {
     data,
   };
 };
+
+// A model session owns exact persisted transcript versions, never every record
+// from a call. Task results and user-requested replies remain independent.
+{
+  const store = new MaidConversationStore({ storage: null, loadKv: async () => null, saveKv: async () => {},
+    compactionTurnThreshold: 1000, compactionHistoryTokenThreshold: 100000 });
+  await store.load();
+  const user = await store.upsertRealtimeTranscript({ id: 'voice-user', callId: 'old-call', role: 'user', text: '喜欢安静的音乐' });
+  const assistant = await store.upsertRealtimeTranscript({ id: 'voice-assistant', callId: 'old-call', role: 'assistant', text: '我会选轻柔的钢琴曲' });
+  assert.deepEqual(assistant, { messageId: 'voice-assistant', revision: 1 });
+  assert.deepEqual(await store.upsertRealtimeTranscript({ id: 'voice-assistant', callId: 'old-call', role: 'assistant', text: '我会选轻柔的钢琴曲' }), assistant);
+  await store.appendTurn({ id: 'real-task', context: { voiceCallId: 'old-call' }, message: '已找到三首曲目', status: 'succeeded' });
+  const automatic = { maidTranscriptKind: 'ack', maidTranscriptAutomatic: true, maidTranscriptContentOnly: true };
+  await store.upsertRealtimeTranscript({ id: 'pure-ack', callId: 'old-call', role: 'assistant', text: '任务已接收', meta: { ...automatic, maidTranscriptContentOnly: false } });
+  await store.upsertRealtimeTranscript({ id: 'pure-status', callId: 'old-call', role: 'assistant', text: '自动状态话术', meta: { ...automatic, maidTranscriptKind: 'status' } });
+  await store.upsertRealtimeTranscript({ id: 'mixed', callId: 'old-call', role: 'assistant', text: '正在查，你喜欢哪位钢琴家？', meta: { ...automatic, maidTranscriptContentOnly: false } });
+  await store.upsertRealtimeTranscript({ id: 'queried', callId: 'old-call', role: 'assistant', text: '你问的进度是已找到两首', meta: { ...automatic, maidTranscriptKind: 'status', maidTranscriptAutomatic: false } });
+  await store.upsertRealtimeTranscript({ id: 'permission', callId: 'old-call', role: 'assistant', text: '请确认修改当前角色卡', meta: { ...automatic, maidTranscriptKind: 'confirmation' } });
+  await store.upsertRealtimeTranscript({ id: 'user-ack', callId: 'old-call', role: 'user', text: '我说已交给女仆是引用', meta: automatic });
+  const full = store.getContextSnapshot();
+  assert.match(full.historyText, /女仆（语音）: 我会选轻柔的钢琴曲/);
+  assert.match(full.historyText, /结果: 已找到三首曲目/);
+  assert.doesNotMatch(full.historyText, /任务已接收|自动状态话术/);
+  assert.match(full.historyText, /钢琴家|你问的进度|确认修改|是引用/);
+  assert.equal(store.exportState().turns.length, 9, 'projection exclusions never erase editable captions');
+  const realtimeHistory = { sessionId: 'model-session', connectionGeneration: 1,
+    includedTranscripts: [user, assistant, { messageId: 'real-task', revision: 1 }] };
+  for (const projected of [store.getContextSnapshot({ realtimeHistory }), await store.getContextSnapshotAsync({ realtimeHistory })]) {
+    assert.doesNotMatch(projected.historyText, /喜欢安静的音乐|轻柔的钢琴曲/);
+    assert.match(projected.historyText, /已找到三首曲目/);
+    assert.doesNotMatch(projected.memoryText, /钢琴曲|任务已接收|钢琴家/, 'revision protection is not working memory');
+    assert.ok(projected.realtimeTranscripts.some(item => item.messageId === 'mixed'));
+    assert.ok(projected.realtimeTranscripts.every(item => !['voice-user', 'voice-assistant', 'real-task', 'pure-ack', 'pure-status'].includes(item.messageId)));
+  }
+  const revised = await store.upsertRealtimeTranscript({ id: 'voice-assistant', callId: 'old-call', role: 'assistant', text: '修订为轻柔的小提琴曲', previousText: '我会选轻柔的钢琴曲' });
+  assert.deepEqual(revised, { messageId: 'voice-assistant', revision: 2 });
+  assert.match(store.getContextSnapshot({ realtimeHistory }).historyText, /修订为轻柔的小提琴曲/, 'stale versions cannot exclude revised captions');
+  assert.equal((await store.upsertRealtimeTranscript({ id: 'voice-assistant', callId: 'old-call', role: 'assistant', text: '迟到旧修订', previousText: '我会选轻柔的钢琴曲' })).ignored, true);
+  realtimeHistory.includedTranscripts = [user, revised];
+  assert.doesNotMatch(store.getContextSnapshot({ realtimeHistory }).historyText, /修订为轻柔的小提琴曲/);
+  for (const fresh of [null, { ...realtimeHistory, sessionId: '' }, { ...realtimeHistory, connectionGeneration: null },
+    { sessionId: 'new-model-session', connectionGeneration: 2, includedTranscripts: [] }]) {
+    assert.match(store.getContextSnapshot({ realtimeHistory: fresh }).historyText, /喜欢安静的音乐/);
+  }
+  const latest = await store.upsertRealtimeTranscript({ id: 'long-caption', callId: 'old-call', role: 'assistant', text: '完整字幕'.repeat(1000) });
+  const truncated = store.getContextSnapshot({ maxHistoryTokens: 40 });
+  assert.deepEqual(truncated.selectedTurnIds, [latest.messageId]);
+  assert.deepEqual(truncated.realtimeTranscripts, [], 'a truncated preview does not acknowledge the complete record');
+  console.log('ok - realtime history excludes exact held revisions, preserves task results and recovers history for new sessions');
+}
+
+{
+  const store = new MaidConversationStore({ storage: null, loadKv: async () => null, saveKv: async () => {},
+    compactionTurnThreshold: 1000, compactionHistoryTokenThreshold: 100000 });
+  await store.load();
+  const meta = { maidTranscriptKind: 'ack', maidTranscriptAutomatic: true, maidTranscriptContentOnly: true };
+  await store.upsertRealtimeTranscript({ id: 'ack-only', callId: 'call', role: 'assistant', text: '已交给女仆处理', meta });
+  await store.finalizeRealtimeConversation('call');
+  for (let index = 0; index < 9; index++) await store.appendTurn({ id: `substantive-${index}`, input: `真实请求${index}`, message: `真实结果${index}` });
+  const row = store.compactHistoryToMemory({ force: true });
+  assert.ok(row);
+  assert.doesNotMatch(row.content, /已交给女仆处理/);
+  assert.deepEqual(row.sourceTurnIds, ['substantive-0']);
+  assert.deepEqual(store.resolveExtractionBatchTurns({ sourceTurnIds: ['ack-only', 'substantive-0'] }).map(turn => turn.id), ['substantive-0']);
+  assert.equal(store.exportState().turns.find(turn => turn.id === 'ack-only').compacted, false);
+  const revised = await store.upsertRealtimeTranscript({ id: 'ack-only', callId: 'call', role: 'assistant', text: '修订字幕含真实偏好：我喜欢爵士', previousText: '已交给女仆处理' });
+  assert.equal(revised.revision, 2);
+  assert.match(store.getContextSnapshot().historyText, /真实偏好/, 'changed text without a fresh classification is retained');
+  console.log('ok - reliable automatic-only captions stay editable without entering summaries or semantic extraction');
+}
+
+{
+  const store = new MaidConversationStore({ storage: null, loadKv: async () => null, saveKv: async () => {},
+    compactionTurnThreshold: 1000, compactionHistoryTokenThreshold: 100000 });
+  await store.load();
+  const source = { maidTranscriptKind: 'ack', maidTranscriptAutomatic: true, maidTranscriptContentOnly: false };
+  await store.upsertRealtimeTranscript({ id: 'exact', callId: 'call', role: 'assistant', text: 'ＲＥＱＵＥＳＴ　ＡＣＣＥＰＴＥＤ！', meta: source });
+  assert.equal(store.exportState().turns[0].context.maidTranscriptContentOnly, true);
+  assert.equal(store.getContextSnapshot().historyText, '');
+  const mixed = 'Request accepted. Your weather is 27°C.';
+  const revised = await store.upsertRealtimeTranscript({ id: 'exact', callId: 'call', role: 'assistant', text: mixed,
+    previousText: 'ＲＥＱＵＥＳＴ　ＡＣＣＥＰＴＥＤ！', meta: { ...source, maidTranscriptContentOnly: true } });
+  assert.equal(revised.revision, 2);
+  assert.equal(store.exportState().turns[0].context.maidTranscriptContentOnly, false);
+  assert.match(store.getContextSnapshot().historyText, /27°C/);
+  await store.upsertRealtimeTranscript({ id: 'exact', callId: 'call', role: 'assistant', text: 'Request accepted.', previousText: mixed, meta: source });
+  assert.equal(store.getContextSnapshot().historyText, '', 'each new version is classified from its entire text');
+  const retained = [
+    { text: '任务已接收？', meta: source },
+    { text: 'Yes', meta: source },
+    { text: '已接单，请允许删除当前世界书', meta: source },
+    { text: 'Request accepted. What music do you prefer?', meta: source },
+    { text: '已接单', meta: {} },
+    { text: '任务已接收', meta: { ...source, maidTranscriptAutomatic: false } },
+    { text: '请求已接收', meta: { ...source, maidTranscriptKind: 'status' } },
+  ];
+  for (let index = 0; index < retained.length; index++) await store.upsertRealtimeTranscript({ id: `retained-${index}`, callId: 'call', role: 'assistant', ...retained[index] });
+  const projected = store.getContextSnapshot();
+  assert.deepEqual(projected.selectedTurnIds, retained.map((_, index) => `retained-${index}`));
+  assert.ok(store.exportState().turns.find(turn => turn.id === 'exact'), 'pure receipt remains in the original transcript');
+  console.log('ok - automatic acknowledgement classification requires trusted origin and an exact complete receipt');
+}
 
 {
   const state = normalizeMaidConversationState({

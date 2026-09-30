@@ -74,10 +74,6 @@ const isSupportedOpenAIWebSearchModel = model => (
   || /^o(?:3|4-mini)(?:[.\-]|$)/iu.test(trim(model))
 );
 
-const isSupportedDeepSeekWebSearchModel = model => (
-  /^deepseek-v4-(?:flash|pro)$/iu.test(trim(model))
-);
-
 const isSupportedKimiWebSearchModel = model => (
   /^(?:kimi-|moonshot-v1-)/iu.test(trim(model))
 );
@@ -233,11 +229,9 @@ export const resolveWebSearchRoute = ({
     }) ? WEB_SEARCH_ROUTES.openai : WEB_SEARCH_ROUTES.toolFallback;
   }
   if (value === 'deepseek') {
-    return isSupportedDeepSeekWebSearchModel(model) && hasOfficialEndpoint(baseUrl, {
-      fallback: 'https://api.deepseek.com/v1',
-      hosts: ['api.deepseek.com'],
-      paths: ['/', '/v1'],
-    }) ? WEB_SEARCH_ROUTES.deepseek : WEB_SEARCH_ROUTES.toolFallback;
+    // DeepSeek Responses ignores built-in web_search tools. Use executable
+    // function tools instead: https://api-docs.deepseek.com/guides/responses_api/
+    return WEB_SEARCH_ROUTES.toolFallback;
   }
   return WEB_SEARCH_ROUTES.toolFallback;
 };
@@ -315,14 +309,14 @@ export const buildWebSearchRequestPlan = ({
   const existingTools = collectExistingTools(existingOptions);
 
   if (
-    route === WEB_SEARCH_ROUTES.deepseek
+    trim(provider).toLowerCase() === 'deepseek'
     && (Array.isArray(existingOptions) ? existingOptions : [existingOptions]).some(option => (
       trim(option?.deepseekPrefix?.prefix)
     ))
   ) {
     return disabledPlan({
       route,
-      reason: 'deepseek prefix completion is incompatible with native web search',
+      reason: 'deepseek prefix completion is incompatible with web search',
     });
   }
 
@@ -467,14 +461,13 @@ export const buildWebSearchRequestPlan = ({
     };
   }
 
-  if (route === WEB_SEARCH_ROUTES.openai || route === WEB_SEARCH_ROUTES.deepseek) {
+  if (route === WEB_SEARCH_ROUTES.openai) {
     const tools = existingTools.slice();
     appendUniqueTool(
       tools,
       { type: 'web_search' },
       tool => trim(tool?.type) === 'web_search' || trim(tool?.type) === 'web_search_preview',
     );
-    const isOpenAI = route === WEB_SEARCH_ROUTES.openai;
     return {
       enabled: true,
       route,
@@ -484,10 +477,8 @@ export const buildWebSearchRequestPlan = ({
         openaiApi: 'responses',
         tools,
         tool_choice: 'auto',
-        ...(isOpenAI ? {
-          max_tool_calls: 3,
-          include: ['web_search_call.action.sources'],
-        } : {}),
+        max_tool_calls: 3,
+        include: ['web_search_call.action.sources'],
       },
       fallbackToolNames: {},
       diagnostics: {
@@ -495,7 +486,7 @@ export const buildWebSearchRequestPlan = ({
         route,
         reason: '',
         execution: 'provider_native',
-        maxToolCalls: isOpenAI ? 3 : null,
+        maxToolCalls: 3,
       },
     };
   }

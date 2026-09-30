@@ -1,6 +1,7 @@
 import { safeInvoke } from '../utils/tauri.js';
 import { estimateTokens } from '../memory/memory-prompt-utils.js';
 import { formatMaidMemoryDate } from '../agent/maid-memory-prompt.js';
+import { normalizeMaidResultBasis } from '../agent/maid-result-basis.js';
 
 export const MAID_CONVERSATION_STORE_KEY = 'maid_conversation_store_v1';
 export const MAID_CONVERSATION_STORE_VERSION = 1;
@@ -136,6 +137,53 @@ const memoryDateSuffix = value => {
   return date ? `；记于: ${date}` : '';
 };
 
+const isRealtimeTranscript = turn => turn?.responseType === 'realtime';
+const realtimeTranscriptRevision = turn => Math.max(1, Math.trunc(Number(turn?.context?.realtimeRevision)) || 1);
+// Exact whole-caption receipts only. Keep questions, generic assent, completion
+// claims and any added conversation outside this small vocabulary.
+const normalizeMaidAcknowledgement = value => String(value ?? '').normalize('NFKC').toLowerCase()
+  .replace(/[\s,，。.!！、:：;；'"“”‘’]/gu, '');
+const MAID_AUTOMATIC_ACKNOWLEDGEMENTS = new Set([
+  '已接单', '已接單', '请求已接收', '請求已接收', '任务已接收', '任務已接收',
+  '已交给女仆处理', '已交給女僕處理', '收到，已交给女仆', '收到，已交給女僕',
+  '任务已加入队列', '任務已加入佇列',
+  'request accepted', 'task accepted', 'your request has been accepted',
+  'your task has been queued', 'queued', "I've handed it to the maid",
+].map(normalizeMaidAcknowledgement));
+// Only an explicit whole-caption classification may remove a transcript from
+// prompt/memory projections. Scheduling an acknowledgement response alone does
+// not prove that the generated speech contains no substantive conversation.
+const isProjectableMaidTurn = turn => !(isRealtimeTranscript(turn)
+  && turn.context?.realtimeRole === 'assistant'
+  && ['ack', 'status'].includes(turn.context?.maidTranscriptKind)
+  && turn.context?.maidTranscriptAutomatic === true
+  && turn.context?.maidTranscriptContentOnly === true);
+
+const includedRealtimeTranscripts = realtimeHistory => {
+  if (!trim(realtimeHistory?.sessionId) || !trim(realtimeHistory?.connectionGeneration)) return new Map();
+  return new Map((Array.isArray(realtimeHistory?.includedTranscripts) ? realtimeHistory.includedTranscripts : [])
+    .filter(item => trim(item?.messageId) && Number.isInteger(item?.revision) && item.revision > 0)
+    .map(item => [trim(item.messageId), item.revision]));
+};
+
+const formatMaidResultBasisContext = (turn = {}, indent = '') => {
+  const basis = normalizeMaidResultBasis(turn.resultBasis);
+  if (!basis && isRealtimeTranscript(turn)) return '';
+  const sources = (basis?.sources || []).slice(0, 2).map(source => ({
+    title: truncate(source.title, 80),
+    kind: source.kind,
+    ...(source.url.length <= 240 ? { url: source.url } : { origin: new URL(source.url).origin }),
+  }));
+  // This records observed work, not whether the answer is correct or current.
+  // Missing legacy metadata must not inherit evidence from status or toolName.
+  return `${indent}resultBasis: ${JSON.stringify({
+    kind: basis?.kind || 'unverified',
+    ...(basis?.recordedAt ? { recordedAt: basis.recordedAt } : {}),
+    sources,
+    ...(basis?.artifacts?.length ? { artifacts: basis.artifacts } : {}),
+  })}`;
+};
+
 const formatMaidHistoryTurn = (turn = {}) => [
   `- 时间: ${new Date(Number(turn.at || 0) || Date.now()).toISOString()}`,
   (turn.responseType === 'realtime' || turn.context?.voiceCallId) && !turn.input ? '' : `  用户: ${trim(turn.input, '-')}`,
@@ -143,14 +191,16 @@ const formatMaidHistoryTurn = (turn = {}) => [
   turn.toolName ? `  工具: ${turn.toolName}` : '',
   turn.featureId ? `  功能: ${turn.featureId}` : '',
   turn.status ? `  状态: ${turn.status}` : '',
+  formatMaidResultBasisContext(turn, '  '),
   turn.reactStoppedReason ? `  中断原因: ${turn.reactStoppedReason}` : '',
   turn.continuable ? '  可继续: 是' : '',
   turn.continueHint ? `  继续提示: ${turn.continueHint}` : '',
-  turn.message ? `  结果: ${turn.message}` : '',
+  turn.message ? `  ${isRealtimeTranscript(turn) ? '女仆（语音）' : '结果'}: ${turn.message}` : '',
 ].filter(Boolean).join('\n');
 
 const estimateMaidTurnsTokens = (turns = []) => estimateTokens(
   (Array.isArray(turns) ? turns : [])
+    .filter(isProjectableMaidTurn)
     .map(turn => formatMaidHistoryTurn(turn))
     .filter(Boolean)
     .join('\n'),
@@ -161,14 +211,17 @@ const buildMaidHistoryContextPlan = ({
   turns = [],
   maxTurns = MAID_CONTEXT_RECENT_TURN_LIMIT,
   maxTokens = MAID_CONTEXT_RECENT_TOKEN_LIMIT,
+  realtimeHistory = null,
 } = {}) => {
   const turnLimit = Math.max(1, Math.trunc(Number(maxTurns)) || MAID_CONTEXT_RECENT_TURN_LIMIT);
   const tokenLimit = normalizeBudget(maxTokens, MAID_CONTEXT_RECENT_TOKEN_LIMIT);
   if (tokenLimit <= 0) {
-    return { text: '', tokenCount: 0, selectedTurnIds: [], diagnostics: [] };
+    return { text: '', tokenCount: 0, selectedTurnIds: [], realtimeTranscripts: [], diagnostics: [] };
   }
+  const included = includedRealtimeTranscripts(realtimeHistory);
   const available = (Array.isArray(turns) ? turns : [])
-    .filter(turn => !turn?.compacted)
+    .filter(turn => !turn?.compacted && isProjectableMaidTurn(turn)
+      && !(isRealtimeTranscript(turn) && included.get(trim(turn.id)) === realtimeTranscriptRevision(turn)))
     .slice(-turnLimit);
   const selected = [];
   const diagnostics = [];
@@ -190,7 +243,9 @@ const buildMaidHistoryContextPlan = ({
       }
       break;
     }
-    selected.unshift({ id: trim(turn?.id), text });
+    selected.unshift({ id: trim(turn?.id), text,
+      ...(isRealtimeTranscript(turn) ? { revision: realtimeTranscriptRevision(turn) } : {}),
+    });
     used += separatorCost + cost;
   }
   const text = selected.map(item => item.text).join('\n');
@@ -198,6 +253,8 @@ const buildMaidHistoryContextPlan = ({
     text,
     tokenCount: estimateTokens(text, 'rough'),
     selectedTurnIds: selected.map(item => item.id).filter(Boolean),
+    realtimeTranscripts: selected.filter(item => item.id && item.revision)
+      .map(item => ({ messageId: item.id, revision: item.revision })),
     diagnostics,
   };
 };
@@ -369,7 +426,7 @@ const buildMaidWorkingContextPlan = ({
   }
   const candidates = [];
   (Array.isArray(turns) ? turns : [])
-    .filter(turn => !turn?.compacted && trim(turn?.compactionProtection))
+    .filter(turn => !turn?.compacted && !isRealtimeTranscript(turn) && trim(turn?.compactionProtection))
     .slice(-MAID_CONTEXT_WORKING_ITEM_LIMIT)
     .forEach((turn) => {
       candidates.push({
@@ -557,6 +614,7 @@ const normalizeTurn = (raw = {}, { now = Date.now } = {}) => {
     input: truncate(src.input, src.responseType === 'realtime' ? 12000 : 2000),
     status: trim(src.status || src.resultStatus),
     responseType: trim(src.responseType),
+    resultBasis: normalizeMaidResultBasis(src.resultBasis),
     message: truncate(src.message || src.response || src.reason, src.responseType === 'realtime' ? 12000 : 2400),
     toolName: trim(src.toolName || plan.toolName || output.toolName),
     featureId: trim(src.featureId || plan.featureId),
@@ -743,7 +801,8 @@ export const formatMaidHistoryContextText = ({
   turns = [],
   maxTurns = MAID_CONTEXT_RECENT_TURN_LIMIT,
   maxTokens = MAID_CONTEXT_RECENT_TOKEN_LIMIT,
-} = {}) => buildMaidHistoryContextPlan({ turns, maxTurns, maxTokens }).text;
+  realtimeHistory = null,
+} = {}) => buildMaidHistoryContextPlan({ turns, maxTurns, maxTokens, realtimeHistory }).text;
 
 // 排列对齐聊天室记忆表格的行格式：每条一行，`标签: 值；标签: 值`。
 export const formatMaidMemoryTableText = ({
@@ -775,17 +834,18 @@ const buildMemoryRowFromTurns = (turns = [], {
   at = Date.now(),
   compactionIndex = 1,
 } = {}) => {
-  const selected = (Array.isArray(turns) ? turns : []).filter(turn => !turn?.compacted);
+  const selected = (Array.isArray(turns) ? turns : []).filter(turn => !turn?.compacted && isProjectableMaidTurn(turn));
   if (!selected.length) return null;
   const content = selected.map((turn, index) => [
     `${index + 1}. 用户请求：${summarizeTurnFieldForMemory(turn.input, 160) || '-'}`,
     turn.toolName ? `   工具：${turn.toolName}` : '',
     turn.featureId ? `   功能：${turn.featureId}` : '',
     turn.status ? `   状态：${turn.status}` : '',
+    formatMaidResultBasisContext(turn, '   '),
     turn.reactStoppedReason ? `   中断原因：${turn.reactStoppedReason}` : '',
     turn.continuable ? '   可继续：是' : '',
     turn.continueHint ? `   继续提示：${summarizeTurnFieldForMemory(turn.continueHint, 300)}` : '',
-    turn.message ? `   结果：${summarizeTurnFieldForMemory(turn.message, 240)}` : '',
+    turn.message ? `   ${isRealtimeTranscript(turn) ? '女仆（语音）' : '结果'}：${summarizeTurnFieldForMemory(turn.message, 240)}` : '',
   ].filter(Boolean).join('\n')).join('\n');
   return normalizeMemoryRow({
     id: `maid_memory_${at}_${compactionIndex}`,
@@ -1289,6 +1349,7 @@ export class MaidConversationStore {
     );
     const historyPlan = buildMaidHistoryContextPlan({
       turns: this.state.turns,
+      realtimeHistory: options.realtimeHistory,
       maxTurns: options.maxTurns,
       maxTokens: Math.min(
         normalizeBudget(options.maxHistoryTokens, MAID_CONTEXT_RECENT_TOKEN_LIMIT),
@@ -1323,6 +1384,7 @@ export class MaidConversationStore {
       historyTokenCount: historyPlan.tokenCount,
       memoryTokenCount: memoryPlan.tokenCount,
       selectedTurnIds: historyPlan.selectedTurnIds,
+      realtimeTranscripts: historyPlan.realtimeTranscripts,
       selectedMemoryIds: memoryPlan.selectedMemoryIds,
       contextDiagnostics: {
         budgets: {
@@ -1366,6 +1428,7 @@ export class MaidConversationStore {
     );
     const historyPlan = buildMaidHistoryContextPlan({
       turns: this.state.turns,
+      realtimeHistory: options.realtimeHistory,
       maxTurns: options.maxTurns,
       maxTokens: historyBudget,
     });
@@ -1545,6 +1608,7 @@ export class MaidConversationStore {
       legacyMemoryTokenCount: safeLegacyPlan.tokenCount || 0,
       memoryTokenCount,
       selectedTurnIds: historyPlan.selectedTurnIds,
+      realtimeTranscripts: historyPlan.realtimeTranscripts,
       selectedWorkingTurnIds: workingPlan.selectedTurnIds || [],
       selectedSemanticMemoryIds,
       selectedLegacyMemoryIds: safeLegacyPlan.selectedMemoryIds || [],
@@ -1649,14 +1713,27 @@ export class MaidConversationStore {
     if (!id || !callId || !['user', 'assistant'].includes(role) || !trim(text)) return null;
     const old = this.state.turns.find(turn => turn.id === id);
     const field = role === 'user' ? 'input' : 'message';
+    // Live retains raw deltas in savedText; compare the same normalized form we persist.
+    const previousContent = previousText === null ? null : truncate(previousText, 12000);
     if (old && (old.context?.realtimeCallId !== callId || old.context?.realtimeRole !== role
-      || old.compacted || (previousText !== null && old[field] !== previousText))) return { ignored: true };
-    const turn = normalizeTurn({ ...old, id, [field]: text, status: 'succeeded', responseType: 'realtime',
-      compactionProtection: 'realtime_transcript', context: { ...meta, realtimeCallId: callId, realtimeRole: role, uiMode: 'maid' },
+      || old.compacted || (previousContent !== null && old[field] !== previousContent))) return { ignored: true };
+    const content = truncate(text, 12000);
+    const sameContent = old?.[field] === content;
+    const revision = old ? realtimeTranscriptRevision(old) + (sameContent ? 0 : 1) : 1;
+    const transcriptContext = { ...(sameContent ? old.context : {}), ...meta };
+    if (role === 'assistant' && transcriptContext.maidTranscriptKind === 'ack'
+      && transcriptContext.maidTranscriptAutomatic === true) {
+      transcriptContext.maidTranscriptContentOnly = MAID_AUTOMATIC_ACKNOWLEDGEMENTS.has(normalizeMaidAcknowledgement(content));
+    }
+    const turn = normalizeTurn({ ...old, id, [field]: content, status: 'succeeded', responseType: 'realtime',
+      compactionProtection: 'realtime_transcript', context: {
+        ...transcriptContext,
+        realtimeCallId: callId, realtimeRole: role, realtimeRevision: revision, uiMode: 'maid',
+      },
     }, { now: this.now });
     if (old) { Object.assign(old, turn); if (!await this.write()) return null; }
     else if (!await this.appendTurn(turn, { requirePersisted: true })) return null;
-    return { messageId: id };
+    return { messageId: id, revision };
   }
 
   async finalizeRealtimeConversation(callId) {
@@ -1702,7 +1779,7 @@ export class MaidConversationStore {
   }
 
   shouldCompactHistory() {
-    const activeTurns = this.getUncompressedTurns();
+    const activeTurns = this.getUncompressedTurns().filter(isProjectableMaidTurn);
     return (
       activeTurns.length > this.compactionTurnThreshold ||
       estimateMaidTurnsTokens(activeTurns) > this.compactionHistoryTokenThreshold
@@ -1711,7 +1788,7 @@ export class MaidConversationStore {
 
   compactHistoryToMemory({ force = false } = {}) {
     this.ensureLoaded();
-    const activeTurns = this.state.turns.filter(turn => !turn.compacted);
+    const activeTurns = this.state.turns.filter(turn => !turn.compacted && isProjectableMaidTurn(turn));
     if (!force && !this.shouldCompactHistory()) return null;
     const keepStart = Math.max(0, activeTurns.length - MAID_CONTEXT_KEEP_RECENT_AFTER_COMPACT);
     const compactableTurns = activeTurns
@@ -1777,7 +1854,7 @@ export class MaidConversationStore {
       const id = trim(turn?.id);
       if (id && ids.has(id) && !byId.has(id)) byId.set(id, normalizeTurn(turn, { now: this.now }));
     });
-    return batch.sourceTurnIds.map(id => byId.get(id)).filter(Boolean);
+    return batch.sourceTurnIds.map(id => byId.get(id)).filter(turn => turn && isProjectableMaidTurn(turn));
   }
 
   async upsertStructuredMemoriesForBatch(batch = {}, turns = [], { shouldWrite = () => true } = {}) {

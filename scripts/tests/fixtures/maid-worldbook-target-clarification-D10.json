@@ -1,0 +1,359 @@
+{
+  "source_file": "maid_testset_tools/live-results-20260930-target-blocks-mixed-fixes/D10-deepseek.json",
+  "source_sha256": "d5d918c07c72464a26a88fb437e05f95a04a40e71973c60e1e14b925ba080dc4",
+  "input": "林念初的设定里补一句，她其实很怕打雷",
+  "context": {
+    "roleCardId": "persona_1790735557891_f1e3w",
+    "submissionId": "maid_eval_D10_9e276976-966c-443c-b6e6-aeff996b163a"
+  },
+  "result": {
+    "ok": true,
+    "status": "succeeded",
+    "responseType": "react",
+    "input": "林念初的设定里补一句，她其实很怕打雷",
+    "message": "林念初的设定条目在「邻家篇世界书」里，但这本世界书属于角色卡「邻家篇」，不是当前角色卡「测试」的。请问要写进哪边呢？① 直接补进「邻家篇世界书」的林念初条目；② 为当前角色卡「测试」新建一本世界书再写。您选一个我就动手～",
+    "finalDecision": {
+      "ok": true,
+      "action": "final",
+      "message": "林念初的设定条目在「邻家篇世界书」里，但这本世界书属于角色卡「邻家篇」，不是当前角色卡「测试」的。请问要写进哪边呢？① 直接补进「邻家篇世界书」的林念初条目；② 为当前角色卡「测试」新建一本世界书再写。您选一个我就动手～",
+      "source": "maid_provider_fc",
+      "providerFcControl": "clarify",
+      "reason": "目标世界书归属另一张角色卡，需澄清写入位置",
+      "plannerTransport": {
+        "requestedMode": "provider_fc",
+        "effectiveMode": "provider_fc",
+        "fallbackReason": "",
+        "providerSource": "primary",
+        "primaryProvider": "deepseek",
+        "primaryModel": "deepseek-flash",
+        "fallbackProvider": "",
+        "fallbackModel": "",
+        "thinkingRequested": false,
+        "thinkingEnabled": false,
+        "thinkingOverrideReason": "",
+        "providerFamily": "openai",
+        "providerEndpoint": "official_deepseek_responses",
+        "candidateSnapshotId": "cap-snapshot:91549445-9682-4907-a5ef-ab177c59f8b0",
+        "toolCallCount": 1
+      },
+      "candidateSnapshotId": "cap-snapshot:91549445-9682-4907-a5ef-ab177c59f8b0",
+      "retrieverVersion": "maid-capability-retriever-v4",
+      "selectedCapabilityId": "",
+      "capabilityRoutingMode": "candidate"
+    },
+    "steps": [
+      {
+        "index": 1,
+        "toolName": "app.read_resource",
+        "featureId": "app.resource.read",
+        "title": "读取林念初设定",
+        "args": {
+          "resource": "persona",
+          "name": "林念初",
+          "include": [
+            "description",
+            "details"
+          ]
+        },
+        "status": "succeeded",
+        "guided": false,
+        "guide": null,
+        "guideMessage": "",
+        "summary": "read resource persona",
+        "output": {
+          "ok": true,
+          "resource": "persona",
+          "activeId": "persona_1790735557891_f1e3w",
+          "count": 2,
+          "projection": "full",
+          "includedFields": [
+            "details",
+            "description"
+          ],
+          "contentHint": "角色默认仅返回 id、name、active；需要关联资源引用时传 include:[\"associations\"]，需要描述或头像时传 include:[\"description\"] / include:[\"avatar\"]，完整档案传 include:[\"details\"]。",
+          "items": []
+        },
+        "metadata": null,
+        "candidateSnapshotId": "cap-snapshot:fba6a576-74a2-4103-890c-a97bb0ee0a35",
+        "retrieverVersion": "maid-capability-retriever-v4",
+        "selectedCapabilityId": "app.resource.read",
+        "candidateHit": true,
+        "errorMessage": "",
+        "failureCode": ""
+      },
+      {
+        "index": 2,
+        "toolName": "app.read_resource",
+        "featureId": "app.resource.read",
+        "title": "读取 APP 结构化资源",
+        "args": {
+          "resource": "persona",
+          "include": [
+            "description"
+          ]
+        },
+        "status": "succeeded",
+        "guided": false,
+        "guide": null,
+        "guideMessage": "",
+        "summary": "read resource persona",
+        "output": {
+          "ok": true,
+          "resource": "persona",
+          "activeId": "persona_1790735557891_f1e3w",
+          "count": 2,
+          "projection": "selected",
+          "includedFields": [
+            "description"
+          ],
+          "contentHint": "角色默认仅返回 id、name、active；需要关联资源引用时传 include:[\"associations\"]，需要描述或头像时传 include:[\"description\"] / include:[\"avatar\"]，完整档案传 include:[\"details\"]。",
+          "items": [
+            {
+              "id": "persona_1790735557891_f1e3w",
+              "name": "测试",
+              "active": true,
+              "description": ""
+            },
+            {
+              "id": "persona_1790735557898_umh8b",
+              "name": "邻家篇",
+              "active": false,
+              "description": ""
+            }
+          ]
+        },
+        "metadata": null,
+        "candidateSnapshotId": "cap-snapshot:42f9d481-a3cb-45f7-bc3f-811d5f5d4b18",
+        "retrieverVersion": "maid-capability-retriever-v4",
+        "selectedCapabilityId": "app.resource.read",
+        "candidateHit": true,
+        "errorMessage": "",
+        "failureCode": ""
+      },
+      {
+        "index": 3,
+        "toolName": "app.read_resource",
+        "featureId": "app.resource.read",
+        "title": "读取 APP 结构化资源",
+        "args": {
+          "resource": "worldbook",
+          "query": "林念初",
+          "includeContent": true
+        },
+        "status": "succeeded",
+        "guided": false,
+        "guide": null,
+        "guideMessage": "",
+        "summary": "read resource worldbook",
+        "output": {
+          "ok": true,
+          "resource": "worldbook",
+          "currentCard": {
+            "personaId": "persona_1790735557891_f1e3w",
+            "personaName": "测试",
+            "worldbookId": ""
+          },
+          "currentCardHint": "当前角色卡没有绑定自己的世界书；不要因为别的世界书名称与要求相似就写进去。给当前角色卡加内容时，不传 name 调用 worldbook.create 会为它新建并绑定一本。",
+          "contentMode": "content",
+          "contentHint": "",
+          "sessionId": "",
+          "sessionLookup": {
+            "sessionId": "",
+            "source": "current",
+            "matched": true
+          },
+          "currentWorldIds": [],
+          "globalWorldId": "",
+          "globalWorldIds": [],
+          "globalSettings": {
+            "scanDepth": 2,
+            "insertionStrategy": "role_first",
+            "contextPercent": 20,
+            "includeNames": false,
+            "budgetCap": 0,
+            "minActivations": 0,
+            "maxDepth": 0,
+            "maxRecursionSteps": 0,
+            "recursiveScan": true,
+            "caseSensitive": false,
+            "matchWholeWords": true,
+            "useGroupScoring": false,
+            "alertOnOverflow": false,
+            "variableDefineStrategy": "legacy_eager"
+          },
+          "aiGeneration": {
+            "templateStorageKey": "world_ai_template_v1",
+            "hasCustomTemplate": false,
+            "template": "name: \"\"\nenglish_name: \"\"\ngender: \"\"\nbackground: \"\"\nappearance: \"\"\npersonality:\n  mbti: \"\"\n  traits: \"\"\ndialogue_examples:\n  note: \"仅供参考，勿完全按照其输出\"\n  examples:\n    - \"\"\n    - \"\"\n    - \"\""
+          },
+          "count": 4,
+          "worldbooks": [
+            {
+              "id": "奇幻大陆",
+              "name": "奇幻大陆",
+              "entryCount": 12,
+              "returnedEntryCount": 0,
+              "truncated": false,
+              "contentMode": "content",
+              "entries": [],
+              "ownershipKnown": true,
+              "currentCard": false,
+              "personaBindings": [],
+              "ownerCards": [],
+              "otherOwnerCards": [],
+              "sharedAcrossCards": false,
+              "targetSelectionEvidence": {
+                "currentCard": {
+                  "personaId": "persona_1790735557891_f1e3w",
+                  "personaName": "测试",
+                  "worldbookId": "",
+                  "bindingState": "unbound"
+                },
+                "observedWorldbook": {
+                  "worldbookId": "奇幻大陆",
+                  "personaBindings": []
+                },
+                "targetOptions": []
+              }
+            },
+            {
+              "id": "奇幻大陆(副本)",
+              "name": "奇幻大陆(副本)",
+              "entryCount": 10,
+              "returnedEntryCount": 0,
+              "truncated": false,
+              "contentMode": "content",
+              "entries": [],
+              "ownershipKnown": true,
+              "currentCard": false,
+              "personaBindings": [],
+              "ownerCards": [],
+              "otherOwnerCards": [],
+              "sharedAcrossCards": false,
+              "targetSelectionEvidence": {
+                "currentCard": {
+                  "personaId": "persona_1790735557891_f1e3w",
+                  "personaName": "测试",
+                  "worldbookId": "",
+                  "bindingState": "unbound"
+                },
+                "observedWorldbook": {
+                  "worldbookId": "奇幻大陆(副本)",
+                  "personaBindings": []
+                },
+                "targetOptions": []
+              }
+            },
+            {
+              "id": "校园日常",
+              "name": "校园日常",
+              "entryCount": 5,
+              "returnedEntryCount": 0,
+              "truncated": false,
+              "contentMode": "content",
+              "entries": [],
+              "ownershipKnown": true,
+              "currentCard": false,
+              "personaBindings": [],
+              "ownerCards": [],
+              "otherOwnerCards": [],
+              "sharedAcrossCards": false,
+              "targetSelectionEvidence": {
+                "currentCard": {
+                  "personaId": "persona_1790735557891_f1e3w",
+                  "personaName": "测试",
+                  "worldbookId": "",
+                  "bindingState": "unbound"
+                },
+                "observedWorldbook": {
+                  "worldbookId": "校园日常",
+                  "personaBindings": []
+                },
+                "targetOptions": []
+              }
+            },
+            {
+              "id": "邻家篇世界书",
+              "name": "邻家篇世界书",
+              "entryCount": 2,
+              "returnedEntryCount": 1,
+              "truncated": false,
+              "contentMode": "content",
+              "entries": [
+                {
+                  "id": "other_01",
+                  "title": "林念初",
+                  "keys": [
+                    "林念初",
+                    "念初"
+                  ],
+                  "secondaryKeys": [],
+                  "constant": false,
+                  "disabled": false,
+                  "contentLength": 54,
+                  "content": "林念初是<user>的青梅竹马，两家住隔壁；深栗色长发扎高马尾，性格活泼，暗恋<user>多年却从未说出口。",
+                  "contentTruncated": false
+                }
+              ],
+              "ownershipKnown": true,
+              "currentCard": false,
+              "personaBindings": [
+                {
+                  "personaId": "persona_1790735557898_umh8b",
+                  "personaName": "邻家篇",
+                  "enabled": true
+                }
+              ],
+              "ownerCards": [
+                "邻家篇"
+              ],
+              "otherOwnerCards": [
+                "邻家篇"
+              ],
+              "sharedAcrossCards": false,
+              "targetSelectionEvidence": {
+                "currentCard": {
+                  "personaId": "persona_1790735557891_f1e3w",
+                  "personaName": "测试",
+                  "worldbookId": "",
+                  "bindingState": "unbound"
+                },
+                "observedWorldbook": {
+                  "worldbookId": "邻家篇世界书",
+                  "personaBindings": [
+                    {
+                      "personaId": "persona_1790735557898_umh8b",
+                      "personaName": "邻家篇",
+                      "enabled": true
+                    }
+                  ]
+                },
+                "targetOptions": [
+                  {
+                    "target": "current_card",
+                    "personaId": "persona_1790735557891_f1e3w",
+                    "worldbookId": "",
+                    "intent": "create_and_bind"
+                  },
+                  {
+                    "target": "observed_worldbook",
+                    "worldbookId": "邻家篇世界书",
+                    "intent": "use_observed_worldbook"
+                  }
+                ]
+              },
+              "ownerHint": "这本世界书属于角色卡「邻家篇」，不是当前角色卡的世界书；除非用户点名这本，写入或修改前先向用户确认。"
+            }
+          ]
+        },
+        "metadata": null,
+        "candidateSnapshotId": "cap-snapshot:c4d069b1-78ec-4b70-a0b2-20dacc15604c",
+        "retrieverVersion": "maid-capability-retriever-v4",
+        "selectedCapabilityId": "app.resource.read",
+        "candidateHit": true,
+        "errorMessage": "",
+        "failureCode": ""
+      }
+    ]
+  }
+}

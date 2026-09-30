@@ -619,6 +619,8 @@ export const createExecutionFlowRuntime = ({
     if (creativeHostEl) creativeHostEl.hidden = state.activeKind !== 'creative';
     renderSwitcher();
     const view = state.view;
+    const cardVisible = state.activeKind === 'maid' && state.visible && state.expanded;
+    runCard?.setVisible(cardVisible);
     if (!state.activeKind) {
       position();
       return;
@@ -635,6 +637,7 @@ export const createExecutionFlowRuntime = ({
     if (chipDot) chipDot.setAttribute?.('data-tone', view.tone);
     const card = ensureRunCard();
     if (card) {
+      card.setVisible(cardVisible);
       const nearBottom = streamEl.scrollHeight - streamEl.scrollTop - streamEl.clientHeight < 48;
       card.update(view, { approval: getApproval?.(view.runId) || null, voice: view.source === 'maid_realtime' });
       if (nearBottom || view.terminal === false) streamEl.scrollTop = streamEl.scrollHeight;

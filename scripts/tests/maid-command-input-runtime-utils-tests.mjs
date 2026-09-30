@@ -740,6 +740,48 @@ class FakeDocument {
 }
 
 {
+  const timers = new Map(), releases = new Map();
+  let timerId = 0, latestView = null;
+  const runtime = createMaidCommandInputRuntime({
+    documentRef: new FakeDocument(), getViewportSize: () => ({ w: 1200, h: 800 }),
+    setTimeoutFn: () => 0, clearTimeoutFn: () => {},
+    setIntervalFn: fn => { timers.set(++timerId, fn); return timerId; },
+    clearIntervalFn: id => timers.delete(id),
+    onOpenStateChange: ({ open }) => { if (open && latestView) runtime.applyTraceView(latestView); },
+    onSubmit: async text => {
+      latestView = { runId: text, status: 'running', terminal: false, startedAt: 1, steps: [] };
+      runtime.applyTraceView(latestView);
+      await new Promise(resolve => releases.set(text, resolve));
+      latestView = { ...latestView, runId: text, status: 'succeeded', terminal: true, finishedAt: 2 };
+      runtime.applyTraceView(latestView);
+      return { ok: true, message: text };
+    },
+  });
+  runtime.open({ autoFocus: false });
+  runtime.getElements().inputEl.value = 'first';
+  const first = runtime.submit();
+  runtime.getElements().inputEl.value = 'second';
+  const second = runtime.submit();
+  assert.equal(timers.size, 1);
+  const preservedResult = runtime.getElements().resultEl;
+  runtime.collapse();
+  assert.equal(timers.size, 0, 'hidden run cards release their tickers');
+  releases.get('first')(); await first;
+  releases.get('second')(); await second;
+  assert.equal(runtime.getElements().resultEl, preservedResult, 'background status updates must not rebuild hidden cards');
+  assert.equal(runtime.getResultMessages().find(item => item.runId === 'first').view.status, 'succeeded', 'preserved cards receive their background terminal state');
+  runtime.open({ autoFocus: false });
+  assert.equal(timers.size, 0, 'reopening cannot restart a completed task timer');
+  assert.equal(runtime.getElements().resultEl.children.find(node => node.dataset.key === 'run:first').children[0].dataset.state, 'done');
+  const completedCard = runtime.getElements().resultEl.children.find(node => node.dataset.key === 'run:first').children[0];
+  runtime.close();
+  assert.equal(runtime.getElements().resultEl, null);
+  assert.equal(completedCard.parentNode, null, 'clearing results destroys the cached card rather than retaining its detached DOM');
+  assert.equal(timers.size, 0);
+  console.log('ok - hidden and cleared maid cards release tickers and preserve background completion');
+}
+
+{
   // 运行卡按行 id 原位更新：同一 run 不新增外壳，已存在的行节点身份不变，新行才进场
   const documentRef = new FakeDocument();
   const runtime = createMaidCommandInputRuntime({

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 
 import { createContactProfileAgentTools } from '../../src/scripts/agent/tools/contact-profile-tools.js';
+import { createAgentToolRegistry, validateAgentToolArguments } from '../../src/scripts/agent/agent-tool-registry.js';
 
 {
   const savedProfiles = new Map([
@@ -121,4 +122,59 @@ import { createContactProfileAgentTools } from '../../src/scripts/agent/tools/co
   assert.equal(result.reason, 'profile_changed_during_operation');
   assert.equal(profile.displayName, 'User Alice');
   console.log('ok - contact profile upsert confirmation snapshot rejects a later user edit');
+}
+
+{
+  const localState = new Map();
+  globalThis.localStorage = {
+    getItem: key => localState.get(String(key)) ?? null,
+    setItem: (key, value) => localState.set(String(key), String(value)),
+    removeItem: key => localState.delete(String(key)),
+  };
+  globalThis.__TAURI_INVOKE__ = async command => (command === 'load_kv' ? null : true);
+  const { ContactProfileStore } = await import('../../src/scripts/storage/contact-profile-store.js');
+  const store = new ContactProfileStore({ scopeId: 'b01-profile-schema' });
+  await store.ready;
+  const tools = createContactProfileAgentTools({ contactProfileStore: store });
+  const write = tools.find(tool => tool.name === 'contact_profile.upsert');
+  const registry = createAgentToolRegistry({
+    permissionEvaluator: { evaluateTool: () => ({ decision: 'allow', checks: [] }) },
+    logger: { warn() {} },
+  });
+  registry.registerMany(tools);
+  const args = {
+    profile: {
+      contactId: 'session-created-chinatsu',
+      displayName: '千夏',
+      stable_traits: ['18岁', '图书管理员', '性格安静', '喜欢推理小说'].map(label => ({ label, sourceRefs: ['user_request'] })),
+      sourceRefs: ['user_request'],
+    },
+  };
+  assert.equal(validateAgentToolArguments(args, write.schema).ok, true);
+  assert.equal(validateAgentToolArguments({ profile: { displayName: '千夏' } }, write.schema).ok, false);
+  assert.equal(validateAgentToolArguments({ profile: { contactId: args.profile.contactId, age: 18 } }, write.schema).ok, false);
+
+  const denied = await registry.executeTool(write.name, args, {
+    requestToolConfirmation: async () => ({ decision: 'deny' }),
+  });
+  assert.equal(denied.result.saved, false);
+  assert.equal(store.getProfile(args.profile.contactId), null);
+
+  const approvals = [];
+  const saved = await registry.executeTool(write.name, args, {
+    requestToolConfirmation: async request => {
+      approvals.push(request);
+      return { decision: 'allow' };
+    },
+  });
+  assert.equal(saved.result.saved, true);
+  assert.equal(approvals.length, 1);
+  assert.equal(approvals[0].kind, 'contact_profile.upsert');
+  assert.equal(approvals[0].argsPreview.contactId, args.profile.contactId);
+  const read = await registry.executeTool('contact_profile.read', { contactId: args.profile.contactId });
+  assert.equal(read.result.profile.scopeId, 'b01-profile-schema');
+  assert.deepEqual(read.result.profile.stable_traits.map(item => item.label), ['18岁', '图书管理员', '性格安静', '喜欢推理小说']);
+  assert.equal(validateAgentToolArguments({ profile: read.result.profile }, write.schema).ok, true);
+  await store.whenPersisted();
+  console.log('ok - complete contact traits survive the real store schema and writes still require target confirmation');
 }

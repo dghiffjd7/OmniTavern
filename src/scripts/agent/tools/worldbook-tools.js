@@ -1,3 +1,16 @@
+const PREVIEW_ENTRY_FIELDS_SCHEMA = {
+  type: 'object',
+  properties: {
+    comment: { type: 'string', description: 'Entry title.' },
+    content: { type: 'string' },
+    key: { type: 'array', items: { type: 'string' } },
+    keysecondary: { type: 'array', items: { type: 'string' } },
+    constant: { type: 'boolean' },
+    disable: { type: 'boolean' },
+    order: { type: 'number' },
+  },
+};
+
 export const createWorldbookAgentTools = ({
   previewWorldbookActions = null,
   getPreviewWorldbookActions = null,
@@ -39,7 +52,22 @@ export const createWorldbookAgentTools = ({
           worldId: { type: 'string', minLength: 1 },
           actions: {
             type: 'array',
-            items: { type: 'object' },
+            // 字段须完整声明：Gemini 原生函数调用对未声明字段的对象只会生成 {}
+            items: {
+              type: 'object',
+              properties: {
+                action: {
+                  type: 'string',
+                  description: 'insert_entry | update_entry | delete_entry | toggle_entry | disable_entry | enable_entry',
+                },
+                entryId: { type: 'string', description: 'Target entry id (all actions except insert_entry).' },
+                entryIndex: { type: 'integer' },
+                position: { type: 'string', description: 'insert_entry position: top or bottom.' },
+                entry: { ...PREVIEW_ENTRY_FIELDS_SCHEMA, description: 'insert_entry: the new entry.' },
+                patch: { ...PREVIEW_ENTRY_FIELDS_SCHEMA, description: 'update_entry: only the fields to change.' },
+                disabled: { type: 'boolean' },
+              },
+            },
           },
         },
       },

@@ -1,5 +1,6 @@
 // One command submission, shared by the input bar and the continuous voice task queue.
 import { t } from '../i18n/index.js';
+import { captureMaidTextApprovalScope, sameMaidTextApprovalScope } from './maid-text-approval-reply.js';
 export const createMaidCommandSubmit = ({
   getVoiceRuntime, getOnboardingRuntime, matchMaidIntent, hasConfiguredMaidProfile, resolveMaidRuntimeConfig,
   logger, checkMaidVisionInput, maidSettingsStore, buildAppFeatureSearchContextText, getAppContext,
@@ -26,7 +27,15 @@ export const createMaidCommandSubmit = ({
           })),
         };
       }
-      const maidTurnContext = { ...getAppContext?.(), ...controls.context, submissionId: controls.submissionId, source: controls.source, voiceCallId: controls.voiceCallId, voiceRequestId: controls.voiceRequestId };
+      const appContext = getAppContext?.() || {};
+      const maidTurnContext = { ...appContext, ...controls.context,
+        roleCardId: appContext.roleCardId, agentId: appContext.agentId,
+        submissionId: controls.submissionId, source: controls.source, voiceCallId: controls.voiceCallId, voiceRequestId: controls.voiceRequestId };
+      const revisionScope = controls.maidTextApprovalRevision?.scope;
+      const rejectChangedRevision = () => revisionScope && !sameMaidTextApprovalScope(revisionScope, getAppContext?.());
+      const changedRevision = () => ({ ok: false, status: 'cancelled', reason: 'approval_revision_scope_changed',
+        message: t('页面或角色卡已变化，未提交修改后的任务。请在目标页面重新说明。') });
+      if (rejectChangedRevision()) return changedRevision();
       let runtimeConfig = null;
       try {
         runtimeConfig = await resolveMaidRuntimeConfig(maidTurnContext);
@@ -60,13 +69,17 @@ export const createMaidCommandSubmit = ({
         fullResponse: '',
         source: 'pending',
       });
+      if (rejectChangedRevision()) return changedRevision();
+      const approvalScope = captureMaidTextApprovalScope(maidTurnContext);
       const result = await maidAssistantAgent.runPrompt(text, {
         ...maidTurnContext,
         maidAttachments: attachments,
         signal: controls?.signal || null,
         maxReactSteps: maidSettingsStore.getMaxReactSteps?.(),
         resolveMaidSelectionRegion: regionId => resolveSelectionRegion(regionId, maidTurnContext),
-        requestToolConfirmation: requestMaidToolConfirmation,
+        requestToolConfirmation: (request, options = {}) => requestMaidToolConfirmation(request, {
+          ...options, submissionId: controls.submissionId, ...approvalScope,
+        }),
         onStatus: (status = {}) => {
           const message = String(status?.message || '').trim();
           if (!message) return;
@@ -74,9 +87,14 @@ export const createMaidCommandSubmit = ({
         },
       });
       await recordMaidTurnFromResult({
-        input: controls.source === 'maid_realtime' ? '' : text,
+        // The input runtime already recorded a revision verbatim when it
+        // withdrew the old approval. The stitched planner goal is audit data.
+        input: controls.source === 'maid_realtime' || controls.maidTextApprovalRevision ? '' : text,
         result,
-        context: controls.source === 'maid_realtime' ? { ...maidTurnContext, voiceRequestText: text } : maidTurnContext,
+        context: controls.source === 'maid_realtime' ? { ...maidTurnContext, voiceRequestText: text }
+          : controls.maidTextApprovalRevision
+            ? { ...maidTurnContext, textApprovalRevision: { ...controls.maidTextApprovalRevision, replanningInput: text } }
+            : maidTurnContext,
       });
       const latestExchange = maidSettingsStore.getLastExchange?.() || {};
       if (!String(latestExchange.requestPrompt || '').trim() || latestExchange.source === 'pending') {

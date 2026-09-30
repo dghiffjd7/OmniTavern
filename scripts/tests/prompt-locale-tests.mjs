@@ -117,6 +117,22 @@ assert.equal(localizeVariableAiEvaluationPrompt('Return a score from 1 to 3.'), 
 assert.equal(canonicalizeMaidPrompt(getLocalizedMaidPrompt(DEFAULT_MAID_PROMPT)), DEFAULT_MAID_PROMPT);
 assert.equal(getLocalizedMaidPrompt('Custom maid prompt'), 'Custom maid prompt');
 
+const voiceDefault = getLocalizedMaidPrompt(DEFAULT_MAID_PROMPT, { voiceConversation: true });
+const voiceSafety = getLocalizedMaidOperationSafetyPrompt({ voiceConversation: true });
+const voiceConversation = getLocalizedPromptText('maid.voice.conversation');
+assert.match(voiceDefault, /maid persona/);
+assert.doesNotMatch(voiceDefault, /explain the status of app operations/);
+assert.equal(getLocalizedMaidPrompt(getLocalizedMaidPrompt(DEFAULT_MAID_PROMPT), { voiceConversation: true }), voiceDefault);
+assert.equal(getLocalizedMaidPrompt(`${DEFAULT_MAID_PROMPT}\nCustom persona`, { voiceConversation: true }), `${DEFAULT_MAID_PROMPT}\nCustom persona`);
+assert.match(voiceSafety, /current permission request/);
+assert.match(voiceSafety, /affected scope and permission purpose/);
+assert.match(voiceSafety, /stays enabled until the user disables it in settings/);
+assert.doesNotMatch(voiceSafety, /before execution/);
+assert.match(voiceConversation, /continue the user's topic/);
+assert.match(voiceConversation, /use status to check specific progress/);
+assert.match(voiceConversation, /Without a real result for this task, do not claim completion/);
+assert.doesNotMatch([voiceDefault, voiceSafety, voiceConversation].join('\n'), /\p{Script=Han}/u);
+
 const localized = localizeOfficialPromptRecord({
   dialogue_rules: defaults.dialogue_rules,
   group_rules: defaults.group_rules,
@@ -226,5 +242,8 @@ assert.doesNotMatch(getLocalizedPromptText('time_context.template'), /真即/);
 
 setPromptLocale('zh-CN');
 assert.equal(getLocalizedPromptText('dialogue_rules', defaults.dialogue_rules), defaults.dialogue_rules);
+assert.match(getLocalizedPromptText('maid.voice.conversation'), /交办后接着聊用户刚才的话题/);
+assert.match(getLocalizedPromptText('maid.voice.conversation'), /没有本次任务的真实结果，就不说完成/);
+assert.match(getLocalizedMaidOperationSafetyPrompt({ voiceConversation: true }), /收到当前权限请求后/);
 
 console.log('prompt-locale-tests passed');

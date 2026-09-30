@@ -24,6 +24,8 @@ import { createGuideStartFlowTools } from '../../src/scripts/agent/tools/guide-s
 import { createChatFormatRepairTools } from '../../src/scripts/agent/tools/chat-format-tools.js';
 import { createMomentsAgentTools } from '../../src/scripts/agent/tools/moments-tools.js';
 import { createPresetRegexScriptAgentTools } from '../../src/scripts/agent/tools/preset-regex-script-tools.js';
+import { createContactProfileAgentTools } from '../../src/scripts/agent/tools/contact-profile-tools.js';
+import { createAgentToolRegistry } from '../../src/scripts/agent/agent-tool-registry.js';
 
 const getTool = (tools, name) => tools.find(tool => tool.name === name);
 
@@ -45,6 +47,20 @@ const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
   assert.match(doc.doc, /界面路径/);
   assert.match(doc.doc, /session\.open_config/);
   console.log('ok - app feature catalog resolves aliases and builds concise docs');
+}
+
+{
+  assert.match(findAppFeature('session.create').title, /联系人/);
+  assert.match(buildAppFeatureDoc('session.create').doc, /contact_profile/);
+  assert.match(buildAppFeatureDoc('contact_profile.upsert').doc, /stable_traits/);
+  for (const feature of listAppFeatures()) {
+    if (!feature.verification?.tool) continue;
+    const readFeature = findAppFeature(feature.verification.featureId);
+    assert.ok(readFeature, `${feature.id} verification must name an existing feature`);
+    assert.equal(readFeature.writes, false, `${feature.id} verification must use a read-only feature`);
+    assert.ok(readFeature.tools.includes(feature.verification.tool), `${feature.id} verification feature must own its tool`);
+  }
+  console.log('ok - contact creation retains profile semantics and verification names read-only owners');
 }
 
 {
@@ -621,7 +637,32 @@ const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
     },
     getCurrentSessionId: () => current,
   });
-  const tools = [...navTools, ...sessionTools, ...groupTools, ...contentTools, ...mediaTools, ...captureTools, ...webTools, ...todoTools, ...maidMemoryTools, ...guideTools, ...formatTools, ...momentsTools, ...presetRegexScriptTools];
+  const contactProfiles = new Map();
+  const contactProfileTools = createContactProfileAgentTools({
+    contactProfileStore: {
+      getProfile: id => contactProfiles.get(id) || null,
+      listProfiles: () => [...contactProfiles.values()],
+      upsertProfile: profile => {
+        contactProfiles.set(profile.contactId, profile);
+        return profile;
+      },
+    },
+  });
+  const tools = [...navTools, ...sessionTools, ...groupTools, ...contentTools, ...mediaTools, ...captureTools, ...webTools, ...todoTools, ...maidMemoryTools, ...guideTools, ...formatTools, ...momentsTools, ...presetRegexScriptTools, ...contactProfileTools];
+  const worldbookRegistry = createAgentToolRegistry({
+    permissionEvaluator: { evaluateTool: () => ({ decision: 'allow', checks: [] }) },
+    logger: { warn() {} },
+  });
+  worldbookRegistry.registerMany(contentTools);
+  const executeConfirmedWorldbook = async (toolName, args) => {
+    const output = await worldbookRegistry.executeTool(toolName, args, {
+      requestToolConfirmation: async request => {
+        assert.equal(request.toolName, toolName);
+        return { decision: 'allow' };
+      },
+    });
+    return output.result;
+  };
   const maidAttachments = [{ id: 'catalog-image', kind: 'image', url: 'data:image/png;base64,AAAA', name: 'catalog.png' }];
 
   for (const feature of listAppFeatures()) {
@@ -630,7 +671,41 @@ const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
     }
   }
 
+  // Gemini 原生函数调用严格按 schema 生成参数：数组没有 items、对象没有 properties 时只能生成 {}（曾产生 entry-N 空条目）
+  const findUndeclaredSchemaNodes = (schema, path = 'args') => {
+    if (!schema || typeof schema !== 'object') return [];
+    const types = [].concat(schema.type || []);
+    const issues = [];
+    if (types.includes('array')) {
+      if (!schema.items || typeof schema.items !== 'object') issues.push(`${path}: array without items`);
+      else issues.push(...findUndeclaredSchemaNodes(schema.items, `${path}[]`));
+    }
+    if (types.includes('object')) {
+      if (path !== 'args' && !(schema.properties && Object.keys(schema.properties).length)) issues.push(`${path}: object without properties`);
+      Object.entries(schema.properties || {}).forEach(([key, child]) => {
+        issues.push(...findUndeclaredSchemaNodes(child, `${path}.${key}`));
+      });
+    }
+    return issues;
+  };
+  const undeclared = [...new Set(listAppFeatures().flatMap(feature => feature.tools || []))]
+    .flatMap(toolName => findUndeclaredSchemaNodes(getTool(tools, toolName)?.schema).map(issue => `${toolName} ${issue}`));
+  assert.deepEqual(undeclared, [], 'maid tool schemas must declare array items and object properties');
+
   const runFeature = async (feature) => {
+    if (feature.id === 'contact_profile.read') {
+      const result = await getTool(tools, feature.directAction).execute({ contactId: 'B' });
+      assert.equal(result.contactId, 'B');
+      return;
+    }
+    if (feature.id === 'contact_profile.upsert') {
+      const result = await getTool(tools, feature.directAction).execute({
+        profile: { contactId: 'B', displayName: 'Beta', stable_traits: [{ label: '性格安静' }] },
+      });
+      assert.equal(result.saved, true);
+      assert.equal(contactProfiles.get('B').stable_traits[0].label, '性格安静');
+      return;
+    }
     if (feature.id === 'app.ui.capture_region') {
       const context = {
         userSelection: [{
@@ -783,25 +858,20 @@ const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
       return;
     }
     if (feature.id === 'worldbook.create') {
-      const result = await getTool(tools, 'worldbook.create').execute({
+      const result = await executeConfirmedWorldbook('worldbook.create', {
         name: 'CatalogWorld',
         personaName: 'CatalogRole',
         bindToPersona: true,
         entries: [{ title: 'CatalogEntry', content: 'Catalog content.' }],
       });
-      assert.equal(result.ok, true);
+      assert.equal(result.ok, true, JSON.stringify(result));
       assert.equal(result.entryCount, 1);
       return;
     }
     if (feature.id === 'worldbook.update_entries') {
-      const result = await getTool(tools, 'worldbook.update_entries').execute({
+      const result = await executeConfirmedWorldbook('worldbook.update_entries', {
         name: 'CatalogWorld',
         updates: [{ entryTitle: 'CatalogEntry', content: 'Updated catalog content.' }],
-      }, {
-        toolSafety: {
-          decision: 'allow',
-          request: { kind: 'worldbook.update_entries' },
-        },
       });
       assert.equal(result.ok, true);
       assert.equal(result.updatedEntryCount, 1);
@@ -815,16 +885,11 @@ const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
           { id: 'latest', comment: 'Duplicate', content: 'latest' },
         ],
       });
-      const result = await getTool(tools, 'worldbook.delete_entries').execute({
+      const result = await executeConfirmedWorldbook('worldbook.delete_entries', {
         name: 'CatalogDeleteWorld',
         dedupeByTitle: true,
         duplicateTitles: ['Duplicate'],
         keep: 'last',
-      }, {
-        toolSafety: {
-          decision: 'allow',
-          request: { kind: 'worldbook.delete_entries' },
-        },
       });
       assert.equal(result.ok, true);
       assert.equal(result.deletedEntryCount, 1);
@@ -1048,6 +1113,13 @@ const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
       const kind = preflight?.kind || '';
       const result = await tool.execute(args, kind ? { toolSafety: { decision: 'allow', request: { kind } } } : {});
       assert.equal(result.ok, true, `${feature.id} direct action should succeed: ${JSON.stringify(result).slice(0, 200)}`);
+      return;
+    }
+    if (feature.directAction === 'app.read_feature_doc') {
+      const result = await getTool(tools, feature.directAction).execute({ featureId: feature.id });
+      assert.equal(result.ok, true);
+      assert.equal(result.feature.id, feature.id);
+      assert.equal(result.feature.writes, false);
       return;
     }
     if (feature.id === 'app.capabilities.search') {

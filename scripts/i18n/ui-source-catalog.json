@@ -168,6 +168,18 @@
     ]
   },
   {
+    "source": "，另有 {count} 个会话引用",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "，全局共享",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "，跳过 {value} 条重复规则",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -1099,6 +1111,12 @@
   },
   {
     "source": "{name}（{count} 行）",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "{side}原文：\n{content}",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -2543,6 +2561,13 @@
     ]
   },
   {
+    "source": "按当前清单执行请回复“确认”；不执行请回复“取消”。需要修改时请说明改动。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/maid-text-approval-reply.js#ui-call"
+    ]
+  },
+  {
     "source": "按段查看正文的修改必要性评分，手动运行并保留原文。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
@@ -2565,6 +2590,12 @@
     "source": "按规则替换输入/输出文本；全局始终生效，角色/预设按绑定对象生效",
     "references": [
       "src/scripts/ui/regex-panel.js#html-attribute"
+    ]
+  },
+  {
+    "source": "按建群清单请求创建",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -2942,6 +2973,12 @@
     "references": [
       "src/scripts/ui/user-panel.js#html-attribute",
       "src/scripts/ui/user-panel.js#html-text"
+    ]
+  },
+  {
+    "source": "绑定角色卡：{owners}",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -3357,6 +3394,12 @@
     ]
   },
   {
+    "source": "保存联系人档案与人设",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "保存联系人画像",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -3749,9 +3792,21 @@
     ]
   },
   {
+    "source": "本次尚未写入；选定目标后仍会按 APP 的权限与目标检查执行。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "本次生成",
     "references": [
       "src/index.html#html-text"
+    ]
+  },
+  {
+    "source": "本次使用了工具",
+    "references": [
+      "src/scripts/ui/maid-voice-orb-ui.js#ui-call"
     ]
   },
   {
@@ -3800,6 +3855,12 @@
     "source": "本次未触发图片提示词任务",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "本次未调用工具",
+    "references": [
+      "src/scripts/ui/maid-voice-orb-ui.js#ui-call"
     ]
   },
   {
@@ -5553,6 +5614,18 @@
     ]
   },
   {
+    "source": "部分原文或条目清单超过本次呈现预算，未完整显示；不能据此视为已呈现完整比较。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "部分正文、条目对应关系或读取范围尚未核实，不能视为完整比较。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "部分资料未载入：{value}。可重切角色卡或重启 APP 后再试。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -6746,6 +6819,12 @@
     ]
   },
   {
+    "source": "成员：\n{members}",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "成员加入：{value}",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -7081,6 +7160,12 @@
     ]
   },
   {
+    "source": "创建后打开群聊。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "创建脚本",
     "references": [
       "src/scripts/ui/script-panel.js#ui-property"
@@ -7090,6 +7175,12 @@
     "source": "创建克隆声音",
     "references": [
       "src/scripts/ui/realtime/realtime-enrollment-view.js#ui-definition"
+    ]
+  },
+  {
+    "source": "创建联系人和聊天室",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -7112,6 +7203,12 @@
   },
   {
     "source": "创建群聊并加入成员",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "创建群聊失败：{reason}",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -9440,6 +9537,12 @@
     ]
   },
   {
+    "source": "当前角色卡：{persona}。{targets}。{operation}请确认允许本次操作。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "当前角色卡的角色世界书在聊天界面与创意写作界面共用。",
     "references": [
       "src/scripts/ui/world-panel.js#ui-property"
@@ -10025,6 +10128,13 @@
     "source": "当前全局角色卡",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "当前确认的任务或页面已变化，请查看对应任务后再操作。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/maid-text-approval-reply.js#ui-call"
     ]
   },
   {
@@ -12630,6 +12740,12 @@
     ]
   },
   {
+    "source": "读取联系人档案与人设",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "读取联系人画像",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
@@ -12810,6 +12926,12 @@
     "references": [
       "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
       "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
+    ]
+  },
+  {
+    "source": "读取指定私聊联系人的已保存档案，或列出当前作用域的联系人档案；档案与角色卡分别保存。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -13903,6 +14025,13 @@
     "source": "附加图片",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "附件超过上限，请先减少附件再修改任务。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/maid-text-approval-reply.js#ui-call"
     ]
   },
   {
@@ -17055,6 +17184,12 @@
     ]
   },
   {
+    "source": "合并方向尚未选择，请确认哪一本作为目标。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "合并后（预算前）",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -18964,6 +19099,12 @@
     ]
   },
   {
+    "source": "兼容环境",
+    "references": [
+      "src/scripts/ui/maid-skill-ui.js#ui-call"
+    ]
+  },
+  {
     "source": "兼容协议",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
@@ -19299,7 +19440,25 @@
     ]
   },
   {
+    "source": "建群预览缺少有效的目标或作用域，未创建群聊。请重新预览。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "建群预览失败：{reason}",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "建议",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "建议保留相同原文和双方独有内容；同名原文不同的条目请逐项选择左侧、右侧或两者。确认方案后仍须通过 APP 的写入确认，不会自动覆盖或删除任何一本。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -19599,6 +19758,12 @@
   },
   {
     "source": "将在预设「{preset}」中停用 {count} 个条目。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "将执行 {operation}。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -20993,6 +21158,12 @@
     ]
   },
   {
+    "source": "仅在{side}完整读取中存在的 {count} 条：{titles}。建议保留，待确定目标后再确认是否追加。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "仅在分节尚不存在时插入。",
     "references": [
       "src/scripts/memory/default-template.js#ui-definition"
@@ -21696,6 +21867,13 @@
     ]
   },
   {
+    "source": "可回复确认、取消或修改要求...",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/maid-command-input-runtime-utils.js#ui-call"
+    ]
+  },
+  {
     "source": "可回滚 {value}",
     "references": [
       "src/scripts/ui/plugin-panel.js#dom-assignment"
@@ -22237,6 +22415,12 @@
     ]
   },
   {
+    "source": "来源信息",
+    "references": [
+      "src/scripts/ui/maid-skill-ui.js#ui-call"
+    ]
+  },
+  {
     "source": "来源已失效",
     "references": [
       "src/scripts/ui/agent-reference-editor.js#ui-call",
@@ -22756,6 +22940,12 @@
   },
   {
     "source": "连续 {value} 次结构失败 · {value2}",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "连续查询未找到与目标相关的来源，所需信息仍未确认。已停止重复搜索；可以补充更准确的名称或指定来源后再查。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -23517,6 +23707,12 @@
     ]
   },
   {
+    "source": "列出联系人及群聊对应的全部聊天室/会话与真实 ID、基本信息。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "列出已保存的世界书，按名称或关键词查找。",
     "references": [
       "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
@@ -23618,6 +23814,12 @@
     ]
   },
   {
+    "source": "另有 {count} 本未选中的近似名世界书，将保留；其中包括：{names}。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "另有 {count} 条建议待查看",
     "references": [
       "src/scripts/ui/chat/agent-suggestion-banner.js#ui-call"
@@ -23631,6 +23833,12 @@
   },
   {
     "source": "另有 {value} 条重复身份会跳过。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "另有未选中的近似名世界书：{names}。这些世界书将保留。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -25633,6 +25841,12 @@
     "source": "目标身份由运行时冻结；本轮只接受唯一终态调用，并在完整领域校验后一次提交。",
     "references": [
       "src/scripts/ui/chat/prompt-preview-view-utils.js#html-text"
+    ]
+  },
+  {
+    "source": "目标世界书属于其他角色卡或共享范围。请先确认具体世界书及操作，并在本次确认面板允许一次。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -28021,7 +28235,8 @@
   {
     "source": "请明确说「允许」或「取消」。",
     "references": [
-      "src/scripts/ui/maid-voice-task-runtime.js#ui-call"
+      "src/scripts/ui/maid-voice-task-runtime.js#ui-call",
+      "src/scripts/ui/realtime/realtime-maid-task-session.js#ui-call"
     ]
   },
   {
@@ -29131,6 +29346,12 @@
       "src/scripts/ui/realtime/realtime-enrollment-view.js#ui-call",
       "src/scripts/ui/realtime/realtime-enrollment-view.js#ui-definition",
       "src/scripts/ui/realtime/realtime-voice-enrollment.js#ui-definition"
+    ]
+  },
+  {
+    "source": "请选择：① 修改「{worldbook}」中的「{entry}」；② 为当前角色卡「{currentCard}」新建并绑定世界书，再添加设定。您选哪一项？",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -30524,6 +30745,12 @@
     ]
   },
   {
+    "source": "确认保存联系人画像",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "确认当前 APP 状态",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -30640,6 +30867,12 @@
     ]
   },
   {
+    "source": "确认世界书写入目标",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "确认收款",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -30662,6 +30895,12 @@
     "references": [
       "src/scripts/ui/agent-configuration-editor.js#ui-call",
       "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "确认这份清单后会进入 APP 创建确认；也可以修改要求，或回复“不要”取消。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -30707,6 +30946,30 @@
     ]
   },
   {
+    "source": "群成员无需修改。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "群成员修改失败：{reason}",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "群成员已写入，但未完成核对：{reason}",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "群成员预览失败：{reason}",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "群聊",
     "references": [
       "src/index.html#html-text",
@@ -30743,6 +31006,12 @@
   },
   {
     "source": "群聊：不建立",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "群聊「{name}」已存在，已核对成员：{members}。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -30902,6 +31171,12 @@
     ]
   },
   {
+    "source": "群聊已写入，但未完成核对：{reason}",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "群聊摘要",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
@@ -30931,6 +31206,12 @@
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/scripts/memory/default-template.js#ui-definition"
+    ]
+  },
+  {
+    "source": "群名：{name}",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -34014,6 +34295,12 @@
     ]
   },
   {
+    "source": "世界书「{worldbook}」：{scope}{global}{sessions}",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "世界书绑定已由工具完成并读回验证；没有再对「{value}」执行重复核对。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -34110,6 +34397,12 @@
   },
   {
     "source": "世界书名称不能为空",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "世界书目标、归属或本次操作在确认后发生变化，请重新核对目标并确认。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -36830,6 +37123,12 @@
     ]
   },
   {
+    "source": "条目「{entry}」位于角色卡「{ownerCards}」的世界书「{worldbook}」中。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "条目「{value}」标为 canon，但尚无通过目标作品校对的来源；请先用 web.research 传 target/targetAliases。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -37540,6 +37839,12 @@
     ]
   },
   {
+    "source": "同名成员：{name}（ID：{id}）",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "同名角色已存在",
     "references": [
       "src/scripts/ui/character-card-importer.js#ui-property"
@@ -37551,6 +37856,12 @@
       "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/scripts/ui/session-panel.js#ui-property",
       "src/scripts/ui/world-panel.js#ui-property"
+    ]
+  },
+  {
+    "source": "同名条目「{title}」的原文不同：",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -38630,6 +38941,12 @@
     ]
   },
   {
+    "source": "为已存在的私聊联系人保存年龄、职业、性格、爱好等档案；需用户确认，按确认时的作用域和版本写入，不创建联系人或角色卡。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "未绑定",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
@@ -38641,6 +38958,12 @@
   },
   {
     "source": "未绑定 {count}",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "未绑定当前角色卡",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -40153,6 +40476,12 @@
     ]
   },
   {
+    "source": "无法读取图片尺寸，请选择其他图片",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "无法读取图片内容",
     "references": [
       "src/scripts/ui/app.js#ui-call"
@@ -41452,6 +41781,12 @@
     ]
   },
   {
+    "source": "新建世界书",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "新建世界书名称",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -42310,6 +42645,12 @@
     ]
   },
   {
+    "source": "许可",
+    "references": [
+      "src/scripts/ui/maid-skill-ui.js#ui-call"
+    ]
+  },
+  {
     "source": "序",
     "references": [
       "src/index.html#html-text"
@@ -43066,6 +43407,20 @@
     ]
   },
   {
+    "source": "页面或角色卡已变化，未提交修改后的任务。请在目标页面重新说明。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/maid-command-input-runtime-utils.js#ui-call",
+      "src/scripts/ui/maid-command-submit-runtime.js#ui-call"
+    ]
+  },
+  {
+    "source": "页面或角色卡已变化，原建群清单不能继续使用。请重新预览。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "一般保持直连，需要走代理出口时再改。",
     "references": [
       "src/scripts/ui/config-panel.js#html-attribute"
@@ -43166,6 +43521,12 @@
     "source": "依据任务要求生成修改建议，确认后替换选定文本。",
     "references": [
       "src/scripts/ui/agent-center-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "依据未记录",
+    "references": [
+      "src/scripts/ui/maid-voice-orb-ui.js#ui-call"
     ]
   },
   {
@@ -43682,6 +44043,12 @@
     ]
   },
   {
+    "source": "已创建并核对群聊「{name}」。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "已创建角色副本：{value}。是否切换到这个会话？",
     "references": [
       "src/scripts/ui/experience-pack-import-utils.js#ui-property"
@@ -43691,6 +44058,12 @@
     "source": "已创建聊天室：{value}",
     "references": [
       "src/scripts/ui/world-editor.js#ui-call"
+    ]
+  },
+  {
+    "source": "已创建群聊「{name}」，成员：{members}。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -44155,6 +44528,18 @@
     ]
   },
   {
+    "source": "已核对：{same} 组原文相同，{different} 组同名原文不同。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "已核对现有群聊「{name}」。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "已忽略候选",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -44604,6 +44989,13 @@
     ]
   },
   {
+    "source": "已取消本次创建群聊。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/maid-text-approval-reply.js#ui-call"
+    ]
+  },
+  {
     "source": "已取消导出",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -44667,6 +45059,12 @@
     "source": "已取消应用，候选仍保留在当前会话。",
     "references": [
       "src/scripts/ui/app.js#ui-property"
+    ]
+  },
+  {
+    "source": "已取消这份建群清单，没有创建群聊。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -45095,6 +45493,12 @@
     ]
   },
   {
+    "source": "已修改并核对群成员。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "已修改历史消息；后续 AI 回复仍基于修改前的内容",
     "references": [
       "src/scripts/ui/app.js#ui-call"
@@ -45173,6 +45577,12 @@
     "source": "已选成员",
     "references": [
       "src/scripts/ui/group-chat-panels.js#html-text"
+    ]
+  },
+  {
+    "source": "已选方案目标：{id}；这不是写入授权。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -45387,9 +45797,28 @@
     ]
   },
   {
+    "source": "已预览群成员变更，本次未修改。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "已预览群聊「{name}」，本次未创建。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "已允许",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "已允许本次创建群聊。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/maid-text-approval-reply.js#ui-call"
     ]
   },
   {
@@ -45555,6 +45984,12 @@
     "source": "以下功能引用目前不可用，仍会保留",
     "references": [
       "src/scripts/ui/maid-skill-messages.js#ui-call"
+    ]
+  },
+  {
+    "source": "以下金额未能完成额外核对：{amounts}。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -46358,6 +46793,7 @@
   {
     "source": "用户修正：",
     "references": [
+      "src/scripts/ui/maid-text-approval-reply.js#ui-call",
       "src/scripts/ui/maid-voice-task-runtime.js#ui-call"
     ]
   },
@@ -46635,9 +47071,35 @@
     ]
   },
   {
+    "source": "有 {count} 组正文或对侧读取范围不完整，暂不判断是否独有或冲突。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "有 {count} 组重名或无标题条目，无法自动配对，请先明确对应关系。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "有 {value} 处未保存的更改，取消将全部回滚。确定放弃吗？",
     "references": [
       "src/scripts/ui/preset-panel.js#ui-property"
+    ]
+  },
+  {
+    "source": "有多个待确认任务，请说明要确认哪一个",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/maid-voice-task-runtime.js#ui-call"
+    ]
+  },
+  {
+    "source": "有多个进行中的任务，请说明要修正哪一个",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/realtime/realtime-maid-task-session.js#ui-call"
     ]
   },
   {
@@ -46666,6 +47128,18 @@
   },
   {
     "source": "有未保存修改{value}",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "右侧",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "右侧：{name}（ID：{id}）",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -47411,6 +47885,12 @@
     ]
   },
   {
+    "source": "元数据",
+    "references": [
+      "src/scripts/ui/maid-skill-ui.js#ui-call"
+    ]
+  },
+  {
     "source": "元素引用已被较新的 inspect 取代。",
     "references": [
       "src/scripts/ui/agent-ui-click-runtime.js#ui-property"
@@ -47433,6 +47913,20 @@
     "references": [
       "src/scripts/ui/chat/code-viewer-ui-utils.js#dom-assignment",
       "src/scripts/ui/chat/code-viewer-ui-utils.js#html-attribute"
+    ]
+  },
+  {
+    "source": "原请求已撤销；任务状态已变化，请重新说明要执行的操作。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/maid-text-approval-reply.js#ui-call"
+    ]
+  },
+  {
+    "source": "原确认已撤销，正在按修改后的要求重新规划。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/maid-command-input-runtime-utils.js#ui-call"
     ]
   },
   {
@@ -49457,6 +49951,18 @@
     ]
   },
   {
+    "source": "这份建群清单仍待确认。请明确确认、修改要求，或回复“不要”取消。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "这份建群清单已失效，请重新预览。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "这个 Agent 操作尚未开放",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -49592,6 +50098,12 @@
   },
   {
     "source": "这里只显示已启用、适用范围为「{value}」且通过格式与预算护栏的提示词。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "这轮只整理建群预览，未执行其他写入。请补充已有联系人或调整清单。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -49772,6 +50284,13 @@
     "source": "这项规则尚未通过零写入测试。模型可能返回坏结构并回退；只有你明确接受风险时才继续。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "这项确认已处理，没有重复执行。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/maid-text-approval-reply.js#ui-call"
     ]
   },
   {
@@ -53601,6 +54120,18 @@
     ]
   },
   {
+    "source": "左侧",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "左侧：{name}（ID：{id}）",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "左侧：{status}",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -54390,6 +54921,12 @@
     ]
   },
   {
+    "source": "APP 按已读原文整理；以下仅为方案，尚未执行合并或删除。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "APP 本地补丁候选",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -54408,7 +54945,31 @@
     ]
   },
   {
+    "source": "APP 操作提醒：删除选定的联系人或会话会一并丢失其聊天记录和内部归档，不会合并到保留对象。后续需要先明确准确目标，再由您在 APP 的真实确认中批准；本次没有执行删除。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "APP 建群预览：尚未创建群聊。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "APP 目标确认：本次读取时，当前角色卡「{currentCard}」尚未绑定世界书。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "App 搜索工具已取得网页资料，正在整理回答…",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "APP 已保留实际读取的世界书资料，请明确要比较的两本世界书；尚未选择合并目标，也未执行修改。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]

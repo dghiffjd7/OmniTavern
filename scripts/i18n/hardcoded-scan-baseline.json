@@ -2446,5 +2446,11 @@
     "text": "根据本轮对话判断好感度变化（-5~+5 之间的整数，只输出数字）。",
     "category": "prompt_fallback",
     "reason": "These literals are canonical fallbacks behind prompt-locale builders; English actual-send output is asserted by prompt-locale and memory-template tests."
+  },
+  {
+    "file": "src/scripts/ui/realtime/realtime-maid-tools.js",
+    "text": "Delegate app work with execute. For an unfinished task, use revise when the user changes or adds constraints to the same goal; select its task_id. For independe",
+    "category": "agent_semantic_source",
+    "reason": "Realtime tool JSON Schema instructions. Chinese permission words are canonical intent examples for the model, not product UI copy."
   }
 ]

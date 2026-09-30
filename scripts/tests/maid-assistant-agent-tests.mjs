@@ -1543,6 +1543,36 @@ setPromptLocale('zh-CN');
 }
 
 {
+  // 相同的失败写入之间夹着读取时，连续计数会被打断；整轮累计也要能停下（曾循环 37 步）
+  let react = 0;
+  const failingUpdate = { toolName: 'worldbook.update_entries', args: { name: '苏晓彤', updates: [{}] }, featureId: 'worldbook.update_entries' };
+  const agent = createMaidAssistantAgent({
+    repeatedFailureLimit: 3,
+    maxReactSteps: 40,
+    planner: async () => ({ ok: true, ...failingUpdate, title: '修改条目', response: '我来改。' }),
+    reactPlanner: async () => {
+      react += 1;
+      return react % 2
+        ? { ok: true, action: 'tool', toolName: 'worldbook.read', args: { name: '苏晓彤' }, featureId: 'worldbook.read', title: '读取', response: '我看看。' }
+        : { ok: true, action: 'tool', ...failingUpdate, title: '再改一次', response: '再试一次。' };
+    },
+    toolRegistry: {
+      executeTool: async (toolName) => {
+        if (toolName === 'worldbook.read') return { toolName, status: 'succeeded', result: { ok: true, name: '苏晓彤', entries: [] }, summary: 'read' };
+        throw new Error('update worldbook entries failed: invalid_updates');
+      },
+    },
+    logger: { warn() {} },
+  });
+  const result = await agent.runPrompt('帮我把林念初加进世界书');
+  assert.equal(result.reason, 'repeated_tool_failure');
+  assert.equal(result.steps.filter(step => step.toolName === 'worldbook.update_entries').length, 3);
+  assert.equal(result.steps.length, 5);
+  assert.match(result.message, /反复失败 3 次/);
+  console.log('ok - maid assistant agent stops identical failures repeated across interleaved reads');
+}
+
+{
   const calls = [];
   const reactCalls = [];
   const statuses = [];

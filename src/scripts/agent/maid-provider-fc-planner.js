@@ -9,6 +9,16 @@ export const MAID_PROVIDER_FC_MODE = 'provider_fc';
 export const MAID_PROMPTED_JSON_MODE = 'prompted_json';
 export const MAID_PROVIDER_FC_CONTROL_TOOL_NAME = 'maid_planner_control';
 export const MAID_PROVIDER_FC_MESSAGE_MAX_LENGTH = 6000;
+const MAID_PROVIDER_FC_REASON_MAX_LENGTH = 120;
+
+// Only these local reads may be serialized from one response. UI actions,
+// generation, writes and planner controls still require a single selection.
+const SERIAL_READ_TOOLS = new Set([
+  'app.read_resource', 'app.get_current_state', 'app.search_feature',
+  'app.read_feature_doc', 'app.read_skill', 'app.search_skills',
+  'worldbook.list', 'worldbook.read', 'session.list', 'contact_profile.read',
+]);
+export const MAID_PROVIDER_FC_READ_BATCH_LIMIT = 8;
 
 const isPlainObject = value => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 
@@ -166,7 +176,7 @@ const buildControlSchema = () => ({
     },
     reason: {
       type: 'string',
-      maxLength: 120,
+      maxLength: MAID_PROVIDER_FC_REASON_MAX_LENGTH,
     },
   },
 });
@@ -177,6 +187,14 @@ const buildToolDescription = (feature = {}, toolName = '') => truncate([
   trim(feature?.argsHint),
   `APP capability: ${trim(feature?.id)}; internal tool: ${toolName}`,
 ].filter(Boolean).join('。'), 480);
+
+const selectOfferedToolOwner = (owners = [], toolName = '') => (
+  owners.find(feature => trim(feature.id) === toolName)
+  || owners.filter(feature => feature.writes === false)
+    .sort((left, right) => Number(trim(right.directAction) === toolName) - Number(trim(left.directAction) === toolName)
+      || trim(left.id).localeCompare(trim(right.id)))[0]
+  || owners[0]
+);
 
 export const buildMaidProviderFcToolPlan = ({
   config = {},
@@ -189,27 +207,36 @@ export const buildMaidProviderFcToolPlan = ({
   const usedNames = new Map([[MAID_PROVIDER_FC_CONTROL_TOOL_NAME, MAID_PROVIDER_FC_CONTROL_TOOL_NAME]]);
   const toolMappings = [];
   const missingSchemas = [];
-  const seenInternalNames = new Set();
+  const ownersByTool = new Map();
+  for (const feature of candidateFeatures) {
+    for (const internalName of list(feature?.tools)) {
+      const owners = ownersByTool.get(internalName) || [];
+      owners.push(feature);
+      ownersByTool.set(internalName, owners);
+    }
+  }
 
-  candidateFeatures.forEach((feature) => {
-    list(feature?.tools).forEach((internalName) => {
-      if (seenInternalNames.has(internalName)) return;
+  ownersByTool.forEach((owners, internalName) => {
+      // Select metadata and authority from this offered snapshot only. Shared
+      // prerequisite reads must not inherit a write owner merely by rank.
+      const feature = selectOfferedToolOwner(owners, internalName);
       const schemas = isPlainObject(feature?.toolSchemas) ? feature.toolSchemas : {};
       if (!Object.prototype.hasOwnProperty.call(schemas, internalName) || !isPlainObject(schemas[internalName])) {
         missingSchemas.push({ featureId: trim(feature?.id), toolName: internalName });
         return;
       }
-      seenInternalNames.add(internalName);
+      const auxiliaryRead = feature.writes === true && SERIAL_READ_TOOLS.has(internalName);
       toolMappings.push({
         providerName: toProviderSafeName(internalName, usedNames),
         internalName,
         featureId: trim(feature?.id),
-        title: trim(feature?.title, feature?.id || internalName),
-        description: buildToolDescription(feature, internalName),
+        title: auxiliaryRead ? internalName : trim(feature?.title, feature?.id || internalName),
+        description: auxiliaryRead
+          ? `Read-only auxiliary tool ${internalName}, offered under APP capability ${trim(feature.id)}. This call reads data only; it does not create, bind, or otherwise complete the parent capability's write operation. Use the parameters in this tool's schema. APP capability: ${trim(feature.id)}; internal tool: ${internalName}`
+          : buildToolDescription(feature, internalName),
         schema: clone(schemas[internalName], { type: 'object' }),
         control: false,
       });
-    });
   });
 
   if (missingSchemas.length) {
@@ -322,19 +349,45 @@ export const normalizeMaidProviderFcCompletedCalls = ({
   completedToolCalls = [],
   toolPlan = null,
   phase = 'planner',
+  allowReadBatch = false,
 } = {}) => {
   const calls = Array.isArray(completedToolCalls) ? completedToolCalls : [];
   if (!toolPlan?.ok) return invalidCompletedCall(toolPlan?.reason || 'tool_plan_unavailable');
   if (!calls.length) return invalidCompletedCall('no_tool_call', { toolCallCount: 0 });
-  if (calls.length !== 1) return invalidCompletedCall('multiple_tool_calls', { toolCallCount: calls.length });
+  if (calls.length !== 1) {
+    const rejected = () => invalidCompletedCall('multiple_tool_calls', { toolCallCount: calls.length });
+    if (!allowReadBatch || calls.length > MAID_PROVIDER_FC_READ_BATCH_LIMIT) return rejected();
+    // Validate the whole response before returning even the first selection.
+    const normalized = calls.map(call => normalizeMaidProviderFcCompletedCalls({
+      completedToolCalls: [call], toolPlan, phase,
+    }));
+    if (normalized.some(item => !item.ok || item.kind !== 'tool'
+      || !SERIAL_READ_TOOLS.has(item.selection.toolName))) return rejected();
+    const selections = normalized.map(item => item.selection);
+    return { ok: true, kind: 'tool', toolCallCount: calls.length,
+      selection: selections[0], remainingSelections: selections.slice(1) };
+  }
 
   const call = calls[0] || {};
   const providerName = trim(call?.toolName || call?.name);
-  const mapping = toolPlan.toolMappings.find(item => item.providerName === providerName) || null;
+  // The delta accumulator normalizes known provider aliases to internal names.
+  // Resolve either form only within this offered plan, without guessing aliases
+  // or choosing one tool when the two name domains are ambiguous.
+  const matches = toolPlan.toolMappings.filter(item => item.providerName === providerName
+    || (!item.control && item.internalName === providerName));
+  if (matches.length > 1) return invalidCompletedCall('ambiguous_tool', { providerName, toolCallCount: 1 });
+  const mapping = matches[0] || null;
   if (!mapping) return invalidCompletedCall('unknown_tool', { providerName, toolCallCount: 1 });
   const parsedArgs = parseArgumentsText(call);
   if (!parsedArgs.ok) return invalidCompletedCall(parsedArgs.reason, { providerName, toolCallCount: 1 });
-  const validation = validateAgentToolArguments(parsedArgs.args, mapping.schema);
+  // Gemini omits string bounds from its offered schema. This reason is only
+  // diagnostic metadata: bound a copy before validation so it cannot reject an
+  // otherwise valid control. Preserve message, types, extra fields and business
+  // arguments for the same strict validation, and leave the raw call untouched.
+  const args = mapping.control && typeof parsedArgs.args.reason === 'string'
+    ? { ...parsedArgs.args, reason: parsedArgs.args.reason.trim().slice(0, MAID_PROVIDER_FC_REASON_MAX_LENGTH) }
+    : parsedArgs.args;
+  const validation = validateAgentToolArguments(args, mapping.schema);
   if (!validation.ok) {
     return invalidCompletedCall('invalid_tool_arguments', {
       providerName,
@@ -386,6 +439,7 @@ export const runMaidProviderFcAttempt = async ({
   maxTokens = 8000,
   generationSettings = null,
   onModelUsage = null,
+  allowReadBatch = false,
   now = Date.now,
 } = {}) => {
   const eligibility = resolveMaidProviderFcEligibility({
@@ -489,6 +543,7 @@ export const runMaidProviderFcAttempt = async ({
     completedToolCalls,
     toolPlan,
     phase: eligibility.phase,
+    allowReadBatch,
   });
   reportUsage({ outcome: normalized.ok ? 'ok' : trim(normalized.reason, 'no_tool_call') });
   return {

@@ -419,4 +419,83 @@ for (const provider of ['openai', 'gemini_live']) {
   languageClient.callbacks.onAudioLevel({ input: { level: 1 } }); assert.equal(levels.length, 1, 'late meter samples cannot reach a closed call');
 }
 
+// Maid history excludes only versioned transcripts still held as conversation
+// items. An instructions snapshot is replaced every turn, not retained forever.
+{
+  let client;
+  let pendingCommit;
+  let resumeSnapshot;
+  const snapshots = [];
+  const historyRuntime = createRealtimeCallRuntime({
+    createSessionClient: callbacks => (client = new FakeSessionClient(callbacks)),
+    resolveConnection: async () => ({ config: { provider: 'openai' }, settings: {} }),
+    buildSemanticSnapshot: async payload => {
+      snapshots.push(payload);
+      if (payload.inputText === 'snapshot-race' && !resumeSnapshot) await new Promise(resolve => { resumeSnapshot = resolve; });
+      return { instructions: JSON.stringify(payload.realtimeHistory), realtimeTranscripts: [{ messageId: 'old-call', revision: 1 }] };
+    },
+    getCallTarget: () => ({ supported: true, sessionId: 'maid', uiMode: 'maid', maidCallId: 'call' }),
+    isTargetCurrent: () => true,
+    handleMaidTaskRequest: async () => ({ ok: true }),
+    commitUserMessage: async ({ meta }) => meta.realtimeItemId === 'pending'
+      ? new Promise(resolve => { pendingCommit = resolve; })
+      : ({ messageId: meta.realtimeItemId, revision: 1 }),
+    commitAssistantMessage: async ({ meta }) => ({ messageId: meta.realtimeResponseId, revision: 2 }),
+    setIntervalFn: () => 1, clearIntervalFn: () => {},
+  });
+  const user = async id => {
+    client.emit({ type: 'conversation.item.input_audio_transcription.completed', item_id: id, transcript: id });
+    await historyRuntime.whenIdle();
+  };
+  assert(await historyRuntime.start());
+  assert.deepEqual(snapshots[0].realtimeHistory.includedTranscripts, []);
+  client.emit({ type: 'session.created', session: { id: 'server-one' } });
+  await user('u1');
+  client.emit({ type: 'response.created', response: { id: 'a1' } });
+  client.emit({ type: 'response.done', response: { id: 'a1', status: 'completed', usage: { input_tokens: 100, output_tokens: 20 }, output: [{ content: [{ transcript: 'useful conversation' }] }] } });
+  await historyRuntime.whenIdle();
+  client.emitConnectionState('disconnected');
+  client.emitConnectionState('connected');
+  client.emit({ type: 'session.updated', session: { id: 'server-one' } });
+  await user('u2');
+  assert.equal(snapshots.at(-1).realtimeHistory.sessionId, 'server-one');
+  assert.deepEqual(snapshots.at(-1).realtimeHistory.includedTranscripts,
+    [{ messageId: 'u1', revision: 1 }, { messageId: 'a1', revision: 2 }], 'same retained session keeps exact committed revisions');
+  assert(!snapshots.at(-1).realtimeHistory.includedTranscripts.some(item => item.messageId === 'old-call'), 'instructions-only history remains injectable');
+  const generation = snapshots.at(-1).realtimeHistory.connectionGeneration;
+  client.emit({ type: 'response.done', response: { id: 'pressure', status: 'completed', usage: { input_tokens: 7000, output_tokens: 50 } } });
+  await historyRuntime.whenIdle();
+  await user('pressure-user');
+  assert.deepEqual(snapshots.at(-1).realtimeHistory.includedTranscripts, [], 'context pressure restores local history without relying on truncation events');
+  client.emit({ type: 'session.created', session: { id: 'server-two' } });
+  await user('u3');
+  assert.deepEqual(snapshots.at(-1).realtimeHistory.includedTranscripts, []);
+  assert.notEqual(snapshots.at(-1).realtimeHistory.connectionGeneration, generation);
+  client.emit({ type: 'conversation.item.truncated', item_id: 'server-item' });
+  await user('u4');
+  assert.deepEqual(snapshots.at(-1).realtimeHistory.includedTranscripts, [], 'truncation invalidates retained text');
+  client.emit({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'pending', transcript: 'pending' });
+  await waitForAsyncEnd();
+  client.emit({ type: 'conversation.item.deleted', item_id: 'server-item' });
+  pendingCommit({ messageId: 'pending', revision: 1 });
+  await historyRuntime.whenIdle();
+  await user('u5');
+  assert.deepEqual(snapshots.at(-1).realtimeHistory.includedTranscripts, [], 'late persistence cannot restore invalidated knowledge');
+  client.emit({ type: 'response.done', response: { id: 'headroom', status: 'completed', usage: { input_tokens: 100, output_tokens: 20 } } });
+  await historyRuntime.whenIdle();
+  client.emit({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'snapshot-race', transcript: 'snapshot-race' });
+  await waitForAsyncEnd();
+  assert(snapshots.at(-1).realtimeHistory.includedTranscripts.length > 0);
+  client.emit({ type: 'conversation.item.truncated', item_id: 'u5' });
+  resumeSnapshot();
+  await historyRuntime.whenIdle();
+  const refreshed = client.sent.filter(event => event.type === 'session.update').at(-1);
+  assert.deepEqual(JSON.parse(refreshed.session.instructions).includedTranscripts, [], 'snapshot invalidated during await is rebuilt before sending');
+  await historyRuntime.end();
+  assert(await historyRuntime.start());
+  assert.equal(snapshots.at(-1).realtimeHistory.sessionId, '');
+  assert.deepEqual(snapshots.at(-1).realtimeHistory.includedTranscripts, [], 'new call starts without exclusions');
+  await historyRuntime.end();
+}
+
 console.log('realtime call runtime tests passed');

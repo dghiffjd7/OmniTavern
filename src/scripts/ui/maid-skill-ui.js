@@ -3,6 +3,7 @@ import { renderMaidMarkdownHtml } from './maid-markdown-utils.js';
 import { maidSkillMessage } from './maid-skill-messages.js';
 import { pickSavePath, hasTauriRuntime } from '../utils/save-dialog.js';
 import { safeInvoke } from '../utils/tauri.js';
+import { normalizeMaidSkillMetadata, skillObject } from '../agent/maid-skill-schema.js';
 
 export const skillElement = (doc, tag, text = '', className = '') => {
   const el = doc.createElement(tag); el.className = className; el.textContent = text; return el;
@@ -137,6 +138,27 @@ export const injectMaidSkillStyle = doc => {
   doc.head.append(style);
 };
 
+export const appendMaidSkillSourceDetails = (doc, parent, skill) => {
+  // Metadata comes from imported documents and historical snapshots. Keep its
+  // existing size/depth bounds and render only text, including markup-looking values.
+  let metadata;
+  try { metadata = normalizeMaidSkillMetadata(skill.portableMetadata || {}); } catch { return; }
+  if (!Object.keys(metadata).length) return;
+  const { frontmatter, ...extra } = metadata;
+  const { compatibility, license, ...fields } = skillObject(frontmatter) ? frontmatter : {};
+  const ordinary = { ...fields, ...(Object.keys(extra).length ? { portableMetadata: extra } : {}) };
+  const rows = [[t('兼容环境'), compatibility], [t('许可'), license], [t('元数据'), Object.keys(ordinary).length ? ordinary : null]];
+  const details = skillElement(doc, 'details', '', 'maid-skill-disclosure');
+  details.append(skillElement(doc, 'summary', t('来源信息')));
+  for (const [label, value] of rows) {
+    if (value == null || value === '') continue;
+    const row = skillElement(doc, 'div');
+    row.append(skillElement(doc, 'strong', label), skillUserText(doc, 'pre', typeof value === 'string' ? value : JSON.stringify(value, null, 2), 'maid-skill-compare-text'));
+    details.append(row);
+  }
+  if (details.children.length > 1) parent.append(details);
+};
+
 export const showMaidSkillDocument = (doc, skill, { revision = skill.revision, source = '' } = {}) => {
   injectMaidSkillStyle(doc);
   const dialog = skillElement(doc, 'dialog', '', 'maid-skill-dialog maid-skills');
@@ -146,6 +168,7 @@ export const showMaidSkillDocument = (doc, skill, { revision = skill.revision, s
   const body = skillElement(doc, 'div', '', 'maid-skill-preview');
   body.dataset.i18nSkip = ''; body.innerHTML = renderMaidMarkdownHtml(skill.content);
   dialog.append(toolbar, skillElement(doc, 'p', `${t('版本')} ${revision || 1}${source ? ` · ${source}` : ''}`, 'maid-skill-muted maid-skill-intro'), body);
+  appendMaidSkillSourceDetails(doc, dialog, skill);
   dialog.addEventListener('close', () => dialog.remove(), { once: true });
   doc.body.append(dialog); dialog.showModal(); return dialog;
 };

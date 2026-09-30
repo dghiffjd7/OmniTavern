@@ -259,6 +259,18 @@ export const countConsecutiveSameAction = (steps = [], status = 'failed') => {
   return { count, key, toolName: trim(last.toolName), args: JSON.parse(JSON.stringify(last.args || {})) };
 };
 
+/* 末步失败时，整轮中与它相同的失败操作共几次（不要求连续）：
+   模型在两次相同的失败写入之间插入读取，连续计数会被打断，原地打转就停不下来。 */
+export const countRunSameFailedAction = (steps = []) => {
+  const list = stepList(steps);
+  const last = list.at(-1);
+  if (!last || last.status !== 'failed') return { count: 0, key: '' };
+  const aliases = buildFamilyAliasReader(list)(maidStepResourceFamily(last));
+  const key = buildMaidStepActionKey(last, aliases);
+  const count = list.filter(step => step?.status === 'failed' && buildMaidStepActionKey(step, aliases) === key).length;
+  return { count, key, toolName: trim(last.toolName), args: JSON.parse(JSON.stringify(last.args || {})) };
+};
+
 /* 模型给出最终回答时的整体成败。
    isWriteTool(toolName) 返回 true / false / undefined（未知工具）；未知工具按写入处理，只读判断必须明确。 */
 export const resolveMaidRunOutcome = ({ lastOk = false, steps = [], isWriteTool = () => undefined } = {}) => {

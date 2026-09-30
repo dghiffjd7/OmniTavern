@@ -50,10 +50,20 @@ export const getVisionInputCapability = ({ provider = '', model = '', baseUrl = 
   }
 
   if (p === 'deepseek') {
+    // https://api-docs.deepseek.com/guides/vision/
+    let supported = false;
+    try {
+      const endpoint = new URL(base || 'https://api.deepseek.com/v1');
+      supported = m === 'deepseek-flash'
+        && endpoint.protocol === 'https:' && endpoint.hostname === 'api.deepseek.com'
+        && !endpoint.port && !endpoint.username && !endpoint.password
+        && !endpoint.search && !endpoint.hash
+        && ['/', '/v1', '/beta'].includes(endpoint.pathname.replace(/\/+$/u, '') || '/');
+    } catch {}
     return {
-      supported: false,
-      status: 'unsupported',
-      reason: `${label} 暂未识别为可接收图片的模型。`,
+      supported,
+      status: supported ? 'supported' : 'unsupported',
+      reason: supported ? '' : `${label} 暂未识别为可接收图片的模型。`,
       label,
     };
   }

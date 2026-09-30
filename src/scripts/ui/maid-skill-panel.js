@@ -4,7 +4,7 @@ import { makeMaidSkillName, skillClone, normalizeMaidSkillDraft, skillLength, sk
 import { renderMaidMarkdownHtml } from './maid-markdown-utils.js';
 import { maidSkillMessage } from './maid-skill-messages.js';
 import { readMaidSkillImportFiles, commitMaidSkillImport, exportMaidSkillMarkdown, exportMaidSkillPackage } from './maid-skill-transfer.js';
-import { skillElement as el, skillButton as button, skillUserText as userText, injectMaidSkillStyle, saveMaidSkillFile } from './maid-skill-ui.js';
+import { skillElement as el, skillButton as button, skillUserText as userText, injectMaidSkillStyle, saveMaidSkillFile, appendMaidSkillSourceDetails } from './maid-skill-ui.js';
 
 export const createMaidSkillPanel = ({ store, documentRef: doc = document, listFeatures = () => [], onUseSkill = null, confirm = appConfirm, saveFile = saveMaidSkillFile } = {}) => {
   let root, status, view = 'list', draft = null, original = '', saveOptions = {}, busy = false, refreshList = null;
@@ -119,6 +119,7 @@ export const createMaidSkillPanel = ({ store, documentRef: doc = document, listF
       field(identifier, t('标识'), draft.name, value => { draft.name = value; }, { maxLength: 64 });
       form.append(el(doc, 'p', t('流程用于指导任务，不会增加工具权限，也不会改变模型配置。'), 'maid-skill-muted'));
     }
+    appendMaidSkillSourceDetails(doc, form, draft);
     toolbar.append(button(doc, t('导出 Markdown'), () => run(() => saveFile(exportMaidSkillMarkdown(draft)))));
   };
   const renderImport = entries => {
@@ -161,6 +162,7 @@ export const createMaidSkillPanel = ({ store, documentRef: doc = document, listF
       field(fields, t('适用说明'), entry.skill.description, value => { entry.skill.description = value; refreshComparison(); }, { type: 'textarea' });
       field(fields, t('流程正文（Markdown）'), entry.skill.content, value => { entry.skill.content = value; refreshComparison(); }, { type: 'textarea', className: 'maid-skill-body' });
       select(fields, t('使用方式'), [['auto', t('可自动选用')], ['manual', t('仅手动使用')]], entry.skill.invocationMode, value => { entry.skill.invocationMode = value; });
+      appendMaidSkillSourceDetails(doc, fields, entry.skill);
       if (!entry.skill.description || !entry.skill.content) detail.open = true;
       block.append(detail);
     }

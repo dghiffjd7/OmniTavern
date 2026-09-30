@@ -15,6 +15,12 @@ export const filterOpenAiLiveModels = items => modelIds(items).filter(isOpenAiLi
 export const filterOpenAiLiveBackendModels = items => modelIds(items).filter(id => /^(?:gpt-|o\d)/i.test(id)
   && !/(?:live|realtime|audio|transcri|tts|image|search|instruct|embedding|moderation)/i.test(id));
 
+const maidDelegationInstructions = [
+  'For maid app tasks, use client delegation for explicit corrections to unfinished work, including corrections to a condition, target, or time. A correction needs a fresh delegation so the app can inspect and revise the existing task.',
+  'Preserve the complete correction. If a short preference does not make clear what should change, ask the user to clarify the intended correction. A spoken acknowledgement alone does not update the background task. Only describe a correction as applied after the app confirms it.',
+  'An explicit question about task progress or status also requires client delegation to obtain current app state. Do not infer progress from earlier acknowledgements. Continue ordinary conversation directly; ask which task the user means when the app reports multiple possible targets.',
+].join('\n');
+
 export const buildOpenAiLiveSessionConfig = ({ realtimeModel, model, liveBackendModel, voice = 'marin', instructions = '', maidTasks = false } = {}) => {
   const voiceModel = String(realtimeModel || model || OPENAI_LIVE_MODEL).trim();
   const backendModel = String(liveBackendModel || OPENAI_LIVE_BACKEND_MODEL).trim();
@@ -22,7 +28,7 @@ export const buildOpenAiLiveSessionConfig = ({ realtimeModel, model, liveBackend
   if (!backendModel || /[\s<>]/.test(backendModel)) throw new Error(t('请填写有效的推理模型 ID'));
   return {
     model: voiceModel,
-    instructions: String(instructions),
+    instructions: maidTasks ? [String(instructions), maidDelegationInstructions].filter(Boolean).join('\n\n') : String(instructions),
     audio: { output: { voice } },
     delegation: maidTasks ? { type: 'client' } : {
       type: 'responses',

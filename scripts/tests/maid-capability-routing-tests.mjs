@@ -1216,7 +1216,8 @@ const createCatalogRoutingHarness = () => {
       args: {},
     },
   });
-  assert.equal(ambiguousVerification.candidateSnapshotId, snapshot.id);
+  assert.notEqual(ambiguousVerification.candidateSnapshotId, snapshot.id);
+  assert.match(ambiguousVerification.candidateSnapshotId, /^cap-verify:/);
   assert.equal(runtime.validatePlan(ambiguousVerification).ok, false);
   console.log('ok - ambiguous verification ownership fails closed in candidate mode');
 }

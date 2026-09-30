@@ -3,7 +3,7 @@ import {
   getMaidModelFeatureContext,
   listAppFeatures,
 } from './app-feature-catalog.js';
-import { resolveCandidateCapabilitySelection } from './maid-capability-routing.js';
+import { findExplicitReadToolOwner, resolveCandidateCapabilitySelection } from './maid-capability-routing.js';
 import { MAID_SKILL_INSTRUCTIONS, buildMaidSkillContextPrompt, createMaidSkillContext, stripMaidSkillObservationBodies, assertMaidSkillRequestBudget } from './maid-skill-context.js';
 import {
   buildMaidImageAttachmentSummary,
@@ -16,6 +16,9 @@ import {
 } from './maid-image-generation-context.js';
 import { buildMaidRunContinuationPromptBlock } from './maid-run-continuation.js';
 import { buildMaidSourceGroundingPromptBlock } from './maid-source-grounding.js';
+import { buildMaidWebObservationPromptBlock, MAID_WEB_EVIDENCE_RULE } from './maid-web-observations.js';
+import { buildMaidWorldbookObservationPromptBlock } from './maid-worldbook-observations.js';
+import { MAID_APP_DISCOVERY_RULE, MAID_APP_DISCOVERY_RECOVERY_FEEDBACK } from './maid-app-discovery-recovery.js';
 import { buildMaidVisualSpecPromptBlock } from './maid-visual-spec.js';
 import { isMaidUserAbort } from './maid-failure-codes.js';
 import { buildMaidGenerationOptions } from './maid-generation-settings.js';
@@ -447,6 +450,7 @@ export const buildMaidModelPlannerFeatureList = (features = listAppFeatures(), {
     .map(feature => [
       `- id: ${yamlText(feature.id)}`,
       `  title: ${yamlText(feature.title)}`,
+      feature.summary ? `  summary: ${yamlText(feature.summary)}` : '',
       `  tools: [${list(feature.tools).map(yamlText).join(', ')}]`,
       includeSchemas && isPlainObject(feature.toolSchemas) && Object.keys(feature.toolSchemas).length
         ? `  schemas: ${JSON.stringify(feature.toolSchemas)}`
@@ -461,9 +465,26 @@ export const buildMaidModelPlannerFeatureList = (features = listAppFeatures(), {
     .join('\n')
 );
 
-// 需要先让用户确认删除清单时（例如用户记忆里有“删除前先确认”的偏好），必须用 preview 生成结构化清单，
-// 用户下一句确认后 APP 按该清单原样执行；只用文字询问会让确认后无法执行
-const MAID_DELETE_PREVIEW_RULE = '如果需要先让用户确认要删除的清单（例如用户偏好要求删除前先确认），调用对应的删除工具并传 preview:true 生成待确认清单（不会删除），再在回复里请用户确认；用户确认后 APP 会按这份清单执行。不要只用文字询问。';
+// 何时反问：只在目标或关键选择无法判断时问、一次问完；创作细节不追问，直接扩写
+const MAID_CLARIFY_RULE = [
+  'When a request to create a new private contact receives a session.create result with created:false and existing:true, the returned ID belongs to an existing contact, not a newly created character or permission to change it. If the user only wants to open or use a private chat with that contact and supplies no new traits or separate-character request, reuse the observed contact and report or open the existing chat as requested; do not ask for a rename or modification choice. If a new or different character was requested, state the collision and existing description from actual observations; if missing, read that exact session before describing it. Ask one choice: rename the new contact to keep a separate character, or explicitly modify the existing contact. Do not attach requested new traits while that choice is unresolved. A missing independent profile does not mean the contact description is empty. Before changing an existing profile, use contact_profile.read and preserve unchanged fields. If the user already explicitly selected modifying this exact contact, follow that choice without repeating the question, while retaining the existing APP approval. Only created:true items may continue the new-character profile workflow; check each batch item separately.',
+  'For a request containing multiple operations, first perform necessary read-only checks. If a later operation still lacks a required target or parameter that cannot be safely inferred, before the first irreversible operation report the observed results, exact proposed targets, and missing choices together, then ask one clarification. Keep the requested execution order; gathering missing choices is preparation, not executing later steps early. If the user explicitly asks to execute an independent ready step first and discuss the rest afterward, perform that step through the existing APP approval and keep the remaining goals pending. Do not add this clarification for a single operation with complete parameters, when all requested operations have complete parameters, or for optional creative details that can reasonably be supplied. Use the existing clarification response; do not create a todo solely for this check, invent missing parameters, or treat a clarification answer as APP approval.',
+  'When an actual worldbook match belongs to another card and the user has not explicitly named the target book or owner card, use targetSelectionEvidence to state the current card bindingState and ask once with the concrete targetOptions: use_current_binding means its recorded book, create_and_bind means a new book for the current card, and use_observed_worldbook means the matched book and its actual owner card. unknown is not unbound; a recorded binding does not prove that book exists. If the user already named the target book or owner card, use that target without repeating this choice. These observations never grant write permission or replace existing target checks and APP confirmation.',
+  '只有目标或关键选择确实无法判断、猜错会写到错误位置或难以撤销时才澄清，例如：同名条目已在别的角色卡世界书里；用户可能指的是另一本已有的世界书；有多本世界书都可能是目标。澄清要一次问完全部问题并给出可选项，已问过的不要重复问。',
+  '外貌、性格、关系等创作细节描述简略或口语化时不要追问：按用户给出的要点直接扩写成完整正文（世界书条目标 sourceLayer:user_original），完成后简短说明补充了哪些设定。',
+  '“新增一个青梅竹马/学妹”这类说法指要新增的人物身份，不是世界书名称；用户未指定世界书时，写入当前角色卡的世界书（worldbook.list/read 结果中 currentCard:true 的那本）；当前角色卡还没有世界书时，不传 name 调用 worldbook.create 会为它新建并绑定一本，完成后要告诉用户新建了哪本世界书。',
+].join('\n');
+
+// APP approval and a user-requested preview are separate workflows. This only
+// describes the tool contract; it never converts preview arguments into writes.
+const MAID_DELETE_PREVIEW_RULE = [
+  '用户明确要求删除，且真实数据中在对应资源类型及作用域内有唯一准确匹配的 ID 或完整名称时，调用删除工具并省略 preview 或传 preview:false，由 APP 确认面板展示准确目标和影响范围，等待用户实际批准后执行。面板本身就是执行前提醒和确认，不需要额外的文字确认，也不需要先做一次预览。',
+  '其他名称只有副本、copy 或编号后缀差异时，不把它们当成准确匹配的歧义：只提交准确目标，并说明未选近似项将保留，不扩大删除范围。存在多个准确匹配、资源类型或作用域未确定时，先读取必要信息；仍无法唯一定位才澄清。',
+  '用户只要预览、方案或不执行，或本次请求及已有明确偏好要求先列清单、等文字回复再删时，使用支持预览的删除工具传 preview:true，仅生成结构化待确认清单，再按要求等待用户。普通的“删除前确认”可由 APP 确认面板满足，不自行推断用户要求两轮确认。',
+  '预览成功只说明清单已生成，不代表批准或完成删除。已生成待确认预览时，必须等待用户后续明确确认并沿用 APP 的待确认协议；不得自动把 preview:true 改成实际删除，也不得代替用户批准。',
+].join('\n');
+
+const MAID_FEATURE_CATALOG_RULE = 'The APP feature catalog contains registered capabilities and help, not an exhaustive list of everything the APP supports. No catalog match does not mean the APP lacks that feature. Distinguish APP support, actions the maid can perform, and facts not yet checked; use matching read-only feature help to explain manual workflows.';
 
 /* 功能目录分层注入：本地检索排名最靠前的少数功能给完整参数，其余全部功能只列“id: 名称”索引。
    模型需要索引里的功能时先用 app.read_feature_doc 读取说明（下一步该功能会进入候选），
@@ -486,7 +507,7 @@ export const buildMaidFeatureCatalogPrompt = ({
   const indexLines = indexSource.map(feature => `- ${feature.id}: ${trim(feature.title, feature.id)}`);
   const staticText = [
     '## APP 功能目录',
-    '<app_feature_index> 列出全部功能的名称；用户消息开头的 <app_features> 给出与本次请求最相关功能的完整参数，可以直接选用。',
+    '<app_feature_index> lists registered capabilities and help, not all APP features; <app_features> contains the full parameters of the current candidates.',
     '需要不在 <app_features> 里的功能时，先调用 app.read_feature_doc 并传 featureId 读取它的工具与参数，下一步再使用；不要凭名称猜测工具名或参数。',
     indexLines.length ? `<app_feature_index>\n${indexLines.join('\n')}\n</app_feature_index>` : '',
     indexSource.some(feature => feature.tools?.includes('app.read_skill')) ? MAID_SKILL_INSTRUCTIONS : '',
@@ -566,9 +587,12 @@ export const buildMaidModelPlannerMessages = ({
         ]),
         '',
         '## 工具与参数规则',
-        '限制：不要发明工具；不要删除、覆盖或修改高风险数据；配置写入类动作只允许打开界面，不允许直接修改配置。',
+        '只使用已登记且当前可用的工具。删除、覆盖及配置写入必须符合用户明确请求、实际工具参数和下述 APP 确认协议；只有界面入口而无写入工具的功能，使用该界面入口。工具存在不代表用户已授权执行。',
         '工具 args 必须是完整、具体、可直接执行的 JSON；不要使用 "__keep_existing"、"同上"、"省略"、"待补" 等占位值。需要旧内容时先调用读取工具。',
         '如果用户询问当前、最新、公开网络资料，允许选择联网搜索工具；如果用户询问 APP 内资料，优先选择 APP 读取工具，不要联网。',
+        MAID_FEATURE_CATALOG_RULE,
+        MAID_APP_DISCOVERY_RULE,
+        MAID_WEB_EVIDENCE_RULE,
         '任务规划判据：todo 只用于跨 3 个及以上不同功能域、且包含写入、生成或较长处理链的复杂任务；多个结构化资源的只读比较不需要 todo，直接选择第一个具体读取工具。打开→检查→点击这类短界面序列也直接执行，不要为它写清单。',
         '界面呈现原则：普通查询与操作默认在后台执行，不要主动打开面板、进入聊天室或切换页面；查询、查看、检查等词不等于要求打开界面。只有用户明确要求打开、进入、带他去看，或任务本身必须由用户在界面继续填写时才导航。',
         '批量任务即使用户要求展示，也只展示最终的主要结果，不要逐项打开重复或次要页面；带 open 参数的工具默认传 false，明确要求展示时才传 true。',
@@ -576,12 +600,14 @@ export const buildMaidModelPlannerMessages = ({
         '教我、一步步、引导等教学请求与普通展示不同：APP 的内建新手任务由本地流程处理；功能首次引导由执行层处理，不要把普通后台任务改写成界面教学。',
         '如果用户要求把附图设置为头像或壁纸，选择对应头像/壁纸工具；工具参数只传 target/name/sessionId/attachmentId 等小字段，不要把 base64 或图片 data URL 写进 args。省略 attachmentId 时工具会使用第一张附图。',
         '调用 media.generate_image 时必须完整传 subject、subjectAliases（提示词使用别名时）、target、purpose、appearance、outfit、style、targetAspectRatio；subject 或别名必须实际出现在 prompt。后续同一主体必须复用 <maid_visual_specs> 的外貌、服装与画风，不得自行改写。',
-        '生成头像/壁纸时，target 必须精确对应随后写回的角色、联系人或聊天室；当前生图尺寸与 targetAspectRatio 不符时先停下说明，不要把错误比例图片写回。',
+          '生成头像/壁纸时，target 必须精确对应随后写回的角色、联系人或聊天室；当前生图尺寸与 targetAspectRatio 不符时先停下说明，不要把错误比例图片写回。',
+          'History resultBasis.artifacts records successful image references in turn order, including the observed target and design. For the same subject, retain those identity details unless the user changes them. To reuse the first or a previous image, use that exact attachmentId with the matching target and purpose; do not generate a replacement and call it the original. A recorded reference does not prove current availability or authorize an overwrite: honor tool validation and APP confirmation, and report an unavailable attachment honestly.',
         '如果 <user_selection> 提供区域ID，且用户询问图片内容、布局、配色、错位、重叠或遮挡等视觉问题，优先调用 ui.capture_region 查看该区域截图；纯文字和结构化语义已经足够时不要截图。只能传区域ID，不能自行编造坐标。',
         '',
         '## 安全原则',
         getLocalizedMaidOperationSafetyPrompt(),
         MAID_DELETE_PREVIEW_RULE,
+        MAID_CLARIFY_RULE,
         '如果用户只要求查询、查看、检查或确认，禁止调用 writes:true 的功能；权限确认不代表用户授权了原请求之外的写入。',
         '世界书写入必须默认追加或新建；不要使用 replace，除非用户明确要求覆盖，且 APP 会要求用户点击确认。',
         '修改现有世界书条目时，优先选择 worldbook.update_entries 这类按条目更新工具；不要为了改几个条目而整体 replace 世界书，除非用户明确要求整体覆盖。',
@@ -909,6 +935,18 @@ export const normalizeMaidModelPlan = (raw = {}, {
   let feature = typeof findFeature === 'function' ? findFeature(featureId) : null;
   if (feature?.maidModelContext === 'awareness_only') feature = null;
   feature ||= modelFeatures.find(item => trim(item?.id) === featureId) || null;
+  if (!feature || !list(feature.tools).includes(toolName)) {
+    const readOwner = findExplicitReadToolOwner(toolName, modelFeatures);
+    if (readOwner && featuresByTool.length > 1) {
+      feature = readOwner;
+      capabilityCorrection = {
+        originalId: featureId,
+        resolvedId: trim(readOwner.id),
+        rule: 'explicit_read_tool_owner',
+        confidence: 1,
+      };
+    }
+  }
   if (!feature) {
     if (featuresByTool.length === 1) {
       feature = featuresByTool[0];
@@ -989,7 +1027,7 @@ export const buildMaidModelReActMessages = ({
   const successfulReadLedger = buildMaidSuccessfulReadLedger(stepList);
   const stepsText = [
     olderText ? `更早步骤（仅摘要）：\n${olderText}` : '',
-    `最近步骤与完整观察：\n${stringifyRecentStepsForPrompt(recentSteps, 12000) || '[]'}`,
+    `最近步骤观察（可能按预算省略；truncated 等字段为工具原始状态，不表示正文已全部呈现）：\n${stringifyRecentStepsForPrompt(recentSteps, 12000) || '[]'}`,
   ].filter(Boolean).join('\n');
   // 会变的内容（本次候选的完整参数）放在用户消息开头，系统提示保持不变以命中服务商的提示词缓存
   const userText = [
@@ -1009,6 +1047,10 @@ export const buildMaidModelReActMessages = ({
     `界面呈现意图：${trim(context?.presentationIntent?.mode, 'background')}`,
     buildMaidMemoryPromptBlock({ memoryText, historyText }),
     successfulReadLedger ? `成功读取账本：\n${successfulReadLedger}` : '',
+    buildMaidWebObservationPromptBlock({ input, steps: stepList }),
+    buildMaidWorldbookObservationPromptBlock({ steps: stepList, context }),
+    context?.maidWebEvidenceFeedback ? `APP evidence feedback (amount coverage only, not a factual verdict): ${JSON.stringify(context.maidWebEvidenceFeedback)}. If these are claimed as current prices, read their source or remove the unsupported claims and state what remains unconfirmed. Historical comparisons, user budgets and calculated totals may be legitimate: distinguish them explicitly and show their basis or calculation instead of inventing a current price.` : '',
+    context?.maidDiscoveryRecovery ? MAID_APP_DISCOVERY_RECOVERY_FEEDBACK : '',
     `已执行步骤与观察结果：\n${stepsText}`,
   ].filter(Boolean).join('\n');
   return [
@@ -1046,7 +1088,7 @@ export const buildMaidModelReActMessages = ({
         '批量任务即使用户要求展示，也只展示最终的主要结果，不要逐项打开重复或次要页面；带 open 参数的工具默认传 false，明确要求展示时才传 true。',
         '例外：chat.send_message 的 user 消息在 triggerReply:true 时会走正常回复链，当前实现必须进入目标聊天室并传 open:true；只有 triggerReply:false 的纯消息写入才能 open:false 后台追加。',
         '教我、一步步、引导等教学请求与普通展示不同；不要在普通后台任务中自行启动或模拟新手引导。',
-        '一次成功读取已经返回用户要求的字段时，立即 final；不要为了“再确认”重复读取同一资源。多个只读资源尚未全部取得时，直接调用下一个具体读取工具。',
+        'For a read-only request, finalize once all requested facts are available. For a mixed request, one successful read does not complete the other requested operations: continue the next ready step or clarify missing required choices under the readiness guidance. If the needed facts remain in the observations and no intervening write invalidated them, do not repeat a successful read just to confirm it. Read the next resource when requested facts are still missing.',
         '成功读取账本中出现相同工具与参数，表示该读取已经完成；账本已保留用户所需事实且其后没有写入时，禁止重复调用，直接处理下一个未完成目标或 final。',
         'maid.todo.write 只在清单状态实际变化时调用，不要在每一步前后机械更新。遇到 todo_unchanged 后禁止重试相同清单，立即执行当前 in_progress 或 pending 项的具体工具。',
         '写过 todo 的复杂任务要逐项确认完成状态；如果最近一次 maid.todo.write 已返回全部 completed，无需再读。只有清单状态不确定或用户询问进度时才用 maid.todo.read；只要仍有未完成项，就继续执行对应具体工具。',
@@ -1058,6 +1100,8 @@ export const buildMaidModelReActMessages = ({
         '## 安全原则',
         getLocalizedMaidOperationSafetyPrompt(),
         MAID_DELETE_PREVIEW_RULE,
+        MAID_CLARIFY_RULE,
+        MAID_APP_DISCOVERY_RULE,
         '如果用户只要求查询、查看、检查或确认，禁止调用 writes:true 的功能；权限确认不代表用户授权了原请求之外的写入。',
         '世界书写入必须默认追加或新建；不要使用 replace，除非用户明确要求覆盖，且 APP 会要求用户点击确认。',
         '修改现有世界书条目时，优先使用 worldbook.update_entries 按条目更新；长正文拆成多次小批量工具调用，每次只更新 1-3 个条目。',
@@ -1066,6 +1110,8 @@ export const buildMaidModelReActMessages = ({
         '## 验证与联网',
         '写入、替换、覆盖、头像/壁纸设置等动作完成后，最终回答前必须依据后续读取或工具返回结果验证是否真的生效；没有验证时继续调用读取工具。',
         '联网工具只用于当前、最新、公开网络资料；APP 私有数据必须使用 APP 读取工具。基于联网结果回答时要给出来源链接或来源名称。',
+        MAID_FEATURE_CATALOG_RULE,
+        MAID_WEB_EVIDENCE_RULE,
         '',
         '## 任务连续性',
         '如果历史中上一轮包含“可继续: 是”或“继续提示”，本轮用户要求继续时要接着该任务执行，不要重新开始，也不要输出普通闲聊。',
@@ -1162,6 +1208,14 @@ const normalizeMaidModelReActResponseText = (responseText = '', {
 const resolveCapabilityDecisionFeatures = (context = {}, fallbackFeatures = []) => {
   const snapshot = context?.capabilitySnapshot;
   return Array.isArray(snapshot?.promptFeatures) ? snapshot.promptFeatures : fallbackFeatures;
+};
+
+const resolveCapabilityCatalogFeatures = (snapshot, promptFeatures = []) => {
+  if (!Array.isArray(snapshot?.candidateFeatures)) return promptFeatures;
+  if (snapshot.candidateFeatures.length) return snapshot.candidateFeatures;
+  // An empty recall result is not a ranking of the full registry. Retain the
+  // complete name index, but detail only public discovery until relevance is known.
+  return promptFeatures.filter(feature => feature.id === 'app.capabilities.search');
 };
 
 const featureListUsesImageGeneration = (features = []) => (
@@ -1280,8 +1334,46 @@ const runMaidProviderFcPlanner = async ({
   onDebugSnapshot = null,
   logger = console,
 } = {}) => {
+  const taskState = isPlainObject(context?.maidProviderFcState) ? context.maidProviderFcState : null;
+  if (context?.signal?.aborted) {
+    if (taskState) taskState.readBatch = null;
+    const error = new Error('Maid planning aborted');
+    error.name = 'AbortError';
+    throw error;
+  }
+  let queuedAttempt = null;
+  const batch = taskState?.readBatch;
+  if (batch) {
+    const previousStep = context?.maidReactSteps?.at(-1);
+    const previousSucceeded = previousStep?.status === 'succeeded'
+      && previousStep?.output?.ok !== false
+      && previousStep?.toolName === batch.previous.toolName
+      && JSON.stringify(previousStep?.args) === JSON.stringify(batch.previous.args);
+    const next = batch.remaining[0];
+    // Revalidate against the current candidate snapshot; never execute a stale
+    // batch after a correction, failed read, permission change or new task.
+    const feature = capabilitySnapshot?.candidateFeatures?.find(item => item.id === next?.featureId);
+    if (batch.input === trim(input) && previousSucceeded && capabilitySnapshot?.useCandidates === true
+      && feature?.tools?.includes(next?.toolName)) {
+      queuedAttempt = { attempted: false, ok: true, kind: 'tool', toolCallCount: batch.total,
+        selection: next, diagnostics: { ...batch.diagnostics, serializedRead: true,
+          readBatchSize: batch.total, readBatchIndex: batch.total - batch.remaining.length } };
+    }
+    if (!queuedAttempt) taskState.readBatch = null;
+  }
+  if (taskState?.fallbackReason === 'multiple_tool_calls') {
+    return {
+      ok: false,
+      attempt: {
+        attempted: false,
+        ok: false,
+        reason: taskState.fallbackReason,
+        diagnostics: { ...taskState.diagnostics, taskFallback: true },
+      },
+    };
+  }
   assertMaidSkillRequestBudget(messages, config, maxTokens);
-  const attempt = await runMaidProviderFcAttempt({
+  const attempt = queuedAttempt || await runMaidProviderFcAttempt({
     client,
     messages,
     config,
@@ -1292,8 +1384,15 @@ const runMaidProviderFcPlanner = async ({
     maxTokens,
     generationSettings: runtime?.generationSettings || null,
     onModelUsage: typeof context?.onModelUsage === 'function' ? context.onModelUsage : null,
+    allowReadBatch: Boolean(taskState),
   });
-  if (!attempt.ok) return { ok: false, attempt };
+  if (!attempt.ok) {
+    if (taskState && attempt.attempted && attempt.reason === 'multiple_tool_calls') {
+      taskState.fallbackReason = attempt.reason;
+      taskState.diagnostics = clone(attempt.diagnostics, {});
+    }
+    return { ok: false, attempt };
+  }
 
   let decision = null;
   if (attempt.kind === 'control') {
@@ -1338,6 +1437,7 @@ const runMaidProviderFcPlanner = async ({
   }
 
   if (!decision?.ok) {
+    if (taskState) taskState.readBatch = null;
     return {
       ok: false,
       attempt: {
@@ -1346,6 +1446,13 @@ const runMaidProviderFcPlanner = async ({
         reason: decision?.reason || 'provider_fc_plan_invalid',
       },
     };
+  }
+  if (taskState && attempt.kind === 'tool') {
+    const remaining = queuedAttempt ? batch.remaining.slice(1) : attempt.remainingSelections;
+    taskState.readBatch = remaining?.length ? {
+      input: trim(input), previous: clone(attempt.selection), remaining: clone(remaining),
+      total: attempt.toolCallCount, diagnostics: clone(attempt.diagnostics, {}),
+    } : null;
   }
   const plannerTransport = buildMaidPlannerTransport({
     experimentStatus,
@@ -1424,9 +1531,7 @@ export const createMaidModelBackedPlanner = ({
     const decisionFeatures = getMaidModelFeatureContext(promptFeatures).features;
     const capabilitySnapshot = context?.capabilitySnapshot || null;
     // 目录详情按检索排名取前几项（即使未进入候选模式也按相关度排序），全部功能只作索引
-    const catalogFeatures = Array.isArray(capabilitySnapshot?.candidateFeatures) && capabilitySnapshot.candidateFeatures.length
-      ? capabilitySnapshot.candidateFeatures
-      : promptFeatures;
+    const catalogFeatures = resolveCapabilityCatalogFeatures(capabilitySnapshot, promptFeatures);
     const imageGenerationContext = await resolveImageGenerationContext({
       context,
       promptFeatures,
@@ -1594,6 +1699,7 @@ export const createMaidModelBackedReActPlanner = ({
     return unsupportedPlan('maid_react_unavailable', '女仆需要先通过 AI 继续判断下一步。');
   }
 
+  let modelRequestFailed = false;
   let runtime = null;
   try {
     runtime = await resolveRuntimeConfig({
@@ -1627,9 +1733,7 @@ export const createMaidModelBackedReActPlanner = ({
     const decisionFeatures = getMaidModelFeatureContext(promptFeatures).features;
     const capabilitySnapshot = context?.capabilitySnapshot || null;
     // 目录详情按检索排名取前几项（即使未进入候选模式也按相关度排序），全部功能只作索引
-    const catalogFeatures = Array.isArray(capabilitySnapshot?.candidateFeatures) && capabilitySnapshot.candidateFeatures.length
-      ? capabilitySnapshot.candidateFeatures
-      : promptFeatures;
+    const catalogFeatures = resolveCapabilityCatalogFeatures(capabilitySnapshot, promptFeatures);
     const imageGenerationContext = await resolveImageGenerationContext({
       context,
       promptFeatures,
@@ -1716,7 +1820,10 @@ export const createMaidModelBackedReActPlanner = ({
         annotateCapabilitySnapshotResolvedModel(context, runtime, config, source);
       },
       typeof context?.onModelUsage === 'function' ? context.onModelUsage : null,
-    );
+    ).catch(error => {
+      modelRequestFailed = true;
+      throw error;
+    });
     emitDebugSnapshot(onDebugSnapshot, {
       source: 'maid_model_react',
       input: trim(input),
@@ -1764,6 +1871,9 @@ export const createMaidModelBackedReActPlanner = ({
       responseText: error?.message || 'maid react planner failed',
       error,
     }, logger);
-    return unsupportedPlan(error?.message || 'maid_react_failed', '女仆暂时无法继续判断下一步。');
+    return {
+      ...unsupportedPlan(modelRequestFailed ? 'provider_request_failed' : error?.message || 'maid_react_failed', '女仆暂时无法继续判断下一步。'),
+      ...(modelRequestFailed ? { errorMessage: truncate(error?.message || error, 240) } : {}),
+    };
   }
 };

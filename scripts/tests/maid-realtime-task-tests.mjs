@@ -8,6 +8,7 @@ import { createMaidRealtimeTools, assertMaidRealtimeCapability, resolveMaidLiveC
 import { createJsonRealtimeProtocol } from '../../src/scripts/ui/realtime/realtime-json-protocol.js';
 import { createGeminiLiveProtocol } from '../../src/scripts/ui/realtime/realtime-gemini-protocol.js';
 import { createNovaSonicProtocol } from '../../src/scripts/ui/realtime/realtime-nova-protocol.js';
+import { createCustomRealtimeProtocol } from '../../src/scripts/ui/realtime/custom-realtime-protocol.js';
 import { buildOpenAiLiveSessionConfig } from '../../src/scripts/ui/realtime/openai-live-config.js';
 import { createMaidAssistantAgent } from '../../src/scripts/agent/maid-assistant-agent.js';
 import { createAgentToolRegistry } from '../../src/scripts/agent/agent-tool-registry.js';
@@ -16,12 +17,190 @@ import { AgentRunStore } from '../../src/scripts/storage/agent-run-store.js';
 import { resolvePendingMaidAction } from '../../src/scripts/agent/maid-pending-action.js';
 import { createVoiceAwareMaidRuntimeResolver, createVoiceTaskModelRegistry } from '../../src/scripts/ui/realtime/voice-task-model.js';
 import { readFile } from 'node:fs/promises';
+import { runInNewContext } from 'node:vm';
 import { createPresetRegexScriptAgentTools } from '../../src/scripts/agent/tools/preset-regex-script-tools.js';
 import { createMaidToolConfirmationRuntime } from '../../src/scripts/ui/maid-tool-confirmation-runtime.js';
+import { projectMaidRunToTraceView } from '../../src/scripts/ui/chat/execution-flow-runtime-utils.js';
 
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { resolve, promise }; };
 const target = { supported: true, sessionId: 'maid', uiMode: 'maid', maidCallId: 'call-one' };
+
+// Exercise the actual voice runtime's submission -> run -> inline approval mapping.
+// A remains running while its permission is open; a later text submission is queued.
+const setupInlineVoiceConfirmation = async () => {
+  const queue = [], notices = [], shown = [], confirmed = [];
+  let voice, sequence = 0;
+  const approvals = createMaidToolConfirmationRuntime({ canShowInline: () => true, onChange: () => voice?.refreshApprovals() });
+  const command = {
+    collapse() {}, syncVoiceState() {}, isSubmitting: () => queue.some(entry => !entry.finished),
+    submitVoiceTask: (input, options) => {
+      const done = deferred(), controller = new AbortController();
+      queue.push({ input, options, done, controller });
+      return done.promise;
+    },
+    cancelSubmission: id => {
+      const entry = queue.find(item => item.options.id === id);
+      if (!entry) return false;
+      entry.cancelled = true; entry.finished = true; entry.controller.abort(); entry.done.resolve({ status: 'cancelled' });
+      return true;
+    },
+  };
+  const cancelledPending = [];
+  voice = createMaidVoiceRuntime({
+    makeId: () => `approval-call-${++sequence}`,
+    settingsStore: { getVoiceInputMode: () => 'realtime' }, conversationStore: { finalizeRealtimeConversation: async () => {} },
+    getAppContext: () => ({ sessionId: 'original-room' }), getCommandRuntime: () => command,
+    getCallAppRuntime: () => ({ runtime: { notifyTaskUpdate: notice => notices.push(notice) } }),
+    createOrb: () => ({ setTasks() {}, setApproval: approval => shown.push(approval) }),
+    getApproval: runId => approvals.getInline(runId),
+    confirmApproval: runIds => { confirmed.push(runIds); return approvals.confirmByVoice(runIds); },
+    cancelPendingAction: ({ submissionId }) => { cancelledPending.push(submissionId); return true; },
+  });
+  const callTarget = voice.getTarget(); await voice.beforeRealtimeStart(callTarget);
+  const submit = request => voice.handleTaskRequest({ target: callTarget, args: { action: 'execute', request } });
+  const openApproval = (task, index) => {
+    const runId = `approval-run-${index}`;
+    voice.consumeTrace({ source: 'maid_realtime', submissionId: task.task_id, runId, terminal: false });
+    return approvals.request({ operationType: 'delete', title: '允许删除吗？' }, { runId, signal: queue[index].controller.signal });
+  };
+  const reply = (inputText, args = { action: 'confirm', request: inputText }) => voice.handleTaskRequest({ target: callTarget, inputText, args });
+  const cleanup = async () => {
+    queue.forEach(entry => { entry.controller.abort(); entry.done.resolve({ ok: true }); });
+    await tick();
+  };
+  return { voice, callTarget, queue, notices, shown, approvals, confirmed, cancelledPending, submit, openApproval, reply, cleanup };
+};
+
+for (const action of ['confirm', 'revise']) {
+  const env = await setupInlineVoiceConfirmation();
+  const first = await env.submit('删除两个项目');
+  const decision = env.openApproval(first, 0);
+  const second = await env.voice.submitText('打开设置');
+  assert.equal(second.status, 'queued');
+  const correction = '允许，但保留第二个';
+  const result = await env.reply(correction, { action, request: action === 'confirm' ? '允许' : correction });
+  assert.equal(env.queue[0].cancelled, true, 'conditional confirmation must stop the task owning the actual inline permission');
+  assert.equal(env.queue[1].cancelled, undefined, 'the later text task must remain queued');
+  assert.equal((await decision).decision, 'deny');
+  assert.equal(result.accepted, true);
+  assert.match(env.queue[2].input, /删除两个项目.*用户修正：允许，但保留第二个/s);
+  assert.equal(env.queue[2].options.context.pendingActionSubmissionId, undefined);
+  assert.deepEqual(env.confirmed, [], 'a conditional answer never grants unconditional permission');
+  await env.cleanup();
+}
+
+for (const answer of ['允许', '取消']) {
+  const env = await setupInlineVoiceConfirmation();
+  const first = await env.submit('删除两个项目');
+  const decision = env.openApproval(first, 0);
+  await env.voice.submitText('打开设置');
+  const result = await env.reply(answer);
+  assert.equal((await decision).decision, answer === '允许' ? 'allow' : 'deny');
+  assert.equal(answer === '允许' ? result.confirmed : result.cancelled, answer === '允许' ? true : 1);
+  assert.equal(env.queue[1].cancelled, undefined);
+  assert.equal(env.queue.length, 2, 'a permission answer does not create a new task');
+  await env.cleanup();
+}
+
+{
+  const env = await setupInlineVoiceConfirmation();
+  await env.submit('正在处理的普通任务');
+  const queued = await env.voice.submitText('另一个任务');
+  for (const answer of ['取消', '允许，但保留图片']) assert.equal((await env.reply(answer)).ok, false);
+  assert.equal((await env.reply('允许', { action: 'confirm', task_id: queued.task_id })).ok, false);
+  assert.ok(env.queue.every(entry => !entry.cancelled), 'a stale confirmation cannot revise or cancel unrelated work');
+  assert.equal(env.queue.length, 2);
+  await env.cleanup();
+}
+
+{
+  const env = await setupInlineVoiceConfirmation();
+  const first = await env.submit('删除第一个项目'); const firstDecision = env.openApproval(first, 0);
+  const second = await env.submit('删除第二个项目'); const secondDecision = env.openApproval(second, 1);
+  assert.equal((await env.reply('允许')).reason, 'ambiguous_confirmation_target');
+  assert.equal((await env.reply('取消')).reason, 'ambiguous_confirmation_target');
+  assert.equal((await env.reply('允许，但保留图片', { action: 'revise', request: '保留图片' })).reason, 'ambiguous_confirmation_target');
+  assert.deepEqual(env.confirmed, []);
+  assert.equal((await env.reply('允许', { action: 'confirm', task_id: second.task_id })).confirmed, true);
+  assert.equal((await secondDecision).decision, 'allow');
+  assert.ok(env.approvals.getInline('approval-run-0'), 'the other pending card stays unresolved');
+  assert.deepEqual(env.confirmed, [['approval-run-1']]);
+  await env.cleanup(); assert.equal((await firstDecision).decision, 'deny');
+}
+
+{
+  const env = await setupInlineVoiceConfirmation();
+  const first = await env.submit('删除两个项目'); env.openApproval(first, 0);
+  const workflow = await env.submit('导入卡建房');
+  env.queue[1].finished = true;
+  env.queue[1].done.resolve({ ok: true, status: 'awaiting_confirmation', pendingWorkflow: { kind: 'imported_card_session_setup' } }); await tick();
+  const ambiguous = await env.reply('允许');
+  assert.equal(ambiguous.ok, false);
+  assert.equal(ambiguous.reason, 'ambiguous_confirmation_target');
+  assert.deepEqual(env.confirmed, []);
+  assert.equal(env.queue.length, 2);
+  const selected = await env.reply('可以', { action: 'confirm', request: '可以', task_id: workflow.task_id });
+  assert.equal(selected.accepted, true, 'an explicitly selected import preview remains lenient');
+  assert.equal(env.queue[2].options.context.pendingActionSubmissionId, workflow.task_id);
+  assert.deepEqual(env.confirmed, [], 'selecting a workflow never grants the unrelated inline approval');
+  await env.cleanup();
+}
+
+{
+  const env = await setupInlineVoiceConfirmation();
+  const first = await env.submit('旧通话任务'); env.openApproval(first, 0);
+  env.voice.onCallState({ status: 'idle' });
+  const nextTarget = env.voice.getTarget(); await env.voice.beforeRealtimeStart(nextTarget);
+  env.voice.refreshApprovals();
+  assert.equal(env.shown.at(-1), null, 'the new call does not display or announce the old call permission');
+  assert.equal(env.voice.canShowApproval('approval-run-0'), false, 'the new call is not a visible host for an older call permission');
+  const foreign = await env.voice.handleTaskRequest({ target: nextTarget, inputText: '允许', args: { action: 'confirm', task_id: first.task_id } });
+  assert.equal(foreign.ok, false, 'an explicit task ID cannot cross the call boundary');
+  assert.deepEqual(env.confirmed, []);
+  assert.equal(env.queue.length, 1);
+  await env.cleanup();
+}
+for (const mode of ['inline', 'workflow']) {
+  const env = await setupInlineVoiceConfirmation();
+  const preview = await env.submit('预览删除旧项目');
+  env.queue[0].finished = true;
+  env.queue[0].done.resolve({ ok: true, status: 'awaiting_confirmation', pendingWorkflow: { kind: 'maid_pending_action' } }); await tick();
+  const latest = await env.submit('改为删除新项目');
+  // A new instruction closes the old preview through AgentTaskRuntime, after
+  // that preview's submission promise already returned awaiting_confirmation.
+  env.voice.consumeTrace(projectMaidRunToTraceView({ id: 'old-preview-run', status: 'cancelled', summary: '旧清单已作废',
+    metadata: { submissionSource: 'maid_realtime', submissionId: preview.task_id } }));
+  assert.equal(env.voice.getTasks().recent.find(task => task.task_id === preview.task_id).status, 'cancelled');
+  if (mode === 'inline') env.openApproval(latest, 1);
+  else {
+    env.queue[1].finished = true;
+    env.queue[1].done.resolve({ ok: true, status: 'awaiting_confirmation', pendingWorkflow: { kind: 'maid_pending_action' } }); await tick();
+  }
+  const allowed = await env.reply('允许');
+  assert.equal(allowed.ok, true, 'a superseded preview must not make the current permission ambiguous');
+  if (mode === 'inline') assert.equal(allowed.confirmed, true);
+  else assert.equal(env.queue[2].options.context.pendingActionSubmissionId, latest.task_id);
+  await env.cleanup();
+}
+console.log('ok - real inline approvals own voice confirmation, revisions and cancellation across queued work and calls');
+
+{
+  const appSource = await readFile(new URL('../../src/scripts/ui/app.js', import.meta.url), 'utf8');
+  const source = appSource.match(/onMaidTrace:\s*([\s\S]*?),\r?\n\s*onCancelMaidRun:/)?.[1];
+  assert.ok(source, 'the app connects the shared trace callback');
+  let inputConsumed = true, voiceConsumed = false;
+  const seen = [];
+  const onMaidTrace = runInNewContext(`(${source})`, {
+    maidCommandInputRuntime: { applyTraceView: view => { seen.push(['input', view]); return inputConsumed; } },
+    maidVoiceRuntime: { consumeTrace: view => { seen.push(['voice', view]); return voiceConsumed; } },
+  });
+  const view = { runId: 'run', submissionId: 'submission', source: 'maid_realtime' };
+  assert.equal(onMaidTrace(view), true);
+  assert.deepEqual(seen, [['input', view], ['voice', view]], 'an open command input must not short-circuit the voice approval mapping');
+  inputConsumed = false; voiceConsumed = true; assert.equal(onMaidTrace(view), true);
+  voiceConsumed = false; assert.equal(onMaidTrace(view), false, 'unclaimed traces still fall back to the execution panel');
+}
 
 {
   let context = { sessionId: 'original', userSelection: [{ id: 'image-one' }] }, seq = 0;
@@ -154,9 +333,17 @@ const target = { supported: true, sessionId: 'maid', uiMode: 'maid', maidCallId:
   session.handle({ type: 'session.delegation.created', offset_ms: 400, delegation: { id: 'delegation', target: 'client' } });
   groups[0].fragments.push({ delta: '设置', startMs: 100, endMs: 400 }); session.handle({ type: 'session.input_transcript.delta' }); await settle();
   assert.equal(requests[0].args.request, '打开设置');
+  const acceptedFeedback = sent.find(event => event.delegation_id === 'delegation');
+  assert.equal(acceptedFeedback.type, 'session.thinking.append');
+  assert.equal(JSON.parse(acceptedFeedback.content).accepted, true);
+  assert.equal(JSON.parse(acceptedFeedback.content).message, undefined, 'Live accepted feedback contains neutral data rather than progress wording');
   session.handle({ type: 'session.delegation.created', offset_ms: 400, delegation: { id: 'delegation', target: 'client' } }); await settle(); assert.equal(requests.length, 1);
   session.notifyTaskUpdate({ target, requestId: 'delegation', task_id: 'live-task', status: 'succeeded', request: '长请求'.repeat(200), message: '完成' });
   assert(sent.some(event => event.type === 'session.commentary.append' && event.delegation_id === 'delegation' && event.content.includes('完成')));
+  groups[0].fragments.push({ delta: '现在进度如何', startMs: 500, endMs: 700 });
+  session.handle({ type: 'session.delegation.created', offset_ms: 700, delegation: { id: 'live-status', target: 'client' } }); await settle();
+  assert.equal(requests.at(-1).args.action, 'status');
+  assert.equal(sent.find(event => event.delegation_id === 'live-status').type, 'session.commentary.append', 'explicit status queries retain spoken feedback');
   session.dispose(); assert.equal(timers.size, 0);
 }
 
@@ -174,7 +361,9 @@ const target = { supported: true, sessionId: 'maid', uiMode: 'maid', maidCallId:
   const sent = [], events = [];
   const gemini = createGeminiLiveProtocol({ profile: { provider: 'gemini_live', model: 'gemini-3.1-flash-live-preview', maidTools: tools }, instructions: 'test', send: value => sent.push(value), emit: value => events.push(value), ready() {}, play() {}, clear() {} });
   gemini.start(); assert.equal(sent[0].setup.tools[0].functionDeclarations[0].name, 'maid_task');
-  gemini.receive({ toolCall: { functionCalls: [{ id: call.id, name: call.name, args: call.arguments }] } }); assert.equal(events[0].type, 'maid.tools.requested');
+  gemini.receive({ toolCall: { functionCalls: [{ id: call.id, name: call.name, args: call.arguments }] } });
+  assert.equal(events[0].type, 'response.created');
+  assert.equal(events[1].type, 'maid.tools.requested'); assert.equal(events[1].response_id, events[0].response.id);
   gemini.toolResults([{ call, result }]); assert.deepEqual(sent[1].toolResponse.functionResponses[0], { id: call.id, name: call.name, response: result });
   gemini.taskUpdate('finished'); assert.equal(sent[2].clientContent.turnComplete, true);
   const novaSent = [], novaEvents = [];
@@ -373,6 +562,17 @@ for (const normalized of [false, true]) {
   assert.equal(env.updates.length, 2, 'no misleading second completion is emitted');
 }
 {
+  const gate = deferred(), env = setupConfirmation({ gate });
+  await env.preview();
+  const [first, repeated] = await Promise.all([env.request('允许'), env.request('允许')]);
+  assert.equal(repeated.task_id, first.task_id, 'concurrent confirmations reuse the continuation accepted by the serial submit queue');
+  assert.equal(repeated.reused, true);
+  assert.equal(env.submissions.length, 2, 'only the preview and one continuation are submitted');
+  gate.resolve();
+  assert.equal((await env.resultOf(first)).ok, true);
+  assert.deepEqual(env.deleted, ['a', 'b']);
+}
+{
   const env = setupConfirmation();
   await env.preview();
   assert.equal((await env.request('好', { action: 'confirm', request: '好' })).accepted, undefined);
@@ -388,7 +588,7 @@ for (const normalized of [false, true]) {
     getCommandRuntime: () => ({
       submitVoiceTask: (input, options) => { const done = deferred(); queue.push({ input, options, done }); return done.promise; },
       cancelSubmission: () => { controller.abort(); queue[0].done.resolve({ status: 'cancelled' }); return true; },
-    }), confirmApproval: ids => approvals.confirmByVoice(ids),
+    }), getApproval: id => approvals.getInline(id), confirmApproval: ids => approvals.confirmByVoice(ids),
   });
   const task = await voice.request({ target, args: { action: 'execute', request: '删除两个项目' } });
   const decision = approvals.request({ kind: 'delete_fixture', operationType: 'delete' }, { runId: task.task_id, signal: controller.signal });
@@ -460,4 +660,130 @@ console.log('ok - conditional permissions revise, repeated permissions reuse res
   assert.equal(queue[2].options.context.pendingActionSubmissionId, undefined, 'a follow-up is a new request, not a continuation of the old list');
   console.log('ok - voice confirm revisions and cancels target the waiting task; follow-ups do not inherit continuation authority');
 }
+// Receipt policy is tied to actual audio and the originating input, not transcript wording.
+{
+  const accepted = { ok: true, accepted: true, task_id: 'queued-task', status: 'queued', message: 'Already working on it', request: 'full request', has_references: false };
+  const setup = ({ provider = 'openai', audible = true, result = accepted } = {}) => {
+    const sent = [], requests = [];
+    const client = { sendEvent: event => sent.push(event), sendToolResults: results => sent.push({ results }), requestResponse: () => sent.push({ type: 'response.create' }), sendTaskUpdate: text => sent.push({ text }) };
+    const session = createRealtimeMaidTaskSession({ target, provider, getClient: () => client, isOutputAudible: () => audible,
+      handleTaskRequest: async value => { requests.push(value); return typeof result === 'function' ? result(value) : result; } });
+    const input = (id = 'input', text = 'open settings') => session.handle({ type: 'conversation.item.input_audio_transcription.completed', item_id: id, transcript: text });
+    const start = id => session.handle({ type: 'response.created', response: { id } });
+    const done = (id, args = { action: 'execute', request: id }) => session.handle({ type: 'response.done', response: { id, status: 'completed', output: [{ type: 'function_call', call_id: `tool-${id}`, name: 'maid_task', arguments: JSON.stringify(args) }] } });
+    const replies = () => sent.filter(event => event.type === 'response.create').length;
+    return { session, sent, requests, input, start, done, replies };
+  };
+  for (const provider of ['openai', 'xai_voice', 'qwen_audio_realtime', 'step_realtime', 'custom']) {
+    for (const mode of ['audio', 'text', 'muted', 'suppressed', 'interrupted']) {
+      const env = setup({ provider, audible: mode !== 'muted' });
+      env.input(); env.start('r');
+      env.session.handle({ type: mode === 'text' ? 'response.output_audio_transcript.delta' : 'response.output_audio.delta', response_id: 'r', delta: 'data', playbackSuppressed: mode === 'suppressed' });
+      if (mode === 'interrupted') env.session.handle({ type: 'output_audio_buffer.cleared', response_id: 'r' });
+      env.done('r'); await tick();
+      assert.equal(env.replies(), mode === 'audio' ? 0 : 1, `${provider}: ${mode} receipt continuation`);
+      const receipt = provider === 'openai' ? JSON.parse(env.sent.find(event => event.item?.type === 'function_call_output').item.output) : env.sent.find(event => event.results).results[0].result;
+      assert.deepEqual(receipt, { ok: true, accepted: true, task_id: 'queued-task', status: 'queued', request: 'full request', request_truncated: false, has_references: false });
+      env.session.dispose();
+    }
+  }
+  {
+    const env = setup(); env.input(); env.start('r');
+    env.session.handle({ type: 'output_audio_buffer.started', response_id: 'r' }); env.done('r'); await tick();
+    assert.equal(env.replies(), 0);
+    env.session.handle({ type: 'output_audio_buffer.stopped', response_id: 'r' });
+    assert.equal(env.replies(), 0, 'played WebRTC audio prevents an extra acknowledgement'); env.session.dispose();
+  }
+  {
+    const env = setup(); env.input(); env.start('r'); env.done('r'); await tick();
+    assert.equal(env.replies(), 1); env.start('ack');
+    env.session.handle({ type: 'response.output_audio.delta', response_id: 'ack', delta: 'data' });
+    assert.deepEqual(env.session.takeResponseContext('ack'), { maidTranscriptKind: 'ack', maidTranscriptAutomatic: true, maidTranscriptContentOnly: false });
+    assert.equal(env.session.takeResponseContext('ack'), null, 'audio does not consume response context; commit reads it once');
+    env.done('ack'); await tick(); assert.equal(env.replies(), 1, 'same input cannot request a second accepted supplement');
+    env.input('next'); env.start('next'); env.done('next'); await tick();
+    assert.equal(env.replies(), 2, 'audio in the preceding input does not silence the next input'); env.session.dispose();
+  }
+  for (const [action, result] of [
+    ['status', accepted], ['revise', accepted], ['confirm', accepted], ['cancel', { ok: true, cancelled: 1 }],
+    ['execute', { ...accepted, status: 'awaiting_confirmation' }], ['execute', { ...accepted, question: 'Which setting?' }],
+    ['execute', { ...accepted, responseType: 'clarify' }], ['execute', { ok: false, message: 'Task rejected' }],
+  ]) {
+    const env = setup({ result }); env.input(); env.start('r');
+    env.session.handle({ type: 'response.output_audio.delta', response_id: 'r', delta: 'data' });
+    env.done('r', { action, request: 'settings' }); await tick();
+    assert.equal(env.replies(), 1, `${action}/${result.status || result.responseType || result.ok} is not silenced`);
+    assert.deepEqual(JSON.parse(env.sent.find(event => event.item?.type === 'function_call_output').item.output), result);
+    env.session.dispose();
+  }
+  {
+    const env = setup(); env.input(); env.start('r');
+    env.session.handle({ type: 'response.output_audio.delta', response_id: 'r', delta: 'data' }); env.done('r'); await tick();
+    env.session.notifyTaskUpdate({ target, kind: 'confirmation', message: 'Allow deletion?' });
+    assert.equal(env.replies(), 1, 'a real permission still asks for a response'); env.start('permission');
+    assert.equal(env.session.takeResponseContext('permission'), null);
+    env.session.handle({ type: 'response.done', response: { id: 'permission', status: 'completed' } });
+    env.session.notifyTaskUpdate({ target, status: 'succeeded', message: 'Actual task result' });
+    assert.equal(env.replies(), 2, 'actual results still request a response'); env.session.dispose();
+  }
+  {
+    const gate = deferred(), env = setup({ result: () => gate.promise });
+    env.session.handle({ type: 'input_audio_buffer.speech_started', item_id: 'old' }); env.input('old', 'old task'); env.start('old'); env.done('old');
+    env.session.handle({ type: 'input_audio_buffer.speech_started', item_id: 'new' });
+    env.input('old', 'late old transcript'); gate.resolve(accepted); await tick();
+    assert.equal(env.replies(), 0, 'late old transcription neither rewinds current input nor ends new speech');
+    env.input('new', 'new task'); env.start('new'); env.done('new'); await tick();
+    assert.equal(env.requests.at(-1).inputText, 'new task'); assert.equal(env.replies(), 1); env.session.dispose();
+  }
+  for (const provider of ['gemini_live', 'nova_sonic']) {
+    const env = setup({ provider }); env.input(); env.start('r'); env.done('r'); await tick();
+    assert.equal(env.sent.filter(event => event.results).length, 1, 'native protocol receipt is mandatory');
+    assert.equal(env.sent.find(event => event.results).results[0].result.message, undefined);
+    assert.equal(env.replies(), 0, 'native provider resumes from its own tool-result protocol'); env.session.dispose();
+  }
+  console.log('ok - accepted receipts retain protocol data, use audible input scope and supplement at most once; controls/results remain spoken');
+}
+
+// Native transcription may finalize after response.created; task evidence must use that input.
+for (const provider of ['gemini_live', 'nova_sonic']) {
+  const requests = [], events = [], sent = [];
+  const session = createRealtimeMaidTaskSession({ target, provider, getClient: () => ({ sendToolResults() {} }),
+    handleTaskRequest: async value => { requests.push(value); return { ok: true }; } });
+  const options = { profile: { provider, model: 'fixture' }, instructions: '', send: value => sent.push(value), emit: event => { events.push(event); session.handle(event); }, ready() {}, play() {}, clear() {} };
+  session.handle({ type: 'conversation.item.input_audio_transcription.completed', item_id: 'previous', transcript: 'old task' });
+  const protocol = provider === 'gemini_live' ? createGeminiLiveProtocol(options) : createNovaSonicProtocol(options);
+  if (provider === 'gemini_live') {
+    protocol.receive({ serverContent: { inputTranscription: { text: '允许' } } });
+    protocol.receive({ serverContent: { outputTranscription: { text: '好的' } } });
+    protocol.receive({ serverContent: { modelTurn: { parts: [{ inlineData: { data: 'AA==', mimeType: 'audio/pcm;rate=24000' } }] } } });
+    protocol.receive({ toolCall: { functionCalls: [{ id: 'confirm', name: 'maid_task', args: { action: 'confirm' } }] } });
+  } else {
+    protocol.receive({ event: { completionStart: { completionId: 'current' } } });
+    protocol.receive({ event: { contentStart: { completionId: 'current', contentId: 'input', role: 'USER', type: 'TEXT', additionalModelFields: '{"generationStage":"FINAL"}' } } });
+    protocol.receive({ event: { textOutput: { contentId: 'input', content: '允许' } } });
+    protocol.receive({ event: { contentEnd: { contentId: 'input' } } });
+    protocol.receive({ event: { audioOutput: { completionId: 'current', content: 'AA==' } } });
+    protocol.receive({ event: { contentStart: { completionId: 'current', contentId: 'tool', role: 'TOOL' } } });
+    protocol.receive({ event: { toolUse: { contentId: 'tool', toolUseId: 'confirm', toolName: 'maid_task', content: '{"action":"confirm"}' } } });
+    protocol.receive({ event: { contentEnd: { contentId: 'tool', stopReason: 'TOOL_USE' } } });
+  }
+  await tick(); assert.equal(requests[0].inputText, '允许'); assert.notEqual(requests[0].inputItemId, 'previous');
+  assert.equal(events.find(event => event.type === 'response.output_audio.delta').playbackSuppressed, false);
+  protocol.cancel();
+  if (provider === 'gemini_live') protocol.receive({ serverContent: { modelTurn: { parts: [{ inlineData: { data: 'AA==', mimeType: 'audio/pcm' } }] } } });
+  else protocol.receive({ event: { audioOutput: { completionId: 'current', content: 'AA==' } } });
+  assert.equal(events.at(-1).playbackSuppressed, true); session.dispose();
+}
+{
+  for (const factory of [createJsonRealtimeProtocol, createCustomRealtimeProtocol]) {
+    const events = [], played = [];
+    const protocol = factory({ profile: { provider: 'xai_voice' }, sessionConfig: {}, send() {}, emit: event => events.push(event), ready() {}, play: value => played.push(value), clear() {} });
+    protocol.receive({ type: 'response.created', response: { id: 'audio' } });
+    protocol.receive({ type: 'response.output_audio.delta', delta: 'AA==' });
+    assert.equal(events.at(-1).response_id, 'audio'); assert.equal(events.at(-1).playbackSuppressed, false);
+    protocol.cancel(); protocol.receive({ type: 'response.output_audio.delta', response_id: 'audio', delta: 'BB==' });
+    assert.equal(played.length, 1, 'cancelled playback is not counted as audible');
+  }
+}
+console.log('ok - adapter audio metadata preserves actual playback and native late transcripts bind to the current task input');
 console.log('maid realtime tasks: independent lifecycle, frozen targets, revision/cancel, actual results, original UI routing and provider adapters passed');

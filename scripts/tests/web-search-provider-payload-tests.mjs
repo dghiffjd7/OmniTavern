@@ -134,6 +134,7 @@ const sourceCallback = () => {};
     provider: 'deepseek',
     baseUrl: 'https://api.deepseek.com/v1',
     model: 'deepseek-v4-pro',
+    fallbackToolDefinitions: [{ name: 'web.search', schema: { type: 'object', properties: {} } }],
   });
   const provider = new DeepseekProvider({
     provider: 'deepseek',
@@ -141,11 +142,12 @@ const sourceCallback = () => {};
     baseUrl: 'https://api.deepseek.com/v1',
     model: 'deepseek-v4-pro',
   });
-  const prepared = provider.prepareResponsesRequest(messages, plan.requestOptions);
-  assert.equal(prepared.url, 'https://api.deepseek.com/responses');
-  assert.deepEqual(prepared.body.tools, [{ type: 'web_search' }]);
-  assert.equal(prepared.body.tool_choice, 'auto');
-  assert.equal(Object.hasOwn(prepared.body, 'include'), false);
+  const prepared = provider.prepareChatRequest(messages, plan.requestOptions);
+  assert.equal(prepared.url, 'https://api.deepseek.com/v1/chat/completions');
+  assert.equal(prepared.payload.tools[0].type, 'function');
+  assert.equal(prepared.payload.tools[0].function.name, 'web_search');
+  assert.equal(prepared.payload.tool_choice, 'auto');
+  assert.equal(Object.hasOwn(prepared.payload, 'include'), false);
 }
 
 console.log('ok - native web search schemas reach each provider payload without leaking callbacks');

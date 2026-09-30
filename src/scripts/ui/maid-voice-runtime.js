@@ -7,7 +7,7 @@ import { createMaidVoiceTaskRuntime } from './maid-voice-task-runtime.js';
 import { createMaidVoiceOrbUi } from './maid-voice-orb-ui.js';
 
 export const buildMaidVoiceSnapshot = ({ inputText = '', maidPrompt, conversationContext, context = {} } = {}) => {
-  const messages = buildMaidChatResponderMessages({ input: inputText, maidPrompt, conversationContext, context });
+  const messages = buildMaidChatResponderMessages({ input: inputText, maidPrompt, conversationContext, context, voiceConversation: true });
   const voiceRules = getLocalizedPromptText('maid.voice.conversation');
   return { instructions: [messages[0].content, voiceRules, messages[1].content].join('\n\n'), messages };
 };
@@ -41,10 +41,15 @@ export const createMaidVoiceRuntime = ({
     cancelPendingAction,
     onChange: state => orb?.setTasks(state),
     onResult: update => { if (isTargetCurrent(update.target)) getCallAppRuntime()?.runtime?.notifyTaskUpdate?.(update); },
+    getApproval: taskId => {
+      const runId = runViews.get(taskId)?.runId;
+      return runId ? getApproval(runId) : null;
+    },
     confirmApproval: taskIds => confirmApproval((taskIds || []).map(id => runViews.get(id)?.runId).filter(Boolean)) === true,
   });
   const findVoiceApproval = () => {
     for (const [taskId, view] of runViews) {
+      if (!isTargetCurrent(tasks.getTaskMeta(taskId)?.target)) continue;
       const approval = getApproval?.(view.runId);
       if (approval) return { ...approval, taskId };
     }
@@ -146,11 +151,12 @@ export const createMaidVoiceRuntime = ({
     if (!['realtime', 'stt'].includes(choice)) return;
     await settingsStore.setVoiceInputMode(choice); sync();
   };
-  const buildSemanticSnapshot = async ({ target, inputText = '' } = {}) => {
+  const buildSemanticSnapshot = async ({ target, inputText = '', realtimeHistory = null } = {}) => {
     if (!isTargetCurrent(target)) throw new Error(t('通话已结束'));
-    const conversationContext = await prepareConversationContext({ input: inputText });
+    const conversationContext = await prepareConversationContext({ input: inputText, realtimeHistory });
     if (!isTargetCurrent(target)) throw new Error(t('通话已结束'));
     const snapshot = buildMaidVoiceSnapshot({ inputText, maidPrompt: settingsStore.getMaidPrompt(), conversationContext, context: getAppContext() });
+    snapshot.realtimeTranscripts = conversationContext?.realtimeTranscripts || [];
     snapshot.instructions += `\n\nCurrent maid task state (application data): ${JSON.stringify(tasks.getState(target.maidCallId))}`;
     onContextInjected?.({ conversationContext });
     onDebugSnapshot?.({ source: 'maid_realtime', input: inputText, requestPrompt: snapshot.instructions });
@@ -182,12 +188,15 @@ export const createMaidVoiceRuntime = ({
       const taskId = String(view.submissionId || '').trim();
       if (taskId) {
         runViews.set(taskId, view);
+        tasks.updateTaskFromTrace(view);
         while (runViews.size > 20) runViews.delete(runViews.keys().next().value);
         refreshApprovals();
       }
       return true;
     },
-    canShowApproval: runId => Boolean(orb && (starting || activeTarget) && [...runViews.values()].some(view => view.runId === runId && !view.terminal)),
+    canShowApproval: runId => Boolean(orb && (starting || activeTarget) && [...runViews].some(([taskId, view]) => (
+      view.runId === runId && !view.terminal && isTargetCurrent(tasks.getTaskMeta(taskId)?.target)
+    ))),
     refreshApprovals,
     getState, getTarget, isTargetCurrent, sync, action, chooseMode, openSettings, cancelInput, endCall, beforeRealtimeStart, onCallState, buildSemanticSnapshot,
     commitUserMessage: options => commit({ ...options, role: 'user', id: options.meta?.realtimeItemId || makeId() }),

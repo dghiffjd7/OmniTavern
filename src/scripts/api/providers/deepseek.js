@@ -17,6 +17,16 @@ export class DeepseekProvider extends OpenAIProvider {
     super(deepseekConfig);
   }
 
+  prepareResponsesRequest(messages, options = {}, context = {}) {
+    // Responses uses reasoning.effort; dropping the Chat Completions toggle would
+    // re-enable the provider's default thinking mode.
+    const responsesOptions = { ...options };
+    if (!options.reasoning && options.thinking?.type === 'disabled') {
+      responsesOptions.reasoning = { effort: 'none' };
+    }
+    return super.prepareResponsesRequest(messages, responsesOptions, context);
+  }
+
   /**
    * Get available Deepseek models
    */

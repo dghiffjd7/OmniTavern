@@ -71,12 +71,13 @@ import { createProviderToolPendingContinuationPlanner } from '../agent/provider-
 import { resolveProviderToolCurrentRunnerClient } from '../agent/provider-tool-current-runner-client.js';
 import { createProviderToolPendingResumeExecutor } from '../agent/provider-tool-pending-resume.js';
 import { registerChatEmitAgentTools } from '../agent/tools/chat-emit-tools.js';
-import { registerContactProfileAgentTools } from '../agent/tools/contact-profile-tools.js';
+import { MAID_CONTACT_PROFILE_PERMISSION_RULES, registerContactProfileAgentTools } from '../agent/tools/contact-profile-tools.js';
 import { registerImageAgentTools } from '../agent/tools/image-tools.js';
 import { registerMemoryAgentTools } from '../agent/tools/memory-tools.js';
 import { registerVariableAgentTools } from '../agent/tools/variable-tools.js';
 import { registerWorldbookAgentTools } from '../agent/tools/worldbook-tools.js';
 import { createMaidAssistantAgent } from '../agent/maid-assistant-agent.js';
+import { buildMaidResultBasis } from '../agent/maid-result-basis.js';
 import { createMaidCapabilityRoutingRuntime } from '../agent/maid-capability-routing.js';
 import { createMaidChatResponder } from '../agent/maid-chat-responder.js';
 import {
@@ -3029,6 +3030,7 @@ const initApp = async () => {
   );
   const agentPermissionEvaluator = createAgentPermissionEvaluator({
     defaultDecision: 'ask',
+    rules: MAID_CONTACT_PROFILE_PERMISSION_RULES,
   });
   const agentToolRegistry = createAgentToolRegistry({
     permissionEvaluator: agentPermissionEvaluator,
@@ -3474,7 +3476,13 @@ const initApp = async () => {
       }
     },
   });
-  registerContactProfileAgentTools(agentToolRegistry, { contactProfileStore });
+  registerContactProfileAgentTools(agentToolRegistry, {
+    contactProfileStore,
+    getMaidScopeContext: () => {
+      const roleCardId = String(personaStore.getActive?.()?.id || '');
+      return { roleCardId, scopeId: getPersonaScopeKey(roleCardId) };
+    },
+  });
   registerChatEmitAgentTools(agentToolRegistry);
   registerMemoryAgentTools(agentToolRegistry, {
     getMemoryUpdateRuntime: () => currentMemoryUpdateRuntime,
@@ -3590,6 +3598,10 @@ const initApp = async () => {
   registerGroupChatAgentTools(agentToolRegistry, {
     contactsStore,
     chatStore,
+    getCurrentContext: () => {
+      const roleCardId = String(personaStore.getActive?.()?.id || '');
+      return { roleCardId, sessionId: chatStore.getCurrent(), uiMode, scopeId: getPersonaScopeKey(roleCardId) };
+    },
     enterChatRoom: (...args) => enterChatRoom(...args),
     refreshChatAndContacts: (...args) => refreshChatAndContacts(...args),
     setActiveSession: sessionId => window.appBridge.setActiveSession(sessionId),
@@ -4085,9 +4097,10 @@ const initApp = async () => {
     regexStore,
     scriptStore,
   });
-  const prepareMaidConversationContext = ({ input = '' } = {}) => (
+  const prepareMaidConversationContext = ({ input = '', realtimeHistory = null } = {}) => (
     maidConversationStore.getContextSnapshotAsync({
       query: input,
+      realtimeHistory,
       validateResource: validateMaidSemanticResource,
     })
   );
@@ -4107,6 +4120,7 @@ const initApp = async () => {
         input,
         status: safeResult.status || (safeResult.ok ? 'succeeded' : 'failed'),
         responseType: safeResult.responseType || '',
+        resultBasis: buildMaidResultBasis(safeResult),
         message: safeResult.message || safeResult.reason || '',
         toolName: safeResult.plan?.toolName || safeResult.output?.toolName || '',
         featureId: safeResult.plan?.featureId || '',
@@ -4204,6 +4218,12 @@ const initApp = async () => {
     logger,
   });
   const maidAssistantAgent = createMaidAssistantAgent({
+    getCurrentContext: () => ({
+      roleCardId: String(personaStore.getActive?.()?.id || ''),
+      sessionId: chatStore.getCurrent(), uiMode,
+      contactsScopeId: contactsStore.scopeId, chatScopeId: chatStore.scopeId,
+      contactsScopeToken: contactsStore._scopeToken, chatScopeToken: chatStore._scopeToken,
+    }),
     getSkillCatalog: async () => { await maidSkillStore.ready; return maidSkillStore.list(); },
     toolRegistry: agentToolRegistry,
     agentTaskRuntime,
@@ -4250,6 +4270,11 @@ const initApp = async () => {
   const maidToolConfirmationRuntime = createMaidToolConfirmationRuntime({
     allowStore: maidToolSafetyAllowStore,
     choose: appChoice,
+    getCurrentScope: () => ({
+      roleCardId: String(personaStore.getActive?.()?.id || ''),
+      sessionId: chatStore.getCurrent(),
+      uiMode,
+    }),
     canShowInline: runId => maidCommandInputRuntime?.hasRunCard?.(runId) === true
       || executionFlowRuntime?.hasRunCard?.(runId) === true
       || maidVoiceRuntime?.canShowApproval?.(runId) === true,
@@ -4733,6 +4758,8 @@ const initApp = async () => {
           const input = String(opts.input || opts.prompt || opts.text || '').trim();
           const maidTurnContext = {
             sessionId: opts.sessionId || chatStore.getCurrent(),
+            roleCardId: String(personaStore.getActive?.()?.id || ''),
+            agentId: 'maid-assistant',
             uiMode: opts.uiMode || uiMode,
             activePage: opts.activePage || activePage,
             userSelection: Array.isArray(opts.userSelection) ? opts.userSelection : maidSelectionMode.getItems(),
@@ -22467,6 +22494,9 @@ const initApp = async () => {
       if (rpToolbar) rpToolbar.style.display = 'none';
       if (backToListBtn) backToListBtn.style.display = '';
     }
+    // 聊天室挂在聊天页里；从联系人/动态页直接进房（如添加好友后“开始聊天”、女仆打开会话）
+    // 须先切到聊天页，否则进房会隐藏底部栏，页面却停在原页
+    if (activePage !== 'chat') switchPage('chat', { animate: false });
     const enterRequest = beginChatEnterRequest(sid);
     const contact = contactsStore.getContact(sid);
     const chatAvatarEl = document.getElementById('current-chat-avatar');
@@ -24226,7 +24256,7 @@ const initApp = async () => {
     store: maidSkillStore,
     resolveTaskContext: maidAssistantAgent.prepareSkillTaskContext,
     inputPersistence: createMaidTaskInputPersistence({ referenceStore: imageGenerationReferenceStore }),
-    getAppContext: () => ({ sessionId: chatStore.getCurrent(), uiMode, activePage, userSelection: maidSelectionMode.getItems() }),
+    getAppContext: () => ({ sessionId: chatStore.getCurrent(), roleCardId: String(personaStore.getActive?.()?.id || ''), agentId: 'maid-assistant', uiMode, activePage, userSelection: maidSelectionMode.getItems() }),
     validateTask: createMaidSkillTaskValidator({ resolveConfig: resolveMaidTaskRuntimeConfig, checkVision: checkMaidVisionInput }),
   });
   const maidSkillInput = createMaidSkillInput({ store: maidSkillStore, runtime: maidSkillRuntime, documentRef: document,
@@ -24261,7 +24291,7 @@ const initApp = async () => {
       // hasConfiguredMaidProfile 在后面才赋值为真实实现，这里必须在调用时再读取
       matchMaidIntent, hasConfiguredMaidProfile: () => hasConfiguredMaidProfile(), resolveMaidRuntimeConfig: resolveMaidTaskRuntimeConfig,
       logger, checkMaidVisionInput, maidSettingsStore, buildAppFeatureSearchContextText,
-      getAppContext: () => ({ sessionId: chatStore.getCurrent(), uiMode, activePage, userSelection: maidSelectionMode.getItems() }),
+      getAppContext: () => ({ sessionId: chatStore.getCurrent(), roleCardId: String(personaStore.getActive?.()?.id || ''), agentId: 'maid-assistant', uiMode, activePage, userSelection: maidSelectionMode.getItems() }),
       maidAssistantAgent,
       resolveSelectionRegion: (regionId, context) => context.source === 'maid_realtime' && (context.sessionId !== chatStore.getCurrent() || context.activePage !== activePage)
         ? { ok: false, reason: 'region_scope_changed', regionId } : maidSelectionMode.resolveCaptureRegion(regionId),
@@ -24292,6 +24322,14 @@ const initApp = async () => {
     matchMediaFn: typeof matchMedia === 'function' ? query => matchMedia(query) : null,
     windowLike: window,
     getApproval: runId => maidToolConfirmationRuntime.getInline(runId),
+    getPendingApproval: runId => maidToolConfirmationRuntime.getPendingForRun(runId),
+    resolveBoundApproval: (binding, action) => maidToolConfirmationRuntime.resolveBound(binding, action),
+    getAppContext: () => ({
+      roleCardId: String(personaStore.getActive?.()?.id || ''),
+      sessionId: chatStore.getCurrent(),
+      uiMode,
+    }),
+    onTextApprovalReply: recordMaidTurnFromResult,
     onApprovalDecision: resolveMaidInlineApproval,
   });
 
@@ -24343,7 +24381,12 @@ const initApp = async () => {
     getViewportSize,
     getBallDragRuntime: () => modeSwitchInteractionRuntime,
     // 女仆流首选画布 = 指令条白色结果流（结构化 trace 卡原位并入，避免双流）
-    onMaidTrace: view => maidCommandInputRuntime?.applyTraceView?.(view) === true || maidVoiceRuntime?.consumeTrace(view) === true,
+    onMaidTrace: view => {
+      const inputConsumed = maidCommandInputRuntime?.applyTraceView?.(view) === true;
+      // 输入条承载卡片时，语音仍需记录任务与 run 的归属，口头确认才能找到当前确认项。
+      const voiceConsumed = maidVoiceRuntime?.consumeTrace(view) === true;
+      return inputConsumed || voiceConsumed;
+    },
     onCancelMaidRun: ({ runId = '' } = {}) => maidCommandInputRuntime?.cancelActive?.({ runId }),
     getApproval: runId => maidToolConfirmationRuntime.getInline(runId),
     onApprovalDecision: resolveMaidInlineApproval,
@@ -31776,7 +31819,7 @@ const initApp = async () => {
     documentRef: document, windowLike: window, modeSwitchEl: modeSwitch,
     settingsStore: maidSettingsStore, conversationStore: maidConversationStore,
     prepareConversationContext: prepareMaidConversationContext,
-    getAppContext: () => ({ sessionId: chatStore.getCurrent(), uiMode, activePage, userSelection: maidSelectionMode.getItems() }),
+    getAppContext: () => ({ sessionId: chatStore.getCurrent(), roleCardId: String(personaStore.getActive?.()?.id || ''), agentId: 'maid-assistant', uiMode, activePage, userSelection: maidSelectionMode.getItems() }),
     getCommandRuntime: () => maidCommandInputRuntime,
     getCallAppRuntime: () => realtimeCallAppRuntime,
     cancelChatVoice: () => chatVoiceRuntime.cancel(), resolveVoiceConfig: resolveVoiceRuntimeConfig,
@@ -33111,6 +33154,8 @@ const initApp = async () => {
     },
     onSessionPanelClosed: (detail) => {
       if (detail?.jumpToContacts) {
+        // 在聊天室里添加好友后跳联系人页，须先正常出房，否则底部栏保持隐藏
+        if (isChatRoomVisible()) exitChatRoom({ animate: false });
         switchPage('contacts');
       }
     },

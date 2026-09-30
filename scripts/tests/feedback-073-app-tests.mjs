@@ -68,3 +68,44 @@ test('creating/opening a normal room while writing renders it in chat mode', asy
   assert.equal(sandbox.rpToolbar.style.display, 'none');
   assert.equal(sandbox.backToListBtn.style.display, '');
 });
+
+test('entering a room from contacts switches to the chat page before the room shell hides the bottom nav', async () => {
+  const calls = [];
+  const sandbox = {
+    uiMode: 'chat', activePage: 'contacts', activePersonaScopeKey: 'default',
+    chatStore: { getCurrent: () => 'alice' }, contactsStore: { getContact: () => ({ name: 'Alice' }) },
+    isRpSessionId: () => false, canEnterPersonaScopedSession: ({ sessionId }) => ({ allowed: sessionId !== 'blocked', reason: 'scope' }),
+    beginChatEnterRequest: noop, document: { getElementById: () => null },
+    switchPage: (page, options) => { calls.push(['switchPage', page, options?.animate]); sandbox.activePage = page; },
+    runSessionEnterFlow: async options => { calls.push(['enter', options.sessionId, sandbox.activePage, options.originPage]); return {}; },
+    recordDebugTraceEvent: noop, uiLog: noop, chatGeneratedImagePreview: { revealPendingForSession: noop },
+    syncRejectedFormatRepairBanner: noop, syncAgentSuggestionBanner: noop, syncProtocolRevealButtonState: noop, syncRealtimeCallButtonAvailability: noop,
+    maidGuideEmit: noop, window: {}, refreshChatAndContacts: noop, logger: { debug: noop },
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(`${extract('const enterChatRoom = async', 'const exitChatRoom =')}globalThis.enter = enterChatRoom;`, sandbox);
+  await sandbox.enter('blocked', 'Blocked', 'chat');
+  assert.deepEqual(calls, [], 'a blocked enter must not leave the current page');
+  await sandbox.enter('alice', 'Alice', 'chat');
+  assert.deepEqual(calls, [['switchPage', 'chat', false], ['enter', 'alice', 'chat', 'chat']]);
+  calls.length = 0;
+  await sandbox.enter('alice', 'Alice', 'chat');
+  assert.deepEqual(calls, [['enter', 'alice', 'chat', 'chat']], 'already on the chat page: no extra page switch');
+});
+
+test('add-friend jump to contacts exits an open room before switching pages', () => {
+  const calls = [];
+  const sandbox = {
+    roomVisible: true,
+    isChatRoomVisible: () => sandbox.roomVisible,
+    exitChatRoom: options => { calls.push(['exit', options?.animate]); sandbox.roomVisible = false; },
+    switchPage: page => calls.push(['switchPage', page]),
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(`globalThis.handlers = { ${extract('onSessionPanelClosed: (detail) => {', 'onSessionChanged:')} };`, sandbox);
+  sandbox.handlers.onSessionPanelClosed({ jumpToContacts: true });
+  assert.deepEqual(calls, [['exit', false], ['switchPage', 'contacts']]);
+  calls.length = 0;
+  sandbox.handlers.onSessionPanelClosed({ jumpToContacts: true });
+  assert.deepEqual(calls, [['switchPage', 'contacts']], 'outside a room it only switches pages');
+});

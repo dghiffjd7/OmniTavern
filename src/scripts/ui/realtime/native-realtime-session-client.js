@@ -17,7 +17,7 @@ const createVertexAuth = async config => {
 };
 export class NativeRealtimeSessionClient {
   constructor({ onEvent, onConnectionState, onAudioLevel, invoke = safeInvoke, createChannel = callback => createTauriPluginChannel({ callback }), createAudio = options => new RealtimePcmAudio(options), createVertexAuth: vertexAuthFactory = createVertexAuth } = {}) {
-    Object.assign(this, { onEvent, onConnectionState, onAudioLevel, invoke, createChannel, createAudio, createVertexAuth: vertexAuthFactory }); this.closed = true; this.generation = 0; this.pendingFinals = new Map(); this.transcripts = new Map();
+    Object.assign(this, { onEvent, onConnectionState, onAudioLevel, invoke, createChannel, createAudio, createVertexAuth: vertexAuthFactory }); this.closed = true; this.generation = 0; this.pendingFinals = new Map(); this.transcripts = new Map(); this.pendingToolCalls = new Map();
   }
   async connect({ config, sessionConfig, signal } = {}) {
     await this.close(); this.closed = false; this.config = { ...config, maidTools: sessionConfig.tools }; this.instructions = sessionConfig.instructions; this.history = []; this.resumeHandle = ''; this.activeResponse = '';
@@ -40,6 +40,36 @@ export class NativeRealtimeSessionClient {
   }
   emit(event, playbackFinished = false) {
     if (this.closed) return;
+    const sourceResponseId = event.response_id || event.response?.id || this.activeResponse;
+    if (!playbackFinished && event.type === 'response.function_call_arguments.done' && sourceResponseId && event.call_id) {
+      const calls = this.pendingToolCalls.get(sourceResponseId) || new Map();
+      calls.set(event.call_id, { id: event.call_id, name: event.name, arguments: event.arguments });
+      this.pendingToolCalls.set(sourceResponseId, calls);
+    }
+    if (!playbackFinished && ['response.done', 'response.cancelled'].includes(event.type)) {
+      const pending = this.pendingToolCalls.get(sourceResponseId) || new Map();
+      this.pendingToolCalls.delete(sourceResponseId);
+      const output = (event.response?.output || []).filter(item => item.type === 'function_call');
+      const known = new Map(pending);
+      for (const item of output) if (item.call_id) known.set(item.call_id, { id: item.call_id,
+        name: item.name || known.get(item.call_id)?.name,
+        arguments: item.arguments ?? known.get(item.call_id)?.arguments });
+      const status = event.type === 'response.cancelled' ? 'cancelled' : event.response?.status;
+      if (status === 'completed') {
+        // Explicit function output is authoritative: an incomplete/cancelled
+        // item cannot be revived by its earlier arguments.done fragment.
+        const calls = output.length ? output.filter(item => item.call_id && (!item.status || item.status === 'completed'))
+          .map(item => known.get(item.call_id)) : [...pending.values()];
+        // The server has finished these calls. Local audio playback may still be
+        // interrupted, but cannot revoke the already completed tool response.
+        if (calls.length) this.emit({ type: 'maid.tools.requested', response_id: sourceResponseId, calls });
+      } else if (['incomplete', 'cancelled'].includes(status) && known.size) {
+        // Report only genuine service cancellation, never clearPlayback's local
+        // cancellation of audio whose server response has already completed.
+        this.emit({ type: 'maid.tools.not_executed', response_id: sourceResponseId, reason: status,
+          calls: [...known.values()].map(({ id, name }) => ({ id, name })) });
+      }
+    }
     if (!playbackFinished && event.type === 'response.done') {
       const delay = Math.max(0, (this.audio?.nextTime || 0) - (this.audio?.context?.currentTime || 0)) * 1000;
       const id = event.response?.id || event.response_id || this.activeResponse;
@@ -146,7 +176,12 @@ export class NativeRealtimeSessionClient {
     if (this.config.provider === 'gemini_live' && !this.resumeHandle) { this.fail(new Error(t('Gemini 未提供可恢复的会话，请重新拨号'))); return; }
     this.renewPending = true;
     if (!this.activeResponse) void this.renew();
-    else this.renewDeadline = setTimeout(() => { this.clearPlayback(); this.emit({ type: 'response.cancelled', response_id: this.activeResponse }); }, 15000);
+    else this.renewDeadline = setTimeout(() => {
+      const responseId = this.activeResponse;
+      this.clearPlayback();
+      // A local renewal deadline is not a cancellation reported by the service.
+      this.emit({ type: 'response.cancelled', response_id: responseId }, true);
+    }, 15000);
   }
   async renew() {
     if (this.closed || this.renewing) return;
@@ -193,7 +228,7 @@ export class NativeRealtimeSessionClient {
     if (this.closingPromise) return this.closingPromise;
     this.closed = true; this.closing = true; this.streaming = false; this.renewPending = false;
     this.authController?.abort(); this.vertexAuth = null;
-    for (const final of this.pendingFinals.values()) clearTimeout(final.timer); this.pendingFinals.clear(); this.transcripts.clear();
+    for (const final of this.pendingFinals.values()) clearTimeout(final.timer); this.pendingFinals.clear(); this.transcripts.clear(); this.pendingToolCalls.clear();
     this.rejectReady?.(abortError()); this.rejectReady = null;
     this.signal?.removeEventListener('abort', this.abort);
     const audio = this.audio; this.audio = null;

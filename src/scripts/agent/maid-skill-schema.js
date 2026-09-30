@@ -8,6 +8,13 @@ export const skillError = (code, details = {}) => Object.assign(new Error(code),
 export const makeMaidSkillId = () => `custom:${globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`}`;
 export const makeMaidSkillName = () => `skill-${Math.random().toString(36).slice(2, 10)}`;
 
+// Imported environment requirements are reference text. Other source metadata
+// is retained for display/export, never interpreted as runtime configuration.
+export const maidSkillCompatibility = skill => {
+  const value = skill?.portableMetadata?.frontmatter?.compatibility;
+  return typeof value === 'string' ? value.trim() : '';
+};
+
 export const normalizeMaidSkillMetadata = (value = {}) => {
   if (!skillObject(value)) throw skillError('skill_invalid_metadata');
   const visit = (item, depth = 0) => {

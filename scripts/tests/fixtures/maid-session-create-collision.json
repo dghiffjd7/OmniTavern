@@ -1,0 +1,44 @@
+{
+  "source": {
+    "file": "maid_testset_tools/live-results-20260930-native-readonly-cases/native_readonly_1790745559445-result.json",
+    "sha256": "224ae702d817f02bbdb5a9d6a7e43c4b9ac81468a9202a232b5f2930f24e5e87",
+    "inputPointer": "/record/turns/1/input",
+    "createPointer": "/record/tools/1",
+    "continuationPointer": "/record/modelCalls/3/messages",
+    "blockedRequestPointer": "/record/tools/4",
+    "descriptionSource": "The native read_only observer required this exact existing description before the real B05 submission; the original create result did not expose it."
+  },
+  "input": "建个联系人叫小雪，是个元气运动少女",
+  "existingContact": {
+    "id": "native_group_members_1790743464159_xiaoxue",
+    "name": "小雪",
+    "isGroup": false,
+    "description": "温柔学姐，黑色长发，喜欢读书。"
+  },
+  "createArgs": { "open": false, "name": "小雪" },
+  "originalResult": {
+    "ok": true,
+    "created": false,
+    "existing": true,
+    "sessionId": "native_group_members_1790743464159_xiaoxue",
+    "contact": {
+      "id": "native_group_members_1790743464159_xiaoxue",
+      "name": "小雪",
+      "isGroup": false,
+      "memberCount": 0
+    },
+    "opened": null
+  },
+  "blockedRequest": {
+    "toolName": "contact_profile.upsert",
+    "args": {
+      "profile": {
+        "displayName": "小雪",
+        "contactId": "native_group_members_1790743464159_xiaoxue",
+        "stable_traits": [{ "label": "元气运动少女", "sourceRefs": ["user_request"] }]
+      }
+    },
+    "status": "blocked_by_test_guard",
+    "guardReason": "write_in_readonly_case"
+  }
+}

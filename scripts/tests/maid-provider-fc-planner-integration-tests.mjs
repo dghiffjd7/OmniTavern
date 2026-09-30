@@ -62,6 +62,144 @@ const emitToolCall = (options, {
   }, { provider: 'deepseek', model: 'deepseek-v4-flash' });
 };
 
+{
+  let task = 1;
+  const modelCalls = [];
+  const executed = [];
+  const decisions = [];
+  const client = {
+    async chat(_messages, options) {
+      const native = Array.isArray(options.tools) && options.tools.length > 0;
+      modelCalls.push({ task, mode: native ? 'provider_fc' : 'prompted_json' });
+      if (native && task === 1) {
+        const tool = options.tools.find(item => item.function.name !== MAID_PROVIDER_FC_CONTROL_TOOL_NAME);
+        options.onProviderToolCallDelta({ output: ['rejected-first', 'rejected-second'].map((query, index) => ({
+          type: 'function_call', id: `fc-multiple-${index}`, call_id: `call-multiple-${index}`,
+          name: tool.function.name, arguments: JSON.stringify({ query: index === 1 ? 42 : query }),
+        })) }, { provider: 'deepseek', model: 'deepseek-flash' });
+        return '';
+      }
+      const taskExecutions = executed.filter(item => item.task === task).length;
+      if (native) {
+        emitToolCall(options, taskExecutions
+          ? { control: true, args: { action: 'final', message: 'Complete.' } }
+          : { args: { query: 'independent-task' } });
+        return '';
+      }
+      return JSON.stringify(taskExecutions < 2
+        ? { ok: true, action: 'tool', toolName: 'session.list', featureId: 'session.list', args: { query: `accepted-${taskExecutions}` } }
+        : { ok: true, action: 'final', message: 'Complete.' });
+    },
+  };
+  const dependencies = {
+    features: [feature],
+    resolveRuntimeConfig: async () => ({ config: { ...runtimeConfig, model: 'deepseek-flash' }, client }),
+    getProviderFcExperimentStatus: () => ({ enabled: true }),
+    logger: { warn() {}, debug() {} },
+  };
+  const planner = createMaidModelBackedPlanner(dependencies);
+  const react = createMaidModelBackedReActPlanner(dependencies);
+  const recordDecision = fn => async (input, decisionContext) => {
+    const decision = await fn(input, decisionContext);
+    decisions.push({ task, transport: decision.plannerTransport });
+    return decision;
+  };
+  const agent = createMaidAssistantAgent({
+    planner: recordDecision(planner), reactPlanner: recordDecision(react), maxReactSteps: 5,
+    toolRegistry: { executeTool: async (toolName, args) => {
+      executed.push({ task, toolName, query: args.query });
+      return { toolName, status: 'succeeded', result: { ok: true, count: 2 } };
+    } },
+    logger: { warn() {}, debug() {} },
+  });
+  const first = await agent.runPrompt('List the sessions and check them again.', context);
+  assert.equal(first.ok, true);
+  assert.deepEqual(modelCalls.map(call => call.mode), ['provider_fc', 'prompted_json', 'prompted_json', 'prompted_json'],
+    'a rejected batch causes only one FC attempt in this task, across copied planner/ReAct contexts');
+  assert.deepEqual(executed.map(item => item.query), ['accepted-0', 'accepted-1'], 'no rejected child call is executed or replayed');
+  assert.ok(decisions.every(item => item.transport.effectiveMode === 'prompted_json'
+    && item.transport.fallbackReason === 'multiple_tool_calls'));
+  task = 2;
+  const second = await agent.runPrompt('List the sessions.', context);
+  assert.equal(second.ok, true);
+  assert.deepEqual(modelCalls.filter(call => call.task === 2).map(call => call.mode), ['provider_fc', 'provider_fc'],
+    'the next task retries FC without a global cooldown or profile change');
+  assert.deepEqual(executed.filter(item => item.task === 2).map(item => item.query), ['independent-task']);
+  assert.ok(decisions.filter(item => item.task === 2).every(item => item.transport.fallbackReason === ''));
+  console.log('ok - invalid multiple FC calls switch only the current task to JSON without executing the rejected batch');
+}
+
+{
+  const modelCalls = [], executed = [];
+  const client = { async chat(_messages, options) {
+    modelCalls.push(options);
+    if (modelCalls.length === 1) {
+      const tool = options.tools.find(item => item.function.name !== MAID_PROVIDER_FC_CONTROL_TOOL_NAME);
+      options.onProviderToolCallDelta({ output: ['first', 'second', 'third'].map((query, index) => ({
+        type: 'function_call', id: `read-${index}`, call_id: `read-${index}`,
+        name: tool.function.name, arguments: JSON.stringify({ query }),
+      })) }, { provider: 'deepseek', model: 'deepseek-flash' });
+    } else emitToolCall(options, { control: true, args: { action: 'final', message: 'Read all three.' } });
+    return '';
+  } };
+  const dependencies = { features: [feature],
+    resolveRuntimeConfig: async () => ({ config: runtimeConfig, client }),
+    getProviderFcExperimentStatus: () => ({ enabled: true }), logger: { warn() {}, debug() {} } };
+  const agent = createMaidAssistantAgent({
+    planner: createMaidModelBackedPlanner(dependencies), reactPlanner: createMaidModelBackedReActPlanner(dependencies),
+    maxReactSteps: 5, toolRegistry: { executeTool: async (toolName, args) => {
+      executed.push({ toolName, args });
+      return { toolName, status: 'succeeded', result: { ok: true, query: args.query } };
+    } }, logger: { warn() {}, debug() {} },
+  });
+  const result = await agent.runPrompt('Read three different session searches.', context);
+  assert.equal(result.ok, true);
+  assert.deepEqual(executed.map(item => item.args.query), ['first', 'second', 'third']);
+  assert.equal(modelCalls.length, 2, 'one response supplies three reads; model sees all observations before finishing');
+  console.log('ok - validated native reads execute serially through normal agent steps without extra model calls');
+}
+
+// A queued selection is never a cached permission. Failed observations, changed
+// candidates and cancellation must prevent the remaining read from running.
+for (const scenario of ['failed_read', 'candidate_removed', 'cancelled', 'new_input']) {
+  let modelCalls = 0;
+  const shared = { fallbackReason: '', diagnostics: null };
+  const client = { async chat(_messages, options) {
+    modelCalls++;
+    if (modelCalls === 1) {
+      const tool = options.tools.find(item => item.function.name !== MAID_PROVIDER_FC_CONTROL_TOOL_NAME);
+      options.onProviderToolCallDelta({ output: ['a', 'b'].map((query, index) => ({
+        type: 'function_call', id: `guard-${index}`, call_id: `guard-${index}`,
+        name: tool.function.name, arguments: JSON.stringify({ query }),
+      })) }, { provider: 'deepseek', model: 'deepseek-flash' });
+      return '';
+    }
+    if (options.tools) {
+      emitToolCall(options, { control: true, args: { action: 'final', message: 'Stopped.' } });
+      return '';
+    }
+    return JSON.stringify({ ok: true, action: 'final', message: 'Stopped.' });
+  } };
+  const dependencies = { features: [feature], resolveRuntimeConfig: async () => ({ config: runtimeConfig, client }),
+    getProviderFcExperimentStatus: () => ({ enabled: true }), logger: { warn() {}, debug() {} } };
+  const planner = createMaidModelBackedPlanner(dependencies), react = createMaidModelBackedReActPlanner(dependencies);
+  const first = await planner('Read a and b.', { ...context, maidProviderFcState: shared });
+  assert.equal(first.args.query, 'a');
+  const nextContext = { ...context, maidProviderFcState: shared, maidReactSteps: [{
+    toolName: first.toolName, args: first.args, status: scenario === 'failed_read' ? 'failed' : 'succeeded', output: { ok: scenario !== 'failed_read' },
+  }] };
+  if (scenario === 'candidate_removed') nextContext.capabilitySnapshot = { ...snapshot, candidateFeatures: [] };
+  if (scenario === 'cancelled') nextContext.signal = AbortSignal.abort();
+  if (scenario === 'cancelled') await assert.rejects(react('Read a and b.', nextContext), { name: 'AbortError' });
+  else {
+    const next = await react(scenario === 'new_input' ? 'Stop reading.' : 'Read a and b.', nextContext);
+    assert.notEqual(next.toolName, 'session.list', scenario);
+    assert.equal(modelCalls, 2, scenario);
+  }
+  assert.equal(shared.readBatch, null, scenario);
+}
+console.log('ok - pending native reads stop after failure, lost candidates, cancellation or a changed request');
+
 // 从 provider tool call 一直走到最终 decision，避免标准化后又被第二次截断。
 {
   const answer = '规则集名称。'.repeat(340) + 'FINAL_ENTRY';

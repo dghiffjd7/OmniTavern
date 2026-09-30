@@ -197,6 +197,19 @@ const deepSeekConfig = {
     phase: 'planner',
   });
   const readMapping = toolPlan.toolMappings.find(item => item.internalName === 'session.list');
+  const writeMapping = toolPlan.toolMappings.find(item => item.internalName === 'session.create');
+  const readCalls = ['a', 'b'].map(query => ({ toolName: readMapping.providerName, arguments: { query } }));
+  const batch = normalizeMaidProviderFcCompletedCalls({ completedToolCalls: readCalls, toolPlan, allowReadBatch: true });
+  assert.equal(batch.ok, true);
+  assert.equal(batch.selection.args.query, 'a');
+  assert.equal(batch.remainingSelections[0].args.query, 'b');
+  for (const calls of [
+    [...readCalls, { toolName: writeMapping.providerName, arguments: { name: 'Do not create' } }],
+    [...readCalls, { toolName: MAID_PROVIDER_FC_CONTROL_TOOL_NAME, arguments: { action: 'final', message: 'Premature' } }],
+    [...readCalls, { toolName: readMapping.providerName, arguments: {} }],
+    Array.from({ length: 9 }, () => readCalls[0]),
+  ]) assert.equal(normalizeMaidProviderFcCompletedCalls({ completedToolCalls: calls, toolPlan, allowReadBatch: true }).reason,
+    'multiple_tool_calls', 'mixed, invalid and oversized batches execute nothing');
   const selected = normalizeMaidProviderFcCompletedCalls({
     completedToolCalls: [{
       toolName: readMapping.providerName,

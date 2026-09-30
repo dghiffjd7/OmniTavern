@@ -2,13 +2,19 @@ const trim = value => String(value ?? '').trim();
 
 const normalize = value => trim(value)
   .normalize('NFKC')
-  .toLowerCase();
+  .toLowerCase()
+  // Template references describe story content; they are not requests to create APP identities.
+  .replace(/<\s*(?:user|char)\s*>|\{\{\s*(?:user|char)\s*\}\}/gu, ' ');
 
 const list = value => (Array.isArray(value) ? value : [value]).filter(Boolean);
 
 export const stripNegatedMaidCapabilityActions = value => normalize(value)
-  .replace(/(?:不要|不得|禁止|无需|不用|不可|不能|避免)\s*[^，,。；;：:！？!?\n]*/gu, ' ')
+  .replace(/(?:不要|不得|禁止|无需|不用|不可|不能|避免|不想|不打算|没让你|(?:暂时?|先)别|不(?=\s*(?:删|执行)))\s*[^，,。；;：:！？!?\n]*/gu, ' ')
   .replace(/(^|[，,。；;：:！？!?\n\s]|请)(?:别|莫)\s*[^，,。；;：:！？!?\n]*/gu, '$1 ');
+
+// Keep destructive-action discovery and its high-risk gate aligned for colloquial requests.
+export const hasPositiveMaidDeleteIntent = value =>
+  /(?:删除|删掉|删了|移除|清理(?!后)|delete|remove)/iu.test(stripNegatedMaidCapabilityActions(value));
 
 export const searchMaidCapabilityConcepts = (
   query = '',
@@ -52,16 +58,33 @@ export const searchMaidCapabilityConcepts = (
     add('app.visible_panel.read', 100, 'visible_ui');
   }
 
-  const sessionNoun = /(?:会话|聊天室|房间|测试房|群聊|群组(?:聊天)?|contacts?|groups?|chats?|conversations?|\bsessions?\b|\brooms?\b)/iu;
+  const sessionNoun = /(?:联系人|好友|会话|聊天室|房间|测试房|群聊|群组(?:聊天)?|contacts?|groups?|chats?|conversations?|\bsessions?\b|\brooms?\b)/iu;
+  const createIntent = /(?:创建|新建|新增|建立|建\s*(?:一[个间位]?|个|间|位)|\bcreate\b)/iu;
+  const addContactIntent = /(?:添加|加)\s*(?:一[个位]?|个|位)?\s*(?:联系人|好友)/iu;
   const listIntent = /(?:列出|读取|查看|清单|名单|所有|全部|哪些|一共有|几间|多少|各几项|列候选|不唯一|inventory|\blist\b|\bevery\b|names?)/iu;
   if (sessionNoun.test(text) && listIntent.test(text)) {
     add('session.list', 98, 'session_inventory');
   }
   if (
     sessionNoun.test(positiveText) &&
-    /(?:创建|新建|新增|建立|\bcreate\b)/iu.test(positiveText)
+    (createIntent.test(positiveText) || addContactIntent.test(positiveText))
   ) {
     add('session.create', 100, 'session_create');
+  }
+  const contactNoun = /(?:联系人|好友|\bcontacts?\b)/iu;
+  const compareIntent = /(?:比较|对比|差异|合并|去重|重复|同名|\bcompar(?:e|ison)\b|\bdiff(?:erences?)?\b|\bmerge\b|\bdedupe\b|\bduplicates?\b)/iu;
+  // Comparison guides expose existing reads. A bare merge or unnamed copy
+  // does not identify a private resource domain or authorize a write.
+  if (contactNoun.test(positiveText) && compareIntent.test(positiveText)) {
+    add('session.compare', 112, 'contact_comparison');
+  }
+  const contactProfileNoun = /(?:档案|画像|人设|资料|年龄|职业|性格|爱好|喜欢|\d+\s*岁|\bprofile\b|\btraits?\b)/iu;
+  if (contactNoun.test(positiveText) && contactProfileNoun.test(positiveText)) {
+    add('contact_profile.read', 94, 'contact_profile_read');
+    add('session.list', 86, 'contact_profile_target');
+    if (createIntent.test(positiveText) || addContactIntent.test(positiveText) || /(?:补充|写入|保存|设置|修改|更新|改成|改为|\bupdate\b|\bsave\b)/iu.test(positiveText)) {
+      add('contact_profile.upsert', 98, 'contact_profile_write');
+    }
   }
   if (
     sessionNoun.test(positiveText) &&
@@ -75,7 +98,7 @@ export const searchMaidCapabilityConcepts = (
   if (hasPositive(/(?:打开|进入|切到|切换到).{0,12}(?:主要|最终)(?:结果|成果)/iu)) {
     add('session.open', 108, 'session_open_result');
   }
-  const groupChatNoun = /(?:群聊|群组(?:聊天)?|group\s*chats?|\bgroups?\b)/iu;
+  const groupChatNoun = /(?:群聊|群组(?:聊天)?|(?:建|拉|开|发起)\s*(?:一[个]?|个)?\s*群(?!众|体)|group\s*chats?|\bgroups?\b)/iu;
   if (
     groupChatNoun.test(text) &&
     /(?:成员|members?)/iu.test(text) &&
@@ -86,7 +109,7 @@ export const searchMaidCapabilityConcepts = (
   }
   if (
     groupChatNoun.test(positiveText) &&
-    /(?:创建|新建|建立|发起|拉一个|\bcreate\b|\bstart\b)/iu.test(positiveText)
+    /(?:创建|新建|建立|发起|(?:建|拉|开)\s*(?:一[个]?|个)?\s*群|\bcreate\b|\bstart\b)/iu.test(positiveText)
   ) {
     add('group.create', 110, 'group_chat_create');
   }
@@ -176,10 +199,10 @@ export const searchMaidCapabilityConcepts = (
     else if (has(/(?:有哪些|列出|列表|哪些|查看|看看|list|which)/iu)) add('script.list', 100, 'script_inventory');
   }
 
-  const profileCreateIntent = /(?:创建|新建|新增|建立|添加|\bcreate\b)/iu;
+  const profileCreateIntent = /(?:创建|新建|新增|建立|建\s*(?:一[个位]?|个|位)|添加|\bcreate\b)/iu;
   if (
     profileCreateIntent.test(positiveText) &&
-    /(?:用户(?:名称|身份|档案)?|user\s*(?:name|profile|identity)?)/iu.test(positiveText)
+    /(?:用户(?:名称|身份|档案)?|\buser\b\s*(?:name|profile|identity)?)/iu.test(positiveText)
   ) {
     add('user.create', 100, 'user_create');
   }
@@ -196,8 +219,19 @@ export const searchMaidCapabilityConcepts = (
     add('persona.delete_many', 105, 'persona_batch_delete');
   }
 
+  const storyCharacterCreate = /(?:新增|添加|新建|创建|补充|加|写)\s*(?:一[个位名]?|个|位|名)?\s*(?:人物|角色(?!卡|档案)|青梅竹马|学妹|学姐|同桌|邻居)/iu.test(positiveText)
+    && !/(?:联系人|好友|聊天室|会话|角色卡|人物卡|角色档案|用户档案)/iu.test(positiveText);
+  if (storyCharacterCreate) {
+    add(['worldbook.list', 'worldbook.read'], 100, 'story_character_target');
+    add('worldbook.create', 98, 'story_character_create');
+    add('app.resource.read', 90, 'story_character_context');
+  }
   const inferredWorldbookContentIntent = /(?:读取|查看|核对).{0,80}(?:资料|设定).{0,40}(?:人物|角色).{0,24}(?:地点|事件|世界观)/iu;
   const worldbookIntent = /(?:世界书|世借书|world\s*book|worldbook|world\s*lore|lore\s*library|条目|entry\s*titles?|目录页|(?:replace|覆盖).{0,24}全部内容)/iu;
+  if (/(?:世界书|世借书|\bworld\s*books?\b|\bworld\s*lore\b|\blore\s*library\b)/iu.test(positiveText)
+    && compareIntent.test(positiveText)) {
+    add('worldbook.compare', 112, 'worldbook_comparison');
+  }
   if (worldbookIntent.test(text) || inferredWorldbookContentIntent.test(text)) {
     add(['worldbook.read', 'worldbook.list'], 84, 'worldbook_domain');
     add(['worldbook.open', 'worldbook.create', 'worldbook.update_entries', 'worldbook.bind_persona', 'worldbook.bind_session', 'worldbook.bind_sessions', 'worldbook.bind_rp_session'], 58, 'worldbook_domain');
@@ -213,7 +247,7 @@ export const searchMaidCapabilityConcepts = (
     if (hasPositive(/(?:修改|更新|改写|update|modify)/iu)) {
       add(['worldbook.update_entries', 'worldbook.read'], 100, 'worldbook_update');
     }
-    if (hasPositive(/(?:删除|清理(?!后)|去重|delete|remove|dedupe)/iu)) {
+    if (hasPositiveMaidDeleteIntent(text) || hasPositive(/(?:去重|dedupe)/iu)) {
       const entryDelete = /(?:条目|重复|去重|dedupe|entries?|(?:里|中|内)的)/iu.test(text);
       if (entryDelete) {
         add(['worldbook.delete_entries', 'worldbook.read'], 105, 'worldbook_entry_delete');

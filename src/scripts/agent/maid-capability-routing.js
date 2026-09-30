@@ -5,6 +5,7 @@ import {
 import {
   searchMaidCapabilityConcepts,
   stripNegatedMaidCapabilityActions,
+  hasPositiveMaidDeleteIntent,
 } from './maid-capability-concept-retriever.js';
 import { readMaidSkill } from './maid-skill-catalog.js';
 import { getMaidLoadedSkillFeatures } from './maid-skill-context.js';
@@ -167,6 +168,30 @@ const findToolOwners = (toolName = '', features = []) => {
   ));
 };
 
+// Workflows can share prerequisite reads. Only the explicitly declared,
+// low-risk read capability can repair a mismatched feature ID; never infer a
+// write owner or import a capability outside the supplied snapshot.
+export const findExplicitReadToolOwner = (toolName = '', features = []) => {
+  const name = trim(toolName);
+  if (!name) return null;
+  // Operation guides share this public reader. Its generic owner supports any
+  // documented featureId; choosing a topic-specific guide would add false scope.
+  if (name === 'app.read_feature_doc') {
+    const generic = (Array.isArray(features) ? features : []).filter(feature => (
+      feature?.id === 'app.capabilities.search' && feature.writes === false && feature.riskLevel === 'low'
+      && list(feature.tools).includes(name)
+    ));
+    if (generic.length === 1) return generic[0];
+  }
+  const owners = (Array.isArray(features) ? features : []).filter(feature => (
+    feature?.writes === false && trim(feature?.riskLevel) === 'low'
+    && trim(feature?.directAction) === name && list(feature?.tools).includes(name)
+  ));
+  const canonical = owners.filter(feature => trim(feature.id) === name);
+  if (canonical.length === 1) return canonical[0];
+  return owners.length === 1 ? owners[0] : null;
+};
+
 const resolveUniqueFuzzyFeature = (featureId = '', features = []) => {
   const target = canonicalToken(featureId);
   if (!target) return null;
@@ -237,6 +262,20 @@ export const resolveCandidateCapabilitySelection = ({
       rule: 'unique_tool_owner',
       confidence: 1,
     };
+  }
+
+  if (!feature || !resolvedToolName) {
+    const readOwner = findExplicitReadToolOwner(originalToolName, candidates);
+    if (readOwner) {
+      feature = readOwner;
+      resolvedToolName = originalToolName;
+      correction = {
+        originalId: originalFeatureId,
+        resolvedId: trim(readOwner.id),
+        rule: 'explicit_read_tool_owner',
+        confidence: 1,
+      };
+    }
   }
 
   if (!feature && allowFuzzy) {
@@ -377,11 +416,11 @@ const hasExplicitHighRiskIntent = (input = '', feature = {}) => {
   if (trim(feature?.riskLevel, 'low') !== 'high') return true;
   const text = String(input || '').normalize('NFKC');
   if (
-    /(?:只读|只查询|只查|仅查询|仅核对)/iu.test(text) &&
+    /(?:只读|只查询|只查|只看|仅查询|仅查看|仅看|仅核对)/iu.test(text) &&
     !/(?:删除预览|预览.{0,12}删除|preview)/iu.test(text)
   ) return false;
   const positiveText = stripNegatedMaidCapabilityActions(text);
-  return /(?:删除|删掉|移除|清空|清除|清理(?!后)|去重|覆盖|替换|delete|remove|clear|dedupe|overwrite|replace)/iu.test(positiveText);
+  return hasPositiveMaidDeleteIntent(text) || /(?:清空|清除|去重|覆盖|替换|clear|dedupe|overwrite|replace)/iu.test(positiveText);
 };
 
 const detectLanguage = (input = '') => (/\p{Script=Han}/u.test(String(input || '')) ? 'zh' : 'other');
@@ -1035,7 +1074,7 @@ export const createMaidCapabilityRoutingRuntime = ({
       featureId: plan?.featureId,
       toolName: plan?.toolName,
       features: snapshot.candidateFeatures,
-      allowFuzzy: true,
+      allowFuzzy: !['verification', 'discovery'].includes(snapshot.phase),
     });
     if (!resolved.ok) {
       return {
@@ -1081,15 +1120,18 @@ export const createMaidCapabilityRoutingRuntime = ({
     reasonCode = 'verification_dependency',
   } = {}) => {
     const parentSnapshot = snapshotCache.get(trim(parentPlan?.candidateSnapshotId)) || null;
+    const verificationOnly = phase === 'verification' || phase === 'discovery';
     const owners = findToolOwners(childPlan?.toolName, allFeatures);
-    const rawFeature = findExactFeature(childPlan?.featureId, owners) || (owners.length === 1 ? owners[0] : null);
-    const projection = rawFeature ? buildToolProjection({
+    const rawFeature = findExactFeature(childPlan?.featureId, owners) || (!verificationOnly && owners.length === 1 ? owners[0] : null);
+    const requestedProjection = rawFeature ? buildToolProjection({
       feature: rawFeature,
       toolRegistry,
       permissionEvaluator,
       context,
     }).feature : null;
-    if (!projection) {
+    const projection = requestedProjection && (!verificationOnly || requestedProjection.writes !== true)
+      ? requestedProjection : null;
+    if (!projection && !verificationOnly) {
       if (!parentSnapshot?.useCandidates) return childPlan;
       return {
         ...childPlan,
@@ -1103,22 +1145,24 @@ export const createMaidCapabilityRoutingRuntime = ({
       requestId: trim(requestId || parentSnapshot?.requestId),
       phase,
       mode: parentSnapshot?.mode || getConfig().mode,
-      effectiveMode: parentSnapshot?.effectiveMode || 'shadow',
-      useCandidates: parentSnapshot?.useCandidates === true,
+      // Internal verification always gets a bounded read snapshot. An invalid or
+      // denied declaration gets an empty snapshot, never the parent's write scope.
+      effectiveMode: verificationOnly ? 'candidate' : parentSnapshot?.effectiveMode || 'shadow',
+      useCandidates: verificationOnly || parentSnapshot?.useCandidates === true,
       retrieverVersion: activeRetrieverVersion,
       createdAt: now(),
       latencyMs: 0,
       confidence: 100,
-      candidateFeatures: [projection],
-      candidateRefs: [{ ...projection.capabilityRef, rank: 1, score: 100, reasonCodes: [reasonCode] }],
-      candidateIds: new Set([trim(projection.id)]),
+      candidateFeatures: projection ? [projection] : [],
+      candidateRefs: projection ? [{ ...projection.capabilityRef, rank: 1, score: 100, reasonCodes: [reasonCode] }] : [],
+      candidateIds: new Set(projection ? [trim(projection.id)] : []),
       excluded: [],
-      promptFeatures: [projection],
+      promptFeatures: projection ? [projection] : [],
       cohort: clone(parentSnapshot?.cohort, {}),
     });
     const plan = {
       ...childPlan,
-      featureId: trim(projection.id),
+      featureId: trim(projection?.id || childPlan?.featureId),
       candidateSnapshotId: snapshot.id,
       retrieverVersion: activeRetrieverVersion,
       capabilityRoutingMode: snapshot.effectiveMode,
@@ -1137,6 +1181,22 @@ export const createMaidCapabilityRoutingRuntime = ({
     childPlan: verificationPlan,
     context,
   });
+
+  const authorizeDiscovery = ({ requestId = '', parentPlan = {}, discoveryPlan = {}, context = {} } = {}) => {
+    // This is a single public catalog read. Never use workflow authorization's
+    // fallback to an unrestricted parent when a tool is missing or denied.
+    if (discoveryPlan.featureId !== CONTROL_CAPABILITY_ID || discoveryPlan.toolName !== 'app.search_feature') return null;
+    const parentSnapshot = snapshotCache.get(trim(parentPlan.candidateSnapshotId));
+    const offeredSearch = parentSnapshot?.candidateFeatures?.some(feature => feature.id === CONTROL_CAPABILITY_ID
+      && list(feature.tools).includes('app.search_feature'));
+    if (!offeredSearch) return null;
+    const authorized = authorizeChildPlan({
+      requestId, parentPlan, childPlan: discoveryPlan, context,
+      phase: 'discovery', snapshotPrefix: 'cap-discovery', reasonCode: 'unverified_app_intent_discovery',
+    });
+    const validation = validatePlan(authorized, { context });
+    return validation.ok ? validation.plan : null;
+  };
 
   const authorizeWorkflowPlan = ({
     requestId = '',
@@ -1191,6 +1251,7 @@ export const createMaidCapabilityRoutingRuntime = ({
   };
 
   return {
+    authorizeDiscovery,
     authorizeVerification,
     authorizeWorkflowPlan,
     beginRequest,

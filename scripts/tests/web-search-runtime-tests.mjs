@@ -39,7 +39,7 @@ assert.equal(resolveWebSearchRoute({
   provider: 'deepseek',
   baseUrl: 'https://api.deepseek.com/v1',
   model: 'deepseek-v4-pro',
-}), WEB_SEARCH_ROUTES.deepseek);
+}), WEB_SEARCH_ROUTES.toolFallback);
 assert.equal(resolveWebSearchRoute({
   enabled: true,
   provider: 'deepseek',
@@ -247,11 +247,12 @@ console.log('ok - web search route stays disabled by default and selects native 
     provider: 'deepseek',
     baseUrl: 'https://api.deepseek.com/v1',
     model: 'deepseek-v4-flash',
+    fallbackToolDefinitions: [{ name: 'web.search', schema: { type: 'object', properties: {} } }],
   });
-  assert.equal(deepseek.native, true);
-  assert.equal(deepseek.fallback, false);
-  assert.equal(deepseek.requestOptions.openaiApi, 'responses');
-  assert.deepEqual(deepseek.requestOptions.tools, [{ type: 'web_search' }]);
+  assert.equal(deepseek.native, false);
+  assert.equal(deepseek.fallback, true);
+  assert.equal(deepseek.requestOptions.tools[0].type, 'function');
+  assert.deepEqual(deepseek.fallbackToolNames, { web_search: 'web.search' });
   assert.equal(Object.hasOwn(deepseek.requestOptions, 'include'), false);
 }
 

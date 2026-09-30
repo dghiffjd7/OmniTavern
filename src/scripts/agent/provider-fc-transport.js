@@ -927,7 +927,7 @@ export const buildProviderFcRequestPlan = ({
     transport.provider === 'deepseek'
     && !localAdvanced
     && probationMode !== true
-    && !/^deepseek-v4-(?:flash|pro)$/u.test(providerModel)
+    && !/^(?:deepseek-flash|deepseek-v4-(?:flash|pro))$/u.test(providerModel)
   ) {
     return {
       ok: false,

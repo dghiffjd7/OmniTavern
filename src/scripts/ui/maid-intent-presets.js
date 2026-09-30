@@ -39,8 +39,12 @@ export const matchMaidIntent = (raw = '') => {
   }
 
   const hasApiTopic = includesAny(text, ['api', 'apikey', 'api key', '接线', '连线', '配置模型', '模型配置']);
+  // Error details are evidence for troubleshooting, not a request to open setup.
+  const hasApiTroubleshooting = /报错|錯誤|错误|失敗|失败|异常|異常|超时|逾時|unauthorized|invalid\s+(?:api\s*)?key|\b(?:error|failed|timeout|[45]\d{2})\b/iu.test(text);
+  const hasApiSetupRequest = /(?:怎么|如何|教我|指导我|一步步|一步一步|第一次)[^，。！？\n]{0,18}(?:配置|设置|填写|填入|填|接入|连接|绑定|接上|接好)[^，。！？\n]{0,12}(?:api|接线|连线|模型)/iu.test(text)
+    || /(?:api(?:\s*key)?|模型)[^，。！？\n]{0,12}(?:怎么|如何)[^，。！？\n]{0,8}(?:配置|设置|填写|填入|填|接入|连接|绑定|接上|接好)/iu.test(text);
   if (
-    (hasTeachingCue && hasApiTopic) ||
+    (hasApiTopic && hasApiSetupRequest && !hasApiTroubleshooting) ||
     ['接好api', '给女仆接api', '给女仆接上api'].includes(compact)
   ) {
     return {

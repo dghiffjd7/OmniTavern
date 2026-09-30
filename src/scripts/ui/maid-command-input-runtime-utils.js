@@ -10,6 +10,7 @@ import { bindMaidVoiceButton } from './maid-voice-button.js';
 import { t } from '../i18n/index.js';
 import { maidSkillMessage } from './maid-skill-messages.js';
 import { createMaidRunCardView, MAID_RUN_ICONS } from './maid-run-card-dom.js';
+import { createMaidTextApprovalReply, sameMaidTextApprovalScope } from './maid-text-approval-reply.js';
 
 const STYLE_ID = 'maid-command-input-runtime-style';
 const FIELD_MIN_HEIGHT = 32;
@@ -757,6 +758,10 @@ export const createMaidCommandInputRuntime = ({
   clearIntervalFn = null,
   getApproval = () => null,
   onApprovalDecision = null,
+  getAppContext = () => null,
+  getPendingApproval = () => null,
+  resolveBoundApproval = () => false,
+  onTextApprovalReply = null,
 } = {}) => {
   let rootEl = null;
   let inputEl = null;
@@ -1064,12 +1069,16 @@ export const createMaidCommandInputRuntime = ({
   const renderResultMessages = ({ forceBottom = false } = {}) => {
     if (!rootEl || !documentRef) return;
     if (!resultMessages.length && !liveStatus) {
+      runCards.forEach(card => card.destroy());
+      runCards.clear();
       resultEl?.remove?.();
       resultEl = null;
       rootEl.classList.remove('has-result');
       applySheetSnap();
       return;
     }
+    // 隐藏时只更新保存的视图；重开后统一渲染，保留展开状态且不重启后台计时。
+    if (!isOpen) return;
     const keepBottom = forceBottom || shouldStickResultToBottom();
     const previousScrollTop = Number(resultEl?.scrollTop || 0) || 0;
     if (!resultEl) {
@@ -1104,6 +1113,7 @@ export const createMaidCommandInputRuntime = ({
           voice: item.view?.source === 'maid_realtime',
           touch: layout === 'sheet',
         });
+        card.setVisible(true);
         return;
       }
       bubble.innerHTML = '';
@@ -1318,7 +1328,13 @@ export const createMaidCommandInputRuntime = ({
     if (!view || !trim(view.runId)) return false;
     const runId = trim(view.runId);
     if (activeSubmission && view.terminal !== true) activeRunId = runId;
-    if (!rootEl || !isOpen) return false; // 从未打开或已经关闭 → 交回执行流面板兜底
+    if (!rootEl || !isOpen) {
+      // 画布交给执行流面板，但已保留的卡片仍接收终态，避免重开后显示旧的“执行中”。
+      const existing = resultMessages.find(item => item.kind === 'run' && item.runId === runId);
+      if (existing) existing.view = view;
+      if (view.terminal) liveStatus = null;
+      return false;
+    }
     if (activeSubmission && activeRunId === runId && pendingThoughts.length) {
       runThoughts.set(runId, [...(runThoughts.get(runId) || []), ...pendingThoughts]);
       pendingThoughts = [];
@@ -1339,6 +1355,23 @@ export const createMaidCommandInputRuntime = ({
     submitBtn.title = isSubmitting ? '停止当前女仆任务' : '';
   };
 
+  const visibleTextApproval = () => {
+    const voice = getVoiceState?.() || {};
+    if (!activeSubmission || !activeRunId || activeSubmission.controls?.source === 'maid_realtime'
+      || activeSubmission.controls?.voiceCallId || (voice.call && voice.call !== 'idle')
+      || (voice.recording && voice.recording !== 'idle')) return null;
+    const pending = getPendingApproval(activeRunId);
+    return pending?.visible === true && !pending.ambiguous && pending.toolName === 'group.create'
+      && pending.runId === activeRunId && pending.binding?.submissionId === activeSubmission.id
+      && sameMaidTextApprovalScope(pending.binding, getAppContext()) ? pending : null;
+  };
+  const hasTextApprovalDraft = () => Boolean(trim(inputEl?.value) && visibleTextApproval());
+  const updateInputPlaceholder = () => {
+    if (inputEl) inputEl.placeholder = isSubmitting
+      ? visibleTextApproval() ? t('可回复确认、取消或修改要求...') : '继续输入，发送后排队...'
+      : '问女仆...';
+  };
+
   const setSubmitting = (next) => {
     isSubmitting = next === true;
     if (!isSubmitting && liveStatus) {
@@ -1347,7 +1380,7 @@ export const createMaidCommandInputRuntime = ({
     }
     rootEl?.classList.toggle('is-submitting', isSubmitting);
     rootEl?.setAttribute?.('aria-busy', isSubmitting ? 'true' : 'false');
-    if (inputEl) inputEl.placeholder = isSubmitting ? '继续输入，发送后排队...' : '问女仆...';
+    updateInputPlaceholder();
     updateSubmitButton();
   };
 
@@ -1466,7 +1499,7 @@ export const createMaidCommandInputRuntime = ({
         let result = null;
         try {
           entry.controls?.onStatus?.(t('正在处理'), 'progress');
-          result = await onSubmit(entry.text, {
+          result = !revisionScopeIsCurrent(entry.controls) ? scopeChangedResult() : await onSubmit(entry.text, {
             ...entry.controls,
             submissionId: entry.id,
             setStatus: (message = '', tone = 'thinking') => {
@@ -1667,7 +1700,7 @@ export const createMaidCommandInputRuntime = ({
     submitBtn.innerHTML = ICONS.send;
     submitBtn.setAttribute('aria-label', '发送给女仆');
     voiceButton = bindMaidVoiceButton({ button: submitBtn,
-      getState: () => ({ ...getVoiceState(), available: typeof onVoiceAction === 'function', submitting: isSubmitting,
+      getState: () => ({ ...getVoiceState(), available: typeof onVoiceAction === 'function', submitting: isSubmitting && !hasTextApprovalDraft(),
         hasDraft: Boolean(trim(inputEl?.value) || imageAttachments.length), cancelPending }),
       onAction: onVoiceAction, onChooseMode: onChooseVoiceMode,
     });
@@ -1709,7 +1742,8 @@ export const createMaidCommandInputRuntime = ({
       if (!isSubmitting) return;
       event.preventDefault?.();
       event.stopPropagation?.();
-      void cancelActive();
+      if (hasTextApprovalDraft()) void submit();
+      else void cancelActive();
     });
     moreBtn.addEventListener?.('click', (event) => {
       event.preventDefault?.();
@@ -1851,6 +1885,7 @@ export const createMaidCommandInputRuntime = ({
     const wasOpen = isOpen;
     const shouldPreserveResult = (preserve || isSubmitting) && (resultMessages.length > 0 || Boolean(liveStatus));
     isOpen = false;
+    runCards.forEach(card => card.setVisible(false));
     if (!isSubmitting) setSubmitting(false);
     rootEl?.classList.remove('is-open');
     rootEl?.classList.remove('is-dragover');
@@ -1885,6 +1920,7 @@ export const createMaidCommandInputRuntime = ({
       text: text || getLocalizedPromptText('maid.image_only_input', '请看这张图片。'),
       attachments,
       wasQueued,
+      completion,
       resolve: resolveSubmission,
     };
     queuedSubmissions.push(entry);
@@ -1901,15 +1937,68 @@ export const createMaidCommandInputRuntime = ({
     return completion;
   };
   const prepareInOrder = createSubmissionPreparationQueue();
-  const enqueueSubmission = (text, attachments, controls = {}, options = {}) => {
+  const revisionScopeIsCurrent = controls => !controls?.maidTextApprovalRevision
+    || sameMaidTextApprovalScope(controls.maidTextApprovalRevision.scope, getAppContext());
+  const scopeChangedResult = () => {
+    const message = t('页面或角色卡已变化，未提交修改后的任务。请在目标页面重新说明。');
+    setResult(message, 'info');
+    return { ok: false, status: 'cancelled', reason: 'approval_revision_scope_changed', message };
+  };
+  const enqueueNewSubmission = (text, attachments, controls = {}, options = {}) => {
+    if (!revisionScopeIsCurrent(controls)) return scopeChangedResult();
     if (!prepareSubmission || controls.skillsPrepared) return enqueuePreparedSubmission(text, attachments, controls);
     if (!text && !attachments.length) return false;
     return prepareInOrder(() => prepareSubmission(text, attachments, controls), ({ ok, value: prepared, error }) => {
-      if (ok) return enqueuePreparedSubmission(text, prepared.attachments || attachments, prepared);
+      if (ok) {
+        if (!revisionScopeIsCurrent(controls)) return scopeChangedResult();
+        return enqueuePreparedSubmission(text, prepared.attachments || attachments, {
+          ...prepared,
+          ...(controls.maidTextApprovalRevision ? { maidTextApprovalRevision: controls.maidTextApprovalRevision } : {}),
+        });
+      }
       const message = maidSkillMessage(error);
       setResult(message, 'error');
       return { ok: false, status: 'failed', reason: error?.code, message };
     }, options) ?? false;
+  };
+  const textApprovalReplies = createMaidTextApprovalReply({
+    getActive: () => activeSubmission && ({ ...activeSubmission, runId: activeRunId }),
+    getAppContext, getPendingApproval, resolveBoundApproval, maxAttachments: getMaxImages(),
+    abortSubmission: id => {
+      if (activeSubmission?.id !== id || !activeAbortController || activeAbortController.signal.aborted) return false;
+      activeAbortController.abort(new DOMException('Maid approval withdrawn by user', 'AbortError'));
+      return true;
+    },
+  });
+  const enqueueSubmission = (text, attachments, controls = {}, options = {}) => {
+    const replyActive = activeSubmission;
+    const replyOwner = activeSubmission && { submissionId: activeSubmission.id, runId: activeRunId };
+    const replyScope = getAppContext?.() || {};
+    const replyRequest = replyOwner?.runId ? getPendingApproval(replyOwner.runId) : null;
+    const reply = textApprovalReplies.handle({ text, attachments, controls });
+    if (!reply.handled) return enqueueNewSubmission(text, attachments, controls, options);
+    if (!reply.preserveDraft && inputEl && !controls.preserveDraft && trim(inputEl.value) === text) {
+      inputEl.value = '';
+      clearAttachments();
+      resizeInput();
+    }
+    const response = reply.result || { ok: true, status: 'responded', responseType: 'local', reason: 'approval_revised',
+      message: t('原确认已撤销，正在按修改后的要求重新规划。') };
+    setResult(response.message, 'info');
+    if (replyRequest?.id && replyActive) replyActive.lastTextApprovalRequestId = replyRequest.id;
+    // The active submit records its original turn before resolving completion.
+    // Persist local replies afterwards; revisions must also wait before their
+    // planner reads history. UI feedback above remains immediate.
+    const recorded = Promise.resolve(replyActive?.completion).catch(() => {}).then(() => onTextApprovalReply?.({ input: text, result: response,
+        context: { ...replyScope, ...replyOwner, textApprovalReply: {
+          requestId: replyRequest?.id || replyActive?.lastTextApprovalRequestId || '', runId: replyOwner?.runId || '',
+          submissionId: replyOwner?.submissionId || '', source: 'app_text_approval',
+        } } })).catch(() => {});
+    if (reply.revision) {
+      const revision = reply.revision;
+      return recorded.then(() => enqueueNewSubmission(revision.text, revision.attachments, revision.controls, options));
+    }
+    return Promise.resolve(response);
   };
   const submit = () => {
     const text = trim(inputEl?.value), attachments = imageAttachments.slice();
@@ -1957,6 +2046,8 @@ export const createMaidCommandInputRuntime = ({
     // 卡内确认：该 run 的运行卡正在输入胶囊里显示时才算可承载
     hasRunCard: runId => Boolean(isOpen && trim(runId) && resultMessages.some(item => item.kind === 'run' && item.runId === trim(runId))),
     refreshApprovals: () => {
+      updateInputPlaceholder();
+      updateSubmitButton();
       if (isOpen && resultMessages.some(item => item.kind === 'run')) renderResultMessages({ forceBottom: false });
     },
     getLayout: () => ({ layout, snap: layout === 'sheet' ? sheetSnap : '' }),

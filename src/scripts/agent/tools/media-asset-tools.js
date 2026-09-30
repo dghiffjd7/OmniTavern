@@ -1,5 +1,6 @@
 import { normalizeMaidImageAttachments } from '../maid-attachment-parts.js';
 import { normalizeMaidImageGenerationContext } from '../maid-image-generation-context.js';
+import { readImageHeaderDimensions } from '../../utils/image.js';
 import {
   buildMaidVisualSpecPrompt,
   createMaidVisualSpecLedger,
@@ -14,6 +15,17 @@ const trim = (value, fallback = '') => {
 };
 
 const isPlainObject = value => Boolean(value && typeof value === 'object' && !Array.isArray(value));
+
+const readGeneratedImageDimensions = (dataUrl = '') => {
+  const match = String(dataUrl).match(/^data:image\/[^;,]+;base64,(.+)$/s);
+  if (!match) return null;
+  try {
+    const binary = atob(match[1]);
+    return readImageHeaderDimensions(Uint8Array.from(binary, character => character.charCodeAt(0)));
+  } catch {
+    return null;
+  }
+};
 
 const clone = (value) => {
   if (value === null || value === undefined) return value;
@@ -656,8 +668,12 @@ export const createMaidMediaAssetTools = ({
         const generationContext = normalizeMaidImageGenerationContext(
           generated?.generationContext || currentGenerationContext,
         );
-        const actualWidth = Number(generated?.width || generationContext?.width || 0) || 0;
-        const actualHeight = Number(generated?.height || generationContext?.height || 0) || 0;
+        // The preset describes a request, not the returned image. Automatic
+        // sizes have no preset dimensions; providers can also return a different
+        // aspect. Prefer bytes, then explicit output metadata from the adapter.
+        const dimensions = readGeneratedImageDimensions(dataUrl);
+        const actualWidth = Number(dimensions?.width || generated?.width || 0) || 0;
+        const actualHeight = Number(dimensions?.height || generated?.height || 0) || 0;
         const aspectValidation = validateMaidVisualAspect({
           targetAspectRatio: frozen.spec.targetAspectRatio,
           width: actualWidth,

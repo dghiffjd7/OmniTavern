@@ -9,6 +9,47 @@ import {
 } from '../../src/scripts/agent/maid-source-grounding.js';
 
 {
+  const url = 'https://example.com/shared-work-page';
+  const page = { ok: true, results: [{ title: '作品 Alpha', url, snippet: '作品 Alpha 的角色设定。' }] };
+  const steps = ['作品 Alpha', '作品 Beta'].map(target => ({
+    toolName: 'web.research', status: 'succeeded', args: { target },
+    output: annotateMaidResearchResult(page, { target }),
+  }));
+  const context = buildMaidSourceGroundingContext({ steps });
+  assert.equal(context.sources.find(source => source.target === '作品 Beta')?.targetRelevant, false,
+    'An earlier match for Alpha must not be relabelled as a match for Beta at the same URL');
+  assert.equal(context.sources.find(source => source.target === '作品 Alpha')?.targetRelevant, true);
+  assert.deepEqual(context.sources.find(source => source.target === '作品 Beta').matchedTargetTerms, []);
+  assert.deepEqual(context.allowedCanonRefs, [url], 'Keep the source available for its genuinely matched work');
+  assert.equal(validateMaidWorldbookSourcePlan({
+    toolName: 'worldbook.create', grounding: context,
+    args: { entries: [{ title: 'Alpha character', content: 'Source-backed content.', sourceLayer: 'canon', sourceRefs: [url] }] },
+  }).ok, true);
+  const prompt = buildMaidSourceGroundingPromptBlock({ steps });
+  assert.match(prompt, /relevant \| target=作品 Alpha/);
+  assert.match(prompt, /unrelated \| target=作品 Beta/);
+  console.log('ok - the same source keeps independent target verdicts and normal canon references');
+}
+
+{
+  const url = 'https://example.com/aliases';
+  const page = { ok: true, results: [{ title: '作品 Alpha', url, snippet: '作品 Alpha 的资料。' }] };
+  const steps = [['作品 Alpha'], ['作品 Beta']].map(targetAliases => ({
+    toolName: 'web.search', status: 'succeeded', args: { targetAliases },
+    output: annotateMaidResearchResult(page, { targetAliases }),
+  }));
+  const context = buildMaidSourceGroundingContext({ steps });
+  assert.equal(context.sources.length, 2, 'Alias-only checks must not share an empty target scope');
+  assert.equal(context.sources.find(source => source.targetAliases.includes('作品 Beta')).targetRelevant, false);
+  assert.equal(context.sources.find(source => source.targetAliases.includes('作品 Alpha')).targetRelevant, true);
+  const unchecked = buildMaidSourceGroundingContext({ steps: [...steps, {
+    toolName: 'web.search', status: 'succeeded', args: {}, output: annotateMaidResearchResult(page),
+  }] });
+  assert.equal(unchecked.sources.find(source => !source.target && !source.targetAliases.length).targetRelevant, null);
+  console.log('ok - alias-only and unchecked searches preserve separate source scopes');
+}
+
+{
   const strict = resolveMaidSourceGroundingPolicy('请按《我的青春恋爱物语果然有问题》原作建立世界书，不要硬编；可以把我的领养设定作为原创补充。');
   assert.equal(strict.strictNoInvent, true);
   assert.equal(strict.allowCreativeExtension, true);

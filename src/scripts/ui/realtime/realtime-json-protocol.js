@@ -31,18 +31,28 @@ export const createJsonRealtimeProtocol = ({ profile, instructions, send, emit, 
       const type = event.type;
       if (type === 'session.updated') ready();
       if (type === 'response.created') { responseId = event.response?.id || ''; suppressed = false; }
-      if (type === 'input_audio_buffer.speech_started') { userId = event.item_id || `input_${crypto.randomUUID()}`; clear(); event = { ...event, item_id: userId }; }
+      if (type === 'input_audio_buffer.speech_started') {
+        userId = event.item_id || `input_${crypto.randomUUID()}`; suppressed = true;
+        // Mark the new speaker before clearing queued playback emits local finals.
+        emit({ ...event, item_id: userId }); clear(); return;
+      }
       if (type === 'input_audio_buffer.speech_stopped') event = { ...event, item_id: event.item_id || userId };
       if (type === 'response.audio.delta' || type === 'response.output_audio.delta') {
-        if (!suppressed && (!event.response_id || event.response_id === responseId)) play(event.delta);
-        emit(event); return;
+        const playbackSuppressed = suppressed || Boolean(event.response_id && event.response_id !== responseId);
+        if (!playbackSuppressed) play(event.delta);
+        emit({ ...event, response_id: event.response_id || responseId, playbackSuppressed }); return;
       }
       if (type === 'conversation.item.input_audio_transcription.updated' || type === 'conversation.item.input_audio_transcription.delta') {
         // xAI updated is a cumulative revision; only completed events enter history.
         emit({ type: 'input.transcript.preview', text: event.transcript || event.delta || '' }); return;
       }
       if (type === 'conversation.item.input_audio_transcription.completed') event = { ...event, item_id: event.item_id || userId };
-      if (type === 'response.done' || type === 'response.cancelled') responseId = '';
+      if (type === 'response.function_call_arguments.done') event = { ...event, response_id: event.response_id || responseId };
+      if (type === 'response.done' || type === 'response.cancelled') {
+        const endedId = event.response?.id || event.response_id || responseId;
+        event = { ...event, response_id: endedId };
+        if (endedId === responseId) responseId = '';
+      }
       const aliases = { 'response.audio_transcript.delta': 'response.output_audio_transcript.delta', 'response.audio_transcript.done': 'response.output_audio_transcript.done', 'response.text.delta': 'response.output_text.delta', 'response.text.done': 'response.output_text.done' };
       emit({ ...event, type: aliases[type] || type });
     },

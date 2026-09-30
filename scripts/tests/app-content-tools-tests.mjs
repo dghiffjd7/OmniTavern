@@ -8,6 +8,14 @@ import { createAgentToolRegistry } from '../../src/scripts/agent/agent-tool-regi
 import { createAppContentAgentTools } from '../../src/scripts/agent/tools/app-content-tools.js';
 
 const getTool = (tools, name) => tools.find(tool => tool.name === name);
+const executeWithTargetApproval = async (tool, args) => {
+  const registry = createAgentToolRegistry({
+    permissionEvaluator: createAgentPermissionEvaluator({ defaultDecision: AGENT_PERMISSION_DECISIONS.allow }),
+  });
+  registry.register(tool);
+  const output = await registry.executeTool(tool.name, args, { requestToolConfirmation: () => ({ decision: 'allow' }) });
+  return output.result;
+};
 
 const createProfileStore = (prefix = 'profile') => {
   const items = new Map();
@@ -508,7 +516,9 @@ const createProfileStore = (prefix = 'profile') => {
   assert.equal(saved.get('Role A World').entries[0].constant, true);
   assert.deepEqual(bound, [{ personaId: persona.id, worldId: 'Role A World', options: { enabled: true } }]);
 
-  const appended = await getTool(tools, 'worldbook.create').execute({
+  // This fixture only records assignment requests; its card remains unbound.
+  // Appending to the explicitly named shared book needs a real target approval.
+  const appended = await executeWithTargetApproval(getTool(tools, 'worldbook.create'), {
     name: 'Role A World',
     entries: [{ title: '新增条目', content: '不会覆盖旧内容。' }],
   });
@@ -578,20 +588,15 @@ const createProfileStore = (prefix = 'profile') => {
   assert.equal(contentRead.entries.length, 1);
   assert.match(contentRead.entries[0].content, /超级温柔/);
 
-  const updated = await getTool(tools, 'worldbook.update_entries').execute({
+  const updated = await executeWithTargetApproval(getTool(tools, 'worldbook.update_entries'), {
     name: 'Role A World',
     updates: [{
       entryTitle: '温柔大姐姐',
       content: '扩展后的温柔大姐姐设定，仍然和用户是姐弟关系。',
       keys: ['姐姐', '大姐姐'],
     }],
-  }, {
-    toolSafety: {
-      decision: 'allow',
-      request: { kind: 'worldbook.update_entries' },
-    },
   });
-  assert.equal(updated.ok, true);
+  assert.equal(updated.ok, true, JSON.stringify(updated));
   assert.equal(updated.updatedEntryCount, 1);
   assert.equal(updated.entryCount, 3);
   assert.deepEqual(saved.get('Role A World').entries.map(entry => entry.comment), ['温柔大姐姐', '傲娇青梅竹马', '新增条目']);
@@ -608,16 +613,11 @@ const createProfileStore = (prefix = 'profile') => {
       { id: 'b-2', comment: 'B', content: 'latest B' },
     ],
   });
-  const deduped = await getTool(tools, 'worldbook.delete_entries').execute({
+  const deduped = await executeWithTargetApproval(getTool(tools, 'worldbook.delete_entries'), {
     name: 'Duplicate World',
     dedupeByTitle: true,
     duplicateTitles: ['A', 'B'],
     keep: 'last',
-  }, {
-    toolSafety: {
-      decision: 'allow',
-      request: { kind: 'worldbook.delete_entries' },
-    },
   });
   assert.equal(deduped.ok, true);
   assert.equal(deduped.deletedEntryCount, 2);
@@ -1879,6 +1879,400 @@ const createProfileStore = (prefix = 'profile') => {
   assert.equal(output.result.succeededCount, 0);
   assert.equal(output.result.results[0].reason, 'worldbook_changed_since_confirmation');
   assert.equal(data.entries[0].content, 'recreated');
-  assert.equal(deleteCalls, 1);
+  assert.equal(deleteCalls, 0, 'the commit boundary rejects a recreated target before invoking deletion');
   console.log('ok - worldbook delete confirmation expires after delete/recreate ABA');
+}
+
+{
+  // Gemini 按缺字段 schema 生成的 {} 不得写成 entry-N 空壳条目
+  const saved = new Map([['卡书', { name: '卡书', entries: [{ id: 'e1', comment: '林念初', content: '青梅竹马。' }] }]]);
+  const tools = createAppContentAgentTools({
+    saveWorldInfo: async (id, data) => saved.set(id, JSON.parse(JSON.stringify(data))),
+    getWorldInfo: async id => saved.get(id) || null,
+    worldInfoExists: async id => saved.has(id),
+    listWorlds: async () => Array.from(saved.keys()),
+  });
+  const create = getTool(tools, 'worldbook.create');
+  const before = JSON.stringify(saved.get('卡书'));
+
+  const empty = await create.execute({ name: '卡书', entries: [{}] });
+  assert.equal(empty.ok, false);
+  assert.equal(empty.reason, 'incomplete_entries');
+  assert.deepEqual(empty.incompleteEntries, [{ index: 0, missing: ['title', 'content'] }]);
+  assert.match(empty.message, /title/);
+  assert.match(create.summarizeResult(empty), /create worldbook failed: incomplete_entries/);
+  const titleOnly = await create.execute({ name: '卡书', entries: [{ title: '沈听雨' }] });
+  assert.deepEqual(titleOnly.incompleteEntries, [{ index: 0, missing: ['content'] }]);
+  assert.equal(JSON.stringify(saved.get('卡书')), before, 'incomplete entries must not be written');
+  const replacePreflight = await create.safety.preflight({ name: '卡书', mode: 'replace', entries: [{}] });
+  assert.equal(replacePreflight.destructive, false, 'incomplete entries must not ask to overwrite');
+
+  const added = await create.execute({ name: '卡书', entries: [{ title: '沈听雨', content: '傲娇活泼的青梅竹马。' }] });
+  assert.equal(added.ok, true);
+  assert.deepEqual(added.addedEntries, [{ id: '沈听雨', title: '沈听雨', contentLength: 10 }]);
+
+  const update = getTool(tools, 'worldbook.update_entries');
+  const emptyUpdate = await update.execute({ name: '卡书', createMissing: true, updates: [{}] });
+  assert.equal(emptyUpdate.ok, false);
+  assert.equal(emptyUpdate.reason, 'invalid_updates');
+  assert.equal(emptyUpdate.skippedUpdates[0].reason, 'empty_update');
+  const missingContent = await update.execute({ name: '卡书', createMissing: true, updates: [{ title: '新人物' }] });
+  assert.equal(missingContent.reason, 'invalid_updates');
+  assert.deepEqual(missingContent.skippedUpdates[0], { index: 0, reason: 'incomplete_entry', missing: ['content'] });
+  const updatePreflight = await update.safety.preflight({ name: '卡书', createMissing: true, updates: [{ title: '新人物' }] });
+  assert.equal(updatePreflight.destructive, false, 'updates that cannot apply must not ask for confirmation');
+  assert.equal(saved.get('卡书').entries.length, 2, 'only the complete entry was added');
+  console.log('ok - worldbook create/update reject empty or incomplete entries instead of writing entry-N shells');
+}
+
+{
+  // 未指定世界书时：会话绑定 → 当前角色卡的世界书 → 全局；并标出当前卡的那本
+  const saved = new Map([
+    ['卡书', { name: '卡书', entries: [] }],
+    ['青梅竹马', { name: '青梅竹马', entries: [] }],
+    ['全局书', { name: '全局书', entries: [] }],
+  ]);
+  const personas = new Map([
+    ['persona_card', { id: 'persona_card', name: '苏晓彤', source: { worldbookId: '卡书', worldbookEnabled: false } }],
+    ['persona_bare', { id: 'persona_bare', name: '测试', source: null }],
+  ]);
+  let activeId = 'persona_card';
+  const bound = [];
+  const tools = createAppContentAgentTools({
+    personaStore: { getAll: () => [...personas.values()], get: id => personas.get(id) || null, getActive: () => personas.get(activeId) },
+    chatStore: { getCurrent: () => `rp:${activeId}` },
+    saveWorldInfo: async (id, data) => saved.set(id, JSON.parse(JSON.stringify(data))),
+    getWorldInfo: async id => saved.get(id) || null,
+    worldInfoExists: async id => saved.has(id),
+    listWorlds: async () => Array.from(saved.keys()),
+    getWorldIdsForSession: async () => [],
+    getGlobalWorldId: async () => '全局书',
+    assignWorldToPersona: async (...args) => bound.push(args),
+  });
+
+  const read = await getTool(tools, 'worldbook.read').execute({ query: '林念初' });
+  assert.equal(read.id, '卡书');
+  assert.equal(read.resolvedFrom, 'current_card');
+  assert.equal(read.currentCard, true);
+  assert.equal(read.ownerHint, undefined);
+  const created = await getTool(tools, 'worldbook.create').execute({ entries: [{ title: '沈听雨', content: '傲娇青梅竹马。' }] });
+  assert.equal(created.worldbookId, '卡书', 'unnamed create writes into the card worldbook');
+  assert.deepEqual(bound, [], 'an already-bound card worldbook is not re-bound (keeps the user toggle)');
+  const list = await getTool(tools, 'worldbook.list').execute({});
+  assert.deepEqual(list.currentCard, { personaId: 'persona_card', personaName: '苏晓彤', worldbookId: '卡书' });
+  assert.deepEqual(list.worldbooks.filter(item => item.currentCard).map(item => item.id), ['卡书']);
+
+  activeId = 'persona_bare';
+  const otherCard = await getTool(tools, 'worldbook.read').execute({ name: '卡书' });
+  assert.deepEqual(otherCard.ownerCards, ['苏晓彤']);
+  assert.match(otherCard.ownerHint, /不是当前角色卡的世界书/);
+  const fallback = await getTool(tools, 'worldbook.read').execute({});
+  assert.equal(fallback.id, '全局书');
+  assert.equal(fallback.resolvedFrom, 'global_fallback');
+  assert.equal(fallback.currentCard, false);
+  assert.match(fallback.targetHint, /不传 name 调用 worldbook.create/);
+  const bareList = await getTool(tools, 'worldbook.list').execute({});
+  assert.equal(bareList.currentCard.worldbookId, '');
+  assert.match(bareList.currentCardHint, /新建并绑定/);
+  const cardCreated = await getTool(tools, 'worldbook.create').execute({ entries: [{ title: '沈听雨', content: '傲娇青梅竹马。' }] });
+  assert.equal(cardCreated.worldbookId, '测试 世界书');
+  assert.deepEqual(bound.at(-1).slice(0, 2), ['persona_bare', '测试 世界书']);
+  assert.match(cardCreated.notice, /为角色卡「测试」新建并绑定了世界书「测试 世界书」/);
+  assert.equal(created.notice, undefined, 'appending to an existing card worldbook needs no notice');
+  assert.equal(getTool(tools, 'worldbook.create').summarizeResult(cardCreated), 'created new worldbook 测试 世界书 (1 entries); bound it to the character card');
+  console.log('ok - worldbook tools resolve and mark the current character card worldbook');
+}
+
+// Small in-memory store with the same revision/generation write contract as the bridge.
+const createWorldbookSafetyHarness = (worlds, dependencies = {}) => {
+  const copy = value => JSON.parse(JSON.stringify(value));
+  const records = new Map(worlds.map(world => [world.name, copy(world)]));
+  const versions = new Map(worlds.map(world => [world.name, { revision: 1, generation: 1 }]));
+  const replace = (id, data, { recreated = false } = {}) => {
+    const previous = versions.get(id) || { revision: 0, generation: 0 };
+    records.set(id, copy(data));
+    versions.set(id, {
+      revision: previous.revision + 1,
+      generation: previous.generation + (recreated || !previous.generation ? 1 : 0),
+    });
+  };
+  const snapshot = async id => ({
+    worldbookId: id,
+    exists: records.has(id),
+    data: copy(records.get(id) || null),
+    ...(versions.get(id) || { revision: 0, generation: 0 }),
+  });
+  const tools = createAppContentAgentTools({
+    getWorldInfo: async id => copy(records.get(id) || null),
+    getWorldInfoSnapshot: snapshot,
+    worldInfoExists: async id => records.has(id),
+    listWorlds: async () => [...records.keys()],
+    saveWorldInfo: async (id, data, expected) => {
+      const current = await snapshot(id);
+      if (current.revision !== expected.expectedRevision || current.generation !== expected.expectedGeneration
+        || current.exists !== expected.expectedExists) {
+        return { ok: false, reason: 'worldbook_revision_conflict', latestSnapshot: current };
+      }
+      replace(id, data);
+      return { ok: true };
+    },
+    ...dependencies,
+  });
+  const registry = createAgentToolRegistry({
+    permissionEvaluator: createAgentPermissionEvaluator({ defaultDecision: AGENT_PERMISSION_DECISIONS.allow }),
+    logger: { warn: () => {} },
+  });
+  registry.registerMany(tools);
+  return { records, replace, registry, tools };
+};
+
+{
+  const harness = createWorldbookSafetyHarness([{ name: 'Selectors', entries: [
+    { id: 'b', title: 'B', content: 'keep-B', key: ['a'] },
+    { id: 'a', title: 'A', content: 'old-A' },
+  ] }]);
+  const output = await harness.registry.executeTool('worldbook.update_entries', {
+    name: 'Selectors',
+    updates: [
+      { entryId: 'a', title: 'B', content: 'new-A' },
+      { entryId: 'missing', title: 'B', content: 'must-not-write' },
+    ],
+  }, { requestToolConfirmation: () => true });
+  assert.equal(output.result.ok, true);
+  assert.equal(output.result.partial, true);
+  assert.equal(output.result.skippedUpdates[0].reason, 'entry_not_found');
+  assert.deepEqual(harness.records.get('Selectors').entries.map(entry => entry.content), ['keep-B', 'new-A']);
+  const legacy = await harness.registry.executeTool('worldbook.update_entries', {
+    name: 'Selectors', updates: [{ title: 'B', content: 'legacy-title-selector' }],
+  }, { requestToolConfirmation: () => true });
+  assert.equal(legacy.result.ok, true, 'title remains a legacy selector when no explicit selector is given');
+  assert.equal(harness.records.get('Selectors').entries[0].content, 'legacy-title-selector');
+  console.log('ok - explicit entry ids cannot be displaced by a rename, keyword or missing-id fallback');
+}
+
+{
+  const personaStore = createProfileStore('collision');
+  const active = await personaStore.create({ name: 'Active', source: { worldbookId: 'Active World' } });
+  const target = await personaStore.create({ name: 'Twin' });
+  const owner = await personaStore.create({ name: 'Other', source: { worldbookId: 'Twin 世界书' } });
+  await personaStore.setActive(active.id);
+  const harness = createWorldbookSafetyHarness([
+    { name: 'Active World', entries: [{ id: 'active', content: 'keep-active' }] },
+    { name: 'Twin 世界书', entries: [{ id: 'other', content: 'keep-other' }] },
+  ], {
+    personaStore,
+    chatStore: { getCurrent: () => `rp:${active.id}` },
+    assignWorldToPersona: (id, worldbookId, options) => {
+      const persona = personaStore.get(id);
+      persona.source = { ...persona.source, worldbookId, worldbookEnabled: options.enabled };
+      return true;
+    },
+  });
+  const output = await harness.registry.executeTool('worldbook.create', {
+    sessionId: `rp:${target.id}`, entries: [{ title: 'New', content: 'own-book' }],
+  }, { requestToolConfirmation: request => {
+    assert.equal(request.allowAlways, false);
+    assert.equal(request.details.worldbookTargets[0].bindPersonaId, target.id);
+    return true;
+  } });
+  assert.equal(output.result.ok, true);
+  assert.equal(output.result.worldbookId, 'Twin 世界书 (2)');
+  assert.equal(personaStore.get(target.id).source.worldbookId, 'Twin 世界书 (2)');
+  assert.equal(personaStore.get(active.id).source.worldbookId, 'Active World');
+  assert.equal(personaStore.get(owner.id).source.worldbookId, 'Twin 世界书');
+  assert.equal(harness.records.get('Twin 世界书').entries[0].content, 'keep-other');
+  assert.equal(harness.records.get('Active World').entries[0].content, 'keep-active');
+  console.log('ok - unnamed create gives an unbound target card a unique book without appending another card book');
+}
+
+{
+  for (const change of ['selected-entry', 'same-name-recreation', 'unrelated-entry']) {
+    const harness = createWorldbookSafetyHarness([{ name: 'Frozen', entries: [
+      { id: 'a', title: 'A', content: 'old-A' },
+      { id: 'b', title: 'B', content: 'old-B' },
+    ] }]);
+    const output = await harness.registry.executeTool('worldbook.update_entries', {
+      name: 'Frozen', updates: [{ entryId: 'a', content: 'maid-A' }],
+    }, {
+      requestToolConfirmation: () => {
+        const data = structuredClone(harness.records.get('Frozen'));
+        if (change === 'selected-entry') data.entries[0].content = 'user-A';
+        if (change === 'unrelated-entry') data.entries[1].content = 'user-B';
+        harness.replace('Frozen', data, { recreated: change === 'same-name-recreation' });
+        return true;
+      },
+    });
+    if (change === 'unrelated-entry') {
+      assert.equal(output.result.ok, true);
+      assert.deepEqual(harness.records.get('Frozen').entries.map(entry => entry.content), ['maid-A', 'user-B']);
+    } else {
+      assert.equal(output.result.reason, 'worldbook_changed_since_confirmation', change);
+      assert.equal(harness.records.get('Frozen').entries[0].content, change === 'selected-entry' ? 'user-A' : 'old-A');
+    }
+  }
+  console.log('ok - confirmed updates freeze selected entries and book generation while preserving unrelated edits');
+}
+
+{
+  for (const confirm of [true, false]) {
+    const personaStore = createProfileStore('binding');
+    const persona = await personaStore.create({ name: 'Role', source: { worldbookId: 'Original', worldbookEnabled: true } });
+    await personaStore.setActive(persona.id);
+    let bindingCalls = 0;
+    const harness = createWorldbookSafetyHarness([
+      { name: 'Original', entries: [{ id: 'old', content: 'old-content' }] },
+      { name: 'User Choice', entries: [] },
+    ], { personaStore, assignWorldToPersona: () => { bindingCalls += 1; return true; } });
+    const output = await harness.registry.executeTool('worldbook.create', {
+      mode: 'replace', entries: [{ title: 'New', content: 'saved-content' }],
+    }, {
+      requestToolConfirmation: () => {
+        persona.source = { worldbookId: confirm ? 'User Choice' : 'Original', worldbookEnabled: false };
+        return confirm;
+      },
+    });
+    assert.equal(output.result.worldbookSaved, false);
+    assert.equal(output.result.reason, confirm ? 'worldbook_target_changed' : 'persona_binding_changed');
+    assert.equal(harness.records.get('Original').entries[0].content, 'old-content');
+    assert.equal(harness.records.has('Original (2)'), false);
+    assert.deepEqual(persona.source, { worldbookId: confirm ? 'User Choice' : 'Original', worldbookEnabled: false });
+    assert.equal(bindingCalls, 0);
+  }
+  const personaStore = createProfileStore('save-failure');
+  const persona = await personaStore.create({ name: 'Unbound' });
+  await personaStore.setActive(persona.id);
+  const harness = createWorldbookSafetyHarness([], { personaStore, assignWorldToPersona: () => false });
+  const failedBinding = await harness.registry.executeTool('worldbook.create', {
+    entries: [{ title: 'Saved', content: 'keep-this-on-binding-failure' }],
+  });
+  assert.equal(failedBinding.result.reason, 'persona_binding_save_failed');
+  assert.equal(failedBinding.result.worldbookSaved, true);
+  assert.equal(harness.records.get('Unbound 世界书').entries.length, 1);
+  console.log('ok - create preserves binding/toggle changes during confirmation and reports saved content on binding failure');
+}
+
+{
+  const harness = createWorldbookSafetyHarness([{ name: 'Blocks', entries: [
+    { id: 'multi', title: 'Multi', content: 'stale-flat', promptMode: 'blocks', promptBlocks: [
+      { id: 'first', title: 'First', enabled: true, content: 'first-body', role: 'system' },
+      { id: 'second', title: 'Second', enabled: true, content: 'second-body', conditions: [{ op: 'eq', value: 1 }] },
+    ] },
+    { id: 'plain', title: 'Plain', content: 'plain-old' },
+  ] }]);
+  const read = await harness.registry.executeTool('worldbook.read', { name: 'Blocks', entryId: 'multi', includeContent: true });
+  const entry = read.result.entries[0];
+  assert.equal(entry.contentSource, 'promptBlocks');
+  assert.equal(entry.requiresPromptBlockId, true);
+  assert.deepEqual(entry.promptBlocks.map(block => [block.id, block.content]), [['first', 'first-body'], ['second', 'second-body']]);
+  let confirmations = 0;
+  const rejected = await harness.registry.executeTool('worldbook.update_entries', {
+    name: 'Blocks', updates: [{ entryId: 'multi', newTitle: 'Must not rename', content: 'ambiguous' }],
+  }, { requestToolConfirmation: () => { confirmations += 1; return true; } });
+  assert.equal(rejected.result.ok, false);
+  assert.equal(rejected.result.skippedUpdates[0].reason, 'prompt_block_required');
+  assert.equal(confirmations, 0, 'an ambiguous block edit must not ask for overwrite permission');
+  const absentBlock = await harness.registry.executeTool('worldbook.update_entries', {
+    name: 'Blocks', createMissing: true,
+    updates: [{ entryId: 'absent', title: 'New', content: 'body', promptBlockId: 'second' }],
+  });
+  assert.equal(absentBlock.result.skippedUpdates[0].reason, 'prompt_block_not_found');
+  assert.equal(harness.records.get('Blocks').entries.length, 2, 'an explicit block target must not become a flat new entry');
+  const mixed = await harness.registry.executeTool('worldbook.update_entries', {
+    name: 'Blocks', updates: [
+      { entryId: 'multi', content: 'ambiguous' },
+      { entryId: 'plain', content: 'plain-new' },
+    ],
+  }, { requestToolConfirmation: () => true });
+  assert.equal(mixed.result.partial, true);
+  assert.equal(mixed.result.skippedUpdates[0].reason, 'prompt_block_required');
+  assert.equal(harness.records.get('Blocks').entries[0].title, 'Multi');
+  assert.equal(harness.records.get('Blocks').entries[1].content, 'plain-new');
+  const updated = await harness.registry.executeTool('worldbook.update_entries', {
+    name: 'Blocks', updates: [{ entryId: 'multi', promptBlockId: entry.promptBlocks[1].id, content: 'second-new' }],
+  }, { requestToolConfirmation: () => true });
+  assert.equal(updated.result.ok, true);
+  const stored = harness.records.get('Blocks').entries[0];
+  assert.equal(stored.promptBlocks[0].content, 'first-body');
+  assert.equal(stored.promptBlocks[1].content, 'second-new');
+  assert.deepEqual(stored.promptBlocks[1].conditions, [{ op: 'eq', value: 1 }]);
+  assert.equal(stored.content, 'first-body', 'flat text mirrors the first block, not the combined body');
+  const cleared = await harness.registry.executeTool('worldbook.update_entries', {
+    name: 'Blocks', updates: [{ entryId: 'plain', content: '' }],
+  }, { requestToolConfirmation: () => true });
+  assert.equal(cleared.result.ok, true);
+  const renamed = await harness.registry.executeTool('worldbook.update_entries', {
+    name: 'Blocks', updates: [{ entryId: 'plain', newTitle: 'Empty body', keys: ['empty'] }],
+  }, { requestToolConfirmation: () => true });
+  assert.equal(renamed.result.ok, true);
+  assert.equal(harness.records.get('Blocks').entries[1].content, '', 'metadata changes must not refill a deliberately cleared body');
+  console.log('ok - registry read exposes block ids and only explicitly selected prompt blocks are written');
+}
+
+// Query regression: locate content that only exists in a later prompt block.
+{
+  const harness = createWorldbookSafetyHarness([{ name: 'Block Query', entries: [{
+    id: 'multi', title: 'Scene', content: 'first-body', promptMode: 'blocks', promptBlocks: [
+      { id: 'first', content: 'first-body', enabled: true },
+      { id: 'second', content: 'second-only-needle', enabled: false },
+    ],
+  }] }]);
+  const read = await harness.registry.executeTool('worldbook.read', {
+    name: 'Block Query', query: 'second-only-needle', includeContent: true,
+  });
+  assert.equal(read.result.entries.length, 1);
+  assert.equal(read.result.entries[0].id, 'multi');
+  const block = read.result.entries[0].promptBlocks.find(item => item.content === 'second-only-needle');
+  assert.equal(block.id, 'second');
+  const updated = await harness.registry.executeTool('worldbook.update_entries', {
+    name: 'Block Query', updates: [{ query: 'second-only-needle', promptBlockId: block.id, content: 'second-updated' }],
+  }, { requestToolConfirmation: () => true });
+  assert.equal(updated.result.ok, true);
+  const stored = harness.records.get('Block Query').entries[0];
+  assert.equal(stored.promptBlocks[0].content, 'first-body');
+  assert.equal(stored.promptBlocks[1].content, 'second-updated');
+  assert.equal(stored.promptBlocks[1].enabled, false);
+  assert.equal(stored.content, 'first-body');
+  console.log('ok - query finds a later prompt block and edits only its explicitly selected id');
+}
+
+// Target regression: an explicit missing card must never fall back to the active card.
+{
+  const active = { id: 'active', name: 'Active', created: 1, source: { worldbookId: 'Active World' } };
+  const target = { id: 'target', name: 'Target', created: 2, source: { worldbookId: 'Target World' } };
+  const personas = new Map([[active.id, active], [target.id, target]]);
+  let writes = 0;
+  const harness = createWorldbookSafetyHarness([
+    { name: 'Active World', entries: [{ id: 'a', content: 'keep-active' }] },
+    { name: 'Target World', entries: [{ id: 't', content: 'keep-target' }] },
+  ], {
+    personaStore: { get: id => personas.get(id), getAll: () => [...personas.values()], getActive: () => active },
+    chatStore: { getCurrent: () => 'rp:active' },
+    saveWorldInfo: () => { writes += 1; return { ok: true }; },
+  });
+  for (const args of [{ sessionId: 'rp:missing' }, { personaId: 'missing' }, { personaName: 'Missing Name' }]) {
+    const output = await harness.registry.executeTool('worldbook.create', {
+      ...args, entries: [{ title: 'New', content: 'must-not-write' }],
+    });
+    assert.equal(output.result.reason, 'persona_not_found');
+    assert.equal(output.result.worldbookSaved, false);
+    assert.equal(writes, 0, 'an invalid explicit card must not write a generic or active-card book');
+  }
+  for (const confirm of [true, false]) {
+    personas.set(target.id, target);
+    const output = await harness.registry.executeTool('worldbook.create', {
+      sessionId: 'rp:target', mode: 'replace', entries: [{ title: 'New', content: 'must-not-write' }],
+    }, { requestToolConfirmation: () => { personas.delete(target.id); return confirm; } });
+    assert.equal(output.result.reason, confirm ? 'worldbook_target_changed' : 'worldbook_target_confirmation_cancelled');
+    assert.equal(output.result.worldbookSaved, false);
+    assert.equal(writes, 0, 'a deleted frozen card must not write its book or a fallback copy');
+  }
+  assert.equal(harness.records.get('Active World').entries[0].content, 'keep-active');
+  assert.equal(harness.records.get('Target World').entries[0].content, 'keep-target');
+  const ordinary = await harness.registry.executeTool('worldbook.create', {
+    sessionId: 'chat:ordinary', entries: [{ title: 'Normal', content: 'ordinary-session' }],
+  });
+  assert.equal(ordinary.result.ok, true);
+  assert.equal(ordinary.result.worldbookId, 'Active World');
+  assert.equal(writes, 1, 'a non-RP session still uses the active card');
+  console.log('ok - missing or deleted create persona targets fail without writing another card worldbook');
 }

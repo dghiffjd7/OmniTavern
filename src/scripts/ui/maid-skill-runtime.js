@@ -54,7 +54,10 @@ export const createMaidSkillRuntime = ({ store, getAppContext = () => ({}), vali
     if (resolved.useDraftSkills === false) ids = [];
     if (context.maidSkillContext) {
       // 续接任务的目录补上当前技能库里未读取过的技能；技能库读不出来时只保留快照与内置技能
-      try { await store.ready; mergeMaidSkillCatalog(context.maidSkillContext, store.list()); } catch {}
+      if (context.maidSkillContext.catalogNeedsRefresh) {
+        try { await store.ready; mergeMaidSkillCatalog(context.maidSkillContext, store.list()); }
+        catch { mergeMaidSkillCatalog(context.maidSkillContext); }
+      }
       const restored = !attachments.length && context.maidTaskInputs && inputPersistence ? await inputPersistence.restore(context.maidTaskInputs) : attachments;
       await validateTask({ text, attachments: restored, context, selectedIds: context.maidSkillContext.loaded.map(item => item.id) });
       if (attachments.length && inputPersistence) context.maidTaskInputs = await inputPersistence.persist(attachments, context);

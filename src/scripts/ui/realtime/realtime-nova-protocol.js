@@ -58,7 +58,10 @@ export const createNovaSonicProtocol = ({ profile, instructions, history, send, 
           if (content.role === 'ASSISTANT') emit({ type: 'response.output_audio_transcript.delta', response_id: content.completionId, delta: event.textOutput.content });
         }
       }
-      if (event.audioOutput) { if (!suppressed) play(event.audioOutput.content); emit({ type: 'response.output_audio.delta' }); }
+      if (event.audioOutput) {
+        if (!suppressed) play(event.audioOutput.content);
+        emit({ type: 'response.output_audio.delta', response_id: event.audioOutput.completionId || responseId, playbackSuppressed: suppressed });
+      }
       if (event.toolUse) {
         const tool = event.toolUse, block = blocks.get(tool.contentId);
         if (block) block.tool = { id: tool.toolUseId, name: tool.toolName, arguments: tool.content };
@@ -66,8 +69,8 @@ export const createNovaSonicProtocol = ({ profile, instructions, history, send, 
       if (event.contentEnd) {
         const content = blocks.get(event.contentEnd.contentId);
         if (event.contentEnd.stopReason === 'INTERRUPTED') { clear(); emit({ type: 'input_audio_buffer.speech_started' }); }
-        if (content?.role === 'USER' && content.stage === 'FINAL') emit({ type: 'conversation.item.input_audio_transcription.completed', item_id: content.contentId, transcript: content.text });
-        if (content?.tool && event.contentEnd.stopReason !== 'INTERRUPTED') emit({ type: 'maid.tools.requested', calls: [content.tool] });
+        if (content?.role === 'USER' && content.stage === 'FINAL') emit({ type: 'conversation.item.input_audio_transcription.completed', item_id: content.contentId, response_id: content.completionId || responseId, transcript: content.text });
+        if (content?.tool && event.contentEnd.stopReason !== 'INTERRUPTED') emit({ type: 'maid.tools.requested', response_id: content.completionId || responseId, calls: [content.tool] });
         blocks.delete(event.contentEnd.contentId);
       }
       if (event.completionEnd) {

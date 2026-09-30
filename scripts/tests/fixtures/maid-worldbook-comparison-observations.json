@@ -1,0 +1,2199 @@
+{
+  "note": "Actual tool observations only, deduplicated without changing output. No provider messages or credentials.",
+  "cases": [
+    {
+      "model": "gemini",
+      "source": "../maid_testset_tools/live-results-20260929-comparison-acceptance/D06-gemini.json",
+      "sourceSha256": "5d15fb06824cc3402892222a395defbee04fbf6babb0126e2a7a4e467077053c",
+      "steps": [
+        {
+          "index": 1,
+          "toolName": "app.read_feature_doc",
+          "featureId": "app.capabilities.search",
+          "title": "读取世界书合并说明",
+          "args": {
+            "featureId": "worldbook.compare"
+          },
+          "status": "succeeded",
+          "guided": false,
+          "guide": null,
+          "guideMessage": "",
+          "summary": "feature doc: worldbook.compare",
+          "metadata": null,
+          "candidateSnapshotId": "cap-snapshot:51e8054b-98e2-4739-8ea1-a1c7590f3b4f",
+          "retrieverVersion": "maid-capability-retriever-v4",
+          "selectedCapabilityId": "app.capabilities.search",
+          "candidateHit": true,
+          "errorMessage": "",
+          "failureCode": "",
+          "outputRef": 0
+        },
+        {
+          "index": 2,
+          "toolName": "worldbook.list",
+          "featureId": "worldbook.list",
+          "title": "查看世界书列表",
+          "args": {
+            "includeGlobal": true
+          },
+          "status": "succeeded",
+          "guided": false,
+          "guide": null,
+          "guideMessage": "",
+          "summary": "listed 3 worldbook(s)",
+          "metadata": null,
+          "candidateSnapshotId": "cap-snapshot:552a1438-66e4-42ea-81bb-fe836811531d",
+          "retrieverVersion": "maid-capability-retriever-v4",
+          "selectedCapabilityId": "worldbook.list",
+          "candidateHit": true,
+          "errorMessage": "",
+          "failureCode": "",
+          "outputRef": 1
+        },
+        {
+          "index": 3,
+          "toolName": "worldbook.read",
+          "featureId": "worldbook.compare",
+          "title": "比较世界书并提出合并方案",
+          "args": {
+            "worldbookId": "奇幻大陆(副本)",
+            "name": "奇幻大陆(副本)",
+            "includeContent": true
+          },
+          "status": "succeeded",
+          "guided": false,
+          "guide": null,
+          "guideMessage": "",
+          "summary": "read worldbook 奇幻大陆(副本) (10 entries)",
+          "metadata": null,
+          "candidateSnapshotId": "cap-snapshot:ea23511b-8ed4-46f3-b1fb-7314099313e5",
+          "retrieverVersion": "maid-capability-retriever-v4",
+          "selectedCapabilityId": "worldbook.compare",
+          "candidateHit": true,
+          "errorMessage": "",
+          "failureCode": "",
+          "outputRef": 2
+        },
+        {
+          "index": 4,
+          "toolName": "worldbook.read",
+          "featureId": "worldbook.read",
+          "title": "读取世界书内容",
+          "args": {
+            "worldbookId": "奇幻大陆",
+            "includeContent": true,
+            "name": "奇幻大陆"
+          },
+          "status": "succeeded",
+          "guided": false,
+          "guide": null,
+          "guideMessage": "",
+          "summary": "read worldbook 奇幻大陆 (12 entries)",
+          "metadata": null,
+          "candidateSnapshotId": "cap-snapshot:40c1973f-16a7-494f-b055-0330e6f3d715",
+          "retrieverVersion": "maid-capability-retriever-v4",
+          "selectedCapabilityId": "worldbook.read",
+          "candidateHit": true,
+          "errorMessage": "",
+          "failureCode": "",
+          "outputRef": 3
+        },
+        {
+          "index": 5,
+          "toolName": "worldbook.read",
+          "featureId": "worldbook.read",
+          "title": "读取世界书内容",
+          "args": {
+            "maxEntries": 20,
+            "includeContent": true,
+            "worldbookId": "奇幻大陆(副本)",
+            "name": "奇幻大陆(副本)"
+          },
+          "status": "succeeded",
+          "guided": false,
+          "guide": null,
+          "guideMessage": "",
+          "summary": "read worldbook 奇幻大陆(副本) (10 entries)",
+          "metadata": null,
+          "candidateSnapshotId": "cap-snapshot:43cecc9e-2c9d-4b63-a47a-5b8945922c36",
+          "retrieverVersion": "maid-capability-retriever-v4",
+          "selectedCapabilityId": "worldbook.read",
+          "candidateHit": true,
+          "errorMessage": "",
+          "failureCode": "",
+          "outputRef": 2
+        },
+        {
+          "index": 6,
+          "toolName": "worldbook.read",
+          "featureId": "worldbook.read",
+          "title": "读取世界书内容",
+          "args": {
+            "includeContent": true,
+            "worldbookId": "奇幻大陆",
+            "maxEntries": 20,
+            "name": "奇幻大陆"
+          },
+          "status": "succeeded",
+          "guided": false,
+          "guide": null,
+          "guideMessage": "",
+          "summary": "read worldbook 奇幻大陆 (12 entries)",
+          "metadata": null,
+          "candidateSnapshotId": "cap-snapshot:e585b2c8-3efd-4b30-971d-97e47efd35ea",
+          "retrieverVersion": "maid-capability-retriever-v4",
+          "selectedCapabilityId": "worldbook.read",
+          "candidateHit": true,
+          "errorMessage": "",
+          "failureCode": "",
+          "outputRef": 3
+        },
+        {
+          "index": 7,
+          "toolName": "worldbook.read",
+          "featureId": "worldbook.read",
+          "title": "读取世界书内容",
+          "args": {
+            "includeContent": false,
+            "maxEntries": 20,
+            "name": "奇幻大陆(副本)"
+          },
+          "status": "succeeded",
+          "guided": false,
+          "guide": null,
+          "guideMessage": "",
+          "summary": "read worldbook 奇幻大陆(副本) (10 entries)",
+          "metadata": null,
+          "candidateSnapshotId": "cap-snapshot:eb3b6afb-1d10-43f8-927f-52faef90943e",
+          "retrieverVersion": "maid-capability-retriever-v4",
+          "selectedCapabilityId": "worldbook.read",
+          "candidateHit": true,
+          "errorMessage": "",
+          "failureCode": "",
+          "outputRef": 4
+        },
+        {
+          "index": 8,
+          "toolName": "worldbook.read",
+          "featureId": "worldbook.read",
+          "title": "读取世界书内容",
+          "args": {
+            "includeContent": false,
+            "maxEntries": 20,
+            "name": "奇幻大陆"
+          },
+          "status": "succeeded",
+          "guided": false,
+          "guide": null,
+          "guideMessage": "",
+          "summary": "read worldbook 奇幻大陆 (12 entries)",
+          "metadata": null,
+          "candidateSnapshotId": "cap-snapshot:7917fa11-6e8e-4daa-bd9c-41288aa794bd",
+          "retrieverVersion": "maid-capability-retriever-v4",
+          "selectedCapabilityId": "worldbook.read",
+          "candidateHit": true,
+          "errorMessage": "",
+          "failureCode": "",
+          "outputRef": 5
+        }
+      ]
+    },
+    {
+      "model": "deepseek",
+      "source": "../maid_testset_tools/live-results-20260929-comparison-acceptance/D06-deepseek.json",
+      "sourceSha256": "bd197bf49ad643fce45dd47a7b617328fce15b7be66ffc41f02ad04bbd4aca02",
+      "steps": [
+        {
+          "index": 1,
+          "toolName": "app.search_feature",
+          "featureId": "app.capabilities.search",
+          "title": "检索女仆能力",
+          "args": {
+            "query": "合并",
+            "limit": 8
+          },
+          "status": "succeeded",
+          "guided": false,
+          "guide": null,
+          "guideMessage": "",
+          "summary": "found 2 feature(s)",
+          "metadata": {
+            "discoveryRecovery": {
+              "kind": "public_capability_catalog",
+              "trigger": "unsupported_intent",
+              "initialDecisionSource": "",
+              "maxRecoveries": 1
+            }
+          },
+          "candidateSnapshotId": "cap-discovery:8d6850d4-024c-42cc-b24a-74ab4fdd2316",
+          "retrieverVersion": "maid-capability-retriever-v4",
+          "selectedCapabilityId": "app.capabilities.search",
+          "candidateHit": true,
+          "errorMessage": "",
+          "failureCode": "",
+          "outputRef": 6
+        },
+        {
+          "index": 2,
+          "toolName": "worldbook.list",
+          "featureId": "worldbook.list",
+          "title": "查看世界书列表",
+          "args": {
+            "includeGlobal": true,
+            "limit": 100
+          },
+          "status": "succeeded",
+          "guided": false,
+          "guide": null,
+          "guideMessage": "",
+          "summary": "listed 3 worldbook(s)",
+          "metadata": null,
+          "candidateSnapshotId": "cap-snapshot:74227e5d-2a93-4fd0-b62f-393abd5ac2c8",
+          "retrieverVersion": "maid-capability-retriever-v4",
+          "selectedCapabilityId": "worldbook.list",
+          "candidateHit": true,
+          "errorMessage": "",
+          "failureCode": "",
+          "outputRef": 7
+        },
+        {
+          "index": 3,
+          "toolName": "worldbook.read",
+          "featureId": "worldbook.read",
+          "title": "读取世界书内容",
+          "args": {
+            "worldbookId": "奇幻大陆",
+            "includeContent": true,
+            "maxEntries": 50,
+            "maxContentLength": 12000
+          },
+          "status": "succeeded",
+          "guided": false,
+          "guide": null,
+          "guideMessage": "",
+          "summary": "read worldbook 奇幻大陆 (12 entries)",
+          "metadata": null,
+          "candidateSnapshotId": "cap-snapshot:43d26738-4f8a-4028-8a22-314cc18f9ef1",
+          "retrieverVersion": "maid-capability-retriever-v4",
+          "selectedCapabilityId": "worldbook.read",
+          "candidateHit": true,
+          "errorMessage": "",
+          "failureCode": "",
+          "outputRef": 8
+        },
+        {
+          "index": 4,
+          "toolName": "worldbook.read",
+          "featureId": "worldbook.read",
+          "title": "读取世界书内容",
+          "args": {
+            "worldbookId": "奇幻大陆(副本)",
+            "includeContent": true,
+            "maxEntries": 50,
+            "maxContentLength": 12000
+          },
+          "status": "succeeded",
+          "guided": false,
+          "guide": null,
+          "guideMessage": "",
+          "summary": "read worldbook 奇幻大陆(副本) (10 entries)",
+          "metadata": null,
+          "candidateSnapshotId": "cap-snapshot:444df795-49b4-49ef-a75d-ee032a70626a",
+          "retrieverVersion": "maid-capability-retriever-v4",
+          "selectedCapabilityId": "worldbook.read",
+          "candidateHit": true,
+          "errorMessage": "",
+          "failureCode": "",
+          "outputRef": 9
+        },
+        {
+          "index": 5,
+          "toolName": "worldbook.read",
+          "featureId": "worldbook.read",
+          "title": "读取世界书内容",
+          "args": {
+            "worldbookId": "奇幻大陆",
+            "includeContent": true,
+            "maxEntries": 50,
+            "maxContentLength": 12000
+          },
+          "status": "succeeded",
+          "guided": false,
+          "guide": null,
+          "guideMessage": "",
+          "summary": "read worldbook 奇幻大陆 (12 entries)",
+          "metadata": null,
+          "candidateSnapshotId": "cap-snapshot:9455e10f-da2d-4317-9db6-d2de8c353764",
+          "retrieverVersion": "maid-capability-retriever-v4",
+          "selectedCapabilityId": "worldbook.read",
+          "candidateHit": true,
+          "errorMessage": "",
+          "failureCode": "",
+          "outputRef": 8
+        },
+        {
+          "index": 6,
+          "toolName": "worldbook.read",
+          "featureId": "worldbook.read",
+          "title": "读取世界书内容",
+          "args": {
+            "worldbookId": "奇幻大陆(副本)",
+            "includeContent": true,
+            "maxEntries": 50,
+            "maxContentLength": 12000
+          },
+          "status": "succeeded",
+          "guided": false,
+          "guide": null,
+          "guideMessage": "",
+          "summary": "read worldbook 奇幻大陆(副本) (10 entries)",
+          "metadata": null,
+          "candidateSnapshotId": "cap-snapshot:9ea995d2-631d-45d8-bc25-e2ce17d6f454",
+          "retrieverVersion": "maid-capability-retriever-v4",
+          "selectedCapabilityId": "worldbook.read",
+          "candidateHit": true,
+          "errorMessage": "",
+          "failureCode": "",
+          "outputRef": 9
+        },
+        {
+          "index": 7,
+          "toolName": "worldbook.read",
+          "featureId": "worldbook.read",
+          "title": "读取世界书内容",
+          "args": {
+            "worldbookId": "奇幻大陆",
+            "includeContent": true,
+            "maxEntries": 50,
+            "maxContentLength": 12000
+          },
+          "status": "succeeded",
+          "guided": false,
+          "guide": null,
+          "guideMessage": "",
+          "summary": "read worldbook 奇幻大陆 (12 entries)",
+          "metadata": null,
+          "candidateSnapshotId": "cap-snapshot:02da1a78-0057-4bb2-b675-73ae6221106f",
+          "retrieverVersion": "maid-capability-retriever-v4",
+          "selectedCapabilityId": "worldbook.read",
+          "candidateHit": true,
+          "errorMessage": "",
+          "failureCode": "",
+          "outputRef": 8
+        },
+        {
+          "index": 8,
+          "toolName": "worldbook.read",
+          "featureId": "worldbook.read",
+          "title": "读取世界书内容",
+          "args": {
+            "worldbookId": "奇幻大陆(副本)",
+            "includeContent": true,
+            "maxEntries": 50,
+            "maxContentLength": 12000
+          },
+          "status": "succeeded",
+          "guided": false,
+          "guide": null,
+          "guideMessage": "",
+          "summary": "read worldbook 奇幻大陆(副本) (10 entries)",
+          "metadata": null,
+          "candidateSnapshotId": "cap-snapshot:13c50958-4f66-4ad9-bee1-ea17b20bb82f",
+          "retrieverVersion": "maid-capability-retriever-v4",
+          "selectedCapabilityId": "worldbook.read",
+          "candidateHit": true,
+          "errorMessage": "",
+          "failureCode": "",
+          "outputRef": 9
+        },
+        {
+          "index": 9,
+          "toolName": "worldbook.read",
+          "featureId": "worldbook.read",
+          "title": "读取世界书内容",
+          "args": {
+            "worldbookId": "奇幻大陆",
+            "includeContent": true,
+            "maxEntries": 50,
+            "maxContentLength": 12000
+          },
+          "status": "succeeded",
+          "guided": false,
+          "guide": null,
+          "guideMessage": "",
+          "summary": "read worldbook 奇幻大陆 (12 entries)",
+          "metadata": null,
+          "candidateSnapshotId": "cap-snapshot:b4fa4c71-9d88-4c7c-a406-a7ef55bbd493",
+          "retrieverVersion": "maid-capability-retriever-v4",
+          "selectedCapabilityId": "worldbook.read",
+          "candidateHit": true,
+          "errorMessage": "",
+          "failureCode": "",
+          "outputRef": 8
+        }
+      ]
+    }
+  ],
+  "snapshots": [
+    {
+      "ok": true,
+      "feature": {
+        "id": "worldbook.compare",
+        "title": "比较世界书并提出合并方案",
+        "aliases": [
+          "比较世界书",
+          "对比世界书",
+          "世界书差异",
+          "合并世界书",
+          "合并世界书副本",
+          "世界书副本合并",
+          "compare worldbooks",
+          "worldbook comparison",
+          "merge worldbooks"
+        ],
+        "summary": "只读比较两本世界书的真实条目，提出保留与冲突处理方案；不执行一键合并、覆盖或删除。",
+        "uiPath": [
+          "世界书",
+          "世界书库"
+        ],
+        "tools": [
+          "worldbook.list",
+          "worldbook.read"
+        ],
+        "argsHint": "先用 worldbook.list 取得真实 ID 并明确源世界书与目标世界书；副本名称只是线索，目标有歧义时先澄清。分别用 worldbook.read(name/worldbookId,includeContent:true) 读取双方真实正文；maxEntries/maxContentLength 不足时继续按 entryId/entryTitle 读取，仍不完整时标明未核实，不能只凭数量或短预览判断内容相同。按条目比较相同、源独有、目标独有、冲突四类，保留目标独有内容，逐项说明保留、追加或冲突取舍的选项；不自行编造、重写或丢弃原文。本流程只提出方案，不把缺少专用合并工具当成无法读取比较。后续得到明确选择后，追加可用现有 worldbook.create(mode:append)，局部更新可用 worldbook.update_entries；覆盖或删除仍须准确目标及原工具的 APP 确认，不能为完成合并擅自删掉源书或副本。",
+        "panel": "worldbook",
+        "riskLevel": "low",
+        "writes": false,
+        "confirmation": "allow_once",
+        "firstRunGuide": "",
+        "directAction": "worldbook.list",
+        "doc": "只读比较两本世界书的真实条目，提出保留与冲突处理方案；不执行一键合并、覆盖或删除。\n界面路径：世界书 -> 世界书库\n可用工具：worldbook.list, worldbook.read\n参数提示：先用 worldbook.list 取得真实 ID 并明确源世界书与目标世界书；副本名称只是线索，目标有歧义时先澄清。分别用 worldbook.read(name/worldbookId,includeContent:true) 读取双方真实正文；maxEntries/maxContentLength 不足时继续按 entryId/entryTitle 读取，仍不完整时标明未核实，不能只凭数量或短预览判断内容相同。按条目比较相同、源独有、目标独有、冲突四类，保留目标独有内容，逐项说明保留、追加或冲突取舍的选项；不自行编造、重写或丢弃原文。本流程只提出方案，不把缺少专用合并工具当成无法读取比较。后续得到明确选择后，追加可用现有 worldbook.create(mode:append)，局部更新可用 worldbook.update_entries；覆盖或删除仍须准确目标及原工具的 APP 确认，不能为完成合并擅自删掉源书或副本。\n风险等级：low\n只读或只打开界面。\n确认策略：allow_once"
+      }
+    },
+    {
+      "ok": true,
+      "count": 3,
+      "currentCard": {
+        "personaId": "persona_1790696574381_s8oja",
+        "personaName": "测试",
+        "worldbookId": ""
+      },
+      "currentCardHint": "当前角色卡没有绑定自己的世界书；不要因为别的世界书名称与要求相似就写进去。给当前角色卡加内容时，不传 name 调用 worldbook.create 会为它新建并绑定一本。",
+      "worldbooks": [
+        {
+          "id": "奇幻大陆",
+          "name": "奇幻大陆",
+          "entryCount": 12,
+          "boundToCurrentSession": false,
+          "global": false,
+          "ownershipKnown": true,
+          "currentCard": false,
+          "personaBindings": [],
+          "ownerCards": [],
+          "otherOwnerCards": [],
+          "sharedAcrossCards": false,
+          "targetSelectionEvidence": {
+            "currentCard": {
+              "personaId": "persona_1790696574381_s8oja",
+              "personaName": "测试",
+              "worldbookId": "",
+              "bindingState": "unbound"
+            },
+            "observedWorldbook": {
+              "worldbookId": "奇幻大陆",
+              "personaBindings": []
+            },
+            "targetOptions": []
+          }
+        },
+        {
+          "id": "奇幻大陆(副本)",
+          "name": "奇幻大陆(副本)",
+          "entryCount": 10,
+          "boundToCurrentSession": false,
+          "global": false,
+          "ownershipKnown": true,
+          "currentCard": false,
+          "personaBindings": [],
+          "ownerCards": [],
+          "otherOwnerCards": [],
+          "sharedAcrossCards": false,
+          "targetSelectionEvidence": {
+            "currentCard": {
+              "personaId": "persona_1790696574381_s8oja",
+              "personaName": "测试",
+              "worldbookId": "",
+              "bindingState": "unbound"
+            },
+            "observedWorldbook": {
+              "worldbookId": "奇幻大陆(副本)",
+              "personaBindings": []
+            },
+            "targetOptions": []
+          }
+        },
+        {
+          "id": "校园日常",
+          "name": "校园日常",
+          "entryCount": 5,
+          "boundToCurrentSession": false,
+          "global": false,
+          "ownershipKnown": true,
+          "currentCard": false,
+          "personaBindings": [],
+          "ownerCards": [],
+          "otherOwnerCards": [],
+          "sharedAcrossCards": false,
+          "targetSelectionEvidence": {
+            "currentCard": {
+              "personaId": "persona_1790696574381_s8oja",
+              "personaName": "测试",
+              "worldbookId": "",
+              "bindingState": "unbound"
+            },
+            "observedWorldbook": {
+              "worldbookId": "校园日常",
+              "personaBindings": []
+            },
+            "targetOptions": []
+          }
+        }
+      ]
+    },
+    {
+      "ok": true,
+      "id": "奇幻大陆(副本)",
+      "name": "奇幻大陆(副本)",
+      "entryCount": 10,
+      "boundToCurrentSession": false,
+      "global": false,
+      "resolvedFrom": "explicit",
+      "ownershipKnown": true,
+      "currentCard": false,
+      "personaBindings": [],
+      "ownerCards": [],
+      "otherOwnerCards": [],
+      "sharedAcrossCards": false,
+      "targetSelectionEvidence": {
+        "currentCard": {
+          "personaId": "persona_1790696574381_s8oja",
+          "personaName": "测试",
+          "worldbookId": "",
+          "bindingState": "unbound"
+        },
+        "observedWorldbook": {
+          "worldbookId": "奇幻大陆(副本)",
+          "personaBindings": []
+        },
+        "targetOptions": []
+      },
+      "contentMode": "content",
+      "contentHint": "",
+      "returnedEntryCount": 10,
+      "entries": [
+        {
+          "id": "fantasy_copy_01",
+          "title": "大陆概况",
+          "keys": [
+            "奇幻大陆",
+            "晨星大陆"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 32,
+          "content": "晨星大陆位于两片海洋之间，北方寒冷，南方多港口；通用货币为银币。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_copy_02",
+          "title": "北境霜城",
+          "keys": [
+            "霜城",
+            "城主"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 22,
+          "content": "北境霜城由城主洛恩管理，城门每天日落时关闭。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_copy_03",
+          "title": "银叶森林",
+          "keys": [
+            "银叶森林",
+            "艾琳"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 27,
+          "content": "银叶森林由精灵守林者艾琳巡守，外来旅人须沿白石路行走。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_copy_04",
+          "title": "赤曜王国",
+          "keys": [
+            "赤曜王国",
+            "赫利奥"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 22,
+          "content": "赤曜王国的王都是赫利奥，王室纹章为红色太阳。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_copy_05",
+          "title": "潮汐港",
+          "keys": [
+            "潮汐港",
+            "港务行会"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 24,
+          "content": "潮汐港由港务行会安排泊位，商船入港后需登记货物。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_copy_06",
+          "title": "星辉学院",
+          "keys": [
+            "星辉学院",
+            "魔法学院"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 33,
+          "content": "星辉学院研究基础魔法，每年春季招收新生，校规禁止在宿舍施放火焰术。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_copy_07",
+          "title": "旅行者公会",
+          "keys": [
+            "旅行者公会",
+            "公会等级"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 28,
+          "content": "旅行者公会的新成员佩戴木徽，完成三次委托后可以申请铜徽。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_copy_08",
+          "title": "月石魔法",
+          "keys": [
+            "月石",
+            "蓝月石"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 24,
+          "content": "蓝月石可储存少量魔力，耗尽后需在月光下静置一夜。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_copy_09",
+          "title": "白沙岛",
+          "keys": [
+            "白沙岛"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 21,
+          "content": "白沙岛位于潮汐港以东，每周有一班渡船往返。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_copy_10",
+          "title": "风语信标",
+          "keys": [
+            "风语信标"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 26,
+          "content": "风语信标位于海岸高塔，只能发出约定好的三种警示信号。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "ok": true,
+      "id": "奇幻大陆",
+      "name": "奇幻大陆",
+      "entryCount": 12,
+      "boundToCurrentSession": false,
+      "global": false,
+      "resolvedFrom": "explicit",
+      "ownershipKnown": true,
+      "currentCard": false,
+      "personaBindings": [],
+      "ownerCards": [],
+      "otherOwnerCards": [],
+      "sharedAcrossCards": false,
+      "targetSelectionEvidence": {
+        "currentCard": {
+          "personaId": "persona_1790696574381_s8oja",
+          "personaName": "测试",
+          "worldbookId": "",
+          "bindingState": "unbound"
+        },
+        "observedWorldbook": {
+          "worldbookId": "奇幻大陆",
+          "personaBindings": []
+        },
+        "targetOptions": []
+      },
+      "contentMode": "content",
+      "contentHint": "",
+      "returnedEntryCount": 12,
+      "entries": [
+        {
+          "id": "fantasy_01",
+          "title": "大陆概况",
+          "keys": [
+            "奇幻大陆",
+            "晨星大陆"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 32,
+          "content": "晨星大陆位于两片海洋之间，北方寒冷，南方多港口；通用货币为银币。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_02",
+          "title": "北境霜城",
+          "keys": [
+            "霜城",
+            "城主"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 22,
+          "content": "北境霜城由城主赛琳管理，城门每天日落时关闭。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_03",
+          "title": "银叶森林",
+          "keys": [
+            "银叶森林",
+            "艾琳"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 27,
+          "content": "银叶森林由精灵守林者艾琳巡守，外来旅人须沿白石路行走。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_04",
+          "title": "赤曜王国",
+          "keys": [
+            "赤曜王国",
+            "赫利奥"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 22,
+          "content": "赤曜王国的王都是赫利奥，王室纹章为红色太阳。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_05",
+          "title": "潮汐港",
+          "keys": [
+            "潮汐港",
+            "港务行会"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 24,
+          "content": "潮汐港由港务行会安排泊位，商船入港后需登记货物。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_06",
+          "title": "星辉学院",
+          "keys": [
+            "星辉学院",
+            "魔法学院"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 33,
+          "content": "星辉学院研究基础魔法，每年春季招收新生，校规禁止在宿舍施放火焰术。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_07",
+          "title": "旅行者公会",
+          "keys": [
+            "旅行者公会",
+            "公会等级"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 28,
+          "content": "旅行者公会的新成员佩戴铜徽，完成三次委托后可以申请银徽。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_08",
+          "title": "月石魔法",
+          "keys": [
+            "月石",
+            "蓝月石"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 24,
+          "content": "蓝月石可储存少量魔力，耗尽后需在月光下静置一夜。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_09",
+          "title": "黑曜山脉",
+          "keys": [
+            "黑曜山脉",
+            "矮人锻炉"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 25,
+          "content": "黑曜山脉的矮人锻炉使用地热，通行商道每月维护一次。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_10",
+          "title": "丰收节",
+          "keys": [
+            "丰收节"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 24,
+          "content": "丰收节在秋季谷物入仓后举行，居民分享面包与果汁。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_11",
+          "title": "雾谷禁区",
+          "keys": [
+            "雾谷",
+            "禁区"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 26,
+          "content": "雾谷常年有浓雾，旅人进入前必须请熟悉道路的向导带路。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_12",
+          "title": "传讯鸦",
+          "keys": [
+            "传讯鸦",
+            "传书"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 26,
+          "content": "传讯鸦只往返已训练的两座驿站，不能临时前往未知地点。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "ok": true,
+      "id": "奇幻大陆(副本)",
+      "name": "奇幻大陆(副本)",
+      "entryCount": 10,
+      "boundToCurrentSession": false,
+      "global": false,
+      "resolvedFrom": "explicit",
+      "ownershipKnown": true,
+      "currentCard": false,
+      "personaBindings": [],
+      "ownerCards": [],
+      "otherOwnerCards": [],
+      "sharedAcrossCards": false,
+      "targetSelectionEvidence": {
+        "currentCard": {
+          "personaId": "persona_1790696574381_s8oja",
+          "personaName": "测试",
+          "worldbookId": "",
+          "bindingState": "unbound"
+        },
+        "observedWorldbook": {
+          "worldbookId": "奇幻大陆(副本)",
+          "personaBindings": []
+        },
+        "targetOptions": []
+      },
+      "contentMode": "summary",
+      "contentHint": "世界书正文默认省略；需要正文时再次读取并传 includeContent:true、entryId、entryTitle 或 query。",
+      "returnedEntryCount": 10,
+      "entries": [
+        {
+          "id": "fantasy_copy_01",
+          "title": "大陆概况",
+          "keys": [
+            "奇幻大陆",
+            "晨星大陆"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 32,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_copy_02",
+          "title": "北境霜城",
+          "keys": [
+            "霜城",
+            "城主"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 22,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_copy_03",
+          "title": "银叶森林",
+          "keys": [
+            "银叶森林",
+            "艾琳"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 27,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_copy_04",
+          "title": "赤曜王国",
+          "keys": [
+            "赤曜王国",
+            "赫利奥"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 22,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_copy_05",
+          "title": "潮汐港",
+          "keys": [
+            "潮汐港",
+            "港务行会"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 24,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_copy_06",
+          "title": "星辉学院",
+          "keys": [
+            "星辉学院",
+            "魔法学院"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 33,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_copy_07",
+          "title": "旅行者公会",
+          "keys": [
+            "旅行者公会",
+            "公会等级"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 28,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_copy_08",
+          "title": "月石魔法",
+          "keys": [
+            "月石",
+            "蓝月石"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 24,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_copy_09",
+          "title": "白沙岛",
+          "keys": [
+            "白沙岛"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 21,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_copy_10",
+          "title": "风语信标",
+          "keys": [
+            "风语信标"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 26,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "ok": true,
+      "id": "奇幻大陆",
+      "name": "奇幻大陆",
+      "entryCount": 12,
+      "boundToCurrentSession": false,
+      "global": false,
+      "resolvedFrom": "explicit",
+      "ownershipKnown": true,
+      "currentCard": false,
+      "personaBindings": [],
+      "ownerCards": [],
+      "otherOwnerCards": [],
+      "sharedAcrossCards": false,
+      "targetSelectionEvidence": {
+        "currentCard": {
+          "personaId": "persona_1790696574381_s8oja",
+          "personaName": "测试",
+          "worldbookId": "",
+          "bindingState": "unbound"
+        },
+        "observedWorldbook": {
+          "worldbookId": "奇幻大陆",
+          "personaBindings": []
+        },
+        "targetOptions": []
+      },
+      "contentMode": "summary",
+      "contentHint": "世界书正文默认省略；需要正文时再次读取并传 includeContent:true、entryId、entryTitle 或 query。",
+      "returnedEntryCount": 12,
+      "entries": [
+        {
+          "id": "fantasy_01",
+          "title": "大陆概况",
+          "keys": [
+            "奇幻大陆",
+            "晨星大陆"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 32,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_02",
+          "title": "北境霜城",
+          "keys": [
+            "霜城",
+            "城主"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 22,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_03",
+          "title": "银叶森林",
+          "keys": [
+            "银叶森林",
+            "艾琳"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 27,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_04",
+          "title": "赤曜王国",
+          "keys": [
+            "赤曜王国",
+            "赫利奥"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 22,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_05",
+          "title": "潮汐港",
+          "keys": [
+            "潮汐港",
+            "港务行会"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 24,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_06",
+          "title": "星辉学院",
+          "keys": [
+            "星辉学院",
+            "魔法学院"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 33,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_07",
+          "title": "旅行者公会",
+          "keys": [
+            "旅行者公会",
+            "公会等级"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 28,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_08",
+          "title": "月石魔法",
+          "keys": [
+            "月石",
+            "蓝月石"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 24,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_09",
+          "title": "黑曜山脉",
+          "keys": [
+            "黑曜山脉",
+            "矮人锻炉"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 25,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_10",
+          "title": "丰收节",
+          "keys": [
+            "丰收节"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 24,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_11",
+          "title": "雾谷禁区",
+          "keys": [
+            "雾谷",
+            "禁区"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 26,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_12",
+          "title": "传讯鸦",
+          "keys": [
+            "传讯鸦",
+            "传书"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 26,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "query": "合并",
+      "scope": "registered_app_feature_catalog",
+      "exhaustive": false,
+      "matchStatus": "matched",
+      "message": "Matched registered capabilities or usage guides; each entry describes available maid tools.",
+      "features": [
+        {
+          "id": "worldbook.compare",
+          "title": "比较世界书并提出合并方案",
+          "aliases": [
+            "比较世界书",
+            "对比世界书",
+            "世界书差异",
+            "合并世界书",
+            "合并世界书副本",
+            "世界书副本合并",
+            "compare worldbooks",
+            "worldbook comparison",
+            "merge worldbooks"
+          ],
+          "summary": "只读比较两本世界书的真实条目，提出保留与冲突处理方案；不执行一键合并、覆盖或删除。",
+          "uiPath": [
+            "世界书",
+            "世界书库"
+          ],
+          "tools": [
+            "worldbook.list",
+            "worldbook.read"
+          ],
+          "argsHint": "先用 worldbook.list 取得真实 ID 并明确源世界书与目标世界书；副本名称只是线索，目标有歧义时先澄清。分别用 worldbook.read(name/worldbookId,includeContent:true) 读取双方真实正文；maxEntries/maxContentLength 不足时继续按 entryId/entryTitle 读取，仍不完整时标明未核实，不能只凭数量或短预览判断内容相同。按条目比较相同、源独有、目标独有、冲突四类，保留目标独有内容，逐项说明保留、追加或冲突取舍的选项；不自行编造、重写或丢弃原文。本流程只提出方案，不把缺少专用合并工具当成无法读取比较。后续得到明确选择后，追加可用现有 worldbook.create(mode:append)，局部更新可用 worldbook.update_entries；覆盖或删除仍须准确目标及原工具的 APP 确认，不能为完成合并擅自删掉源书或副本。",
+          "panel": "worldbook",
+          "riskLevel": "low",
+          "writes": false,
+          "confirmation": "allow_once",
+          "firstRunGuide": "",
+          "directAction": "worldbook.list",
+          "score": 80
+        },
+        {
+          "id": "session.compare",
+          "title": "比较同名联系人并提出方案",
+          "aliases": [
+            "比较同名联系人",
+            "对比联系人",
+            "联系人去重",
+            "清理重复联系人",
+            "删除重复联系人",
+            "合并联系人",
+            "合并好友",
+            "compare contacts",
+            "merge contacts",
+            "duplicate contacts"
+          ],
+          "summary": "只读比较疑似重复联系人的真实资料与聊天数量，给出保留建议和待确认的删除目标；不自动合并或删除。",
+          "uiPath": [
+            "联系人",
+            "聊天列表"
+          ],
+          "tools": [
+            "session.list",
+            "app.read_resource"
+          ],
+          "argsHint": "先用 session.list 定位候选及真实 ID，再按 ID 用 app.read_resource(resource:\"session\",include:[\"description\"]) 读取 description、messageCount、hasAvatar；descriptionTruncated 为 true 时不能把截断简介当完整资料。同名或名称含副本、导入、编号不等于资料重复，messageCount 只表示消息数量，不证明哪份是原版；证据不足时明确保留不确定项。列出各候选 ID、简介差异、聊天数量、建议保留对象及理由；没有可靠依据不能认定重复或擅自选删除目标。删除对应联系人/会话会丢失其聊天及内部归档，并非把历史合并到保留对象。本流程仅提出方案；后续用户明确选择准确目标后，仍由原删除工具的 APP 确认通过才执行，读过本说明不授予删除权限。",
+          "panel": "session",
+          "riskLevel": "low",
+          "writes": false,
+          "confirmation": "none",
+          "firstRunGuide": "",
+          "directAction": "session.list",
+          "score": 70
+        }
+      ]
+    },
+    {
+      "ok": true,
+      "count": 3,
+      "currentCard": {
+        "personaId": "persona_1790696621060_4v001",
+        "personaName": "测试",
+        "worldbookId": ""
+      },
+      "currentCardHint": "当前角色卡没有绑定自己的世界书；不要因为别的世界书名称与要求相似就写进去。给当前角色卡加内容时，不传 name 调用 worldbook.create 会为它新建并绑定一本。",
+      "worldbooks": [
+        {
+          "id": "奇幻大陆",
+          "name": "奇幻大陆",
+          "entryCount": 12,
+          "boundToCurrentSession": false,
+          "global": false,
+          "ownershipKnown": true,
+          "currentCard": false,
+          "personaBindings": [],
+          "ownerCards": [],
+          "otherOwnerCards": [],
+          "sharedAcrossCards": false,
+          "targetSelectionEvidence": {
+            "currentCard": {
+              "personaId": "persona_1790696621060_4v001",
+              "personaName": "测试",
+              "worldbookId": "",
+              "bindingState": "unbound"
+            },
+            "observedWorldbook": {
+              "worldbookId": "奇幻大陆",
+              "personaBindings": []
+            },
+            "targetOptions": []
+          }
+        },
+        {
+          "id": "奇幻大陆(副本)",
+          "name": "奇幻大陆(副本)",
+          "entryCount": 10,
+          "boundToCurrentSession": false,
+          "global": false,
+          "ownershipKnown": true,
+          "currentCard": false,
+          "personaBindings": [],
+          "ownerCards": [],
+          "otherOwnerCards": [],
+          "sharedAcrossCards": false,
+          "targetSelectionEvidence": {
+            "currentCard": {
+              "personaId": "persona_1790696621060_4v001",
+              "personaName": "测试",
+              "worldbookId": "",
+              "bindingState": "unbound"
+            },
+            "observedWorldbook": {
+              "worldbookId": "奇幻大陆(副本)",
+              "personaBindings": []
+            },
+            "targetOptions": []
+          }
+        },
+        {
+          "id": "校园日常",
+          "name": "校园日常",
+          "entryCount": 5,
+          "boundToCurrentSession": false,
+          "global": false,
+          "ownershipKnown": true,
+          "currentCard": false,
+          "personaBindings": [],
+          "ownerCards": [],
+          "otherOwnerCards": [],
+          "sharedAcrossCards": false,
+          "targetSelectionEvidence": {
+            "currentCard": {
+              "personaId": "persona_1790696621060_4v001",
+              "personaName": "测试",
+              "worldbookId": "",
+              "bindingState": "unbound"
+            },
+            "observedWorldbook": {
+              "worldbookId": "校园日常",
+              "personaBindings": []
+            },
+            "targetOptions": []
+          }
+        }
+      ]
+    },
+    {
+      "ok": true,
+      "id": "奇幻大陆",
+      "name": "奇幻大陆",
+      "entryCount": 12,
+      "boundToCurrentSession": false,
+      "global": false,
+      "resolvedFrom": "explicit",
+      "ownershipKnown": true,
+      "currentCard": false,
+      "personaBindings": [],
+      "ownerCards": [],
+      "otherOwnerCards": [],
+      "sharedAcrossCards": false,
+      "targetSelectionEvidence": {
+        "currentCard": {
+          "personaId": "persona_1790696621060_4v001",
+          "personaName": "测试",
+          "worldbookId": "",
+          "bindingState": "unbound"
+        },
+        "observedWorldbook": {
+          "worldbookId": "奇幻大陆",
+          "personaBindings": []
+        },
+        "targetOptions": []
+      },
+      "contentMode": "content",
+      "contentHint": "",
+      "returnedEntryCount": 12,
+      "entries": [
+        {
+          "id": "fantasy_01",
+          "title": "大陆概况",
+          "keys": [
+            "奇幻大陆",
+            "晨星大陆"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 32,
+          "content": "晨星大陆位于两片海洋之间，北方寒冷，南方多港口；通用货币为银币。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_02",
+          "title": "北境霜城",
+          "keys": [
+            "霜城",
+            "城主"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 22,
+          "content": "北境霜城由城主赛琳管理，城门每天日落时关闭。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_03",
+          "title": "银叶森林",
+          "keys": [
+            "银叶森林",
+            "艾琳"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 27,
+          "content": "银叶森林由精灵守林者艾琳巡守，外来旅人须沿白石路行走。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_04",
+          "title": "赤曜王国",
+          "keys": [
+            "赤曜王国",
+            "赫利奥"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 22,
+          "content": "赤曜王国的王都是赫利奥，王室纹章为红色太阳。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_05",
+          "title": "潮汐港",
+          "keys": [
+            "潮汐港",
+            "港务行会"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 24,
+          "content": "潮汐港由港务行会安排泊位，商船入港后需登记货物。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_06",
+          "title": "星辉学院",
+          "keys": [
+            "星辉学院",
+            "魔法学院"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 33,
+          "content": "星辉学院研究基础魔法，每年春季招收新生，校规禁止在宿舍施放火焰术。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_07",
+          "title": "旅行者公会",
+          "keys": [
+            "旅行者公会",
+            "公会等级"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 28,
+          "content": "旅行者公会的新成员佩戴铜徽，完成三次委托后可以申请银徽。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_08",
+          "title": "月石魔法",
+          "keys": [
+            "月石",
+            "蓝月石"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 24,
+          "content": "蓝月石可储存少量魔力，耗尽后需在月光下静置一夜。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_09",
+          "title": "黑曜山脉",
+          "keys": [
+            "黑曜山脉",
+            "矮人锻炉"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 25,
+          "content": "黑曜山脉的矮人锻炉使用地热，通行商道每月维护一次。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_10",
+          "title": "丰收节",
+          "keys": [
+            "丰收节"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 24,
+          "content": "丰收节在秋季谷物入仓后举行，居民分享面包与果汁。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_11",
+          "title": "雾谷禁区",
+          "keys": [
+            "雾谷",
+            "禁区"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 26,
+          "content": "雾谷常年有浓雾，旅人进入前必须请熟悉道路的向导带路。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_12",
+          "title": "传讯鸦",
+          "keys": [
+            "传讯鸦",
+            "传书"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 26,
+          "content": "传讯鸦只往返已训练的两座驿站，不能临时前往未知地点。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "ok": true,
+      "id": "奇幻大陆(副本)",
+      "name": "奇幻大陆(副本)",
+      "entryCount": 10,
+      "boundToCurrentSession": false,
+      "global": false,
+      "resolvedFrom": "explicit",
+      "ownershipKnown": true,
+      "currentCard": false,
+      "personaBindings": [],
+      "ownerCards": [],
+      "otherOwnerCards": [],
+      "sharedAcrossCards": false,
+      "targetSelectionEvidence": {
+        "currentCard": {
+          "personaId": "persona_1790696621060_4v001",
+          "personaName": "测试",
+          "worldbookId": "",
+          "bindingState": "unbound"
+        },
+        "observedWorldbook": {
+          "worldbookId": "奇幻大陆(副本)",
+          "personaBindings": []
+        },
+        "targetOptions": []
+      },
+      "contentMode": "content",
+      "contentHint": "",
+      "returnedEntryCount": 10,
+      "entries": [
+        {
+          "id": "fantasy_copy_01",
+          "title": "大陆概况",
+          "keys": [
+            "奇幻大陆",
+            "晨星大陆"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 32,
+          "content": "晨星大陆位于两片海洋之间，北方寒冷，南方多港口；通用货币为银币。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_copy_02",
+          "title": "北境霜城",
+          "keys": [
+            "霜城",
+            "城主"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 22,
+          "content": "北境霜城由城主洛恩管理，城门每天日落时关闭。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_copy_03",
+          "title": "银叶森林",
+          "keys": [
+            "银叶森林",
+            "艾琳"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 27,
+          "content": "银叶森林由精灵守林者艾琳巡守，外来旅人须沿白石路行走。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_copy_04",
+          "title": "赤曜王国",
+          "keys": [
+            "赤曜王国",
+            "赫利奥"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 22,
+          "content": "赤曜王国的王都是赫利奥，王室纹章为红色太阳。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_copy_05",
+          "title": "潮汐港",
+          "keys": [
+            "潮汐港",
+            "港务行会"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 24,
+          "content": "潮汐港由港务行会安排泊位，商船入港后需登记货物。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_copy_06",
+          "title": "星辉学院",
+          "keys": [
+            "星辉学院",
+            "魔法学院"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 33,
+          "content": "星辉学院研究基础魔法，每年春季招收新生，校规禁止在宿舍施放火焰术。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_copy_07",
+          "title": "旅行者公会",
+          "keys": [
+            "旅行者公会",
+            "公会等级"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 28,
+          "content": "旅行者公会的新成员佩戴木徽，完成三次委托后可以申请铜徽。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_copy_08",
+          "title": "月石魔法",
+          "keys": [
+            "月石",
+            "蓝月石"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 24,
+          "content": "蓝月石可储存少量魔力，耗尽后需在月光下静置一夜。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_copy_09",
+          "title": "白沙岛",
+          "keys": [
+            "白沙岛"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 21,
+          "content": "白沙岛位于潮汐港以东，每周有一班渡船往返。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        },
+        {
+          "id": "fantasy_copy_10",
+          "title": "风语信标",
+          "keys": [
+            "风语信标"
+          ],
+          "secondaryKeys": [],
+          "disabled": false,
+          "constant": false,
+          "promptMode": "legacy",
+          "contentSource": "content",
+          "contentLength": 26,
+          "content": "风语信标位于海岸高塔，只能发出约定好的三种警示信号。",
+          "contentTruncated": false,
+          "requiresPromptBlockId": false,
+          "promptBlocks": [],
+          "sourceLayer": "",
+          "sourceRefs": []
+        }
+      ],
+      "truncated": false
+    }
+  ]
+}

@@ -281,6 +281,7 @@ const run = (overrides = {}) => ({
   };
   const voiceTasks = createMaidVoiceTaskRuntime({
     getCommandRuntime: () => command,
+    getApproval: id => pending ? { id: `approval-${id}` } : null,
     confirmApproval: (ids) => { confirmed.push(ids); return pending; },
   });
   const target = { maidCallId: 'call_a' };

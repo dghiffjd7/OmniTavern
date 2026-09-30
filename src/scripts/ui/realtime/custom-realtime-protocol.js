@@ -49,6 +49,7 @@ export const createCustomRealtimeProtocol = ({ sessionConfig, send, emit, ready,
         playedMilliseconds();
         const part = play(event.delta, 24000);
         if (part) segments.push(part);
+        event = { ...event, response_id: event.response_id || responseId, playbackSuppressed: false };
       }
       if (event.type === 'response.done' && (!event.response?.id || event.response.id === responseId)) responding = false;
       // Server VAD cancellation can win the race against a local cancellation.

@@ -167,7 +167,7 @@ export const createAppNavigationAgentTools = ({
   {
     name: 'app.search_feature',
     title: 'Search APP features',
-    description: 'Search the APP feature catalog by user wording.',
+    description: 'Search registered APP capabilities and usage guides by user wording. The catalog is not exhaustive; no match does not mean the APP lacks the feature. Read a matched guide to distinguish APP support from maid execution tools.',
     source: 'maid-app-navigation',
     permissions: [],
     riskLevel: 'low',
@@ -189,16 +189,27 @@ export const createAppNavigationAgentTools = ({
         limit: { type: 'integer', minimum: 1, maximum: 20 },
       },
     },
-    execute: async (args = {}) => ({
-      query: trim(args.query),
-      features: searchAppFeatures(args.query, { limit: args.limit }),
-    }),
-    summarizeResult: result => `found ${Number(result?.features?.length || 0)} feature(s)`,
+    execute: async (args = {}) => {
+      const features = searchAppFeatures(args.query, { limit: args.limit });
+      return {
+        query: trim(args.query),
+        scope: 'registered_app_feature_catalog',
+        exhaustive: false,
+        matchStatus: features.length ? 'matched' : 'no_catalog_match',
+        message: features.length
+          ? 'Matched registered capabilities or usage guides; each entry describes available maid tools.'
+          : 'No registered catalog entry matched. This does not establish that the APP feature is unsupported; APP support remains unknown.',
+        features,
+      };
+    },
+    summarizeResult: result => result?.features?.length
+      ? `found ${result.features.length} feature(s)`
+      : 'no catalog match; APP support remains unknown',
   },
   {
     name: 'app.read_feature_doc',
     title: 'Read APP feature doc',
-    description: 'Read a concise feature document from the APP feature catalog.',
+    description: 'Read a registered APP capability or usage guide. Reading a guide does not execute its UI steps. Missing documentation does not mean the APP lacks the feature.',
     source: 'maid-app-navigation',
     permissions: [],
     riskLevel: 'low',
@@ -221,7 +232,14 @@ export const createAppNavigationAgentTools = ({
     },
     execute: async (args = {}) => {
       const feature = buildAppFeatureDoc(args.featureId);
-      if (!feature) return { ok: false, featureId: trim(args.featureId), reason: 'feature_not_found' };
+      if (!feature) return {
+        ok: false,
+        featureId: trim(args.featureId),
+        reason: 'feature_not_found',
+        scope: 'registered_app_feature_catalog',
+        exhaustive: false,
+        message: 'No registered documentation matched. This does not establish that the APP feature is unsupported; APP support remains unknown.',
+      };
       return { ok: true, feature };
     },
     summarizeResult: result => result?.ok === false ? 'feature doc not found' : `feature doc: ${trim(result?.feature?.id)}`,
@@ -393,7 +411,7 @@ export const createAppNavigationAgentTools = ({
   {
     name: 'app.read_resource',
     title: 'Read APP resource',
-    description: 'Read structured APP resources such as chat messages, worldbook settings, regex, memory, variables, presets, config, sessions, personas, or users. Persona/user lists are compact by default; request profile fields through include only when needed. Persona associations expose only saved binding references. Session include:["members","worldbooks"] returns compact group-member IDs plus inherited role-world and direct-binding evidence.',
+    description: 'Read structured APP resources such as chat messages, worldbook settings, regex, memory, variables, presets, config, sessions, personas, or users. Worldbooks include current-card and owner-card evidence plus targetSelectionEvidence for binding state and target options. Use this evidence to clarify ambiguous targets with unknown or cross-card ownership; explicitly named targets still require applicable write confirmation. Persona/user lists are compact by default; request fields through include only when needed. Session results include messageCount and hasAvatar; include:["description"] reads saved contact descriptions, separate from contact_profile records. Session include:["members","worldbooks"] returns group-member IDs plus inherited role-world and direct-binding evidence.',
     source: 'maid-app-navigation',
     permissions: [],
     riskLevel: 'low',
@@ -425,14 +443,14 @@ export const createAppNavigationAgentTools = ({
         includeContent: { type: 'boolean' },
         include: {
           type: 'array',
-          description: 'Optional fields to expand. For persona/user use associations, description, avatar, or details. For session use members and/or worldbooks. For regex use rules only when the user explicitly asks to debug raw regex bodies; format inference must use formatEvidence instead.',
+          description: 'Optional fields to expand. For persona/user use associations, description, avatar, or details. For session use description, members and/or worldbooks; descriptionLength and descriptionTruncated distinguish empty from truncated contact descriptions. For regex use rules only when the user explicitly asks to debug raw regex bodies; format inference must use formatEvidence instead.',
           items: { type: 'string', maxLength: 80 },
           maxItems: 30,
         },
         query: { type: 'string', maxLength: 200 },
         limit: { type: 'integer', minimum: 1, maximum: 200 },
         maxEntries: { type: 'integer', minimum: 1, maximum: 200 },
-        maxTextLength: { type: 'integer', minimum: 120, maximum: 12000 },
+        maxTextLength: { type: 'integer', minimum: 120, maximum: 12000, description: 'Maximum returned text length, including each requested session description (default 2000 for descriptions).' },
         maxContentLength: { type: 'integer', minimum: 120, maximum: 12000 },
       },
     },

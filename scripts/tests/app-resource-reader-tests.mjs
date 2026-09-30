@@ -1,10 +1,58 @@
 import assert from 'node:assert/strict';
+import { createAgentToolRegistry } from '../../src/scripts/agent/agent-tool-registry.js';
+import { createAppNavigationAgentTools } from '../../src/scripts/agent/tools/app-navigation-tools.js';
 
 import {
   createAppResourceReader,
   normalizeAppResourceName,
   sanitizeAppResourceValue,
 } from '../../src/scripts/agent/app-resource-reader.js';
+
+{
+  const contacts = [
+    { id: 'sid-alpha', name: '甲', description: '原始简介' },
+    { id: 'sid-beta', name: 'sid-alpha', description: '显示名恰好等于另一真实ID' },
+    { id: 'sid-display', name: 'missing-id', description: '显示名不是会话ID' },
+  ];
+  const readResource = createAppResourceReader({
+    chatStore: {
+      listSessions: () => contacts.map(contact => contact.id),
+      getCurrent: () => 'sid-alpha',
+      getMessages: id => [{ id: `${id}-message`, role: 'user', content: '已保存消息' }],
+      getSessionSettings: () => ({}),
+    },
+    contactsStore: { getContact: id => contacts.find(contact => contact.id === id) },
+  });
+  const registry = createAgentToolRegistry();
+  registry.registerMany(createAppNavigationAgentTools({ readResource }));
+  assert.equal(registry.get('app.read_resource').schema.properties.sessionId.type, 'string');
+  const call = async args => {
+    const result = await registry.executeTool('app.read_resource', {
+      resource: 'session', include: ['description'], ...args,
+    });
+    assert.equal(result.status, 'succeeded');
+    assert.equal(result.result.ok, true);
+    return result.result;
+  };
+  const exact = await call({ sessionId: 'sid-alpha' });
+  assert.deepEqual(exact.sessions.map(session => session.id), ['sid-alpha'],
+    'schema-accepted sessionId must select only its real ID, not all records or a matching display name');
+  assert.equal(exact.sessions[0].description, '原始简介');
+  assert.equal(exact.sessions[0].messageCount, 1);
+  const cases = [
+    [{ sessionId: 'missing-id' }, []],
+    [{ sessionId: 'missing-id', name: '甲', id: 'sid-alpha' }, []],
+    [{ sessionId: 'sid-alpha', sessionName: 'missing-id', name: 'missing-id', id: 'sid-beta' }, ['sid-alpha']],
+    [{ id: 'sid-beta' }, ['sid-beta']],
+    [{ query: '甲' }, ['sid-alpha']],
+    [{ name: 'missing-id', id: 'sid-alpha' }, ['sid-display']],
+    [{}, ['sid-alpha', 'sid-beta', 'sid-display']],
+  ];
+  for (const [args, expectedIds] of cases) {
+    assert.deepEqual((await call(args)).sessions.map(session => session.id), expectedIds, JSON.stringify(args));
+  }
+  console.log('ok - registered session resource honors explicit sessionId without name/list fallback and preserves legacy selectors');
+}
 
 const makeDeps = () => {
   const messagesBySession = {

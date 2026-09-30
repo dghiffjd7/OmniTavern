@@ -2,6 +2,16 @@ import { t, translateUiText } from '../i18n/index.js';
 import { formatRealtimeUsageText } from './realtime/realtime-usage-utils.js';
 import { buildMaidVoiceTaskSummary } from './maid-run-card-model.js';
 import { MAID_RUN_ICONS } from './maid-run-card-dom.js';
+import { normalizeMaidResultBasis } from '../agent/maid-result-basis.js';
+
+export const formatMaidVoiceResultBasis = raw => {
+  const basis = normalizeMaidResultBasis(raw);
+  if (!basis) return '';
+  const label = basis.kind === 'tool_execution' ? t('本次使用了工具')
+    : basis.kind === 'explanation' ? t('本次未调用工具') : t('依据未记录');
+  const time = basis.recordedAt ? new Date(basis.recordedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
+  return [label, time].filter(Boolean).join(' · ');
+};
 
 /* 语音女仆：原小球 + 外圈状态环 + 一句话胶囊 + 托盘。
    语音任务只显示“接收 → 执行 → 汇报”三拍摘要，要看步骤时点“查看详情”打开输入胶囊里的运行卡。
@@ -71,6 +81,7 @@ const STYLE = `
 .mvo-beat-line{height:1.5px;border-radius:1px;background:var(--app-border-default)}
 .mvo-beat-line.is-past{background:var(--app-text-muted)}
 .mvo-task-say{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;font-size:12.5px;color:var(--app-text-secondary);overflow-wrap:anywhere}
+.mvo-task-basis{font-size:11.5px;color:var(--app-text-muted);font-variant-numeric:tabular-nums}
 .mvo-task-detail{border:0;background:transparent;padding:0;color:rgb(var(--app-accent-rgb,59,130,246));font-size:12px;cursor:pointer}
 .mvo-approval{margin:10px;padding:11px 12px;border-radius:12px;background:rgba(var(--app-warning-rgb,217,119,6),.11);display:flex;flex-direction:column;gap:8px}
 .mvo-approval-title{margin:0;font-size:13px;font-weight:600}
@@ -234,6 +245,7 @@ export const createMaidVoiceOrbUi = ({ documentRef = globalThis.document, window
     const recent = Array.isArray(tasks.recent) && tasks.recent.length ? tasks.recent : [tasks.latest].filter(Boolean);
     taskList.innerHTML = recent.map((task) => {
       const summary = summarizeTask(task);
+      const basis = formatMaidVoiceResultBasis(task.resultBasis);
       const running = ['queued', 'running'].includes(task.status);
       return `<li class="mvo-task" data-task-id="${escapeHtml(task.task_id)}">`
         + `<div class="mvo-task-ask"><q>${escapeHtml(task.request || '')}</q>`
@@ -241,6 +253,7 @@ export const createMaidVoiceOrbUi = ({ documentRef = globalThis.document, window
         + '</div>'
         + beatsHtml(summary)
         + `<div class="mvo-task-say"><span>${escapeHtml(summary.line)}</span><button type="button" class="mvo-task-detail" data-task-detail="1">${escapeHtml(t('查看详情'))}</button></div>`
+        + (basis ? `<span class="mvo-task-basis">${escapeHtml(basis)}</span>` : '')
         + '</li>';
     }).join('');
     taskList.hidden = recent.length === 0;

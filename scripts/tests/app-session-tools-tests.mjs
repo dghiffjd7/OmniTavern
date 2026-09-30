@@ -54,6 +54,73 @@ const createHarness = () => {
 
 {
   const h = createHarness();
+  for (let index = 0; index < 34; index += 1) {
+    const id = `room-${index}`;
+    h.contacts.set(id, { id, name: id });
+  }
+  h.contacts.set('rp:hidden', { id: 'rp:hidden', name: 'Hidden RP' });
+  const list = getTool(h.tools, 'session.list');
+  const first = await list.execute({});
+  assert.equal(first.count, 30, 'count remains the number of contacts in this page');
+  assert.equal(first.total, 34, 'default list must disclose contacts beyond its first page');
+  assert.equal(first.offset, 0);
+  assert.equal(first.limit, 30);
+  assert.equal(first.hasMore, true);
+  assert.equal(first.nextOffset, 30);
+  const last = await list.execute({ offset: first.nextOffset });
+  assert.equal(last.count, 4);
+  assert.equal(last.total, 34);
+  assert.equal(last.hasMore, false);
+  assert.equal(last.nextOffset, null);
+  assert.deepEqual([...first.contacts, ...last.contacts].map(contact => contact.id),
+    Array.from({ length: 34 }, (_, index) => `room-${index}`));
+  const beyond = await list.execute({ offset: 100 });
+  assert.equal(beyond.count, 0);
+  assert.equal(beyond.total, 34);
+  assert.equal(beyond.hasMore, false);
+  assert.equal(beyond.nextOffset, null);
+  console.log('ok - session.list exposes pagination and visits every visible contact once');
+}
+
+{
+  const h = createHarness();
+  for (let index = 0; index < 31; index += 1) {
+    const id = `private-${index}`;
+    h.contacts.set(id, { id, name: id });
+  }
+  h.contacts.set('group:one', { id: 'group:one', name: 'One', members: [] });
+  h.contacts.set('group-flag', { id: 'group-flag', name: 'Two', isGroup: true, members: ['private-0'] });
+  h.contacts.set('group:three', { id: 'group:three', name: 'Three', members: [] });
+  h.contacts.set('rp:hidden', { id: 'rp:hidden', isGroup: true, members: [] });
+  const registry = createAgentToolRegistry({
+    permissionEvaluator: createAgentPermissionEvaluator({ defaultDecision: AGENT_PERMISSION_DECISIONS.allow }),
+    logger: { warn() {} },
+  });
+  registry.registerMany(h.tools);
+  const { result: page } = await registry.executeTool('session.list', {
+    groupsOnly: true, offset: 1, limit: 1,
+  }, { operationIntentPolicy: { mode: 'read_only' } });
+  assert.equal(page.total, 3, 'group filtering must happen before pagination and exclude RP');
+  assert.equal(page.count, 1);
+  assert.equal(page.hasMore, true);
+  assert.equal(page.nextOffset, 2);
+  assert.deepEqual(page.contacts, [{ id: 'group-flag', name: 'Two', isGroup: true, memberCount: 1 }]);
+  const list = getTool(h.tools, 'session.list');
+  const privateOnly = await list.execute({ includeGroups: false, limit: 100 });
+  assert.equal(privateOnly.total, 31);
+  assert.equal(privateOnly.contacts.every(contact => !contact.isGroup), true);
+  const conflict = await list.execute({ groupsOnly: true, includeGroups: false });
+  assert.equal(conflict.total, 0, 'an explicit group exclusion must not be overridden');
+  assert.equal(conflict.count, 0);
+  assert.equal(conflict.hasMore, false);
+  assert.equal(conflict.nextOffset, null);
+  assert.equal(h.contacts.size, 35);
+  assert.deepEqual(h.entered, []);
+  console.log('ok - session.list filters groups before paging and preserves explicit exclusions');
+}
+
+{
+  const h = createHarness();
   const result = await getTool(h.tools, 'session.create').execute({ name: 'A', open: true });
   assert.equal(result.ok, true);
   assert.equal(result.created, true);
