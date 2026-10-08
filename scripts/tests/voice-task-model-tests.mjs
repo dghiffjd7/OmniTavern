@@ -50,11 +50,11 @@ import { OPENAI_LIVE_BACKEND_MODEL } from '../../src/scripts/ui/realtime/openai-
   });
   assert.equal(await resolve({ sessionId: 'maid' }), maidRuntime, 'typed tasks keep the maid model');
   assert.equal(await resolve({ voiceCallId: 'call-x' }), maidRuntime, 'calls without a remembered model keep the maid model');
-  registry.remember('call-v', { model: 'gpt-5.6-luna', config: { provider: 'openai', apiKey: 'sk', baseUrl: 'https://api.openai.com/v1', model: 'gpt-5.6-luna' } });
+  registry.remember('call-v', { model: 'gpt-5.6-luna', config: { provider: 'openai', apiKey: 'sk', baseUrl: 'https://api.openai.com/v1', model: 'gpt-5.6-luna', timeout: 600000 } });
   const voice = await resolve({ voiceCallId: 'call-v', sessionId: 'maid' });
   assert.equal(voice.client.id, 'voice');
   assert.equal(voice.config.model, 'gpt-5.6-luna');
-  assert.equal(voice.config.timeout, 240000);
+  assert.equal(voice.config.timeout, 600000, '请求超时跟随该通话所用模型配置');
   assert.deepEqual(voice.config.requestContext, { captured: { sessionId: 'maid' } });
   assert.equal(voice.fallbackClient, null, "the maid profile's fallback is not mixed into voice execution");
   assert.equal(voice.maidPrompt, '女仆人格');

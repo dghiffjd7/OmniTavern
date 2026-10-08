@@ -1,6 +1,6 @@
 [package]
 name = "omnitavern"
-version = "0.7.3-diagnose-3"
+version = "0.7.4"
 description = "A cross-platform chat application"
 authors = ["you"]
 edition = "2021"
@@ -44,6 +44,7 @@ ndk-context = "0.1"
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-dialog = "2.0"
 tauri-plugin-shell = "2.0"
+tauri-plugin-updater = "2"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 webview2-com = "0.38"

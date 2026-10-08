@@ -19,7 +19,8 @@ export const createImageAgentTools = ({
       modelContext: 'none',
       confirmation: 'required',
     },
-    timeoutMs: 120000,
+    // 生图时长跟随生图模型配置的请求超时。
+    timeoutMs: 0,
     outputLimit: 600,
     schema: {
       type: 'object',

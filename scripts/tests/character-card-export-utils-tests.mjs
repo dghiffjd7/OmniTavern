@@ -134,3 +134,32 @@ const ONE_PIXEL_PNG = new Uint8Array(Buffer.from(
 }
 
 console.log('character-card-export-utils-tests passed');
+
+// CCv3 导出：PNG 同时写 chara 与 ccv3（同一快照），读取优先 ccv3；.charx／PNG 的资源清单
+{
+  const { buildCharacterCardV3 } = await import('../../src/scripts/utils/character-card-export.js');
+  const { extractCharacterCardFromPng } = await import('../../src/scripts/utils/character-card.js');
+  const { buildExportCardAssets } = await import('../../src/scripts/ui/character-card-exporter.js');
+  const { buildTavernV2CharacterCard, embedTavernV2CharacterCardInPng } = await import('../../src/scripts/utils/character-card-export.js');
+  const v2 = buildTavernV2CharacterCard({ persona: { name: '船长' }, rawCard: { spec: 'chara_card_v3', data: { name: '旧名', first_mes: 'hi', nickname: '小船', assets: [{ type: 'icon', uri: 'embeded://assets/icon/old.png', name: 'main' }, { type: 'emotion', uri: 'embeded://assets/joy.png', name: 'joy' }, { type: 'background', uri: 'https://x/bg.png', name: 'bg' }] } } });
+  assert.equal(v2.spec, 'chara_card_v2');
+  const v3 = buildCharacterCardV3(v2);
+  assert.deepEqual([v3.spec, v3.spec_version, v3.data.name, v3.data.nickname, v3.data.group_only_greetings], ['chara_card_v3', '3.0', '船长', '小船', []]);
+  assert.equal(v2.spec, 'chara_card_v2', 'the V2 snapshot is not mutated');
+
+  const pngAssets = buildExportCardAssets(v2.data.assets);
+  assert.deepEqual(pngAssets.assets.map(asset => asset.uri), ['ccdefault:', 'https://x/bg.png'], 'a PNG cannot carry package assets');
+  const charxNoSource = buildExportCardAssets(v2.data.assets, { container: 'charx' });
+  assert.deepEqual(charxNoSource.assets.map(asset => asset.uri), ['embeded://assets/icon/images/main.png', 'https://x/bg.png']);
+  const charxWithSource = buildExportCardAssets(v2.data.assets, { container: 'charx', hasSourcePackage: true });
+  assert.deepEqual(charxWithSource.assets.map(asset => asset.uri), ['embeded://assets/icon/images/main.png', 'embeded://assets/joy.png', 'https://x/bg.png']);
+  assert.deepEqual(charxWithSource.oldIconPaths, ['assets/icon/old.png']);
+
+  const png = embedTavernV2CharacterCardInPng(ONE_PIXEL_PNG, v2, { v3Card: buildCharacterCardV3(v2, { assets: pngAssets.assets }) });
+  assert.equal(png.keywordCount, 2);
+  const read = extractCharacterCardFromPng(png.buffer);
+  assert.deepEqual([read.keyword, read.keywords, read.json.spec, read.json.data.name], ['ccv3', ['ccv3', 'chara'], 'chara_card_v3', '船长']);
+  const rewritten = embedTavernV2CharacterCardInPng(png.bytes, v2, { v3Card: buildCharacterCardV3(v2) });
+  assert.equal(rewritten.removedCharacterChunkCount, 2, 'old chara and ccv3 chunks are replaced together');
+  console.log('ok - PNG export writes matching chara and ccv3 chunks and .charx keeps only satisfiable assets');
+}

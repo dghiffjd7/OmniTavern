@@ -14,8 +14,10 @@ const worldRun = worldEditorSource.slice(
   worldEditorSource.indexOf('async handleAiGenerate('),
 );
 assert.match(worldRun, /await this\.aiWebSearchToggleRuntime\?\.consume\(\)/);
-assert.match(worldRun, /buildAdHocWebSearchRuntime\(\{/);
-assert.match(worldRun, /generation\.client\.chat\(messages, generation\.requestOptions\)/);
+// 世界书 AI 走带回退的生成：原生联网失败改用搜索服务，再失败则不联网生成；每次都重新读取当前模型档
+assert.match(worldRun, /runAdHocWebSearchChat\(\{/);
+assert.match(worldRun, /describeAdHocModel\(config\)/);
+assert.match(worldEditorSource, /async ensureChatConfigReady\(\) \{[\s\S]{0,200}this\.chatConfigManager\.reload\(\)/);
 assert.match(worldRun, /renderAdHocWebSources\(this\.aiWebSourcesEl, sources\)/);
 
 assert.match(appSource, /id="sticker-ai-web-search"/);
@@ -25,7 +27,8 @@ const promptHandlers = appSource.slice(
   appSource.indexOf('const show = (options = {})'),
 );
 assert.equal((promptHandlers.match(/await webSearchToggleRuntime\.consume\(\)/g) || []).length, 1);
-assert.equal((promptHandlers.match(/generation\.client\.chat\(messages, generation\.requestOptions\)/g) || []).length, 1);
+// 贴图提示词同样走带回退的生成：原生联网失败改用搜索服务，再失败则不联网生成
+assert.equal((promptHandlers.match(/await runAdHocWebSearchChat\(\{/g) || []).length, 1);
 assert.equal((promptHandlers.match(/runStickerPromptGeneration\(\{/g) || []).length, 2);
 assert.match(promptHandlers, /if \(stickerAiTextPending\) return;/);
 assert.match(promptHandlers, /signal: abortController\.signal/);
@@ -34,7 +37,7 @@ const imageHandler = appSource.slice(
   appSource.indexOf('const handleGenerateImage = async'),
   appSource.indexOf('const show = (options = {})'),
 );
-assert.doesNotMatch(imageHandler, /buildAdHocWebSearchRuntime|webSearchToggleRuntime\.consume/);
+assert.doesNotMatch(imageHandler, /runAdHocWebSearchChat|webSearchToggleRuntime\.consume/);
 assert.match(appSource, /webSearchToggleRuntime\.reset\(\);[\s\S]*?renderAdHocWebSources\(webSourcesEl, \[\]\);/);
 
 assert.match(mainCss, /\.ad-hoc-web-sources\s*\{/);

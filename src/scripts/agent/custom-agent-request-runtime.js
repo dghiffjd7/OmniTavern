@@ -7,7 +7,7 @@ import { getCustomAgentReferenceTool } from './custom-agent-tool-catalog.js';
 
 const LIMITS = Object.freeze({ steps: 32, selectedTools: 24, calls: 12, callsPerRound: 2,
   field: 4000, reasoning: 16000, stepReasoning: 6000, result: 8000, output: 100000, args: 12000,
-  requestMs: 120000, toolMs: 30000 });
+  toolMs: 30000 });
 const TOOL_PARAMS = ['tools', 'tool_choice', 'toolConfig', 'parallel_tool_calls', 'max_tool_calls', 'include'];
 const FINISH_LOOKUP = 'ac_finish_lookup';
 const LOOKUP_STAGE_INSTRUCTION = `REFERENCE LOOKUP STAGE (internal application phase).
@@ -91,7 +91,9 @@ export const createCustomAgentRequestRuntime = ({ createClient, listTools = () =
     };
     const relayAbort = () => controller.abort(signal?.reason);
     signal?.addEventListener('abort', relayAbort, { once: true });
-    const timer = setTimeout(() => controller.abort(abortError('Agent 执行超时，请稍后重试')), agentRequestTimeoutMs(config, LIMITS.requestMs));
+    // 只有自定义超时才另计整段时长；跟随时每次请求由模型配置的请求超时约束。
+    const limitMs = agentRequestTimeoutMs(config);
+    const timer = limitMs ? setTimeout(() => controller.abort(abortError('Agent 执行超时（超过此 Agent 自定义的等待时间）')), limitMs) : null;
     const crop = (value, limit) => {
       const source = text(value);
       if (source.length <= limit) return source;

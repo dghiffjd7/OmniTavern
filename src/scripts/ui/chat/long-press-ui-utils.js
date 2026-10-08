@@ -1,5 +1,5 @@
 const MESSAGE_INTERACTIVE_TARGET_SELECTOR =
-  'a[href], button, input, textarea, select, audio, video, canvas, [contenteditable="true"]';
+  'a[href], button, input, textarea, select, audio, video, canvas, [contenteditable="true"], .inline-text-editor';
 
 export const createLongPressUiRuntime = ({
   schedule = (handler, delay = 0) => setTimeout(handler, delay),
@@ -22,7 +22,7 @@ export const createLongPressUiRuntime = ({
   },
   isSelectableTextTarget(target = null) {
     if (!target || typeof target.closest !== 'function') return false;
-    const interactive = target.closest('button, input, textarea, select, audio, video, canvas, [contenteditable="true"]');
+    const interactive = target.closest('button, input, textarea, select, audio, video, canvas, [contenteditable="true"], .inline-text-editor');
     if (interactive) return false;
     return Boolean(target.closest('.QQ_chat_msgdiv, .chat-message-content, .chat-rich-fragment'));
   },

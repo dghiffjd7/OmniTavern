@@ -1,3 +1,5 @@
+import { hasMaidMediaGenerationIntent } from './maid-app-discovery-recovery.js';
+
 const trim = value => String(value ?? '').trim();
 
 const normalize = value => trim(value)
@@ -277,6 +279,7 @@ export const searchMaidCapabilityConcepts = (
     add('web.search', 100, 'web_search');
   }
   if (
+    hasMaidMediaGenerationIntent(positiveText) ||
     hasPositive(/(?:调用|使用).{0,10}(?:生图工具|图片生成工具|media\.generate_image)/iu) ||
     (
       hasPositive(/(?:生成|生图|画)/iu) &&

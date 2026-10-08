@@ -91,11 +91,11 @@ import {
   assert.equal(view.pending[0].profileSummary, 'Bob · 特征 1 · 互动重点 1');
   assert.deepEqual(view.pending.map(item => item.id), ['profile-pending-1', 'permission-1']);
   assert.deepEqual(view.tools.map(tool => tool.name), ['contact_profile.list', 'memory.update_after_chat']);
-  assert.equal(view.meta.agents, 8);
+  assert.equal(view.meta.agents, 7);
   assert.equal(view.meta.promptModules, 3);
   assert.equal(view.meta.diagnosticViews, 2);
   assert.equal(view.meta.featureAgents, 5);
-  for (const id of ['archive_naming', 'reply_scoring']) assert.equal(view.agents.find(agent => agent.id === id).enabled, false);
+  for (const id of ['archive_naming']) assert.equal(view.agents.find(agent => agent.id === id).enabled, false);
   assert.equal(view.meta.enabledAgents, 4);
   assert.equal(view.meta.enabledPromptModules, 3);
   assert.equal(view.meta.enabledFeatureAgents, 1);
@@ -123,7 +123,7 @@ import {
   });
   assert.equal(view.tabs.find(tab => tab.id === 'pending').count, 2);
   assert.equal(view.tabs.find(tab => tab.id === 'activity').count, 1);
-  assert.equal(view.tabs.find(tab => tab.id === 'agents').count, 8);
+  assert.equal(view.tabs.find(tab => tab.id === 'agents').count, 7);
   assert.equal(view.tabs.find(tab => tab.id === 'prompts').count, 3);
   assert.equal(view.tabs.find(tab => tab.id === 'diagnostics').count, 2);
   assert.equal(view.tabs.find(tab => tab.id === 'resources').count, 1);
@@ -141,7 +141,7 @@ import {
   });
   assert.equal(view.agents.find(agent => agent.id === 'memory_table_agent').title, '记忆表格 Agent');
   assert.equal(view.agents.find(agent => agent.id === 'summary_agent').title, '摘要 Agent');
-  assert.equal(view.tabs.find(tab => tab.id === 'agents').count, 9);
+  assert.equal(view.tabs.find(tab => tab.id === 'agents').count, 8);
   assert.equal(view.meta.memoryMode, 'summary');
   console.log('ok - agent center keeps the memory mode hub reachable while showing summary agent in summary mode');
 }
@@ -150,7 +150,7 @@ import {
   const view = buildAgentCenterView({ memoryMode: 'off' });
   assert.equal(view.agents.find(agent => agent.id === 'memory_table_agent').title, '记忆表格 Agent');
   assert.equal(view.agents.find(agent => agent.id === 'summary_agent'), undefined);
-  assert.equal(view.tabs.find(tab => tab.id === 'agents').count, 8);
+  assert.equal(view.tabs.find(tab => tab.id === 'agents').count, 7);
   console.log('ok - agent center keeps the memory mode hub reachable while memory is off');
 }
 
@@ -459,4 +459,18 @@ import {
   assert.equal(resumed.pending[0].writePreview.commit.canUndo, false);
   assert.match(resumed.pending[0].writePreview.entries[0], /字段：content/);
   console.log('ok - agent center view summarizes write preview tools and commit readiness');
+}
+
+{
+  // 生图 Agent 卡片跟随自动生图总开关：总开关关时卡片不能显示为开（曾出现 AC 显示开、跳房子却没有图片房的情况）
+  const imageCard = (options = {}) => buildAgentCenterView({ agentRuns: [], agentFeatures: [], ...options })
+    .agentCards.find(card => card.id === 'image_director');
+  assert.equal(imageCard({}).enabled, true, 'without the app setting the card keeps its own state');
+  assert.equal(imageCard({ autoImageEnabled: false }).enabled, false);
+  assert.equal(imageCard({ autoImageEnabled: true }).enabled, true);
+  assert.equal(imageCard({
+    autoImageEnabled: true,
+    agentCenterSettings: { cards: { image_director: { enabled: false } } },
+  }).enabled, false, 'a card explicitly turned off still blocks the image prompt injection');
+  console.log('ok - image director card follows the auto image master switch');
 }

@@ -6,7 +6,9 @@ import {
   confirmAdHocWebSearchToggle,
   consumeAdHocWebSearchToggle,
   createAdHocWebSearchToggleRuntime,
+  describeAdHocModel,
   renderAdHocWebSources,
+  runAdHocWebSearchChat,
 } from '../../src/scripts/ui/chat/ad-hoc-web-search-runtime.js';
 
 const client = { chat: async () => 'plain' };
@@ -169,3 +171,116 @@ const toolRuntime = {
 }
 
 console.log('ok - ad-hoc web search is one-shot, provider-aware, and renders safe sources');
+
+// 原生联网失败的回退：先改用 APP 搜索服务，再不行就不联网生成；鉴权错误与中止不重试
+{
+  const openrouter = { provider: 'openrouter', model: 'xiaomi/mimo-v2.6-pro' };
+  const makeClient = (results) => {
+    const calls = [];
+    return {
+      calls,
+      chat: async (messages, options = {}) => {
+        const tools = (options.tools || []).map(tool => tool.type === 'function' ? `fn:${tool.function?.name}` : tool.type);
+        calls.push(tools);
+        const next = results.shift();
+        if (next instanceof Error) throw next;
+        if (typeof next === 'function') return next(options);
+        return next;
+      },
+    };
+  };
+  const failure = (message, status = 0) => Object.assign(new Error(message), status ? { status } : {});
+
+  const callSearch = options => {
+    options.onProviderToolCallDelta?.({ choices: [{ message: { tool_calls: [{
+      id: 'search-1', type: 'function', function: { name: 'web_search', arguments: '{"query":"x"}' },
+    }] }, finish_reason: 'tool_calls' }] }, { provider: 'openrouter', model: openrouter.model });
+    return '';
+  };
+  const viaTools = makeClient([failure('provider error 500', 500), callSearch, 'from tools']);
+  const statuses = [];
+  const toolResult = await runAdHocWebSearchChat({
+    client: viaTools, config: openrouter, enabled: true, messages: [{ role: 'user', content: 'x' }],
+    requestOptions: { temperature: 0.6 }, toolRuntime, onStatus: status => statuses.push(status),
+  });
+  assert.deepEqual({ ...toolResult, reason: undefined }, { output: 'from tools', route: 'tool', degraded: true, reason: undefined });
+  assert.ok(viaTools.calls[0].includes('openrouter:web_search'), 'first attempt uses native search');
+  assert.ok(viaTools.calls[1].some(name => name.startsWith('fn:')) && !viaTools.calls[1].includes('openrouter:web_search'), 'retry uses app search tools');
+  assert.match(statuses.find(item => item.state === 'fallback').message, /改用搜索服务/);
+
+  const noTools = makeClient([failure('rate limited', 429), 'plain']);
+  const plainResult = await runAdHocWebSearchChat({
+    client: noTools, config: openrouter, enabled: true, messages: [], toolRuntime: null,
+  });
+  assert.deepEqual({ ...plainResult, reason: undefined }, { output: 'plain', route: 'none', degraded: true, reason: undefined });
+  assert.deepEqual(noTools.calls[1], [], 'last resort sends no search tools');
+
+  const bothFail = makeClient([failure('native down', 502), failure('search down', 503), 'plain again']);
+  const lastResort = await runAdHocWebSearchChat({ client: bothFail, config: openrouter, enabled: true, messages: [], toolRuntime });
+  assert.equal(lastResort.route, 'none');
+  assert.equal(bothFail.calls.length, 3);
+
+  const unauthorized = makeClient([failure('Unauthorized', 401), 'never']);
+  await assert.rejects(runAdHocWebSearchChat({ client: unauthorized, config: openrouter, enabled: true, messages: [], toolRuntime }), /Unauthorized/);
+  assert.equal(unauthorized.calls.length, 1, 'auth errors are not retried');
+
+  const aborted = makeClient([Object.assign(new Error('aborted'), { name: 'AbortError' }), 'never']);
+  await assert.rejects(runAdHocWebSearchChat({ client: aborted, config: openrouter, enabled: true, messages: [], toolRuntime }), /aborted/);
+  assert.equal(aborted.calls.length, 1);
+
+  const offline = makeClient(['plain only']);
+  const offlineResult = await runAdHocWebSearchChat({ client: offline, config: openrouter, enabled: false, messages: [] });
+  assert.deepEqual([offlineResult.output, offlineResult.route, offlineResult.degraded], ['plain only', 'none', false]);
+  assert.equal(typeof toolResult.reason, 'string', 'first-plan diagnostics reason is carried for callers');
+  assert.equal(describeAdHocModel({ provider: 'vertexai', model: 'gemini-3.8-flash' }), 'vertexai · gemini-3.8-flash');
+  console.log('ok - ad hoc web search falls back from native search to the search service, then to plain generation');
+
+  const stale = [{ url: 'https://stale.example/', title: 'failed native response' }];
+  const fresh = [{ url: 'https://fresh.example/', title: 'successful search' }];
+  const nativeFailsAfterSources = options => {
+    options.onProviderSources(stale);
+    throw failure('empty native response', 502);
+  };
+  for (const output of [
+    { status: 'failed', result: { ok: false, reason: 'service down', results: stale } },
+    { status: 'succeeded', result: { ok: false, reason: 'service down', results: stale } },
+    { status: 'succeeded', result: { ok: true, results: [] } },
+    { status: 'succeeded', result: { ok: true, results: fresh } },
+  ]) {
+    const sourceReports = [];
+    const providerReports = [];
+    const receiptStatuses = [];
+    const succeeded = output.result.ok;
+    const receiptClient = makeClient([nativeFailsAfterSources, callSearch, 'answer after tool receipt']);
+    const result = await runAdHocWebSearchChat({
+      client: receiptClient, config: openrouter, enabled: true, messages: [],
+      toolRuntime: { ...toolRuntime, executeTool: async () => output },
+      requestOptions: { onProviderSources: sources => providerReports.push(sources) },
+      onSources: sources => sourceReports.push(sources), onStatus: status => receiptStatuses.push(status),
+    });
+    assert.equal(result.route, succeeded ? 'tool' : 'none', 'route is based on tool evidence, including successful zero hits');
+    assert.equal(result.degraded, true);
+    assert.equal(receiptClient.calls.length, 3, 'use the answer based on the receipt without another model retry');
+    assert.equal(sourceReports.length, 1, 'publish only the completed attempt');
+    assert.equal(providerReports.length, 1, 'the original callback also sees only committed sources');
+    const expectedUrls = succeeded ? output.result.results.map(item => item.url) : [];
+    assert.deepEqual(sourceReports[0].map(item => item.url), expectedUrls);
+    assert.deepEqual(providerReports[0].map(item => item.url), expectedUrls);
+    if (!succeeded) assert.equal(receiptStatuses.at(-1).state, 'failed', 'failed receipts cannot end with search done');
+  }
+
+  const offlineSources = [];
+  const fromFailedNative = await runAdHocWebSearchChat({
+    client: makeClient([nativeFailsAfterSources, 'offline answer']), config: openrouter, enabled: true,
+    toolRuntime: null, onSources: sources => offlineSources.push(sources),
+  });
+  assert.equal(fromFailedNative.route, 'none');
+  assert.deepEqual(offlineSources, [[]]);
+
+  const unusedSearch = await runAdHocWebSearchChat({
+    client: makeClient(['answer without calling tools']), config: { provider: 'deepseek', model: 'deepseek-chat' },
+    enabled: true, toolRuntime,
+  });
+  assert.equal(unusedSearch.route, 'none', 'exposing tools is not proof that search ran');
+  console.log('ok - search receipts and final-attempt sources determine actual web use');
+}

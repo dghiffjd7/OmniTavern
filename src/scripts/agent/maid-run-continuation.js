@@ -34,7 +34,7 @@ const clone = (value) => {
   }
 };
 
-const OMITTED_KEY_PATTERN = /(?:api[-_]?key|authorization|access[-_]?token|refresh[-_]?token|secret|password|credential|cookie|endpoint|base[-_]?url|service[-_]?account|workflow|originalcard|dataurl|imageurl|llmurl|rawreply)/iu;
+const OMITTED_KEY_PATTERN = /(?:api[-_]?key|authorization|access[-_]?token|refresh[-_]?token|secret|password|credential|cookie|endpoint|base[-_]?url|service[-_]?account|workflow|originalcard|dataurl|imageurl|llmurl|rawreply|attachmentreference)/iu;
 const LARGE_TEXT_KEYS = new Set([
   'avatar',
   'wallpaper',

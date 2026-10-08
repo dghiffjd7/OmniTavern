@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 
 import {
-  GENERATION_STALE_MS,
+  GENERATION_STALE_GRACE_MS,
   buildCancelledAssistantPartial,
   buildCancelledAssistantPartialMessage,
   buildGenerationCancelTraceEvent,
@@ -14,13 +14,23 @@ import {
 const tests = [];
 
 tests.push({
-  name: 'isGenerationRecordStale reclaims only over-age records',
+  name: 'isGenerationRecordStale reclaims only records silent longer than their request timeout',
   fn: () => {
+    const now = Date.now();
     const record = createActiveGenerationRecord({ id: 1, sessionId: 's1' });
     assert.equal(typeof record.startedAt, 'number');
     assert.equal(isGenerationRecordStale(record), false);
-    const stale = { ...record, startedAt: Date.now() - GENERATION_STALE_MS - 1000 };
-    assert.equal(isGenerationRecordStale(stale), true);
+    // 长时间正常生成：开始很久，但一直有输出 → 不回收
+    const longRunning = { ...record, requestTimeoutMs: 6_000_000, startedAt: now - 3_600_000, lastActivityAt: now - 5_000 };
+    assert.equal(isGenerationRecordStale(longRunning, now), false);
+    // 没有输出，但仍在这次请求的超时之内（如思考中的非流式请求）→ 不回收
+    const waiting = { ...record, requestTimeoutMs: 6_000_000, startedAt: now - 3_600_000 };
+    assert.equal(isGenerationRecordStale(waiting, now), false);
+    // 超过请求超时 + 缓冲仍无任何输出 → 残留记录，回收
+    const stuck = { ...record, requestTimeoutMs: 120_000, startedAt: now - 600_000, lastActivityAt: now - 120_000 - GENERATION_STALE_GRACE_MS - 1 };
+    assert.equal(isGenerationRecordStale(stuck, now), true);
+    // 模型配置没填超时时按 provider 默认 60 秒判断
+    assert.equal(isGenerationRecordStale({ ...record, startedAt: now - 60_000 - GENERATION_STALE_GRACE_MS - 1 }, now), true);
     // 无 startedAt 的旧记录不误判（宁可保持旧行为）
     assert.equal(isGenerationRecordStale({ id: 2 }), false);
     assert.equal(isGenerationRecordStale(null), false);
@@ -88,6 +98,8 @@ test('createActiveGenerationRecord keeps caller ownership fields and initializes
     swipeTarget,
     cancelled: false,
     cancelReason: '',
+    lastActivityAt: 0,
+    requestTimeoutMs: 0,
   });
 });
 

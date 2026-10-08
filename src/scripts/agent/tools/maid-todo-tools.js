@@ -3,7 +3,7 @@ const trim = (value, fallback = '') => {
   return text || fallback;
 };
 
-const TODO_STATUSES = new Set(['pending', 'in_progress', 'completed']);
+const TODO_STATUSES = new Set(['pending', 'in_progress', 'completed', 'cancelled']);
 
 const normalizeTodos = (todos = []) => (Array.isArray(todos) ? todos : [])
   .map((todo) => ({
@@ -48,7 +48,7 @@ export const createMaidTodoTools = ({
             additionalProperties: false,
             properties: {
               content: { type: 'string', minLength: 1, maxLength: 200 },
-              status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] },
+              status: { type: 'string', enum: ['pending', 'in_progress', 'completed', 'cancelled'] },
             },
           },
         },
@@ -60,7 +60,14 @@ export const createMaidTodoTools = ({
         return { ok: false, reason: 'maid_run_unavailable' };
       }
       const todos = normalizeTodos(args.todos);
-      updateRun(runId, { metadata: { todos } });
+      const run = getRun?.(runId);
+      if (run?.metadata?.resumedFromRunId) {
+        const missing = normalizeTodos(run.metadata.todos).filter(todo => ['pending', 'in_progress'].includes(todo.status)
+          && !todos.some(item => item.content === todo.content));
+        if (missing.length) return { ok: false, reason: 'continuation_todos_missing', todos: missing,
+          message: 'Keep the original unfinished todo content strings and update their statuses using actual tool evidence.' };
+      }
+      if (!updateRun(runId, { metadata: { todos } })) return { ok: false, reason: 'maid_run_unavailable' };
       return { ok: true, count: todos.length, todos };
     },
     summarizeResult: result => (result?.ok === false
@@ -94,6 +101,7 @@ export const createMaidTodoTools = ({
         return { ok: false, reason: 'maid_run_unavailable' };
       }
       const run = getRun(runId);
+      if (!run) return { ok: false, reason: 'maid_run_unavailable' };
       const todos = normalizeTodos(run?.metadata?.todos);
       return { ok: true, count: todos.length, todos };
     },

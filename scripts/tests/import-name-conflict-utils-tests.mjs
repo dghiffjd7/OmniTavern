@@ -65,20 +65,24 @@ const {
 }
 
 {
+  // 同名检查在导入服务的只读计划里完成；角色卡只在提交时创建。手动导入先询问同名再提交，默认取消。
+  const serviceSource = await readFile(new URL('../../src/scripts/import/character-card-import-service.js', import.meta.url), 'utf8');
+  const planBody = serviceSource.slice(serviceSource.indexOf('const plan = async'), serviceSource.indexOf('const rollback = async'));
+  assert.ok(planBody.length > 0, 'the card import service must expose a read-only plan');
+  assert.match(planBody, /await personaStore\.ready/);
+  assert.match(planBody, /nameConflict:\s*Boolean\(findPersonaNameConflict\(/, 'card import must detect same-name personas');
+  assert.doesNotMatch(planBody, /personaStore\.create/, 'planning must not create a persona');
+
   const importerSource = await readFile(new URL('../../src/scripts/ui/character-card-importer.js', import.meta.url), 'utf8');
   const importStart = importerSource.indexOf('async importCard(');
   assert.ok(importStart >= 0, 'importCard must exist');
   const importBody = importerSource.slice(importStart);
-  const conflictIndex = importBody.indexOf('findPersonaNameConflict');
-  const createIndex = importBody.indexOf('this.personaStore.create');
-  assert.ok(conflictIndex >= 0, 'card import must detect same-name personas');
-  assert.ok(createIndex > conflictIndex, 'persona must not be created before the same-name choice');
-  assert.match(importBody, /await this\.personaStore\.ready/);
+  const conflictIndex = importBody.indexOf('planned.nameConflict');
+  const commitIndex = importBody.indexOf('this.service.commit');
+  assert.ok(conflictIndex >= 0, 'card import must ask about same-name personas');
+  assert.ok(commitIndex > conflictIndex, 'persona must not be created before the same-name choice');
   assert.match(importBody, /defaultActionId:\s*IMPORT_NAME_CONFLICT_DECISIONS\.cancel/);
   assert.match(importBody, /decision\s*!==\s*IMPORT_NAME_CONFLICT_DECISIONS\.keepBoth\)\s*return false/);
-  assert.doesNotMatch(
-    importBody.slice(0, importBody.indexOf('promptImportOptions')),
-    /personaStore\.create/,
-  );
+  assert.doesNotMatch(importBody.slice(0, importBody.indexOf('promptImportOptions')), /personaStore\.create|service\.commit/);
   console.log('ok - card import asks before creating a duplicate persona and cancels by default');
 }

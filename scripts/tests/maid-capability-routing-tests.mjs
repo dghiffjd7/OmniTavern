@@ -118,7 +118,7 @@ const createCatalogRoutingHarness = () => {
 {
   const retriever = createMaidCapabilityRetriever();
   const result = retriever.retrieve('where am I in the app？', { features, limit: 8 });
-  assert.equal(MAID_CAPABILITY_RETRIEVER_VERSION, 'maid-capability-retriever-v4');
+  assert.equal(MAID_CAPABILITY_RETRIEVER_VERSION, 'maid-capability-retriever-v5');
   assert.equal(result[0].id, 'app.state.read');
   assert.equal(result[0].retrievalReason, 'semantic_concept');
   console.log('ok - v4 hybrid retriever adds explainable local concept matches');

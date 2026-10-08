@@ -5,6 +5,7 @@
  * - Tapping a category pushes into a dedicated detail page
  */
 
+import { detectPresetJsonType } from '../utils/preset-type-detect.js';
 import {
     PRESET_APP_SCOPES,
     PresetStore,
@@ -7671,15 +7672,7 @@ export class PresetPanel {
        Import / Export (preserved from original)
        ════════════════════════════════════════ */
     detectPresetType(obj) {
-        if (!obj || typeof obj !== 'object') return null;
-        if (obj.presets && obj.active && obj.enabled) return 'store';
-        if (typeof obj.story_string === 'string') return 'context';
-        if (typeof obj.content === 'string' && ('post_history' in obj)) return 'sysprompt';
-        if (typeof obj.input_sequence === 'string' || typeof obj.output_sequence === 'string') return 'instruct';
-        if (typeof obj.prefix === 'string' && typeof obj.suffix === 'string' && typeof obj.separator === 'string') return 'reasoning';
-        if ('temperature' in obj || 'top_p' in obj || 'temp_openai' in obj || 'top_p_openai' in obj ||
-            'openai_max_context' in obj || 'openai_max_tokens' in obj || 'prompts' in obj || 'prompt_order' in obj) return 'openai';
-        return null;
+        return detectPresetJsonType(obj);
     }
 
     convertStRegexScriptsToRules(regexes = []) {
@@ -7899,10 +7892,18 @@ export class PresetPanel {
         try { text = await file.text(); } catch { this.showStatus('读取文件失败', 'error'); return; }
         let json = null;
         try { json = JSON.parse(text); } catch { this.showStatus('JSON 格式错误', 'error'); return; }
+        await this.importPresetJson(json, { fileName: file?.name });
+    }
+
+    // 导入一份预设 JSON。decisions 为空时按原流程弹窗询问；女仆附件导入传入已确定的选择：
+    // 类型跟随识别结果，附带正则按 includeRegex，附带脚本按 includeScripts 导入且保持关闭不授权。
+    async importPresetJson(json, { fileName = '', decisions = null } = {}) {
+        await this.store.ready;
         this.captureCurrentDetailDraft();
 
         const detected = this.detectPresetType(json);
         if (detected === 'store') {
+            if (decisions) return { ok: false, reason: 'preset_bundle_requires_panel' };
             const replace = await appConfirm({
                 title: '导入预设',
                 message: '检测到「整套预设设定档」。确定要导入并覆盖当前设置吗？（取消=合并导入）',
@@ -7915,14 +7916,14 @@ export class PresetPanel {
             this.renderAllSections();
             this.showStatus('已导入预设设定档', 'success');
             window.dispatchEvent(new CustomEvent('preset-changed'));
-            return;
+            return { ok: true, presetType: 'store' };
         }
 
         const detectedType = (detected && detected !== 'store') ? detected : null;
         let importType = detectedType || 'openai';
 
         if (detectedType && detectedType !== 'openai') {
-            const ok = await appConfirm({
+            const ok = decisions ? true : await appConfirm({
                 title: '导入类型',
                 message: `检测到预设格式为「${this.getTypeLabel(detectedType)}」。要导入到该类型吗？`,
                 confirmText: `导入到「${this.getTypeLabel(detectedType)}」`, cancelText: '导入到生成参数',
@@ -7931,11 +7932,11 @@ export class PresetPanel {
         }
 
         if (importType === 'openai') {
-            if (!(await this.confirmDiscardBlockDrafts('导入并切换生成参数预设'))) return;
+            if (!(await this.confirmDiscardBlockDrafts('导入并切换生成参数预设'))) return { ok: false, reason: 'unsaved_drafts_kept' };
             this.discardOpenAIDrafts({ presetId: this.store.getActiveId('openai') });
         }
 
-        const fileBaseName = String(file?.name || '').replace(/\.[^/.]+$/, '').trim();
+        const fileBaseName = String(fileName || '').replace(/\.[^/.]+$/, '').trim();
         const name = fileBaseName || String(json?.name || '').trim() || '导入预设';
 
         let boundSets = json?.boundRegexSets || json?.bound_regex_sets || null;
@@ -7957,10 +7958,11 @@ export class PresetPanel {
             appScope: 'creative',
             makeActive: true,
         });
+        const outcome = { ok: true, presetId, presetType: importType, name, regex: null, scripts: null };
 
         if (Array.isArray(boundSets) && boundSets.length) {
             try {
-                const ok = await appConfirm({
+                const ok = decisions ? decisions.includeRegex !== false : await appConfirm({
                     title: '导入正则',
                     message: `检测到预设包含绑定的正规表达式（${boundSets.length} 组）。是否一并导入并绑定？`,
                     confirmText: '一并导入', cancelText: '仅导入预设',
@@ -7975,6 +7977,7 @@ export class PresetPanel {
                     const regexPresetId = String(bindTarget?.presetId || '').trim();
                     if (!regexPresetId || !bindTarget?.bind) {
                         window.toastr?.info?.('已跳过绑定正则导入');
+                        outcome.regex = { status: 'skipped', reason: 'no_regex_bind_target' };
                     } else {
                         const regexPresetName = String(
                             this.store.list(REGEX_CUSTOM_PROMPT_PRESET_TYPE).find(item => String(item.id || '') === regexPresetId)?.name ||
@@ -7990,14 +7993,20 @@ export class PresetPanel {
                             });
                         }
                         window.dispatchEvent(new CustomEvent('regex-changed'));
+                        outcome.regex = { status: 'succeeded', setCount: isolatedSets.length };
                     }
+                } else {
+                    outcome.regex = { status: 'skipped', reason: 'not_selected' };
                 }
-            } catch (err) { logger.warn('导入绑定正则失败', err); }
+            } catch (err) {
+                logger.warn('导入绑定正则失败', err);
+                outcome.regex = { status: 'failed', errorMessage: String(err?.message || err).slice(0, 160) };
+            }
         }
 
         if (Array.isArray(boundScripts) && boundScripts.length) {
             try {
-                const ok = await appConfirm({
+                const ok = decisions ? decisions.includeScripts !== false : await appConfirm({
                     title: '导入脚本',
                     message: `检测到预设包含绑定脚本（${boundScripts.length} 条）。是否一并导入并绑定？`,
                     confirmText: '一并导入', cancelText: '仅导入预设',
@@ -8010,7 +8019,15 @@ export class PresetPanel {
                         scopeId: presetId,
                         source: 'preset',
                     });
-                    if (result?.count) {
+                    if (result?.count && decisions) {
+                        // 女仆导入：脚本保持关闭且未授权，启用另行确认
+                        outcome.scripts = {
+                            status: 'succeeded', count: result.count,
+                            runnableCount: Number(result.compatibility?.runnableCount ?? (result.runnableIds || []).length) || 0,
+                            blockedCount: Number(result.compatibility?.blockedCount || 0) || 0, enabled: false,
+                        };
+                    } else if (result?.count) {
+                        outcome.scripts = { status: 'succeeded', count: result.count };
                         const settings = appSettings.get();
                         const ids = Array.isArray(result.ids) ? result.ids : [];
                         const runnableIds = Array.isArray(result.runnableIds) ? result.runnableIds : ids;
@@ -8051,14 +8068,20 @@ export class PresetPanel {
                             window.toastr?.warning?.(`${blockedCount} 条外部扩展加载器已保留并保持禁用`);
                         }
                     }
+                } else {
+                    outcome.scripts = { status: 'skipped', reason: 'not_selected' };
                 }
-            } catch (err) { logger.warn('导入绑定脚本失败', err); }
+            } catch (err) {
+                logger.warn('导入绑定脚本失败', err);
+                outcome.scripts = { status: 'failed', errorMessage: String(err?.message || err).slice(0, 160) };
+            }
         }
 
         this.renderAllSections();
         this.showStatus('已导入为创意写作预设；如需用于聊天模式，可在会话配置中选择。', 'success');
         window.toastr?.success?.('已导入为创意写作预设；如需用于聊天模式，可在会话配置中选择。');
         window.dispatchEvent(new CustomEvent('preset-changed'));
+        return outcome;
     }
 
     /* ── File helpers ── */

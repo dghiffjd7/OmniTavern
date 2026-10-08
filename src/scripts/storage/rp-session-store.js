@@ -431,6 +431,11 @@ export class RpSessionStore {
     return this.ready;
   }
 
+  // 等待最近一次写入落盘（导入时写入非当前角色卡的作用域后使用）
+  whenPersisted() {
+    return this._lastPersistPromise || Promise.resolve();
+  }
+
   getGreetings() {
     return Array.isArray(this.state.greetings) ? [...this.state.greetings] : [];
   }

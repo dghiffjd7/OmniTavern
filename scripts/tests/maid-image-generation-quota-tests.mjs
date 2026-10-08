@@ -20,6 +20,10 @@ assert.equal(corrected.calls.length,1,'Successful preview already consumes the a
 const reused=corrected.result.steps.find(step=>step.output?.localToolExecutionSkipped);
 assert.equal(reused.output.attachmentId,'generated-1');
 assert.equal(reused.output.alreadyApplied,false,'Generation is not proof of avatar application');
+assert.equal(reused.output.generationState,'completed');
+assert.equal(reused.output.reason,'requested_media_already_generated');
+assert.match(reused.output.message,/attachmentId is ready/);
+assert.match(reused.output.message,/provider credits and rate limits have not failed/);
 assert(corrected.result.steps.filter(s=>s.output?.localToolExecutionSkipped).every(s=>s.output.generatedVariantCount===1),'Repeated skipped calls must not increase the count of actual generated variants');
 const two=await run('给 Lilith 生成两张头像预览',[args('first'),args('second'),args('unrequested third')]);
 assert.equal(two.calls.length,2,'An explicitly requested second preview remains allowed');

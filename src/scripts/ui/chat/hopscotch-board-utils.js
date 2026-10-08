@@ -41,10 +41,10 @@ export const HOPSCOTCH_LIMITS = Object.freeze({
   maxConcurrency: 4,
 });
 
+// 房子不另设时限：请求时长由所用模型配置的请求超时决定（与 API 配置一致）。
 export const HOPSCOTCH_DEFAULT_POLICY = Object.freeze({
   rowConcurrencyMax: 3,
   onHouseFailure: 'continue',
-  houseTimeoutMs: 240000,
 });
 
 export const HOPSCOTCH_CUSTOM_HOUSE_DEFAULTS = Object.freeze({
@@ -55,11 +55,12 @@ export const HOPSCOTCH_CUSTOM_HOUSE_DEFAULTS = Object.freeze({
   modelOverride: '',
   includeContext: 'recent',
   recentMessageCount: 8,
-  contextTokenBudget: 2000,
+  contextTokenBudget: 10000,
   output: Object.freeze({ mode: 'context', injectIntoBody: false }),
-  maxTokens: 512,
-  timeoutMs: 60000,
+  maxTokens: 8192,
 });
+// 旧版默认值（未经用户改动）读取时迁移为新默认：输出 512 → 8192，输入预算 2000 → 10000。
+const LEGACY_CUSTOM_HOUSE_DEFAULTS = Object.freeze({ maxTokens: 512, contextTokenBudget: 2000 });
 
 const KIND_SET = new Set(HOPSCOTCH_HOUSE_CATALOG.map(item => item.kind));
 const FUSED_SET = new Set(HOPSCOTCH_FUSED_KINDS);
@@ -90,13 +91,12 @@ export const normalizeCustomHouseConfig = (config = {}) => {
     modelOverride: modelMode === 'profile' ? trim(src.modelOverride) : '',
     includeContext,
     recentMessageCount: clampInt(src.recentMessageCount, d.recentMessageCount, 1, 50),
-    contextTokenBudget: clampInt(src.contextTokenBudget, d.contextTokenBudget, 100, 32000),
+    contextTokenBudget: clampInt(Number(src.contextTokenBudget) === LEGACY_CUSTOM_HOUSE_DEFAULTS.contextTokenBudget ? d.contextTokenBudget : src.contextTokenBudget, d.contextTokenBudget, 100, 32000),
     output: {
       mode: outputMode,
       injectIntoBody: outputMode === 'context' && outputSrc.injectIntoBody === true,
     },
-    maxTokens: clampInt(src.maxTokens, d.maxTokens, 16, 8192),
-    timeoutMs: clampInt(src.timeoutMs, d.timeoutMs, 1000, 600000),
+    maxTokens: clampInt(Number(src.maxTokens) === LEGACY_CUSTOM_HOUSE_DEFAULTS.maxTokens ? d.maxTokens : src.maxTokens, d.maxTokens, 16, 8192),
   };
 };
 
@@ -155,7 +155,6 @@ export const normalizeHopscotchBoard = (board = {}) => {
     policy: {
       rowConcurrencyMax: toInt(policySrc.rowConcurrencyMax, HOPSCOTCH_DEFAULT_POLICY.rowConcurrencyMax),
       onHouseFailure: trim(policySrc.onHouseFailure) === 'stop_following_rows' ? 'stop_following_rows' : 'continue',
-      houseTimeoutMs: toInt(policySrc.houseTimeoutMs, HOPSCOTCH_DEFAULT_POLICY.houseTimeoutMs),
       ...(policySrc.tableSummaryMaintenance === true ? { tableSummaryMaintenance: true } : {}),
       ...(Array.isArray(policySrc.variableRuleExclusions) && policySrc.variableRuleExclusions.length ? { variableRuleExclusions: uniqueStrings(policySrc.variableRuleExclusions).filter(phase => phase === 'before' || phase === 'after') } : {}),
     },
@@ -227,7 +226,6 @@ export const validateHopscotchBoard = (input = {}) => {
   if (board.policy.rowConcurrencyMax < HOPSCOTCH_LIMITS.minConcurrency || board.policy.rowConcurrencyMax > HOPSCOTCH_LIMITS.maxConcurrency) {
     push('invalid_concurrency', t('并发数须为 {value}–{value2} 的整数', { value: HOPSCOTCH_LIMITS.minConcurrency, value2: HOPSCOTCH_LIMITS.maxConcurrency }), { field: 'policy.rowConcurrencyMax' });
   }
-  if (board.policy.houseTimeoutMs <= 0) push('invalid_timeout', t('房子超时须为正数'), { field: 'policy.houseTimeoutMs' });
 
   const seenIds = new Set();
   const seenRowIds = new Set();

@@ -299,7 +299,8 @@ const publicImageMeta = image => ({
 // 附件解析顺序：本次女仆输入附件 -> 工具在当前运行期取得的图片池。
 const resolveAttachment = (context = {}, args = {}, fetchedImages = []) => {
   const images = normalizeMaidImageAttachments(context?.maidAttachments);
-  const fetched = Array.isArray(fetchedImages) ? fetchedImages : [];
+  const fetched = (Array.isArray(fetchedImages) ? fetchedImages : [])
+    .filter(item => !context.roleCardId || item.roleCardId === context.roleCardId);
   const requested = trim(args.attachmentId || args.imageId || args.sourceImageId);
   if (!requested) {
     if (images.length) return images[0];
@@ -352,6 +353,7 @@ export const createMaidMediaAssetTools = ({
   fetchRemoteImage = null,
   generateImageAttachment = null,
   getImageGenerationContext = null,
+  attachmentPersistence = null,
   now = Date.now,
   preparedImageCache = createPreparedImageCache(),
 } = {}) => {
@@ -369,8 +371,9 @@ export const createMaidMediaAssetTools = ({
     target = null,
   } = {}) => {
     const cached = preparedImageCache.get(args.preparedImageId);
-    if (cached) return cached;
-    const attachment = resolveAttachment(context, args, fetchedImages);
+    if (cached && (!context.roleCardId || cached.roleCardId === context.roleCardId)) return cached;
+    const attachment = resolveAttachment(context, args, fetchedImages)
+      || await attachmentPersistence?.load(trim(args.attachmentId || args.imageId || args.sourceImageId), context);
     if (!attachment?.url) {
       return {
         ok: false,
@@ -405,6 +408,7 @@ export const createMaidMediaAssetTools = ({
       dataUrl,
       purpose: options.purpose,
       attachmentId: trim(attachment.id),
+      roleCardId: trim(context.roleCardId),
       name: trim(args.fileName || attachment.name, `${options.purpose}.jpg`),
       mime: trim(prepared?.mime, options.mime),
       bytes: Number(prepared?.bytes || 0) || estimateDataUrlBytes(dataUrl),
@@ -570,7 +574,8 @@ export const createMaidMediaAssetTools = ({
         modelContext: 'allowlist',
         confirmation: 'allow_once',
       },
-      timeoutMs: 180000,
+      // 生图时长跟随生图模型配置的请求超时。
+      timeoutMs: 0,
       outputLimit: 800,
       schema: {
         type: 'object',
@@ -702,13 +707,16 @@ export const createMaidMediaAssetTools = ({
           mime,
           bytes,
           source: 'generated',
+          roleCardId: trim(context.roleCardId),
           visualSpec,
         };
         fetchedImages.push(attachment);
         while (fetchedImages.length > FETCHED_IMAGE_LIMIT) fetchedImages.shift();
+        const attachmentReference = await attachmentPersistence?.persist(attachment, context, generated?.storedImage);
         return {
           ok: true,
           attachmentId: id,
+          ...(attachmentReference ? { attachmentReference } : {}),
           name: attachment.name,
           mime,
           bytes,
@@ -751,7 +759,7 @@ export const createMaidMediaAssetTools = ({
           fileName: { type: 'string', maxLength: 120 },
         },
       },
-      execute: async (args = {}) => {
+      execute: async (args = {}, context = {}) => {
         if (typeof fetchRemoteImage !== 'function') {
           return { ok: false, reason: 'image_fetch_unavailable', message: '当前环境不支持联网下载图片。' };
         }
@@ -782,12 +790,15 @@ export const createMaidMediaAssetTools = ({
           mime,
           bytes,
           sourceUrl: url,
+          roleCardId: trim(context.roleCardId),
         };
         fetchedImages.push(attachment);
         while (fetchedImages.length > FETCHED_IMAGE_LIMIT) fetchedImages.shift();
+        const attachmentReference = await attachmentPersistence?.persist(attachment, context);
         return {
           ok: true,
           attachmentId: id,
+          ...(attachmentReference ? { attachmentReference } : {}),
           name: attachment.name,
           mime,
           bytes,

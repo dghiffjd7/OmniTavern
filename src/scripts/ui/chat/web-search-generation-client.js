@@ -44,7 +44,7 @@ const waitForToolExecution = (task, signal = null) => {
   });
 };
 
-const mergeUsageReports = (reports = [], { provider = '', model = '' } = {}) => {
+const mergeUsageReports = (reports = [], { provider = '', model = '', webSearch = false } = {}) => {
   if (!reports.length) return null;
   const last = reports[reports.length - 1] || {};
   return {
@@ -55,9 +55,13 @@ const mergeUsageReports = (reports = [], { provider = '', model = '' } = {}) => 
     completionTokens: sumNullableCounts(reports, 'completionTokens'),
     totalTokens: sumNullableCounts(reports, 'totalTokens'),
     requestCount: reports.length,
-    webSearch: true,
+    webSearch,
   };
 };
+
+const isSuccessfulSearchResult = output => isPlainObject(output?.result)
+  && output.result.ok !== false
+  && (!output.status || output.status === 'succeeded');
 
 const compactSearchResultForModel = (output = {}) => {
   const result = isPlainObject(output?.result) ? output.result : {};
@@ -80,7 +84,7 @@ const compactSearchResultForModel = (output = {}) => {
     });
   }
   return {
-    ok: result.ok !== false && output?.status !== 'failed',
+    ok: isSuccessfulSearchResult(output),
     status: trim(output?.status, result.ok === false ? 'failed' : 'succeeded'),
     summary: trim(output?.summary || result?.message || result?.reason).slice(0, 600),
     query: trim(result.query).slice(0, 300),
@@ -265,7 +269,7 @@ const executeFallbackCalls = async ({
 const notifySources = (options, toolResults = []) => {
   const callback = options?.onProviderSources;
   if (typeof callback !== 'function') return [];
-  const sources = mergeWebSources(...toolResults.map(item => extractToolResultWebSources(item.output, {
+  const sources = mergeWebSources(...toolResults.filter(item => isSuccessfulSearchResult(item.output)).map(item => extractToolResultWebSources(item.output, {
     provider: item.internalName,
   })));
   if (!sources.length) return sources;
@@ -291,6 +295,7 @@ export const createWebSearchGenerationClient = ({
   model = '',
   sessionId = '',
   maxToolCalls = 2,
+  onSearchOutcome = null,
 } = {}) => {
   if (client && plan?.native === true && plan?.route === 'kimi_native') {
     return createKimiNativeWebSearchClient({
@@ -301,6 +306,20 @@ export const createWebSearchGenerationClient = ({
     });
   }
   if (!client || plan?.fallback !== true) return client;
+
+  const reportOutcome = (results = []) => {
+    const failed = results.filter(item => !isSuccessfulSearchResult(item.output));
+    const outcome = {
+      attempted: results.length,
+      succeeded: results.length - failed.length,
+      failed: failed.length,
+      reason: failed.length
+        ? trim(failed[0].output?.result?.reason || failed[0].output?.summary, 'web_search_failed')
+        : (results.length ? '' : 'web_search_not_used'),
+    };
+    try { onSearchOutcome?.(outcome); } catch {}
+    return outcome;
+  };
 
   // DeepSeek prefix 前缀补全与两轮搜索互斥：首轮去前缀会让“无搜索”回复未被前缀条件化，
   // 显示时再拼前缀就会文不对题。带前缀的请求整体绕过联网（前缀原样传递、剥掉搜索工具）。
@@ -322,6 +341,7 @@ export const createWebSearchGenerationClient = ({
 
     async chat(messages, options = {}) {
       if (isPrefixRequest(options)) {
+        reportOutcome();
         return client.chat(messages, withoutToolOptions(options));
       }
       const completedCalls = [];
@@ -353,6 +373,8 @@ export const createWebSearchGenerationClient = ({
         notifyWebSearchStatus(options, options.signal?.aborted ? 'cancelled' : 'failed', '联网搜索未完成');
         throw error;
       }
+      const outcome = reportOutcome(toolResults);
+      const webSearch = outcome.succeeded > 0;
       if (!toolResults.length) {
         notifyUsage(options, usageReports, { provider, model });
         return firstResponse;
@@ -363,7 +385,9 @@ export const createWebSearchGenerationClient = ({
         toolResults,
         assistantCapture,
       );
-      notifyWebSearchStatus(options, 'continuing', 'App 搜索工具已取得网页资料，正在整理回答…');
+      notifyWebSearchStatus(options, webSearch ? 'continuing' : 'failed', webSearch
+        ? 'App 搜索工具已完成检索，正在整理回答…'
+        : '联网搜索未完成，将继续不联网生成。');
       const continuationOptions = withoutToolOptions(options);
       continuationOptions.onProviderUsage = usage => {
         if (usage && typeof usage === 'object') usageReports.push(usage);
@@ -373,8 +397,8 @@ export const createWebSearchGenerationClient = ({
           [...(Array.isArray(messages) ? messages : []), ...continuationMessages],
           continuationOptions,
         );
-        notifyUsage(options, usageReports, { provider, model });
-        notifyWebSearchStatus(options, 'done', '联网搜索完成');
+        notifyUsage(options, usageReports, { provider, model, webSearch });
+        if (webSearch) notifyWebSearchStatus(options, 'done', '联网搜索完成');
         return response;
       } catch (error) {
         notifyWebSearchStatus(options, options.signal?.aborted ? 'cancelled' : 'failed', '联网搜索未完成');
@@ -384,6 +408,7 @@ export const createWebSearchGenerationClient = ({
 
     async *streamChat(messages, options = {}) {
       if (isPrefixRequest(options)) {
+        reportOutcome();
         yield* client.streamChat(messages, withoutToolOptions(options));
         return;
       }
@@ -428,10 +453,12 @@ export const createWebSearchGenerationClient = ({
         notifyWebSearchStatus(options, options.signal?.aborted ? 'cancelled' : 'failed', '联网搜索未完成');
         throw error;
       }
+      const outcome = reportOutcome(toolResults);
+      const webSearch = outcome.succeeded > 0;
       if (!toolResults.length) {
         for (const chunk of bufferedAfterToolCall) yield chunk;
         notifyUsage(options, usageReports, { provider, model });
-        if (searchStatusStarted) notifyWebSearchStatus(options, 'done', '联网搜索完成');
+        if (searchStatusStarted) notifyWebSearchStatus(options, 'skipped', '未执行联网检索');
         return;
       }
       notifySources(options, toolResults);
@@ -440,7 +467,9 @@ export const createWebSearchGenerationClient = ({
         toolResults,
         assistantCapture,
       );
-      notifyWebSearchStatus(options, 'continuing', 'App 搜索工具已取得网页资料，正在整理回答…');
+      notifyWebSearchStatus(options, webSearch ? 'continuing' : 'failed', webSearch
+        ? 'App 搜索工具已完成检索，正在整理回答…'
+        : '联网搜索未完成，将继续不联网生成。');
       const continuationOptions = withoutToolOptions(options);
       continuationOptions.onProviderUsage = usage => {
         if (usage && typeof usage === 'object') usageReports.push(usage);
@@ -452,8 +481,8 @@ export const createWebSearchGenerationClient = ({
         )) {
           yield chunk;
         }
-        notifyUsage(options, usageReports, { provider, model });
-        notifyWebSearchStatus(options, 'done', '联网搜索完成');
+        notifyUsage(options, usageReports, { provider, model, webSearch });
+        if (webSearch) notifyWebSearchStatus(options, 'done', '联网搜索完成');
       } catch (error) {
         notifyWebSearchStatus(options, options.signal?.aborted ? 'cancelled' : 'failed', '联网搜索未完成');
         throw error;

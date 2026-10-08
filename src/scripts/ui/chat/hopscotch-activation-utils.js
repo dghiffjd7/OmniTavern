@@ -49,7 +49,9 @@ export const resolveHopscotchActivation = (board, settings = {}) => {
       const refs = extractHouseReferences(`${house.config?.prompt || ''}\n${house.config?.systemPrompt || ''}`);
       if (refs.some(id => houses[id]?.enabled === false)) reason = 'dependency_disabled';
     }
-    houses[house.id] = status(house.kind === 'body' || house.enabled !== false, reason);
+    // 修改文本房子的开关与它的 Agent 一起算：Agent 未启用时房子按停用处理，开启时一并开启 Agent。
+    const agentOff = house.kind === 'text_edit' && settings.textAgents && !settings.textAgents.find(c => c.id === house.config?.agentId)?.enabled;
+    houses[house.id] = status(house.kind === 'body' || (house.enabled !== false && !agentOff), reason);
     const config = house.kind === 'text_edit' ? settings.textAgents?.find(c => c.id === house.config?.agentId) : house.kind === 'format_review' ? settings.replyCheck : null;
     if (config) Object.assign(houses[house.id], { invocationMode: getAgentInvocationMode(config), manualEnabled: allowsAgentInvocation(config, 'manual') });
   }

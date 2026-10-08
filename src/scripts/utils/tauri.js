@@ -14,6 +14,8 @@ const UNLIMITED_INVOKE_COMMANDS = new Set([
     'import_data_bundle',
     'import_data_bundle_bytes',
     'prepare_microphone_permission_retry',
+    // 下载安装包耗时取决于网速；成功时应用直接重启，不会返回
+    'app_update_install',
 ]);
 export const resolveInvokeTimeoutMs = (cmd, args) => {
     if (UNLIMITED_INVOKE_COMMANDS.has(cmd)) return 0;

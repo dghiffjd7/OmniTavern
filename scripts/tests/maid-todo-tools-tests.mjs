@@ -66,3 +66,17 @@ const getTool = (tools, name) => tools.find(tool => tool.name === name);
 }
 
 console.log('maid-todo-tools-tests passed');
+
+{
+  const run = { id: 'resume', metadata: { resumedFromRunId: 'source', todos: [{ content: '原未完成项', status: 'pending' }] } };
+  const tools = createMaidTodoTools({ getRun: id => id === run.id ? run : null,
+    updateRun: (id, patch) => { if (id !== run.id) return null; Object.assign(run.metadata, patch.metadata); return run; } });
+  const write = getTool(tools, 'maid.todo.write');
+  assert.equal((await write.execute({ todos: [] }, { runId: run.id })).reason, 'continuation_todos_missing');
+  assert.equal(run.metadata.todos.length, 1, 'failed write preserves the original obligations');
+  assert.equal((await write.execute({ todos: [{ content: '原未完成项', status: 'cancelled' }] }, { runId: run.id })).ok, true);
+  assert.equal((await getTool(tools, 'maid.todo.read').execute({}, { runId: run.id })).todos[0].status, 'cancelled');
+  assert.equal((await write.execute({ todos: [] }, { runId: 'missing' })).ok, false);
+  assert.equal((await getTool(tools, 'maid.todo.read').execute({}, { runId: 'missing' })).ok, false);
+  console.log('ok - continuation todos cannot silently disappear; cancelled and missing-run states roundtrip honestly');
+}

@@ -24,7 +24,7 @@ const { evaluateConditionTree } = await import('../../src/scripts/variables/worl
     name: 'Source World',
     entries: [
       { id: 'entry-a', comment: 'A', content: 'alpha' },
-      { id: 'entry-b', comment: 'B', content: 'beta' },
+      { id: 0, comment: 'B', content: 'beta' },
     ],
   };
   const target = {
@@ -62,16 +62,22 @@ const { evaluateConditionTree } = await import('../../src/scripts/variables/worl
   editor.refreshEntryListSelection = () => true;
   editor.hideBlockManageModal = () => {};
 
+  assert.equal(editor.getEntryId(editor.data.entries[1], 1), '0');
+  editor.data = editor.prepareForSave(editor.worldName);
+  assert.equal(editor.resolveEntryById(0).idx, 1);
+  assert.equal(editor.resolveEntryById('0').idx, 1);
+  assert.equal(editor.getEntryId({ uid: 0 }), '0');
+
   const result = await editor.transferEntryToWorld({
     mode: 'move',
     targetWorldId: 'Target World',
-    entryId: 'entry-b',
+    entryId: editor.getEntryId(editor.data.entries[1], 1),
     entryIndex: 1,
   });
   assert.equal(result.ok, true);
   assert.equal(result.mode, 'move');
   assert.deepEqual(writes.map(write => write.id), ['Target World', 'Source World']);
-  assert.deepEqual(writes[0].payload.entries.map(entry => entry.id), ['entry-c', 'entry-b']);
+  assert.deepEqual(writes[0].payload.entries.map(entry => entry.id), ['entry-c', '0']);
   assert.deepEqual(writes[1].payload.entries.map(entry => entry.id), ['entry-a']);
   assert.deepEqual(editor.data.entries.map(entry => entry.id), ['entry-a']);
   console.log('ok - cross-world move saves the target before removing the source entry');

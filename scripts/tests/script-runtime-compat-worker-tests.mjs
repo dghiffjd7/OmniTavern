@@ -35,9 +35,12 @@ globalThis.setTimeout = (fn, delay, ...args) => {
 const {
   buildScriptRuntimeWorkerSourceForTests,
   isEsmLikeScriptForTests,
+  rewriteScriptUiInlineViewportUnits,
+  rewriteScriptUiViewportUnits,
   ScriptRuntime,
 } = await import('../../src/scripts/plugins/script-runtime.js');
 const { appSettings } = await import('../../src/scripts/storage/app-settings.js');
+const { buildTavernConnectionSettings } = await import('../../src/scripts/plugins/tavern-connection-settings.js');
 globalThis.setTimeout = realSetTimeout;
 
 const createWorkerHarness = ({ chatMessages = [], characterRegexes = [], fetchImpl, importScriptsImpl } = {}) => {
@@ -1074,6 +1077,8 @@ console.log('ok - script runtime recognizes actual ESM import and export syntax'
   assert.ok(firstUpdate, 'missing script button ui update');
   const html = firstUpdate.payload.roots.join('');
   assert.match(html, />Switch</);
+  const buttonRootTag = html.match(/<div[^>]*id="chatapp-script-buttons"[^>]*>/)?.[0] || '';
+  assert.match(buttonRootTag, /z-index:\s*0[;"]/, 'script buttons sit below the script own popups');
   const nodeId = html.match(/<button[^>]*data-chatapp-virtual-node-id="([^"]+)"/)?.[1];
   assert.ok(nodeId, 'missing script button node id');
   await sandbox.self.onmessage({
@@ -2066,6 +2071,9 @@ console.log('ok - script runtime recognizes actual ESM import and export syntax'
           name: 'must not replace identity',
           apiKey: 'must-not-be-persisted',
           function_calling: false,
+          chat_completion_source: 'openrouter',
+          openrouter_model: 'connection-is-owned-by-api-profile',
+          custom_prompt_post_processing: 'strict',
           temperature: 0.2,
           prompts: [{ identifier: 'rule', name: 'Rule', content: 'updated', enabled: true, role: 'system' }],
         },
@@ -2077,6 +2085,9 @@ console.log('ok - script runtime recognizes actual ESM import and export syntax'
     assert.equal(storedPreset.prompts[0].content, 'updated');
     assert.equal(Object.hasOwn(storedPreset, 'apiKey'), false);
     assert.equal(Object.hasOwn(storedPreset, 'function_calling'), false);
+    for (const key of ['chat_completion_source', 'openrouter_model', 'custom_prompt_post_processing']) {
+      assert.equal(Object.hasOwn(storedPreset, key), false, `${key} belongs to the API profile, not the preset`);
+    }
 
     const beforeMismatch = upserts.length;
     assert.equal(await runtime.processRpc('preset.saveChatCompletionSettings', {
@@ -2339,4 +2350,96 @@ console.log('ok - script runtime recognizes actual ESM import and export syntax'
   assert.doesNotMatch(projected, /id="quick-menu"[^>]*hidden=/, '取消隐藏后移除 hidden');
   assert.doesNotMatch(projected, /id="plan"[^>]*disabled=/);
   console.log('ok - worker hidden/disabled properties reflect to projected attributes');
+}
+
+// 手机全面屏：脚本 UI 从状态栏下方开始，给 worker 的纵向布局、视口高度、事件坐标都换算成相对脚本 UI 层
+{
+  const runtime = new ScriptRuntime({ ready: Promise.resolve(), getScripts: () => [] });
+  await runtime.ready;
+  const saved = { document: globalThis.document, getComputedStyle: globalThis.getComputedStyle, window: globalThis.window };
+  let probes = 0;
+  globalThis.document = { body: { appendChild: () => { probes += 1; } }, createElement: () => ({ style: {}, remove() {} }), documentElement: { clientWidth: 411, clientHeight: 923 } };
+  globalThis.getComputedStyle = () => ({ paddingTop: '66px' });
+  globalThis.window = { ...saved.window, innerWidth: 411, innerHeight: 923, visualViewport: { width: 411, height: 923, offsetLeft: 0, offsetTop: 0 } };
+  try {
+    const css = runtime.getWorkerUiBaseCss();
+    const surfaceRule = css.match(/\.chatapp-script-ui-surface \{[^}]*\}/)?.[0] || '';
+    assert.match(surfaceRule, /top: env\(safe-area-inset-top, 0px\)/);
+    assert.match(surfaceRule, /contain: layout/, 'fixed script content resolves against the safe-area surface');
+    assert.match(surfaceRule, /--chatapp-script-vh: calc\(\(100dvh - env\(safe-area-inset-top, 0px\)\) \/ 100\)/);
+
+    const viewport = runtime.getViewportSnapshot();
+    assert.deepEqual([viewport.innerWidth, viewport.innerHeight, viewport.visualViewport.height], [411, 923 - 66, 923 - 66]);
+
+    runtime.uiShadow = { querySelectorAll: () => [{
+      getAttribute: () => 'close',
+      getBoundingClientRect: () => ({ left: 361, top: 82, right: 405, bottom: 126, width: 44, height: 44 }),
+    }] };
+    const [layout] = runtime.collectWorkerUiLayout({ full: true });
+    assert.deepEqual([layout.left, layout.top, layout.right, layout.bottom], [361, 16, 405, 60]);
+
+    const payload = runtime.collectUiEventPayload({
+      type: 'touchmove', clientX: 100, clientY: 166, pageX: 100, pageY: 166, screenY: 166,
+      touches: [{ identifier: 1, clientX: 100, clientY: 166, pageX: 100, pageY: 166, screenY: 166 }],
+    }, null);
+    assert.deepEqual([payload.clientX, payload.clientY, payload.pageY, payload.screenY], [100, 100, 100, 166]);
+    assert.deepEqual([payload.touches[0].clientY, payload.touches[0].pageY, payload.touches[0].screenY], [100, 100, 166]);
+    assert.equal(probes, 1, 'the inset is measured once per viewport size');
+  } finally {
+    Object.assign(globalThis, saved);
+  }
+
+  // 脚本里的视口高度单位改成「状态栏以下」的高度；@media 条件、url、字符串、选择器不动
+  assert.equal(
+    rewriteScriptUiViewportUnits('@supports (height: 100dvh) { .kmc-root { bottom: auto; height: 100dvh; } }'),
+    '@supports (height: 100dvh) { .kmc-root { bottom: auto; height: calc(100 * var(--chatapp-script-vh, 1vh)); } }',
+  );
+  assert.equal(
+    rewriteScriptUiViewportUnits('@media (max-height: 50vh) { .h100vh { max-height: 80svh; margin: 0 -10vh; width: 100vw } }'),
+    '@media (max-height: 50vh) { .h100vh { max-height: calc(80 * var(--chatapp-script-vh, 1vh)); margin: 0 calc(-10 * var(--chatapp-script-vh, 1vh)); width: 100vw } }',
+  );
+  assert.equal(rewriteScriptUiViewportUnits('.x{background:url(img/1vh.png);content:"10vh"}'), '.x{background:url(img/1vh.png);content:"10vh"}');
+  assert.equal(
+    rewriteScriptUiInlineViewportUnits('<div style="height: 100vh">80vh</div><p title="10vh"></p>'),
+    '<div style="height: calc(100 * var(--chatapp-script-vh, 1vh))">80vh</div><p title="10vh"></p>',
+  );
+  console.log('ok - script UI starts below the status bar and reports geometry relative to it');
+}
+
+// 脚本读 chatCompletionSettings 的 chat_completion_source / <source>_model 取当前连接：按本会话实际用的 API 配置档补上
+{
+  assert.deepEqual(buildTavernConnectionSettings({ provider: 'openrouter', model: 'xiaomi/mimo-v2.6-pro', promptPostProcessing: 'none' }),
+    { chat_completion_source: 'openrouter', openrouter_model: 'xiaomi/mimo-v2.6-pro', custom_prompt_post_processing: '' });
+  assert.deepEqual(buildTavernConnectionSettings({ provider: 'gemini', model: 'gemini-3.8-flash' }),
+    { chat_completion_source: 'makersuite', google_model: 'gemini-3.8-flash' });
+  assert.equal(buildTavernConnectionSettings({ provider: 'anthropic', model: 'claude' }).claude_model, 'claude');
+  assert.equal(buildTavernConnectionSettings({ provider: 'opencode', model: 'm', promptPostProcessing: 'strict' }).custom_prompt_post_processing, 'strict');
+  assert.deepEqual(buildTavernConnectionSettings({ provider: 'novelai' }), {});
+  assert.deepEqual(buildTavernConnectionSettings(null), {});
+
+  const preset = { name: 'Kemini', chat_completion_source: 'claude', claude_model: 'stale-from-import', prompts: [] };
+  const runtime = new ScriptRuntime({ ready: Promise.resolve(), getScripts: () => [] });
+  await runtime.ready;
+  let boundProfileId = '';
+  runtime.presets = {
+    getResolvedActive: () => ({ presetId: 'preset-openai', preset: structuredClone(preset) }),
+    getResolvedActiveId: () => ({ presetId: 'preset-openai' }),
+    getActiveId: () => 'preset-openai',
+    getSessionProfileId: (type, sid) => (sid === 'rp:s1' ? boundProfileId : ''),
+    getModeProfileId: () => '',
+    state: { presets: { openai: { 'preset-openai': preset } } },
+  };
+  runtime.bridge = {
+    getConfig: () => ({ provider: 'vertexai', model: 'gemini-3.8-pro' }),
+    getConfigProfileById: id => (id === 'bound' ? { provider: 'openrouter', model: 'xiaomi/mimo-v2.6-pro', promptPostProcessing: 'merge' } : null),
+  };
+  const global = runtime.buildContext('rp:s1').chatCompletionSettings;
+  assert.equal(global.chat_completion_source, 'vertexai', 'the real API profile wins over connection fields left in an imported preset');
+  assert.equal(global.vertexai_model, 'gemini-3.8-pro');
+  boundProfileId = 'bound';
+  const bound = runtime.buildContext('rp:s1').chatCompletionSettings;
+  assert.deepEqual([bound.chat_completion_source, bound.openrouter_model, bound.custom_prompt_post_processing], ['openrouter', 'xiaomi/mimo-v2.6-pro', 'merge']);
+  assert.equal(preset.chat_completion_source, 'claude', 'the stored preset is not modified');
+  assert.equal(runtime.buildContext('rp:s1').model, 'xiaomi/mimo-v2.6-pro', 'script {{model}} follows the session API profile');
+  console.log('ok - scripts read the session API profile as SillyTavern chat completion source and model');
 }

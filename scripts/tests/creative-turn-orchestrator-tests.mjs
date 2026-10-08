@@ -120,28 +120,42 @@ const makeExec = (fn) => ({ run: fn });
 }
 
 {
-  // 超时：房子 failed(timeout)，子 signal 已 abort，迟到 resolve 不能改写终态
-  let lateResolve;
+  // 房子不另设时限：慢请求一直等到自身结束（时长由模型配置的请求超时决定）；用户停止后迟到结果不改写终态
+  let slowResolve;
   let childSignal;
   const exec = makeExec(({ house, signal }) => {
     if (house.kind === 'body') return ok('b');
     childSignal = signal;
-    return new Promise((resolve) => { lateResolve = resolve; });
+    return new Promise((resolve) => { slowResolve = resolve; });
   });
   const orch = createCreativeTurnOrchestrator({
     board: { rows: [{ id: 'r1', houses: [body()] }, { id: 'r2', houses: [custom('slow', { timeoutMs: 1000 })] }] },
     executors: { custom_prompt: exec, body: exec },
-    setTimeoutFn: (fn, ms) => setTimeout(fn, ms >= 1000 ? 10 : ms),
   });
-  const result = await orch.runTurn();
-  assert.equal(result.houses.slow.status, 'failed');
-  assert.equal(result.houses.slow.reason, 'timeout');
-  assert.equal(childSignal.aborted, true);
+  const pending = orch.runTurn();
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(orch.getHouseState('slow').status, 'running', '旧板残留的 timeoutMs 不再生效');
+  assert.equal(childSignal.aborted, false);
+  slowResolve(ok('slow'));
+  const result = await pending;
+  assert.equal(result.houses.slow.status, 'succeeded');
+
+  let lateResolve;
+  const controller = new AbortController();
+  const stopped = createCreativeTurnOrchestrator({
+    board: { rows: [{ id: 'r1', houses: [body()] }, { id: 'r2', houses: [custom('slow')] }] },
+    executors: { custom_prompt: makeExec(({ house }) => house.kind === 'body' ? ok('b') : new Promise((resolve) => { lateResolve = resolve; })), body: makeExec(() => ok('b')) },
+    signal: controller.signal,
+  });
+  const running = stopped.runTurn();
+  await tick(); await tick();
+  controller.abort();
+  const halted = await running;
+  assert.equal(halted.houses.slow.status, 'cancelled');
   lateResolve(ok('late'));
   await tick();
-  assert.equal(orch.getHouseState('slow').status, 'failed', '迟到结果不改写终态');
-  assert.equal(orch.getHouseState('slow').artifact, null);
-  console.log('ok - timeout aborts child signal and blocks late results');
+  assert.equal(stopped.getHouseState('slow').status, 'cancelled', '迟到结果不改写终态');
+  console.log('ok - houses have no extra time limit; stopping still blocks late results');
 }
 
 {

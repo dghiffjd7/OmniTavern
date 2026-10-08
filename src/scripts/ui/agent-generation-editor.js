@@ -1,5 +1,5 @@
 import { t } from '../i18n/index.js';
-import { changeAgentReasoningMode, getAgentReasoningControl, normalizeAgentGenerationSettings } from '../agent/agent-generation-settings.js';
+import { AGENT_TIMEOUT_MAX_SECONDS, changeAgentReasoningMode, getAgentReasoningControl, normalizeAgentGenerationSettings } from '../agent/agent-generation-settings.js';
 import { createCustomSelectWrapper, bindCustomSelectButton, refreshCustomSelectButton } from './custom-select.js';
 
 const escape = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
@@ -15,14 +15,16 @@ export const createAgentGenerationEditor = ({ host, getConfig, onChange, model =
       <label data-agent-effort><span class="ac-label">${escape(t('思考强度'))}</span><select name="reasoningEffort"></select></label></div>
     <span class="ac-source" data-agent-reasoning-hint></span>
     <div class="ac-row"><label><span class="ac-label">${escape(t('最大输出 Tokens'))}</span><input name="maxTokens" type="number" min="16" max="16000" step="1" inputmode="numeric" value="${value.maxTokens}"></label>
-      <label><span class="ac-label">${escape(t('最长等待（秒）'))}</span><input name="timeoutSeconds" type="number" min="5" max="300" step="1" inputmode="numeric" value="${value.timeoutSeconds}"></label></div>
+      <label><span class="ac-label">${escape(t('最长等待'))}</span><select name="timeoutMode"></select></label></div>
+    <div class="ac-row" data-agent-timeout-custom><label><span class="ac-label">${escape(t('自定义等待（秒）'))}</span><input name="timeoutSeconds" type="number" min="5" max="${AGENT_TIMEOUT_MAX_SECONDS}" step="1" inputmode="numeric" value="${value.timeoutSeconds ?? ''}"></label></div>
+    <span class="ac-source" data-agent-timeout-hint></span>
     <span class="ac-source" data-agent-budget-hint>${escape(t(getConfig().id === 'text_completion' || getConfig().inputOutput === 'suggestion'
       ? '思考会占用输出额度；增加额度不会延长显示的续写建议。' : '最大输出额度包含思考与最终结果。'))}</span>
   </div>`;
-  const mode = host.querySelector('[name="reasoningMode"]'), effort = host.querySelector('[name="reasoningEffort"]');
+  const mode = host.querySelector('[name="reasoningMode"]'), effort = host.querySelector('[name="reasoningEffort"]'), timeoutMode = host.querySelector('[name="timeoutMode"]');
   const tokens = host.querySelector('[name="maxTokens"]'), timeout = host.querySelector('[name="timeoutSeconds"]');
   const controls = new Map();
-  for (const field of [mode, effort]) {
+  for (const field of [mode, effort, timeoutMode]) {
     const wrapper = createCustomSelectWrapper(field); field.replaceWith(wrapper); field.hidden = true; wrapper.prepend(field);
     const button = wrapper.querySelector('button'); controls.set(field, button);
     bindCustomSelectButton({ buttonEl: button, selectEl: field, fallback: t('请选择') });
@@ -56,19 +58,29 @@ export const createAgentGenerationEditor = ({ host, getConfig, onChange, model =
           : '不额外请求时使用模型自身行为；部分模型无法关闭思考。');
     tokens.min = state.reasoningMode === 'on' ? '2048' : '16';
     host.querySelector('[data-agent-budget-hint]').hidden = state.reasoningMode !== 'on';
-    if (syncNumbers) { tokens.value = state.maxTokens; timeout.value = state.timeoutSeconds; }
+    // 超时只有一条规则：自定义 ＞ 所用模型配置的请求超时；跟随时直接显示实际生效的值。
+    const modelSeconds = Math.round((Number(model.requestTimeoutMs) || 0) / 1000);
+    options(timeoutMode, [{ value: 'follow', label: modelSeconds ? t('跟随模型配置 · {value} 秒', { value: modelSeconds }) : t('跟随模型配置') },
+      { value: 'custom', label: t('自定义') }], state.timeoutMode);
+    host.querySelector('[data-agent-timeout-custom]').hidden = state.timeoutMode !== 'custom';
+    host.querySelector('[data-agent-timeout-hint]').textContent = state.timeoutMode === 'custom' ? t('自定义优先于 API 配置的请求超时。') : '';
+    if (syncNumbers) { tokens.value = state.maxTokens; timeout.value = state.timeoutSeconds ?? ''; }
   };
   const input = event => {
     event.stopPropagation();
     const field = event.target;
     if (![tokens, timeout].includes(field) || !field.validity.valid || field.value === '') return;
-    onChange({ [field.name]: Number(field.value) });
+    onChange(field === timeout ? { timeoutMode: 'custom', timeoutSeconds: Number(field.value) } : { [field.name]: Number(field.value) });
   };
   const change = event => {
     event.stopPropagation();
     const field = event.target;
     if (field === mode) onChange(changeAgentReasoningMode({ ...getConfig(), ...settings() }, field.value));
     else if (field === effort) onChange({ reasoningEffort: field.value });
+    else if (field === timeoutMode) {
+      const seconds = Number(timeout.value) || Math.round((Number(model.requestTimeoutMs) || 0) / 1000) || 120;
+      onChange(field.value === 'custom' ? { timeoutMode: 'custom', timeoutSeconds: Math.min(AGENT_TIMEOUT_MAX_SECONDS, Math.max(5, seconds)) } : { timeoutMode: 'follow', timeoutSeconds: null });
+    }
     else if ([tokens, timeout].includes(field)) onChange(normalizeAgentGenerationSettings({ ...getConfig(), [field.name]: field.value }));
     refresh(true);
   };

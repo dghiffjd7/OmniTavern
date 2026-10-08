@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createAgentConfigStore } from '../../src/scripts/storage/agent-config-store.js';
-import { createUtilityAgentRuntime, parseArchiveTitle, parseScorePreview, parseUtilityJson, splitScorePreviewText } from '../../src/scripts/agent/utility-agent-runtime.js';
+import { createUtilityAgentRuntime, parseArchiveTitle, parseUtilityJson } from '../../src/scripts/agent/utility-agent-runtime.js';
 
 const storage = new Map();
 globalThis.localStorage = { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, String(value)), removeItem: key => storage.delete(key) };
@@ -15,7 +15,7 @@ const setup = async request => {
   chat.state = { sessions: { room: { messages: [{ id: 'm', role: 'assistant', content: '一起去海边散步。' }], archives: [], summaries: [] } } };
   const context = () => ({ place: 'chat', scopeId: chat.scopeId, sessionId: 'room', archiveId: chat.state.sessions.room.currentArchiveId || '' });
   const configs = createAgentConfigStore({ storage: null, saveKv: async () => true });
-  for (const id of ['archive_naming', 'reply_scoring']) assert.equal((await configs.save({ id, context: context(), scope: 'local', config: { enabled: true, modelMode: 'profile', modelProfileId: 'selected' } })).ok, true);
+  for (const id of ['archive_naming']) assert.equal((await configs.save({ id, context: context(), scope: 'local', config: { enabled: true, modelMode: 'profile', modelProfileId: 'selected' } })).ok, true);
   const runtime = createUtilityAgentRuntime({ chatStore: chat, configStore: configs, getContext: context,
     captureModel: async config => { assert.equal(config.modelProfileId, 'selected'); return { model: 'test-model' }; }, request });
   return { chat, configs, context, runtime };
@@ -47,30 +47,6 @@ test('disabling the model cancels stale archive writes', async () => {
   await h.configs.save({ ...record, config: { ...record.config, enabled: false } });
   h.runtime.reconcile(); resolveRequest('{"title":"不能覆盖"}'); await tick();
   assert.equal(h.chat.getArchives('room').find(a => a.id === id).name, original);
-  h.runtime.dispose();
-});
-
-test('manual score previews keep original messages and require one bounded result per paragraph', async () => {
-  const h = await setup(async ({ request }) => {
-    assert.equal(request.messages.length, 2);
-    return JSON.stringify({ scores: [{ id: 'p2', score: .8, reason: '重复' }, { id: 'p1', score: .1, reason: '清楚' }] });
-  });
-  const original = JSON.stringify(h.chat.state);
-  const result = await h.runtime.run({ id: 'reply_scoring', context: h.context(), text: '第一段。\n\n第二段。' });
-  assert.equal(result.status, 'succeeded');
-  assert.deepEqual(h.runtime.list('reply_scoring')[0].scores.map(row => row.id), ['p1', 'p2']);
-  assert.equal(JSON.stringify(h.chat.state), original, 'scoring never edits or replaces the message');
-  const segments = splitScorePreviewText('第一段。\n第二段。');
-  for (const scores of [[{ id: 'p1', score: .1 }], [{ id: 'p1', score: .1 }, { id: 'p1', score: .3 }], [{ id: 'p1', score: 2 }, { id: 'p2', score: .3 }]])
-    assert.throws(() => parseScorePreview(JSON.stringify({ scores }), segments));
-  assert.throws(() => splitScorePreviewText('x'.repeat(12001)));
-  assert.throws(() => splitScorePreviewText(Array(41).fill('一段').join('\n\n')));
-  // Many dialogue lines no longer hit the segment cap: blank-line paragraphs first, then grouped lines.
-  const dialogue = Array.from({ length: 90 }, (_, index) => `「第${index}句」`);
-  assert.equal(splitScorePreviewText(dialogue.join('\n')).length, 30);
-  assert.equal(splitScorePreviewText(dialogue.join('\n')).map(row => row.text).join('\n'), dialogue.join('\n'));
-  assert.equal(splitScorePreviewText([dialogue.slice(0, 45).join('\n'), dialogue.slice(45).join('\n')].join('\n\n')).length, 2);
-  assert.equal(splitScorePreviewText('一\n二\n\n三').length, 3);
   h.runtime.dispose();
 });
 
@@ -110,19 +86,19 @@ test('V2 thread totals refreshing messageCount do not cancel naming', async () =
 test('timeouts are failures; a user stop keeps its own status', async () => {
   const timeout = () => Promise.reject(Object.assign(new Error('Agent 执行超时，请稍后重试'), { name: 'AbortError' }));
   const h = await setup(timeout);
-  const result = await h.runtime.run({ id: 'reply_scoring', context: h.context(), text: '一段。' });
+  const result = await h.runtime.run({ id: 'archive_naming', context: h.context(), text: '一段。' });
   assert.equal(result.status, 'failed');
   assert.equal(result.reason, 'Agent 执行超时，请稍后重试');
   h.runtime.dispose();
   let rejectRequest;
   const s = await setup(({ signal }) => new Promise((_, reject) => { rejectRequest = reject; signal.addEventListener('abort', () => reject(Object.assign(new Error('目标或配置已变化，任务已停止'), { name: 'AbortError' }))); }));
-  const pending = s.runtime.run({ id: 'reply_scoring', context: s.context(), text: '一段。' }); await tick();
-  const [job] = s.runtime.list('reply_scoring');
+  const pending = s.runtime.run({ id: 'archive_naming', context: s.context(), text: '一段。' }); await tick();
+  const [job] = s.runtime.list('archive_naming');
   s.runtime.cancel(job.id);
   const stopped = await pending;
   assert.equal(stopped.status, 'cancelled');
   assert.equal(stopped.reason, '已停止');
-  assert.equal(s.runtime.list('reply_scoring')[0].message, '已停止');
+  assert.equal(s.runtime.list('archive_naming')[0].message, '已停止');
   void rejectRequest;
   s.runtime.dispose();
 });

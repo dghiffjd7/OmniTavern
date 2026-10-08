@@ -3462,6 +3462,7 @@ export class AgentCenterPanel {
             agentCenterSettings,
             agentProfileView,
             memoryMode,
+            autoImageEnabled: appSettings.get().autoImagePromptEnabled === true,
         });
         view.memoryAgentPromptConfig = memoryAgentPromptConfig;
         view.agentFormatGuide = agentFormatGuide;

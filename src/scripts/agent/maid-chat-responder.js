@@ -17,6 +17,7 @@ import {
   buildMaidImageAttachmentSummary,
   buildMaidUserContentWithImages,
   getMaidImageAttachmentsFromContext,
+  buildMaidFileAttachmentSummary,
 } from './maid-attachment-parts.js';
 import { isMaidUserAbort } from './maid-failure-codes.js';
 import { buildMaidGenerationOptions } from './maid-generation-settings.js';
@@ -93,10 +94,12 @@ export const buildMaidChatResponderMessages = ({
     : '';
   const imageAttachments = getMaidImageAttachmentsFromContext(context);
   const imageSummary = buildMaidImageAttachmentSummary(imageAttachments);
+  const fileSummary = buildMaidFileAttachmentSummary(context?.maidAttachments, { recent: context?.maidRecentFileAttachments });
   const userText = [
     buildMaidSkillContextPrompt(context.maidSkillContext),
     `用户输入：${trim(input)}`,
     imageSummary ? `用户附图：\n${imageSummary}` : '',
+    fileSummary ? `用户附带的文件：\n${fileSummary}` : '',
     `当前会话：${trim(context?.sessionId, '-')}`,
     `UI 模式：${trim(context?.uiMode, '-')}`,
     `当前页面：${trim(context?.activePage, '-')}`,

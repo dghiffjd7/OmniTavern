@@ -3,7 +3,7 @@ import { MAID_SUB_AGENT_SKILLS } from '../storage/maid-settings-store.js';
 // Owns model delegation, its confirmation and fallback; app.js only supplies dependencies.
 export const createMaidSubAgentRuntime = ({
   resolveMaidRuntimeConfig, listEnabledAgents, chatConfigManager, createClient,
-  requestMaidToolConfirmation, buildAdHocWebSearchRuntime, logger = console,
+  requestMaidToolConfirmation, runAdHocWebSearchChat, logger = console,
 } = {}) => {
   const subAgentSkillLabel = (skills = []) => skills
     .map(id => MAID_SUB_AGENT_SKILLS.find(item => item.id === id)?.label || id)
@@ -68,10 +68,8 @@ export const createMaidSubAgentRuntime = ({
           const cfg = await chatConfigManager.getRuntimeConfigByProfileId(sub.modelProfileId);
           if (cfg) {
             subProfileMissing = false;
-            const effective = {
-              ...(sub.modelOverride ? { ...cfg, model: sub.modelOverride } : cfg),
-              timeout: Math.min(Number(cfg.timeout) > 0 ? Number(cfg.timeout) : 240000, 240000),
-            };
+            // 请求超时跟随子代理所用模型配置，不另设封顶。
+            const effective = sub.modelOverride ? { ...cfg, model: sub.modelOverride } : cfg;
             client = createClient(effective);
             clientConfig = effective;
             delegated = true;
@@ -90,7 +88,7 @@ export const createMaidSubAgentRuntime = ({
     }
     const runChat = async (targetClient, targetConfig) => {
       let sources = [];
-      const generation = buildAdHocWebSearchRuntime({
+      const generation = await runAdHocWebSearchChat({
         client: targetClient,
         config: targetConfig,
         enabled: webSearch === true,
@@ -101,23 +99,20 @@ export const createMaidSubAgentRuntime = ({
           max_tokens: 2400,
           ...(context?.signal ? { signal: context.signal } : {}),
         },
+        messages: [{ role: 'user', content: prompt }],
         onStatus: status => {
           const message = String(status?.message || '').trim();
-          if (message) context?.onStatus?.({ message, tone: status?.state === 'unavailable' ? 'warning' : 'thinking' });
+          if (message) context?.onStatus?.({ message, tone: ['unavailable', 'fallback'].includes(status?.state) ? 'warning' : 'thinking' });
         },
         onSources: nextSources => {
           sources = Array.isArray(nextSources) ? nextSources.slice() : [];
         },
       });
-      const text = String(await generation.client.chat(
-        [{ role: 'user', content: prompt }],
-        generation.requestOptions,
-      ) || '').trim();
       return {
-        text,
+        text: String(generation.output || '').trim(),
         sources,
-        webSearchUsed: generation.plan?.enabled === true,
-        webSearchReason: String(generation.plan?.diagnostics?.reason || ''),
+        webSearchUsed: generation.route !== 'none',
+        webSearchReason: String(generation.reason || ''),
       };
     };
     try {

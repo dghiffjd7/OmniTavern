@@ -1,4 +1,5 @@
 import {
+  buildCharacterCardV3,
   buildTavernV2CharacterCard,
   embedTavernV2CharacterCardInPng,
   sanitizeCharacterCardExportName,
@@ -17,6 +18,22 @@ const bytesToBase64 = (bytes) => {
 
 const textToDataUrl = text => `data:application/json;base64,${bytesToBase64(new TextEncoder().encode(String(text || '')))}`;
 const pngBytesToDataUrl = bytes => `data:image/png;base64,${bytesToBase64(bytes)}`;
+
+const EMBEDDED_URI = /^(embedd?ed:\/\/|__asset:)\/?/i;
+const CHARX_ICON_PATH = 'assets/icon/images/main.png';
+
+// 导出时的 CCv3 资源清单：头像换成当前头像；包内资源只有原始 .charx 在时才能保留
+export const buildExportCardAssets = (assets = [], { container = 'png', hasSourcePackage = false } = {}) => {
+  const list = (Array.isArray(assets) ? assets : []).filter(asset => asset && typeof asset === 'object');
+  const kept = list.filter(asset => asset.type !== 'icon'
+    && (!EMBEDDED_URI.test(String(asset.uri || '')) || (container === 'charx' && hasSourcePackage)));
+  const icon = container === 'charx'
+    ? { type: 'icon', uri: `embeded://${CHARX_ICON_PATH}`, name: 'main', ext: 'png' }
+    : { type: 'icon', uri: 'ccdefault:', name: 'main', ext: 'png' };
+  const oldIconPaths = list.filter(asset => asset.type === 'icon' && EMBEDDED_URI.test(String(asset.uri || '')))
+    .map(asset => String(asset.uri).replace(EMBEDDED_URI, ''));
+  return { assets: [icon, ...kept], oldIconPaths };
+};
 
 const decodeDataUrl = (dataUrl) => {
   const raw = String(dataUrl || '').trim();
@@ -96,7 +113,7 @@ export class CharacterCardExporter {
       downloadInBrowser({ dataUrl, fileName });
       return fileName;
     }
-    const extension = format === 'png' ? 'png' : 'json';
+    const extension = ['png', 'charx'].includes(format) ? format : 'json';
     const pick = await pickSavePath({
       defaultName: fileName,
       filters: [{ name: extension.toUpperCase(), extensions: [extension] }],
@@ -110,7 +127,7 @@ export class CharacterCardExporter {
 
   async export(persona, format = 'png') {
     const normalizedFormat = String(format || '').trim().toLowerCase();
-    if (!['png', 'json'].includes(normalizedFormat)) throw new Error('不支持的角色卡导出格式');
+    if (!['png', 'json', 'charx'].includes(normalizedFormat)) throw new Error('不支持的角色卡导出格式');
     const card = await this.buildCard(persona);
     const baseName = sanitizeCharacterCardExportName(card.data?.name || persona?.name, 'character');
 
@@ -126,7 +143,27 @@ export class CharacterCardExporter {
 
     const avatarSource = String(persona?.avatar || '').trim() || String(this.getFallbackAvatar() || '').trim();
     const pngBytes = await imageSourceToPngBytes(avatarSource);
-    const embedded = embedTavernV2CharacterCardInPng(pngBytes, card);
+
+    if (normalizedFormat === 'charx') {
+      if (!hasTauriRuntime()) throw new Error('当前环境不支持导出 .charx');
+      const hasSourcePackage = persona?.source?.originalCharxStored === true;
+      const { assets, oldIconPaths } = buildExportCardAssets(card.data?.assets, { container: 'charx', hasSourcePackage });
+      const v3Card = buildCharacterCardV3(card, { assets });
+      const base64 = await safeInvoke('export_charx', {
+        cardText: JSON.stringify(v3Card),
+        iconPath: CHARX_ICON_PATH,
+        iconBase64: bytesToBase64(pngBytes),
+        personaId: hasSourcePackage ? persona.id : null,
+        skipPaths: oldIconPaths,
+      });
+      const fileName = `${baseName}.charx`;
+      const path = await this.saveDataUrl({ dataUrl: `data:application/zip;base64,${base64}`, fileName, format: normalizedFormat });
+      return { path, fileName, format: normalizedFormat, card: v3Card };
+    }
+
+    // PNG 同时写 chara（V2）与 ccv3（同一快照的 V3 视图），与 SillyTavern 一致
+    const v3Card = buildCharacterCardV3(card, { assets: buildExportCardAssets(card.data?.assets).assets });
+    const embedded = embedTavernV2CharacterCardInPng(pngBytes, card, { v3Card });
     const fileName = `${baseName}.png`;
     const path = await this.saveDataUrl({
       dataUrl: pngBytesToDataUrl(embedded.bytes),

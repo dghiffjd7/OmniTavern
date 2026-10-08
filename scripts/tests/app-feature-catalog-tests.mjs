@@ -25,7 +25,13 @@ import { createChatFormatRepairTools } from '../../src/scripts/agent/tools/chat-
 import { createMomentsAgentTools } from '../../src/scripts/agent/tools/moments-tools.js';
 import { createPresetRegexScriptAgentTools } from '../../src/scripts/agent/tools/preset-regex-script-tools.js';
 import { createContactProfileAgentTools } from '../../src/scripts/agent/tools/contact-profile-tools.js';
+import { createAttachmentImportAgentTools } from '../../src/scripts/agent/tools/attachment-import-tools.js';
 import { createAgentToolRegistry } from '../../src/scripts/agent/agent-tool-registry.js';
+// 附件导入链会加载正则存储的 logger（读取 localStorage）
+globalThis.localStorage = globalThis.localStorage || { getItem: () => null, setItem() {}, removeItem() {} };
+const { createAttachmentImportService } = await import('../../src/scripts/import/attachment-import-service.js');
+const { inspectAttachmentFile } = await import('../../src/scripts/import/attachment-file-inspector.js');
+const { createMaidFileAttachmentRegistry } = await import('../../src/scripts/ui/maid-file-attachments.js');
 
 const getTool = (tools, name) => tools.find(tool => tool.name === name);
 
@@ -648,7 +654,28 @@ const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
       },
     },
   });
-  const tools = [...navTools, ...sessionTools, ...groupTools, ...contentTools, ...mediaTools, ...captureTools, ...webTools, ...todoTools, ...maidMemoryTools, ...guideTools, ...formatTools, ...momentsTools, ...presetRegexScriptTools, ...contactProfileTools];
+  // 附件导入：内存中的附件缓存与世界书存储，目录中的导入动作走真实工具与导入服务
+  const attachmentRegistry = createMaidFileAttachmentRegistry();
+  const attachmentBytes = new TextEncoder().encode(JSON.stringify({ entries: [{ key: ['港'], content: '星港' }] }));
+  attachmentRegistry.register('catalog-file', {
+    bytes: attachmentBytes, hash: 'catalog-hash', name: '目录测试.json', mime: 'application/json', size: attachmentBytes.length,
+    inspection: inspectAttachmentFile({ name: '目录测试.json', mime: 'application/json', bytes: attachmentBytes }),
+  });
+  const attachmentWorlds = {};
+  const readAttachmentWorld = async id => (attachmentWorlds[id]
+    ? { exists: true, revision: 1, generation: 1, data: attachmentWorlds[id] }
+    : { exists: false, revision: 0, generation: 0, data: null });
+  const attachmentTools = createAttachmentImportAgentTools({
+    getAttachmentRegistry: () => attachmentRegistry,
+    getImportService: () => createAttachmentImportService({
+      getAttachment: id => attachmentRegistry.get(id),
+      worldbooks: { listIds: async () => Object.keys(attachmentWorlds), getSnapshot: readAttachmentWorld, save: async (id, world) => { attachmentWorlds[id] = world; } },
+      bindWorldbook: {},
+      regex: {},
+    }),
+    readWorldbookSnapshot: readAttachmentWorld,
+  });
+  const tools = [...navTools, ...sessionTools, ...groupTools, ...contentTools, ...mediaTools, ...captureTools, ...webTools, ...todoTools, ...maidMemoryTools, ...guideTools, ...formatTools, ...momentsTools, ...presetRegexScriptTools, ...contactProfileTools, ...attachmentTools];
   const worldbookRegistry = createAgentToolRegistry({
     permissionEvaluator: { evaluateTool: () => ({ decision: 'allow', checks: [] }) },
     logger: { warn() {} },
@@ -1113,6 +1140,13 @@ const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
       const kind = preflight?.kind || '';
       const result = await tool.execute(args, kind ? { toolSafety: { decision: 'allow', request: { kind } } } : {});
       assert.equal(result.ok, true, `${feature.id} direct action should succeed: ${JSON.stringify(result).slice(0, 200)}`);
+      return;
+    }
+    if (feature.id === 'attachment.inspect' || feature.id === 'attachment.import') {
+      const args = feature.id === 'attachment.import' ? { attachmentId: 'catalog-file', target: 'none' } : { attachmentId: 'catalog-file' };
+      const result = await getTool(tools, feature.directAction).execute(args, {});
+      assert.equal(result.ok, true, `${feature.id} direct action should succeed: ${JSON.stringify(result).slice(0, 200)}`);
+      if (feature.id === 'attachment.import') assert.deepEqual([result.worldbookId, result.verified], ['目录测试', true]);
       return;
     }
     if (feature.directAction === 'app.read_feature_doc') {

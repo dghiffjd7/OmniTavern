@@ -12,9 +12,13 @@ export const buildMaidRunResumeSubmission = run => ({
 // metadata contains references, never a second copy of native image bytes.
 export const createMaidTaskInputPersistence = ({ referenceStore, native = hasTauriRuntime() } = {}) => ({
   persist: async (attachments, context) => {
-    const references = attachments.length ? await referenceStore.persist(attachments.map(item => ({ ...item, url: item.llmUrl || item.url })), 'maid-task-inputs') : [];
+    // 只保存图片；文件附件的原文件只在内存里，恢复任务时需重新上传
+    const images = attachments.filter(item => item?.kind !== 'file' && (item?.llmUrl || item?.url));
+    const references = images.length ? await referenceStore.persist(images.map(item => ({ ...item, url: item.llmUrl || item.url })), 'maid-task-inputs') : [];
     if (native && references.some(item => !item.path && /^data:|^blob:/.test(item.url || item.dataUrl || ''))) throw new Error(t('附图未能保存，输入和技能选择已保留'));
-    return { version: 1, references, context: { sessionId: context.sessionId || '', uiMode: context.uiMode || '', activePage: context.activePage || '', userSelection: structuredClone(context.userSelection || []) } };
+    return { version: 1, references, context: { roleCardId: context.roleCardId || '', sessionId: context.sessionId || '', uiMode: context.uiMode || '',
+      contactsScopeId: context.contactsScopeId || '', chatScopeId: context.chatScopeId || '',
+      activePage: context.activePage || '', userSelection: structuredClone(context.userSelection || []) } };
   },
   restore: async snapshot => {
     if (snapshot?.version !== 1 || !Array.isArray(snapshot.references)) throw new Error(t('原任务附图记录不可用，请重新附图后发起任务'));

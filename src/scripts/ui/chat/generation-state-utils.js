@@ -91,15 +91,21 @@ export const createActiveGenerationRecord = ({
   cancelled: false,
   cancelReason: '',
   startedAt: Date.now(),
+  lastActivityAt: 0,
+  requestTimeoutMs: 0,
 });
 
-// 生成记录超龄判定：Rust 层 240s 硬超时 + 缓冲；超过即视为流挂死残留的僵尸记录。
-export const GENERATION_STALE_MS = 300_000;
+// 卡死判定只看「多久没有任何输出」，不看总时长：请求层在 API 配置的请求超时内要么收到输出、要么中止请求，
+// 超过「请求超时 + 缓冲」仍无输出的记录必然是残留（如 finally 未执行），长时间正常生成不受影响。
+export const GENERATION_STALE_GRACE_MS = 60_000;
+// 模型配置未填请求超时时，各 provider 的默认值。
+const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
 export const isGenerationRecordStale = (generation = null, now = Date.now()) => {
   if (!generation || typeof generation !== 'object') return false;
-  const startedAt = Number(generation.startedAt) || 0;
-  if (!startedAt) return false;
-  return now - startedAt > GENERATION_STALE_MS;
+  const lastActivity = Math.max(Number(generation.lastActivityAt) || 0, Number(generation.startedAt) || 0);
+  if (!lastActivity) return false;
+  const idleLimit = (Number(generation.requestTimeoutMs) || DEFAULT_REQUEST_TIMEOUT_MS) + GENERATION_STALE_GRACE_MS;
+  return now - lastActivity > idleLimit;
 };
 
 export const buildCancelledAssistantPartial = ({

@@ -1,6 +1,5 @@
 import {
-  collectImageFilesFromDropEvent,
-  collectImageFilesFromPasteEvent,
+  collectFilesFromDataTransfer,
   eventHasImageFiles,
 } from './image-attachment-input-utils.js';
 
@@ -74,6 +73,7 @@ const ICONS = Object.freeze({
   stop: iconSvg('<rect x="7" y="7" width="10" height="10" rx="1.5"/>'),
   selection: iconSvg('<circle cx="12" cy="12" r="7"/><path d="M12 2v3"/><path d="M12 19v3"/><path d="M2 12h3"/><path d="M19 12h3"/>'),
   image: iconSvg('<rect x="3.5" y="4.5" width="17" height="15" rx="3"/><circle cx="9" cy="10" r="1.6"/><path d="m20.5 16-4.8-4.8a1.5 1.5 0 0 0-2.1 0L5 19.5"/>'),
+  paperclip: iconSvg('<path d="m20.5 11.5-8.2 8.2a5.3 5.3 0 0 1-7.5-7.5l8.4-8.4a3.5 3.5 0 0 1 5 5l-8.4 8.4a1.8 1.8 0 0 1-2.5-2.5l7.7-7.7"/>'),
 });
 
 const injectStyle = (documentRef) => {
@@ -106,6 +106,11 @@ const injectStyle = (documentRef) => {
 .maid-command-input.is-dragover {
   border-color: rgba(var(--app-accent-rgb, 37, 99, 235), 0.42);
   box-shadow: 0 16px 40px rgba(15, 23, 42, 0.20), 0 0 0 3px rgba(var(--app-accent-rgb, 37, 99, 235), 0.12);
+}
+/* 文件拖到女仆悬浮球上：松开即打开输入条并附上文件 */
+.is-maid-file-dragover {
+  outline: 2px dashed rgba(var(--app-accent-rgb, 37, 99, 235), 0.75);
+  outline-offset: 4px;
 }
 .maid-command-input-drag {
   flex: 0 0 auto;
@@ -220,6 +225,50 @@ const injectStyle = (documentRef) => {
   height: 100%;
   display: block;
   object-fit: cover;
+  pointer-events: none;
+}
+.maid-command-input-attachment.is-file {
+  width: auto;
+  max-width: 172px;
+}
+.maid-command-input-attachment-file {
+  height: 100%;
+  min-width: 96px;
+  max-width: 172px;
+  padding: 7px 12px 7px 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  box-sizing: border-box;
+  border: 1px solid var(--app-border-default, rgba(148, 163, 184, 0.30));
+  border-radius: 12px;
+  background: var(--app-surface-subtle, #f8fafc);
+  color: var(--app-text-primary, #0f172a);
+}
+.maid-command-input-attachment-file-kind {
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--app-text-muted, rgba(100, 116, 139, 0.9));
+  white-space: nowrap;
+}
+.maid-command-input-attachment-file-name {
+  font-size: 12px;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.maid-command-input-attachment-badge {
+  position: absolute;
+  left: 3px;
+  bottom: 3px;
+  padding: 1px 4px;
+  border-radius: 6px;
+  font-size: 10px;
+  line-height: 1.3;
+  background: rgba(15, 23, 42, 0.72);
+  color: #fff;
   pointer-events: none;
 }
 .maid-command-input-attachment-remove {
@@ -819,7 +868,7 @@ export const createMaidCommandInputRuntime = ({
         ? result.attachments
         : [];
     return raw
-      .filter(item => item && typeof item === 'object' && trim(item.url || item.llmUrl))
+      .filter(item => item && typeof item === 'object' && (trim(item.url || item.llmUrl) || item.kind === 'file'))
       .map(item => ({
         ...item,
         id: trim(item.id) || createAttachmentId(),
@@ -865,28 +914,60 @@ export const createMaidCommandInputRuntime = ({
       if (!item) return;
       item.className = 'maid-command-input-attachment';
       item.dataset.attachmentId = attachment.id || '';
-      const url = attachment.url || attachment.llmUrl || '';
-      const preview = documentRef.createElement?.('button');
-      if (preview) {
-        preview.type = 'button';
-        preview.className = 'maid-command-input-attachment-preview';
-        preview.dataset.previewUrl = url;
-        preview.setAttribute?.('aria-label', t('点击查看大图'));
-        const img = documentRef.createElement?.('img');
-        if (img) {
-          img.src = url;
-          img.alt = attachment.name || 'image';
-          img.draggable = false;
-          preview.appendChild(img);
+      const url = attachment.kind === 'file' ? '' : (attachment.url || attachment.llmUrl || '');
+      if (url) {
+        const preview = documentRef.createElement?.('button');
+        if (preview) {
+          preview.type = 'button';
+          preview.className = 'maid-command-input-attachment-preview';
+          preview.dataset.previewUrl = url;
+          preview.setAttribute?.('aria-label', t('点击查看大图'));
+          const img = documentRef.createElement?.('img');
+          if (img) {
+            img.src = url;
+            img.alt = attachment.name || 'image';
+            img.draggable = false;
+            preview.appendChild(img);
+          }
+          item.appendChild(preview);
         }
-        item.appendChild(preview);
+        // 带角色卡数据的 PNG：角标提示已识别
+        if (attachment.file?.format === 'character_card') {
+          const badge = documentRef.createElement?.('span');
+          if (badge) {
+            badge.className = 'maid-command-input-attachment-badge';
+            badge.textContent = t('角色卡');
+            item.appendChild(badge);
+          }
+        }
+      } else {
+        // 文件附件：显示识别出的类型和名称（外部文本只用 textContent）
+        item.classList?.add?.('is-file');
+        const box = documentRef.createElement?.('div');
+        if (box) {
+          box.className = 'maid-command-input-attachment-file';
+          box.title = attachment.name || '';
+          const kind = documentRef.createElement?.('span');
+          if (kind) {
+            kind.className = 'maid-command-input-attachment-file-kind';
+            kind.textContent = t(attachment.file?.label || '文件');
+            box.appendChild(kind);
+          }
+          const name = documentRef.createElement?.('span');
+          if (name) {
+            name.className = 'maid-command-input-attachment-file-name';
+            name.textContent = attachment.file?.title || attachment.name || '';
+            box.appendChild(name);
+          }
+          item.appendChild(box);
+        }
       }
       const remove = documentRef.createElement?.('button');
       if (remove) {
         remove.type = 'button';
         remove.className = 'maid-command-input-attachment-remove';
         remove.dataset.attachmentId = attachment.id || '';
-        remove.setAttribute?.('aria-label', t('移除图片'));
+        remove.setAttribute?.('aria-label', t('移除附件'));
         remove.textContent = '×';
         item.appendChild(remove);
       }
@@ -1653,7 +1734,7 @@ export const createMaidCommandInputRuntime = ({
     fileInputEl = documentRef.createElement?.('input');
     if (fileInputEl) {
       fileInputEl.type = 'file';
-      fileInputEl.accept = 'image/*';
+      fileInputEl.accept = 'image/*,.json,application/json,.js,text/javascript,application/javascript,.charx';
       fileInputEl.multiple = true;
       fileInputEl.style.display = 'none';
     }
@@ -1676,7 +1757,7 @@ export const createMaidCommandInputRuntime = ({
     attachBtn.className = 'maid-command-input-attach';
     attachBtn.type = 'button';
     attachBtn.setAttribute('role', 'menuitem');
-    attachBtn.innerHTML = `${ICONS.image}<span class="maid-command-input-menu-label">${t('图片')}</span>`;
+    attachBtn.innerHTML = `${ICONS.paperclip}<span class="maid-command-input-menu-label">${t('附件')}</span>`;
     inputEl = documentRef.createElement?.('textarea');
     inputEl.className = 'maid-command-input-field';
     inputEl.dataset.maidGuideTarget = 'maid-command-input';
@@ -1780,10 +1861,10 @@ export const createMaidCommandInputRuntime = ({
     });
     inputEl.addEventListener?.('input', resizeInput);
     inputEl.addEventListener?.('paste', (event) => {
-      const files = collectImageFilesFromPasteEvent(event);
+      const files = collectFilesFromDataTransfer(event?.clipboardData || null);
       if (!files.length) return;
       event.preventDefault?.();
-      void addFiles(files, { source: 'clipboard-image' });
+      void addFiles(files, { source: 'clipboard' });
     });
     rootEl.addEventListener?.('dragover', (event) => {
       if (!eventHasImageFiles(event)) return;
@@ -1798,12 +1879,12 @@ export const createMaidCommandInputRuntime = ({
       rootEl.classList.remove('is-dragover');
     });
     rootEl.addEventListener?.('drop', (event) => {
-      const files = collectImageFilesFromDropEvent(event);
+      const files = collectFilesFromDataTransfer(event?.dataTransfer || null);
       if (!files.length) return;
       event.preventDefault?.();
       event.stopPropagation?.();
       rootEl.classList.remove('is-dragover');
-      void addFiles(files, { source: 'drop-image' });
+      void addFiles(files, { source: 'drop' });
     });
     attachmentsEl?.addEventListener?.('click', (event) => {
       const target = event?.target || null;
@@ -1831,7 +1912,7 @@ export const createMaidCommandInputRuntime = ({
     });
     fileInputEl?.addEventListener?.('change', () => {
       const files = Array.from(fileInputEl.files || []);
-      if (files.length) void addFiles(files, { source: 'picker-image' });
+      if (files.length) void addFiles(files, { source: 'picker' });
       try {
         fileInputEl.value = '';
       } catch {}
@@ -2017,6 +2098,30 @@ export const createMaidCommandInputRuntime = ({
     if (countEl) countEl.textContent = String(count || '');
     syncMoreState();
   };
+
+  // 文件拖到女仆悬浮球（输入条未打开时也可以）：打开输入条并按附件规则附上
+  const bindBallFileDrop = () => {
+    if (!modeSwitchEl?.addEventListener || modeSwitchEl.__maidFileDropBound) return;
+    modeSwitchEl.__maidFileDropBound = true;
+    const clearHover = () => modeSwitchEl.classList?.remove?.('is-maid-file-dragover');
+    modeSwitchEl.addEventListener('dragover', (event) => {
+      if (!eventHasImageFiles(event)) return;
+      event.preventDefault?.();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+      modeSwitchEl.classList?.add?.('is-maid-file-dragover');
+    });
+    modeSwitchEl.addEventListener('dragleave', clearHover);
+    modeSwitchEl.addEventListener('drop', (event) => {
+      const files = collectFilesFromDataTransfer(event?.dataTransfer || null);
+      clearHover();
+      if (!files.length) return;
+      event.preventDefault?.();
+      event.stopPropagation?.();
+      open({ autoFocus: true });
+      void addFiles(files, { source: 'drop-ball' });
+    });
+  };
+  bindBallFileDrop();
 
   return {
     syncVoiceState: () => voiceButton?.sync(),

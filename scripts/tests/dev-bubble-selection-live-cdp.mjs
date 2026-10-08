@@ -21,18 +21,18 @@ const mouse=(type,point)=>command('Input.dispatchMouseEvent',{type,...point,butt
 const touch=(type,point)=>command('Input.dispatchTouchEvent',{type,touchPoints:point?[{...point,id:1}]:[]});
 const click=async(selector,isTouch=false)=>{const point=await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)throw Error('Missing click target');const r=e.getBoundingClientRect();return{x:r.left+r.width/2,y:r.top+r.height/2};})()`);
   if(isTouch){await touch('touchStart',point);await touch('touchEnd');}else{await mouse('mousePressed',point);await mouse('mouseReleased',point);}await pause(180);};
-const editText=async text=>{await evaluate('document.querySelector(".text-fragment-editor textarea").focus();document.querySelector(".text-fragment-editor textarea").select()');await command('Input.insertText',{text});};
+const editText=async text=>{await evaluate('(()=>{const e=document.querySelector(".inline-text-editor");e.focus();getSelection().selectAllChildren(e);})()');await command('Input.insertText',{text});await pause(150);};
 const phrase='窗边的灯光照着摊开的书页，她抬起头，看见晚风拂过窗帘。';
 const replacement='暖黄的灯光落在书页上，她抬眼望向窗外，晚风正轻轻掀动窗帘。';
 let session;
-const read=()=>evaluate(`(()=>{const s=window.appBridge.getChatStore(),sid=${JSON.stringify(session.sid)};return{a:s.findMessage('selection-preview-a',sid),u:s.findMessage('selection-preview-u',sid),envelope:s.getLastRawResponseEnvelope(sid),menu:window.appBridge.getChatUI().contextMenu.style.display!=='none',selected:getSelection().toString(),editor:!!document.querySelector('.text-fragment-editor[open]'),scroll:window.appBridge.getChatUI().scrollEl.scrollTop};})()`);
+const read=()=>evaluate(`(()=>{const s=window.appBridge.getChatStore(),sid=${JSON.stringify(session.sid)};return{a:s.findMessage('selection-preview-a',sid),u:s.findMessage('selection-preview-u',sid),envelope:s.getLastRawResponseEnvelope(sid),menu:window.appBridge.getChatUI().contextMenu.style.display!=='none',selected:getSelection().toString(),editor:!!document.querySelector('.inline-text-editor'),scroll:window.appBridge.getChatUI().scrollEl.scrollTop};})()`);
 const points=async(mid,text)=>{
   await until(`!!document.querySelector('[data-msg-id="'+${JSON.stringify(mid)}+'"][data-role] .QQ_chat_msgdiv') && !document.getElementById('app-splash')`);
   await evaluate(`(()=>{const ui=window.appBridge.getChatUI();ui.clearLongPress();ui.contextMenu.style.display='none';getSelection().removeAllRanges();document.querySelector('[data-msg-id="'+${JSON.stringify(mid)}+'"]').scrollIntoView({block:'center'});})()`);await pause(300);
   return evaluate(`(()=>{const b=document.querySelector('[data-msg-id="'+${JSON.stringify(mid)}+'"] .QQ_chat_msgdiv'),w=document.createTreeWalker(b,NodeFilter.SHOW_TEXT),entries=[];let n,all='';while(n=w.nextNode()){entries.push({node:n,start:all.length});all+=n.textContent;}const text=${JSON.stringify(text)},at=all.indexOf(text);if(at<0)throw Error('Text not visible: '+text);const locate=o=>{const e=entries.find(e=>o<e.start+e.node.length)||entries.at(-1);return[e.node,o-e.start];};const a=document.createRange(),z=document.createRange();a.setStart(...locate(at));a.collapse(true);z.setStart(...locate(at+text.length));z.collapse(true);const p=a.getBoundingClientRect(),q=z.getBoundingClientRect();return{start:{x:p.left+.8,y:p.top+p.height/2},end:{x:q.left-.8,y:q.top+q.height/2}};})()`);
 };
 const selectMouse=async(mid,text)=>{const p=await points(mid,text);await mouse('mousePressed',p.start);await mouse('mouseMoved',p.end);await mouse('mouseReleased',p.end);await pause(220);return p;};
-const openEditor=async(isTouch=false)=>{await until('!!document.querySelector(".bubble-selection-edit:not([hidden])")');await click('.bubble-selection-edit',isTouch);await until('!!document.querySelector(".text-fragment-editor[open]")');};
+const openEditor=async(isTouch=false)=>{await until('!!document.querySelector(".bubble-selection-edit:not([hidden])")');await click('.bubble-selection-edit',isTouch);await until('!!document.querySelector(".inline-text-editor")');};
 const phase=process.argv.find(arg=>arg.startsWith('--phase='))?.split('=')[1]||'all';
 const reports=[];
 await pause(1800);
@@ -68,12 +68,11 @@ try {
     if(!['desktop-rest','desktop-finish'].includes(phase)){
       await selectMouse('selection-preview-a',phrase);assert.equal((await read()).selected,phrase);assert.equal((await read()).menu,false);
       await screenshot('desktop-selection');await openEditor();
-      assert.equal(await evaluate('document.querySelector(".fragment-save").disabled'),true);
-      await editText(replacement);await click('.text-fragment-editor summary');await screenshot('desktop-editor');await click('.fragment-save');await until('!document.querySelector(".text-fragment-editor[open]")');
+      await editText(replacement);await screenshot('desktop-editor');await click('.inline-text-editor-save');await until('!document.querySelector(".inline-text-editor")');
     }else if(phase==='desktop-rest'){
       await selectMouse('selection-preview-a',replacement);await openEditor();
-      assert.equal(await evaluate('document.querySelector(".fragment-count").textContent'),replacement.length+' 字');
-      await click('.text-fragment-editor summary');await screenshot('desktop-editor');await click('.fragment-cancel');
+      assert.equal(await evaluate('document.querySelector(".inline-text-editor").textContent'),replacement);
+      await screenshot('desktop-editor');await click('.inline-text-editor-cancel');
     }
     const saved=await read();
     assert.equal(saved.a.rawOriginal??saved.a.meta.swipes[1].rawOriginal,session.raw.replace(phrase,replacement));assert.equal(saved.a.rawSource,session.body.replace(phrase,replacement));
@@ -81,10 +80,10 @@ try {
     assert.equal(saved.envelope.text,session.envelope.replace(phrase,replacement));
     const pencil=await evaluate(`(async()=>{const ui=window.appBridge.getChatUI(),m=window.appBridge.getChatStore().findMessage('selection-preview-a',${JSON.stringify(session.sid)});await ui.actionHandler('view-code',m);const text=ui.__chatappCodeViewer.querySelector('textarea').value;ui.closeCodeViewer();return text;})()`);
     assert.equal(pencil,saved.envelope.text.replace(/\r\n?/g,'\n'));reports.push('desktop exact local save, current branch, and full pencil original synchronized');
-    await selectMouse('selection-preview-u','自己的文字消息');await openEditor();await editText('我修改后的消息');await click('.fragment-save');await until('!document.querySelector(".text-fragment-editor[open]")');
+    await selectMouse('selection-preview-u','自己的文字消息');await openEditor();await editText('我修改后的消息');await click('.inline-text-editor-save');await until('!document.querySelector(".inline-text-editor")');
     assert.equal((await read()).u.rawInput,before.u.rawInput.replace('自己的文字消息','我修改后的消息'));reports.push('user message raw input synchronized');
     await selectMouse('selection-preview-a',replacement);await openEditor();await editText('取消的草稿');
-    assert.equal(await evaluate('window.appBridge.debugUiRegistry.actions.closeTopAppLayer()'),true);await until('!document.querySelector(".text-fragment-editor[open]")');
+    assert.equal(await evaluate('window.appBridge.debugUiRegistry.actions.closeTopAppLayer()'),true);await until('!document.querySelector(".inline-text-editor")');
     assert.equal((await read()).a.meta.swipes[1].rawOriginal,saved.a.meta.swipes[1].rawOriginal);reports.push('app back closes editor without saving its draft');
     await evaluate('window.appBridge.getChatStore().flush()');
     writeFileSync(`${output}/persisted.json`,JSON.stringify(await read(),null,2));
@@ -114,7 +113,7 @@ try {
       await touch('touchStart',p.start);await pause(460);await touch('touchMove',p.end);await touch('touchEnd');await pause(220);
       state=await read();assert.equal(state.selected,replacement);assert.equal(state.menu,false);await screenshot('mobile-selection');
       await openEditor(true);await editText('暖黄的灯光落在书页上，她抬眼望向窗外。');await screenshot('mobile-editor');
-      await click('.fragment-save',true);await until('!document.querySelector(".text-fragment-editor[open]")');
+      await click('.inline-text-editor-save',true);await until('!document.querySelector(".inline-text-editor")');
       const touchSaved=await read();
       assert.equal(touchSaved.a.rawOriginal??touchSaved.a.meta.swipes[1].rawOriginal,(state.a.rawOriginal??state.a.meta.swipes[1].rawOriginal).replace(replacement,'暖黄的灯光落在书页上，她抬眼望向窗外。'));reports.push('touch hold-drag selects and saves in the real conversation');
     }else{

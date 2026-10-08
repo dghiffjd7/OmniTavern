@@ -169,7 +169,7 @@ console.log('ok - maid runtime config resolver uses explicit maid profile');
   assert.equal(runtime.configured, true);
   assert.equal(runtime.profileId, 'memory-profile');
   assert.equal(runtime.config.model, 'memory-model-override');
-  assert.equal(runtime.config.timeout, 240000);
+  assert.equal(runtime.config.timeout, 900000, '请求超时跟随模型配置，不再封顶 240 秒');
   assert.equal(runtime.memoryExtractionMode, 'custom');
   assert.equal(runtime.memoryExtractionModelSource, 'custom');
   assert.equal(runtime.extractionFallbackClient, mainClient);

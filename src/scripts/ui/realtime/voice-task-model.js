@@ -44,15 +44,14 @@ export const createVoiceAwareMaidRuntimeResolver = ({
   registry,
   createClient,
   captureRequestContext = context => context,
-  timeoutMs = 240000,
 } = {}) => async (context = {}) => {
   const base = await resolveMaidRuntime(context);
   const voiceModel = registry?.get?.(context?.voiceCallId);
   if (!voiceModel || typeof createClient !== 'function') return base;
   const config = {
     ...voiceModel.config,
+    // 请求超时跟随该通话所用模型配置，不另设固定值。
     requestContext: captureRequestContext(context?.requestContext || { sessionId: context?.sessionId || 'maid' }),
-    timeout: timeoutMs,
   };
   return {
     ...(base && typeof base === 'object' ? base : {}),

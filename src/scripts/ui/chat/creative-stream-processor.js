@@ -3,6 +3,11 @@ import { hideCreativeContentTagsForDisplay } from './creative-content-display-ut
 const DEFAULT_STREAM_FPS = 18;
 const DEFAULT_MIN_CHARS = 6;
 const DEFAULT_MAX_WAIT_MS = 220;
+// 预览快照要对全文跑显示正则，回复越长越贵。下次预览至少隔上次耗时的这么多倍，
+// 主线程用在流式预览上的时间不超过约四分之一；上限保证长回复仍会持续更新。
+const COST_INTERVAL_FACTOR = 4;
+const MAX_ADAPTIVE_INTERVAL_MS = 1500;
+const defaultClock = () => (typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now());
 
 const normalizeText = (value) => String(value ?? '');
 
@@ -49,7 +54,9 @@ export class CreativeStreamProcessor {
     this.lastEmitAt = 0;
     this.lastPreviewLength = 0;
     this.lastSnapshot = null;
+    this.lastCostMs = 0;
     this.now = typeof this.options.now === 'function' ? this.options.now : () => Date.now();
+    this.clock = typeof this.options.clock === 'function' ? this.options.clock : defaultClock;
     this.frameMs = Math.max(
       16,
       Math.round(1000 / Math.max(1, Number(this.options.fps) || DEFAULT_STREAM_FPS)),
@@ -69,10 +76,14 @@ export class CreativeStreamProcessor {
     const sinceLast = now - this.lastEmitAt;
     const deltaChars = this.fullText.length - this.lastPreviewLength;
     if (this.lastEmitAt > 0) {
-      if (sinceLast < this.frameMs) return null;
+      const minInterval = Math.max(this.frameMs, Math.min(MAX_ADAPTIVE_INTERVAL_MS, this.lastCostMs * COST_INTERVAL_FACTOR));
+      if (sinceLast < minInterval) return null;
       if (deltaChars < this.minChars && sinceLast < this.maxWaitMs) return null;
     }
-    return this.buildSnapshot({ final: false, emittedAt: now });
+    const startedAt = Number(this.clock()) || 0;
+    const snapshot = this.buildSnapshot({ final: false, emittedAt: now });
+    this.lastCostMs = Math.max(0, (Number(this.clock()) || 0) - startedAt);
+    return snapshot;
   }
 
   finalize() {

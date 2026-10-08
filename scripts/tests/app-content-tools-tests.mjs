@@ -1323,8 +1323,7 @@ const createProfileStore = (prefix = 'profile') => {
   });
 
   const sendTool = getTool(tools, 'chat.send_message');
-  assert.equal(sendTool.timeoutMs, 180000);
-  assert.equal(sendTool.timeoutErrorCode, 'generation_failed');
+  assert.equal(sendTool.timeoutMs, 0, '等待角色回复跟随聊天模型配置的请求超时，工具层不另设上限');
   assert.equal(sendTool.capabilities.network, true);
   assert.equal(sendTool.capabilities.cost, 'variable');
   const result = await sendTool.execute({

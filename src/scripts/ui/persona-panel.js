@@ -53,6 +53,7 @@ export class PersonaPanel {
         onUserPersonaSwitch = null,
         onGreetingsImported = null,
         onRoleNewChatFinished = null,
+        cardAssetWriter = null,
     }) {
         this.store = personaStore;
         this.userStore = userStore;
@@ -96,6 +97,11 @@ export class PersonaPanel {
             rpSessionStore: this.rpSessionStore,
             onPersonaChanged: () => this.notifyPersonaChanged(),
             onGreetingsImported: payload => this.notifyGreetingsImported(payload),
+            getPersonaScopeKey: personaId => (typeof this.getPersonaScopeKey === 'function' ? this.getPersonaScopeKey(personaId) : personaId),
+            // 导入失败回滚：本次创建的世界书／正则／预设／脚本由导入服务逐项撤销，这里只删角色卡本身及其数据
+            deletePersona: personaId => this.deleteCore(personaId, { cleanupBindings: false }),
+            chatStore: this.chatStore,
+            assetWriter: cardAssetWriter,
         });
         this.cardExporter = new CharacterCardExporter({
             appBridge: window.appBridge,
@@ -592,7 +598,7 @@ export class PersonaPanel {
                     ">+ 新建角色卡</button>
                 </div>
             </div>
-            <input type="file" id="persona-card-import" accept=".png,.json,application/json,image/png" style="display:none;">
+            <input type="file" id="persona-card-import" accept=".png,.json,.charx,application/json,image/png" style="display:none;">
 
             <!-- Edit View (Hidden by default) -->
             <div id="persona-edit-view" style="
@@ -1830,14 +1836,41 @@ export class PersonaPanel {
         }
     }
 
+    // 导入角色卡文件并刷新列表；返回导入器结果（用户在弹窗中取消时为 false）。女仆附件导入也走这里
+    async importCardFile(file) {
+        const imported = await this.cardImporter.importFromFile(file);
+        this.galleryDetailCache.clear();
+        this.renderList();
+        if (this.galleryPanel) this.renderGallery();
+        return imported;
+    }
+
+    // 女仆附件导入角色卡：先计划后提交；不弹导入选项（内容由用户的话决定），提交后刷新列表
+    async planCardFile(file) {
+        return this.cardImporter.planFromFile(file);
+    }
+
+    async commitCardPlan(planned, { include = {}, activate = false } = {}) {
+        const result = await this.cardImporter.service.commit(planned, { include, activate });
+        if (result.ok) {
+            this.galleryDetailCache.clear();
+            // 面板尚未打开时没有 DOM；打开时会按存储重新渲染
+            if (this.panel) this.renderList();
+            if (this.galleryPanel) this.renderGallery();
+            if (result.activated && result.greetingCount > 0) {
+                try {
+                    await this.notifyGreetingsImported({ personaId: result.personaId, greetingCount: result.greetingCount });
+                } catch {}
+            }
+        }
+        return result;
+    }
+
     async handleCardImport() {
         const file = this.importInput?.files?.[0];
         if (!file) return;
         try {
-            await this.cardImporter.importFromFile(file);
-            this.galleryDetailCache.clear();
-            this.renderList();
-            if (this.galleryPanel) this.renderGallery();
+            await this.importCardFile(file);
             this.hideImportModal();
         } catch (err) {
             const msg = err?.message || '导入失败';
@@ -1877,15 +1910,16 @@ export class PersonaPanel {
         }
         const choice = await appChoice({
             title: '导出角色卡',
-            message: '选择 SillyTavern 兼容格式。PNG 会把角色资料写入头像图片；JSON 只导出角色资料。',
+            message: '选择 SillyTavern 兼容格式。PNG 会把角色资料（V2 与 CCv3 两份）写入头像图片；JSON 只导出角色资料；.charx 为 CCv3 资源包，含头像及导入时附带的资源。',
             actions: [
                 { id: 'png', label: 'PNG 角色卡', primary: true },
                 { id: 'json', label: 'JSON 角色卡' },
+                { id: 'charx', label: 'CCv3 .charx' },
                 { id: 'cancel', label: '取消' },
             ],
             defaultActionId: 'png',
         });
-        if (!['png', 'json'].includes(choice)) return '';
+        if (!['png', 'json', 'charx'].includes(choice)) return '';
         try {
             const result = await this.cardExporter.export(persona, choice);
             if (!result?.path) return '';

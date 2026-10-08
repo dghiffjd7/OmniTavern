@@ -1,4 +1,4 @@
-import { agentRequestTimeoutMs, buildAgentGenerationOptions } from './agent-generation-settings.js';
+import { agentRequestTimeoutMs, applyAgentTimeout, buildAgentGenerationOptions } from './agent-generation-settings.js';
 
 // Capture the Agent's connection once; preview and execution use the same options.
 // Referencing preset prompt blocks never imports preset generation parameters.
@@ -10,7 +10,7 @@ export const createAgentModelRequest = ({ config, resolveModel, createClient, re
     try {
       const model = await resolveModel();
       if (!model) throw new Error('Agent 指定模型配置不存在');
-      return { model: { ...model, ...(settings.modelOverride ? { model: settings.modelOverride } : {}), timeout: timeoutMs } };
+      return { model: applyAgentTimeout({ ...model, ...(settings.modelOverride ? { model: settings.modelOverride } : {}) }, settings) };
     } catch (error) { return { error }; }
   })();
   const prepare = async (messages, options) => {

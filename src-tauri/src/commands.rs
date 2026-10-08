@@ -32,7 +32,7 @@ use ndk_context::android_context;
 use std::os::unix::io::{AsRawFd, FromRawFd};
 
 /// 获取数据目录
-fn get_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn get_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     app.path().app_data_dir().map_err(|e| e.to_string())
 }
 
@@ -63,7 +63,7 @@ fn is_kv_debug_enabled() -> bool {
         .unwrap_or(false)
 }
 
-fn sanitize_segment(input: &str) -> String {
+pub(crate) fn sanitize_segment(input: &str) -> String {
     let raw = input.trim();
     let mut out = String::with_capacity(raw.len());
     for ch in raw.chars() {
@@ -2875,6 +2875,11 @@ pub async fn delete_persona_card(app: AppHandle, id: String) -> Result<bool, Str
     let card_dir = data_dir.join("persona_cards");
     let safe_id = sanitize_segment(&id);
     let file = card_dir.join(format!("{}.json", safe_id));
+    // 从 .charx 导入的卡另存了原始包，一并删除
+    let charx = card_dir.join(format!("{}.charx", safe_id));
+    if charx.exists() {
+        fs::remove_file(&charx).map_err(|e| e.to_string())?;
+    }
     if file.exists() {
         fs::remove_file(&file).map_err(|e| e.to_string())?;
         return Ok(true);

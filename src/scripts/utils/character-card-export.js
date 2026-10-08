@@ -74,6 +74,23 @@ export const buildTavernV2CharacterCard = ({ persona = {}, rawCard = null } = {}
   return output;
 };
 
+/**
+ * CCv3 view of the same snapshot (as SillyTavern writes it): only spec/spec_version
+ * change, plus the V3 fields the spec requires. Both PNG chunks therefore carry the
+ * same content and cannot drift apart.
+ */
+export const buildCharacterCardV3 = (v2Card = {}, { assets = null } = {}) => {
+  const output = cloneJsonValue(v2Card, {});
+  output.spec = 'chara_card_v3';
+  output.spec_version = '3.0';
+  const data = isRecord(output.data) ? output.data : {};
+  data.group_only_greetings = stringArray(data.group_only_greetings);
+  if (Array.isArray(assets)) data.assets = cloneJsonValue(assets, []);
+  else if (!Array.isArray(data.assets)) data.assets = [{ type: 'icon', uri: 'ccdefault:', name: 'main', ext: 'png' }];
+  output.data = data;
+  return output;
+};
+
 const toPngBytes = (input) => {
   if (input instanceof Uint8Array) return input;
   if (input instanceof ArrayBuffer) return new Uint8Array(input);
@@ -166,8 +183,11 @@ const joinBytes = (parts) => {
   return result;
 };
 
-/** Embed a Tavern Card V2 JSON payload in the standard PNG `chara` tEXt chunk. */
-export const embedTavernV2CharacterCardInPng = (pngInput, card) => {
+/**
+ * Embed a Tavern Card V2 JSON payload in the standard PNG `chara` tEXt chunk.
+ * With v3Card, also write the authoritative CCv3 `ccv3` chunk (readers prefer it).
+ */
+export const embedTavernV2CharacterCardInPng = (pngInput, card, { v3Card = null } = {}) => {
   const bytes = toPngBytes(pngInput);
   if (!hasPngSignature(bytes)) throw new Error('PNG image data is invalid');
 
@@ -187,8 +207,10 @@ export const embedTavernV2CharacterCardInPng = (pngInput, card) => {
       removedCharacterChunkCount += 1;
     } else if (type === 'IEND') {
       const encoded = utf8ToBase64(JSON.stringify(card || {}));
-      const textData = new TextEncoder().encode(`chara\0${encoded}`);
-      kept.push(buildPngChunk('tEXt', textData));
+      kept.push(buildPngChunk('tEXt', new TextEncoder().encode(`chara\0${encoded}`)));
+      if (v3Card) {
+        kept.push(buildPngChunk('tEXt', new TextEncoder().encode(`ccv3\0${utf8ToBase64(JSON.stringify(v3Card))}`)));
+      }
       kept.push(rawChunk);
       foundIend = true;
     } else {
@@ -204,7 +226,7 @@ export const embedTavernV2CharacterCardInPng = (pngInput, card) => {
   return {
     bytes: output,
     buffer,
-    keywordCount: 1,
+    keywordCount: v3Card ? 2 : 1,
     removedCharacterChunkCount,
   };
 };

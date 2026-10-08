@@ -82,3 +82,23 @@ test('owner preference does not weaken schema checks or admit unoffered tools', 
   assert.equal(normalize('session_create', {}).reason, 'invalid_tool_arguments');
   assert.equal(normalize('session_create', { name: 'Allowed explicit creation' }).selection.featureId, write.id);
 });
+
+test('a prerequisite read uses its own description even under a read-only workflow guide', () => {
+  const feature={id:'session.compare',title:'Compare duplicate contacts',summary:'Propose deletions only after comparison.',
+    writes:false,riskLevel:'low',tools:['session.list'],toolSchemas:{'session.list':readSchema},
+    toolMetadata:{'session.list':{title:'List contacts',description:'List scoped contacts with pagination and avatar filtering.'}}};
+  const mapping=buildMaidProviderFcToolPlan({config:providers.deepseek,features:[feature]}).toolMappings[0];
+  assert.equal(mapping.featureId,'session.compare','keep the authority of the actually offered feature');
+  assert.match(mapping.description,/pagination and avatar filtering/);
+  assert.doesNotMatch(mapping.description,/Propose deletions|Compare duplicate/);
+});
+
+test('public feature help retains its generic owner instead of an unrelated manual guide', () => {
+  const schema={type:'object',properties:{featureId:{type:'string'}},required:['featureId']};
+  const generic={id:'app.capabilities.search',writes:false,riskLevel:'low',directAction:'app.search_feature',
+    title:'Capability discovery',tools:['app.read_feature_doc'],toolSchemas:{'app.read_feature_doc':schema}};
+  const guide={...generic,id:'chat.export.help',directAction:'app.read_feature_doc',title:'Manual chat export',summary:'Cannot directly export a chat.'};
+  const mapping=buildMaidProviderFcToolPlan({config:providers.deepseek,features:[guide,generic]}).toolMappings[0];
+  assert.equal(mapping.featureId,generic.id);
+  assert.doesNotMatch(mapping.description,/Manual chat export|Cannot directly export/);
+});

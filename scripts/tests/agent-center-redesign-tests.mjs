@@ -4,22 +4,24 @@ import { AgentCenterPanel } from '../../src/scripts/ui/agent-center-panel.js';
 import { renderHopscotchCourt } from '../../src/scripts/ui/chat/hopscotch-court-view.js';
 
 {
-  // 手动 Agent 挂在正文旁（卫星），事件触发的 Agent 排在终点线之外（随时待命）
+  // 不参与每轮流程的 Agent 排在终点线之外（随时待命）：内建的写触发时机，自定义的指向工具箱；正文旁不再挂卫星
   const board = { rows: [{ id: 'r1', houses: [{ id: 'body', kind: 'body', label: '正文生成', fused: [] }] }, { id: 'r2', houses: [{ id: 'fmt', kind: 'format_review', label: '格式复核' }] }] };
   const html = renderHopscotchCourt(board, {
-    satellites: [{ id: 'reply_scoring', title: '正文评分', enabled: false, trigger: '手动' }],
-    standby: [{ id: 'archive_naming', title: '小管家', enabled: true, trigger: '保存存档时' }, { id: 'moment_agent', title: '动态 Agent', enabled: false, trigger: '发布或评论动态时' }],
+    standby: [{ id: 'archive_naming', title: '小管家', enabled: true, trigger: '保存存档时' }, { id: 'moment_agent', title: '动态 Agent', enabled: false, trigger: '发布或评论动态时' },
+      { id: 'text-edit:recap', title: '前情提要', enabled: true, custom: true, manual: true }],
+    canAddStandby: true,
   });
-  const bodyRow = html.slice(html.indexOf('data-hop-row="0"'), html.indexOf('data-hop-row="1"'));
-  assert.match(bodyRow, /class="hop-satellites"[\s\S]*data-hop-standby="reply_scoring"/, '卫星在正文所在行');
-  assert.match(bodyRow, /hop-satellite is-off/, '关闭状态可见');
+  assert.doesNotMatch(html, /hop-satellite/, '正文旁不再有卫星');
   const court = html.indexOf('</div></div>');
   const standby = html.indexOf('class="hop-standby"');
   assert.ok(standby > court, '待命区在板面（缩放区）之外');
   assert.match(html, /data-hop-standby="archive_naming"[\s\S]*保存存档时[\s\S]*已开启/);
   assert.match(html, /data-hop-standby="moment_agent"[\s\S]*发布或评论动态时[\s\S]*已关闭/);
-  assert.doesNotMatch(renderHopscotchCourt(board), /hop-standby|hop-satellites/, '没有这类 Agent 时不渲染空区块');
-  console.log('ok - hopscotch satellites and standby row');
+  assert.match(html, /hop-standby-item is-custom" data-hop-standby="text-edit:recap"[\s\S]*hop-standby-where/, '自定义待命 Agent 用工具箱图标表示调用位置');
+  assert.match(html, /data-hop-add-standby/, '待命区可新增自定义 Agent');
+  assert.doesNotMatch(renderHopscotchCourt(board), /hop-standby/, '没有待命 Agent 且不能新增时不渲染空区块');
+  assert.match(renderHopscotchCourt(board, { canAddStandby: true }), /class="hop-standby"[\s\S]*data-hop-add-standby/, '只有新增入口时也显示待命区');
+  console.log('ok - hopscotch standby row lists built-in triggers, custom toolbox agents and an add entry');
 }
 
 const makePanel = cards => {

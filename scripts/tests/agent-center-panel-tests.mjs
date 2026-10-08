@@ -127,7 +127,8 @@ const agentCenterPanelSource = await readFile(
   const view = await panel.collectView();
   assert.equal(view.meta.pending, 2);
   assert.equal(view.meta.activeRuns, 1);
-  assert.equal(view.meta.enabledAgents, 4);
+  // 生图 Agent 跟随自动生图总开关（默认关闭），因此不计入已开启的 Agent
+  assert.equal(view.meta.enabledAgents, 3);
   assert.equal(view.meta.promptModules, 3);
   assert.equal(view.meta.diagnosticViews, 2);
   assert.equal(view.meta.tools, 1);

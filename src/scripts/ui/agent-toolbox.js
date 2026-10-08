@@ -15,7 +15,7 @@ const isNote = job => job?.outputMode === 'note' || job?.kind === 'note';
 const sameContext = (a, b) => agentToolContextKey(a) === agentToolContextKey(b);
 const sourceHint = (config, snapshot) => snapshot?.targetMode === 'full' || config.target?.mode === 'full' ? '完整回复' : ['tags', 'regex'].includes(config.target?.mode) ? '指定部分' : '正文';
 
-export const createAgentToolbox = ({ input, actions, getContext, getMessages, getInputSnapshot, openAgent, openCenter,
+export const createAgentToolbox = ({ input, actions, getContext, getMessages, getInputSnapshot, openAgent, openCenter, getToolGate = null,
   triggerContainer, anchorEl, targetEventRoot, beforeOpen = () => {}, documentRef = document, storage = globalThis.localStorage } = {}) => {
   const doc = documentRef, win = doc.defaultView, bindings = [], nodes = new Map(), toggling = new Set(), invoking = new Set();
   const clipboard = createMessageClipboardUiRuntime({ documentLike: doc, navigatorLike: win.navigator, execCopyCommand: command => doc.execCommand(command) });
@@ -31,6 +31,9 @@ export const createAgentToolbox = ({ input, actions, getContext, getMessages, ge
   let shortcutError = '';
   let repairProfileId = '', rawRange = null, rawSource = '';
   let frame = 0, targetFrame = 0, epoch = 0, disposed = false, cardStamp = '', resultStamp = '', returnFocus = null, resume = null;
+  let gateTimer = 0, gateStamp = '';
+  // 快捷栏只放此刻可用的工具：流程中的 Agent 要等回复走过它前面的阶段；管理列表仍列出全部。
+  const shelfItems = () => { const gate = getToolGate?.(getContext()); return gate ? items.filter(config => gate(config)) : items; };
   const replies = () => {
     const messages = getMessages(getContext().sessionId) || [], result = [];
     for (let i = messages.length - 1; i >= 0 && result.length < 20; i--) if (isAgentToolReply(messages[i])) result.push(messages[i]);
@@ -48,7 +51,7 @@ export const createAgentToolbox = ({ input, actions, getContext, getMessages, ge
     onChoose: messageId => { target = { messageId }; selectedRunId = ''; selectionSnapshot = null; rawRange = null; rawSource = ''; void prepare(); } });
   const stopFormatPick = () => { if (formatPicker.active) { formatPicker.stop(); controller?.cancel?.(); } };
   const readCatalog = () => {
-    catalog = (actions.listAgentConfigurations({ context: getContext() }) || []).map(record => record.config).filter(config => config && !['archive_naming', 'reply_scoring'].includes(config.kind));
+    catalog = (actions.listAgentConfigurations({ context: getContext() }) || []).map(record => record.config).filter(config => config && config.kind !== 'archive_naming');
     const next = reconcileToolboxPreferences(prefs, catalog, getContext());
     if (JSON.stringify(next) !== JSON.stringify(prefs)) { prefs = next; savePrefs(); }
     items = getToolboxItems(prefs, catalog, getContext());
@@ -192,7 +195,8 @@ export const createAgentToolbox = ({ input, actions, getContext, getMessages, ge
     trigger.setAttribute('aria-label', ready ? `${t('Agent 工具箱')} · ${t('待查看')} ${ready}` : t('Agent 工具箱'));
     if (panel.hidden) return;
     if (!sameContext(context, getContext()) || trigger.hidden) { close(); return; }
-    const count = toolboxVisibleCount(visibleWidth(), items.length), visible = items.slice(0, count);
+    const shelfTools = shelfItems(); gateStamp = shelfTools.map(config => config.id).join('|');
+    const count = toolboxVisibleCount(visibleWidth(), shelfTools.length), visible = shelfTools.slice(0, count);
     for (const [id, node] of nodes) if (!visible.some(config => config.id === id)) { node.remove(); nodes.delete(id); }
     for (const [index, config] of visible.entries()) {
       let node = nodes.get(config.id);
@@ -210,7 +214,7 @@ export const createAgentToolbox = ({ input, actions, getContext, getMessages, ge
       node.querySelector('.at-tool-state').textContent = job?.status === 'running' ? '…' : job?.status === 'ready' || job?.unread ? '1' : toggle ? config.enabled ? '✓' : '−' : '';
       node.querySelector('.at-tool-state').hidden = !node.querySelector('.at-tool-state').textContent;
     }
-    panel.querySelector('[data-key=more]').hidden = items.length <= count;
+    panel.querySelector('[data-key=more]').hidden = shelfTools.length <= count;
     panel.querySelector('[data-key=more]').setAttribute('aria-expanded', String(mode === 'more'));
     panel.querySelector('[data-key=manage]').setAttribute('aria-expanded', String(mode === 'manage'));
     const activeJobs = jobs.filter(job => pendingStates.has(job.status) || job.unread);
@@ -229,8 +233,8 @@ export const createAgentToolbox = ({ input, actions, getContext, getMessages, ge
         if (cardStamp !== stamp) { cardStamp = stamp; card.innerHTML = `<div class="at-card-head"><div class="at-card-heading"><strong>${e(t('任务与结果'))}</strong></div></div><div class="at-overflow">${activeJobs.map(job => `<button type="button" data-key="result:${e(job.id)}"><span class="at-result-entry" data-i18n-skip>${e(job.title || catalog.find(config => config.id === job.agentId)?.title || '')}</span><small>${e(t(labels[job.status] || '待查看'))}</small></button>`).join('') || `<p class="at-status">${e(t('暂无待查看的结果'))}</p>`}</div>`; }
       }
       else if (mode === 'more') {
-        const stamp = JSON.stringify([mode, count, items, jobs.map(job => [job.id, job.status])]);
-        if (cardStamp !== stamp) { cardStamp = stamp; card.innerHTML = `<div class="at-card-head"><div class="at-card-heading"><strong>${e(t('更多工具'))}</strong></div></div><div class="at-overflow">${items.slice(count).map(config => `<button type="button" data-key="tool:${e(config.id)}">${toolboxNamedIcon(config)}<span data-i18n-skip>${e(config.title)}</span><small>${e(t(config.enabled ? '已开启' : '已关闭'))}</small></button>`).join('')}</div>`; }
+        const stamp = JSON.stringify([mode, count, shelfTools, jobs.map(job => [job.id, job.status])]);
+        if (cardStamp !== stamp) { cardStamp = stamp; card.innerHTML = `<div class="at-card-head"><div class="at-card-heading"><strong>${e(t('更多工具'))}</strong></div></div><div class="at-overflow">${shelfTools.slice(count).map(config => `<button type="button" data-key="tool:${e(config.id)}">${toolboxNamedIcon(config)}<span data-i18n-skip>${e(config.title)}</span><small>${e(t(config.enabled ? '已开启' : '已关闭'))}</small></button>`).join('')}</div>`; }
       } else {
         const config = currentConfig();
         if (!config) { mode = 'shelf'; card.hidden = true; } else { if (!card.querySelector('.at-target')) mountCard(); renderTarget(config); renderResult(config, jobFor(config.id, jobs)); }
@@ -239,7 +243,7 @@ export const createAgentToolbox = ({ input, actions, getContext, getMessages, ge
     const showLegend = !picking && mode === 'shelf' && !prefs.legendDismissed && (win.matchMedia('(pointer:coarse)').matches || win.innerWidth <= 600);
     legend.hidden = !showLegend;
     if (showLegend) {
-      const markup = `${button('dismiss-legend', '关闭', { icon: 'close' })}<p>${e(t('点图标使用工具，齿轮管理快捷栏。'))}</p><div class="at-legend-list">${items.slice(0, count).map(config => `<span data-i18n-skip>${agentIconMarkup(getAgentIconName(config))}${e(config.title)}</span>`).join('')}</div>`;
+      const markup = `${button('dismiss-legend', '关闭', { icon: 'close' })}<p>${e(t('点图标使用工具，齿轮管理快捷栏。'))}</p><div class="at-legend-list">${shelfTools.slice(0, count).map(config => `<span data-i18n-skip>${agentIconMarkup(getAgentIconName(config))}${e(config.title)}</span>`).join('')}</div>`;
       if (legend.innerHTML !== markup) legend.innerHTML = markup;
     }
     if (!items.length && mode === 'shelf' && !picking) { notice.hidden = false; notice.innerHTML = `<span>${e(t('还没有快捷工具'))}</span>${button('center', '添加工具')}`; }
@@ -290,7 +294,7 @@ export const createAgentToolbox = ({ input, actions, getContext, getMessages, ge
     } else render();
     const configControl = mode === 'manage' && [...card.querySelectorAll('.at-config')].find(node => node.dataset.key === `config:${continuing.id}` && node.getClientRects().length);
     if (configControl) configControl.focus({ preventScroll: true });
-    else if (options.keyboard || triggerContainer?.contains(doc.activeElement)) focusShelf(items[0]?.id);
+    else if (options.keyboard || triggerContainer?.contains(doc.activeElement)) focusShelf(shelfItems()[0]?.id);
   };
   const toggle = async config => {
     if (toggling.has(config.id)) return;
@@ -469,6 +473,11 @@ export const createAgentToolbox = ({ input, actions, getContext, getMessages, ge
   const observer = new win.MutationObserver(() => { close(); resume = null; refresh(); });
   observer.observe(doc.body, { attributes: true, attributeFilter: ['data-ui-mode'] });
   const targetObserver = new win.MutationObserver(() => {
+    // 消息区安静下来后（如一次生成结束）重新判断哪些流程中的工具可用。
+    if (!panel.hidden && getToolGate) {
+      win.clearTimeout(gateTimer);
+      gateTimer = win.setTimeout(() => { if (!panel.hidden && !disposed && shelfItems().map(config => config.id).join('|') !== gateStamp) refreshStatus(); }, 300);
+    }
     if (panel.hidden || !prepared?.snapshot || targetFrame) return;
     targetFrame = win.requestAnimationFrame(() => {
       targetFrame = 0;
@@ -485,6 +494,6 @@ export const createAgentToolbox = ({ input, actions, getContext, getMessages, ge
     setSelectionController: value => { controller = value; },
     hasSelectionTools: () => catalog.some(config => !isInputAgent(config) && config.enabled),
     isFormatPicking: () => formatPicker.active,
-    dispose: () => { close(); disposed = true; formatPicker.dispose(); win.cancelAnimationFrame(frame); win.cancelAnimationFrame(targetFrame); bindings.forEach(remove => remove()); observer.disconnect(); targetObserver.disconnect(); view.dispose(); },
+    dispose: () => { close(); disposed = true; formatPicker.dispose(); win.clearTimeout(gateTimer); win.cancelAnimationFrame(frame); win.cancelAnimationFrame(targetFrame); bindings.forEach(remove => remove()); observer.disconnect(); targetObserver.disconnect(); view.dispose(); },
   };
 };

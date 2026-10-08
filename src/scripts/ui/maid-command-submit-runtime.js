@@ -5,6 +5,7 @@ export const createMaidCommandSubmit = ({
   getVoiceRuntime, getOnboardingRuntime, matchMaidIntent, hasConfiguredMaidProfile, resolveMaidRuntimeConfig,
   logger, checkMaidVisionInput, maidSettingsStore, buildAppFeatureSearchContextText, getAppContext,
   maidAssistantAgent, resolveSelectionRegion, requestMaidToolConfirmation, recordMaidTurnFromResult, toast,
+  markFileAttachmentsSubmitted = null, listRecentFileAttachments = null, buildResultActions = null,
 } = {}) => {
   return async (text, controls = {}) => {
       await getVoiceRuntime()?.cancelInput();
@@ -53,9 +54,13 @@ export const createMaidCommandSubmit = ({
           }],
         };
       }
-      const attachments = Array.isArray(controls?.attachments) ? controls.attachments : [];
+      let attachments = Array.isArray(controls?.attachments) ? controls.attachments : [];
       const visionCheck = await checkMaidVisionInput(attachments, maidTurnContext, runtimeConfig);
-      if (!visionCheck.ok) {
+      // 角色卡 PNG 的数据由本地解析，不依赖看图：模型不支持图片时只去掉画面，保留卡摘要
+      const imageAttachments = attachments.filter(item => item?.kind === 'image');
+      if (!visionCheck.ok && imageAttachments.length && imageAttachments.every(item => item.file?.format === 'character_card')) {
+        attachments = attachments.map(item => (item?.kind === 'image' ? { ...item, kind: 'file', url: '', llmUrl: '' } : item));
+      } else if (!visionCheck.ok) {
         return {
           ok: false,
           status: 'failed',
@@ -71,9 +76,13 @@ export const createMaidCommandSubmit = ({
       });
       if (rejectChangedRevision()) return changedRevision();
       const approvalScope = captureMaidTextApprovalScope(maidTurnContext);
+      // 文件附件按本次发送时的会话／角色卡解释「当前」；之前上传未导入的文件供追问后继续使用
+      markFileAttachmentsSubmitted?.(attachments.filter(item => item?.file), maidTurnContext);
+      const maidRecentFileAttachments = listRecentFileAttachments?.({ excludeIds: attachments.map(item => item?.id).filter(Boolean) }) || [];
       const result = await maidAssistantAgent.runPrompt(text, {
         ...maidTurnContext,
         maidAttachments: attachments,
+        maidRecentFileAttachments,
         signal: controls?.signal || null,
         maxReactSteps: maidSettingsStore.getMaxReactSteps?.(),
         resolveMaidSelectionRegion: regionId => resolveSelectionRegion(regionId, maidTurnContext),
@@ -106,6 +115,11 @@ export const createMaidCommandSubmit = ({
         });
       }
       if (controls.source === 'maid_realtime') return result;
+      // 导入附件后提供「打开」按钮（按成功的导入步骤生成）
+      const importActions = buildResultActions?.(result) || [];
+      if (importActions.length && result && typeof result === 'object') {
+        result.actions = [...(Array.isArray(result.actions) ? result.actions : []), ...importActions];
+      }
       if (result?.ok === false && result?.status !== 'cancelled') {
         toast?.warning?.(result.message || result.reason || '女仆暂时无法执行这个请求');
       } else if (

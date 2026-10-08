@@ -1,5 +1,6 @@
 import { t } from '../../i18n/index.js';
 import { allowsAgentInvocation } from '../../agent/agent-invocation.js';
+import { agentRequestTimeoutMs } from '../../agent/agent-generation-settings.js';
 import { resolveFormatReviewAvailability } from './format-review-settings-utils.js';
 import { formatToolTargetKey } from '../../agent/agent-tool-targets.js';
 
@@ -83,7 +84,8 @@ export const createFormatReviewExecutor = ({
    if (pending.has(key)) return Promise.resolve({ status: 'skipped', reason: '此回复正在进行格式修复' });
    const controller = new AbortController(), cancel = () => controller.abort();
    options?.signal?.addEventListener('abort', cancel, { once: true });
-   const timeout = setTimeout(cancel, 120000);
+   const limitMs = agentRequestTimeoutMs(options?.configOverride || getConfig?.(sid) || {});
+   const timeout = limitMs ? setTimeout(cancel, limitMs) : null;
    const job = { controller, sid, automatic: options?.automatic === true, scope: getScope(sid) };
    pending.set(key, job);
    return execute({ ...options, signal: controller.signal }).finally(() => {

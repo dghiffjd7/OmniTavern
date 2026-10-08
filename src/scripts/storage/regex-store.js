@@ -192,6 +192,31 @@ export const normalizeRegexRule = (rule = {}) => {
 
 const normalizeRule = normalizeRegexRule;
 
+// 按存盘后的 JSON 内容比较：不看键的顺序（save_kv 落盘时会按字母重排），值为 undefined 的键视为不存在
+const sameStoredData = (a, b) => {
+    if (a === b) return true;
+    if (!a || !b || typeof a !== 'object' || typeof b !== 'object' || Array.isArray(a) !== Array.isArray(b)) return false;
+    if (Array.isArray(a)) return a.length === b.length && a.every((value, index) => sameStoredData(value, b[index]));
+    const keysA = Object.keys(a).filter(key => a[key] !== undefined), keysB = Object.keys(b).filter(key => b[key] !== undefined);
+    return keysA.length === keysB.length && keysA.every(key => Object.prototype.hasOwnProperty.call(b, key) && sameStoredData(a[key], b[key]));
+};
+// 绑定组的 enabled 只是「当前预设／世界书是否匹配」的显示值，每次载入都按 manualEnabled 重置、再由绑定同步重算；
+// 存盘时一律存 manualEnabled，磁盘内容才不随当前预设／世界书变化，启动时不必反复整份重写
+const toStoredState = state => {
+    const sets = state?.local?.sets;
+    if (!sets || typeof sets !== 'object') return state;
+    let changed = false;
+    const storedSets = {};
+    for (const [id, set] of Object.entries(sets)) {
+        if (set?.bind && typeof set.manualEnabled === 'boolean' && set.enabled !== set.manualEnabled) {
+            storedSets[id] = { ...set, enabled: set.manualEnabled };
+            changed = true;
+        } else storedSets[id] = set;
+    }
+    return changed ? { ...state, local: { ...state.local, sets: storedSets } } : state;
+};
+const cloneStoredData = value => (typeof structuredClone === 'function' ? structuredClone(value) : JSON.parse(JSON.stringify(value)));
+
 const normalizeLocalSet = (s = {}) => {
     const bind = normalizeBind(s.bind);
     const manualEnabled = (typeof s.manualEnabled === 'boolean')
@@ -272,6 +297,7 @@ export class RegexStore {
         if (this.isLoaded && this.state) return this.state;
 
         let state = null;
+        let loadedFromKv = null;
         let skipPersistOnLoad = false;
         let kvReadFailed = false;
         const expectsKv = typeof getTauriInvoker() === 'function';
@@ -279,6 +305,8 @@ export class RegexStore {
             const kv = await loadKvWithRetry(STORE_KEY);
             if (isRegexStoreState(kv)) {
                 state = kv;
+                // 规范化会原地修改，先留一份磁盘原样，用来判断启动时是否真的需要写回
+                loadedFromKv = cloneStoredData(kv);
             } else if (isNonEmptyObject(kv)) {
                 skipPersistOnLoad = true;
                 if (kv._tooLarge) {
@@ -345,7 +373,8 @@ export class RegexStore {
                 };
             }
 
-            await persistLoadedState(state);
+            // 规范化后与磁盘内容相同就不重写（正则存储可达数 MB，每次启动整份写回既慢又白写）
+            if (!loadedFromKv || !sameStoredData(loadedFromKv, state)) await persistLoadedState(state);
         }
 
         this.state = state;
@@ -364,11 +393,11 @@ export class RegexStore {
         this.assertWritable();
         this.state = next;
         try {
-            await safeInvoke('save_kv', { name: STORE_KEY, data: this.state });
+            await safeInvoke('save_kv', { name: STORE_KEY, data: toStoredState(this.state) });
         } catch (err) {
             logger.warn('save_kv regex store failed (可能非 Tauri)，回退 localStorage', err);
             try {
-                localStorage.setItem(STORE_KEY, JSON.stringify(this.state));
+                localStorage.setItem(STORE_KEY, JSON.stringify(toStoredState(this.state)));
             } catch {}
         }
     }
@@ -483,7 +512,7 @@ export class RegexStore {
                 changed = true;
             }
         }
-        if (changed) await this.persist();
+        // 不写盘：绑定组的 enabled 只是显示值，存盘时按 manualEnabled 保存，每次启动都会重算
         return changed;
     }
 
@@ -510,7 +539,7 @@ export class RegexStore {
                 changed = true;
             }
         }
-        if (changed) await this.persist();
+        // 不写盘：绑定组的 enabled 只是显示值，存盘时按 manualEnabled 保存，每次启动都会重算
         return changed;
     }
 

@@ -1,4 +1,5 @@
 import { allowsAgentInvocation } from './agent-invocation.js';
+import { agentRequestTimeoutMs } from './agent-generation-settings.js';
 import { agentToolContextKey, agentToolMessageIdentity, formatToolTargetKey, isAgentToolReply } from './agent-tool-targets.js';
 import { buildFormatRepairRequest } from './format-repair-request.js';
 import { validateFormatRepairSelection } from './format-repair-selection.js';
@@ -59,7 +60,9 @@ export const createFormatRepairToolRuntime = ({ getContext, getMessage, getConfi
       target: clone(targetSnapshot.formatTarget), identity: agentToolMessageIdentity(message), key, controller, createdAt: now(), status: 'running' };
     jobs.set(job.id, job); onChange();
     signal?.addEventListener('abort', cancel, { once: true }); if (signal?.aborted) cancel();
-    const timeout = setTimeout(cancel, 120000);
+    // 只有格式修复设了自定义等待才限制整个任务；跟随时由模型配置的请求超时约束每次请求。
+    const limitMs = agentRequestTimeoutMs(job.config);
+    const timeout = limitMs ? setTimeout(cancel, limitMs) : null;
     try {
       if (!await fresh(job)) throw abortError();
       const selection = targetSnapshot.formatSelection;

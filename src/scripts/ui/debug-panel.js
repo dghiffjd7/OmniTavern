@@ -260,7 +260,20 @@ export class DebugPanel {
             maxLogs: this.maxLogs,
         });
         if (!appended) return;
-        this.render();
+        // 日志常在别的界面渲染途中写入（如流式重建创意写作气泡时）：同步刷新会读取面板高度、强制排版，
+        // 把聊天列表的滚动位置截到只塞回一半的内容上。改为下一帧合并刷新。
+        this.scheduleRender();
+    }
+
+    scheduleRender() {
+        if (this.renderScheduled) return;
+        this.renderScheduled = true;
+        const run = () => {
+            this.renderScheduled = false;
+            this.render();
+        };
+        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+        else setTimeout(run, 0);
     }
 
     render() {

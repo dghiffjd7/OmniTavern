@@ -60,13 +60,8 @@ export const createMaidRuntimeConfigResolver = ({
       };
     }
     const ready = Boolean(isConfigReady(config));
-    // 女仆 planner/ReAct 输出为小 JSON，超时不应继承聊天档的超长配置（如 100 分钟）——
-    // 上限 240s 走 Rust 请求层，不受窗口后台 timer 冻结影响。
-    const cappedConfig = {
-      ...config,
-      requestContext,
-      timeout: Math.min(Number(config.timeout) > 0 ? Number(config.timeout) : 240000, 240000),
-    };
+    // 请求超时跟随所用模型配置（API 配置的「请求超时」），不另设封顶。
+    const cappedConfig = { ...config, requestContext };
     const client = ready && typeof createClient === 'function' ? createClient(cappedConfig) : null;
     // 主档故障降级：配置了 fallback 档时提供备用 client（调用方在主档请求失败时重试一次）
     let fallbackClient = null;
@@ -75,11 +70,7 @@ export const createMaidRuntimeConfigResolver = ({
       try {
         const rawFallbackConfig = await configManager?.getRuntimeConfigByProfileId?.(fallbackProfileId);
         if (isPlainObject(rawFallbackConfig) && isConfigReady(rawFallbackConfig) && typeof createClient === 'function') {
-          fallbackConfig = {
-            ...rawFallbackConfig,
-            requestContext,
-            timeout: Math.min(Number(rawFallbackConfig.timeout) > 0 ? Number(rawFallbackConfig.timeout) : 240000, 240000),
-          };
+          fallbackConfig = { ...rawFallbackConfig, requestContext };
           fallbackClient = createClient(fallbackConfig);
         }
       } catch {}
@@ -180,7 +171,6 @@ export const createMaidMemoryExtractionRuntimeResolver = ({
         ...rawConfig,
         requestContext,
         ...(modelOverride ? { model: modelOverride } : {}),
-        timeout: Math.min(Number(rawConfig.timeout) > 0 ? Number(rawConfig.timeout) : 240000, 240000),
       };
       if (isConfigReady(config) && typeof createClient === 'function') {
         client = createClient(config);

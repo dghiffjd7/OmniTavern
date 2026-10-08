@@ -5,6 +5,10 @@
  */
 
 import { convertSTWorld } from '../storage/worldinfo.js';
+import {
+    getWorldbookBoundRegexSets,
+    importWorldbookBoundRegexSets,
+} from '../import/worldbook-bound-regex-import.js';
 import { BUILTIN_PHONE_FORMAT_WORLDBOOK_ID } from '../storage/builtin-worldbooks.js';
 import { logger } from '../utils/logger.js';
 import { FEATHER_DEFAULT, resolveLineAvatar } from '../utils/line-avatar.js';
@@ -37,6 +41,11 @@ const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => 
     "'": '&#39;',
 }[char]));
 
+export {
+    collectWorldbookRegexSignaturesForWorld,
+    getWorldbookRegexRuleSignature,
+} from '../import/worldbook-bound-regex-import.js';
+
 const normalizeWorldTarget = (value, fallbackScope = 'session') => {
     const raw = String(value || '').trim();
     if (raw === 'global') return 'global';
@@ -47,50 +56,6 @@ const normalizeWorldTarget = (value, fallbackScope = 'session') => {
     if (fallback === 'role') return 'role';
     if (fallback === 'session_extra') return 'session_extra';
     return 'session_manage';
-};
-
-export const getWorldbookRegexRuleSignature = (rule = {}) => {
-    const findRegex = String(rule?.findRegex || '').trim();
-    const replaceString = String(rule?.replaceString ?? '');
-    const trim = Array.isArray(rule?.trimStrings) ? rule.trimStrings.map(String).join('\n') : '';
-    const placement = Array.isArray(rule?.placement)
-        ? rule.placement.map(Number).filter(Number.isFinite).sort((a, b) => a - b).join(',')
-        : '';
-    const disabled = rule?.disabled ? '1' : '0';
-    const markdownOnly = rule?.markdownOnly ? '1' : '0';
-    const promptOnly = rule?.promptOnly ? '1' : '0';
-    const runOnEdit = rule?.runOnEdit ? '1' : '0';
-    const substituteRegex = String(Number(rule?.substituteRegex ?? 0));
-    const minDepth = (rule?.minDepth === null || rule?.minDepth === undefined || rule?.minDepth === '')
-        ? ''
-        : String(rule.minDepth);
-    const maxDepth = (rule?.maxDepth === null || rule?.maxDepth === undefined || rule?.maxDepth === '')
-        ? ''
-        : String(rule.maxDepth);
-    if (!findRegex && !String(rule?.pattern || '').trim()) {
-        const when = String(rule?.when || 'both');
-        const pattern = String(rule?.pattern || '').trim();
-        const flags = (rule?.flags === undefined || rule?.flags === null) ? 'g' : String(rule.flags);
-        const replacement = String(rule?.replacement ?? '');
-        return `${when}\u0000${pattern}\u0000${flags}\u0000${replacement}`;
-    }
-    return [
-        findRegex, replaceString, trim, placement,
-        disabled, markdownOnly, promptOnly, runOnEdit, substituteRegex, minDepth, maxDepth,
-    ].join('\u0000');
-};
-
-export const collectWorldbookRegexSignaturesForWorld = (sets = [], worldId = '') => {
-    const target = String(worldId || '').trim();
-    const signatures = new Set();
-    if (!target) return signatures;
-    (Array.isArray(sets) ? sets : []).forEach((set) => {
-        if (set?.bind?.type !== 'world' || String(set.bind.worldId || '').trim() !== target) return;
-        (Array.isArray(set?.rules) ? set.rules : []).forEach((rule) => {
-            signatures.add(getWorldbookRegexRuleSignature(rule));
-        });
-    });
-    return signatures;
 };
 
 export const formatWorldScopeLabel = ({
@@ -1935,7 +1900,7 @@ export class WorldPanel {
             );
 
             // 若导入文件包含绑定的正则集合，则一并导入并绑定到该世界书
-            const boundSets = json?.boundRegexSets || json?.bound_regex_sets || json?.bound_regex_sets_v1 || null;
+            const boundSets = getWorldbookBoundRegexSets(json);
             if (Array.isArray(boundSets) && boundSets.length) {
                 try {
                     const sessionId = this.getActiveSessionKey();
@@ -1959,38 +1924,16 @@ export class WorldPanel {
                     }
 
                     await waitForRegexStoreReady(window.appBridge);
-                    let existingSigs = new Set();
+                    let existingSets = [];
                     try {
-                        const sets = listRegexLocalSets(window.appBridge);
-                        existingSigs = collectWorldbookRegexSignaturesForWorld(sets, name);
+                        existingSets = listRegexLocalSets(window.appBridge);
                     } catch {}
-
-                    let importedRuleCount = 0;
-                    let skippedRuleCount = 0;
-                    for (const s of boundSets) {
-                        const rulesRaw = Array.isArray(s?.rules) ? s.rules : [];
-                        const rules = [];
-                        const localSeen = new Set();
-                        for (const rr of rulesRaw) {
-                            const sig = getWorldbookRegexRuleSignature(rr);
-                            if (!sig || localSeen.has(sig) || existingSigs.has(sig)) {
-                                skippedRuleCount += 1;
-                                continue;
-                            }
-                            localSeen.add(sig);
-                            existingSigs.add(sig);
-                            rules.push(rr);
-                        }
-                        if (!rules.length) continue;
-                        const setName = String(s?.name || '正则').trim() || '正则';
-                        await upsertRegexLocalSet(window.appBridge, {
-                            name: `${setName} (${name})`,
-                            enabled: s?.enabled !== false,
-                            bind: { type: 'world', worldId: name },
-                            rules,
-                        });
-                        importedRuleCount += rules.length;
-                    }
+                    const { importedRuleCount, skippedRuleCount } = await importWorldbookBoundRegexSets({
+                        worldId: name,
+                        boundSets,
+                        existingSets,
+                        upsertLocalSet: set => upsertRegexLocalSet(window.appBridge, set),
+                    });
                     const skippedText = skippedRuleCount > 0 ? `，跳过目标世界书已有或重复规则 ${skippedRuleCount} 条` : '';
                     window.toastr?.success(`已导入并绑定正则：${importedRuleCount} 条${skippedText}`);
                     window.dispatchEvent(new CustomEvent('regex-changed'));

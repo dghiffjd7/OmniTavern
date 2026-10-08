@@ -304,6 +304,91 @@ body.developer-profile-open {
   stroke-linejoin: round;
 }
 
+/* 版本与更新 */
+.app-update-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 18px;
+  padding: 13px 15px;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--app-surface-subtle) 70%, transparent);
+}
+
+.app-update-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.app-update-label {
+  color: var(--app-text-muted);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.app-update-version {
+  color: var(--app-text-primary);
+  font-size: 14px;
+}
+
+.app-update-status {
+  color: var(--app-text-secondary);
+  font-size: 11px;
+}
+
+.app-update-card.has-update .app-update-status {
+  color: var(--app-accent-strong);
+}
+
+.app-update-action {
+  flex: none;
+  padding: 7px 13px;
+  border: 1px solid var(--app-border-default);
+  border-radius: 999px;
+  color: var(--app-text-primary);
+  background: var(--app-surface-card);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.app-update-card.has-update .app-update-action {
+  border-color: var(--app-accent-primary);
+  color: var(--app-accent-strong);
+}
+
+.app-update-action:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* 有新版本时在设置入口与「关于」上挂小红点（跳过的版本不显示） */
+/* 创意写作没有头像入口：「关于」在右上角 ≡ 菜单里，红点挂在 ≡ 上 */
+body.has-app-update .qq-message-topbar .user-avatar-btn,
+body.has-app-update .desktop-rail-brand,
+body.has-app-update[data-ui-mode='rp'] #chat-menu-btn,
+body.has-app-update [data-open-developer-profile] {
+  position: relative;
+}
+
+body.has-app-update .qq-message-topbar .user-avatar-btn::after,
+body.has-app-update .desktop-rail-brand::after,
+body.has-app-update[data-ui-mode='rp'] #chat-menu-btn::after,
+body.has-app-update [data-open-developer-profile]::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--app-danger-text);
+  box-shadow: 0 0 0 2px var(--app-surface-card);
+  pointer-events: none;
+}
+
 .developer-profile-footer {
   display: flex;
   align-items: center;

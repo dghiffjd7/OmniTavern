@@ -6,9 +6,11 @@
 import { t, translateUiText } from '../../i18n/index.js';
 import { cloneData } from '../../utils/clone-data.js';
 import { getActiveHopscotchFused, resolveHopscotchActivation } from './hopscotch-activation-utils.js';
-import { buildDefaultHopscotchBoard, projectHopscotchVariableRules, compileBoardToLaneTasks, findBodyRowIndex, getHopscotchHouseDisplayStatus } from './hopscotch-board-utils.js';
+import { buildDefaultHopscotchBoard, projectHopscotchVariableRules, compileBoardToLaneTasks, findBodyRowIndex, getHopscotchHouseDisplayStatus, HOPSCOTCH_CUSTOM_HOUSE_DEFAULTS } from './hopscotch-board-utils.js';
 import { createCreativeTurnOrchestrator } from './creative-turn-orchestrator.js';
 import { estimateTokens } from '../../memory/memory-prompt-utils.js';
+import { getAgentInvocationMode } from '../../agent/agent-invocation.js';
+import { RECAP_AGENT_ID } from '../../agent/recap-agent.js';
 
 const trim = value => String(value ?? '').trim();
 const isPlainObject = value => Boolean(value && typeof value === 'object' && !Array.isArray(value));
@@ -244,13 +246,13 @@ export const createHopscotchExecutors = ({
           const maxCount = cfg.includeContext === 'full' ? HOPSCOTCH_FULL_CONTEXT_MESSAGE_CAP : (Number(cfg.recentMessageCount) || 8);
           const contextText = buildRecentContextText(historySnapshot, {
             maxCount,
-            charBudget: Math.max(200, (Number(cfg.contextTokenBudget) || 2000) * 2),
+            charBudget: Math.max(200, (Number(cfg.contextTokenBudget) || HOPSCOTCH_CUSTOM_HOUSE_DEFAULTS.contextTokenBudget) * 2),
           });
           if (contextText) parts.push(`${t('【最近对话】')}\n${contextText}`);
         }
         parts.push(rendered);
         const messages = [];
-        const budget = Number(cfg.contextTokenBudget) || 2000;
+        const budget = Number(cfg.contextTokenBudget) || HOPSCOTCH_CUSTOM_HOUSE_DEFAULTS.contextTokenBudget;
         const boundedSystem = trimHouseInputToBudget(system, Math.floor(budget / 3));
         if (trim(boundedSystem)) messages.push({ role: 'system', content: boundedSystem });
         const inputText = parts.join('\n\n');
@@ -263,7 +265,7 @@ export const createHopscotchExecutors = ({
         const options = {
           onProviderUsage: value => { providerUsage = value; },
           signal,
-          maxTokens: Number(cfg.maxTokens) || 512,
+          maxTokens: Number(cfg.maxTokens) || HOPSCOTCH_CUSTOM_HOUSE_DEFAULTS.maxTokens,
           presetContext: { sessionId, uiMode: 'rp' },
           ...(custom.runtimeConfig ? { runtimeConfigOverride: { ...custom.runtimeConfig } } : {}),
           tools: [],
@@ -307,7 +309,7 @@ const laneSummaryFor = (state) => {
   switch (state.status) {
     case 'running': return t('{value} 执行中', { value: label });
     case 'succeeded': return t('{value} 完成', { value: label });
-    case 'failed': return state.reason === 'timeout' ? t('{value} 超时', { value: label }) : t('{value} 失败', { value: label });
+    case 'failed': return t('{value} 失败', { value: label });
     case 'partial': return `${label} · ${t('部分失败')}`;
     case 'cancelled': return t('{value} 已取消', { value: label });
     case 'skipped': return t('{value} 跳过', { value: label });
@@ -359,11 +361,23 @@ export const createHopscotchTurnRuntime = ({
     const settings = resolveWritingSettings(contextSessionId, place, scope);
     const derived = buildDefaultHopscotchBoard({ ...settings, place });
     const agents = getTextAgents(contextSessionId, place, scope);
-    for (let index = 0; index < agents.length; index += 4) derived.rows.push({ id: `text-edit-row-${index}`, houses: agents.slice(index, index + 4).map(config => ({ id: config.id.replace(':', '-'), kind: 'text_edit', label: config.title, enabled: true, config: { agentId: config.id } })) });
+    const agentHouse = config => ({ id: config.id.replace(':', '-'), kind: 'text_edit', label: config.title, enabled: true, config: { agentId: config.id } });
+    const manualAgents = agents.filter(config => getAgentInvocationMode(config) === 'manual');
+    const flowAgents = agents.filter(config => getAgentInvocationMode(config) !== 'manual');
+    // 推导流程：仅手动的 Agent 紧接正文一行（画成挂在正文旁的胶囊，正文回复后可在工具箱调用），自动的排在最后。
+    const derivedBody = findBodyRowIndex(derived);
+    for (let index = 0; index < manualAgents.length; index += 4) derived.rows.splice(derivedBody + 1 + index / 4, 0, { id: `text-edit-manual-row-${index}`, houses: manualAgents.slice(index, index + 4).map(agentHouse) });
+    for (let index = 0; index < flowAgents.length; index += 4) derived.rows.push({ id: `text-edit-row-${index}`, houses: flowAgents.slice(index, index + 4).map(agentHouse) });
     // 聊天不能读到创意写作的自定义板，也不能借此接管聊天发送。
     if (place === 'chat') return { board: derived, source: 'derived' };
     const resolved = boardStore.resolveEffectiveBoard({ sessionId, derivedBoard: derived, scope });
     const board = projectHopscotchVariableRules(resolved.board, settings?.variables?.activity);
+    // 默认的前情提要未删除、也不在用户板上时，补挂在正文旁。
+    const recap = agents.find(config => config.id === RECAP_AGENT_ID);
+    const bodyIndex = findBodyRowIndex(board);
+    if (recap && bodyIndex >= 0 && !board.rows.some(row => row.houses.some(house => house.kind === 'text_edit' && house.config?.agentId === RECAP_AGENT_ID))) {
+      board.rows.splice(bodyIndex + 1, 0, { id: `r_${agentHouse(recap).id}`, houses: [agentHouse(recap)] });
+    }
     board.rows.forEach(row => row.houses.forEach(house => { if (house.kind === 'text_edit') house.label = agents.find(c => c.id === house.config.agentId)?.title || house.label; }));
     return { ...resolved, board };
   };

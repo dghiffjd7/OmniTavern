@@ -2360,13 +2360,6 @@ body[data-reduced-motion='on'] .code-viewer-maximize-restore {
 .ac-utility-message { color: var(--app-text-secondary); font-size: 13px; }
 .ac-utility-title { font-size: 15px; font-weight: 800; overflow-wrap: anywhere; }
 .ac-utility-flag { display: inline-flex; align-items: center; min-height: 20px; padding: 0 7px; border-radius: 6px; background: color-mix(in srgb, var(--app-warning-text, #b45309) 12%, transparent); color: var(--app-warning-text, #b45309); font-size: 11px; font-weight: 750; vertical-align: middle; }
-.ac-utility-score { display: grid; gap: 6px; padding: 10px 0 2px; border-top: 1px solid var(--app-border-subtle); }
-.ac-utility-score-head { display: flex; align-items: center; gap: 10px; }
-.ac-utility-score-head strong { font-size: 12.5px; font-variant-numeric: tabular-nums; }
-.ac-utility-meter { flex: 1 1 auto; height: 6px; border-radius: 999px; background: var(--app-surface-subtle); overflow: hidden; }
-.ac-utility-meter > span { display: block; height: 100%; border-radius: inherit; background: color-mix(in srgb, var(--app-accent-primary) 70%, transparent); }
-.ac-utility-score.is-flagged .ac-utility-meter > span { background: var(--app-warning-text, #b45309); }
-.ac-utility-score p { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.7; }
 
 .chat-reaction-chip {
   display: inline-flex;

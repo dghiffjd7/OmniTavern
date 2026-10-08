@@ -17,7 +17,7 @@ export const createAgentConfigurationService = ({ store, getContext, getMessages
     const profileId = options.repairProfileId ?? result.config?.repairProfiles?.automaticId ?? result.config?.repairProfiles?.items[0]?.id;
     const config = options.id === 'reply_check' ? resolveFormatRepairProfile(result.config, profileId || result.config?.repairProfiles?.items[0]?.id) : result.config;
     return { ...result, config, context: { ...result.context, ...(c.archiveId !== undefined ? { archiveId: c.archiveId } : {}) }, bodyRule: body.config?.target || { mode: 'tags', start: '', end: '' }, bodyRevision: body.revision,
-      profiles: getProfiles().map(p => ({ id: p.id, name: p.name || p.label || p.id, model: p.model || '', provider: p.provider || '', baseUrl: p.baseUrl || '' })) };
+      profiles: getProfiles().map(p => ({ id: p.id, name: p.name || p.label || p.id, model: p.model || '', provider: p.provider || '', baseUrl: p.baseUrl || '', requestTimeoutMs: Number(p.timeout) || 0 })) };
   };
   const toolTargets = createAgentToolTargets({ getContext, getMessages, getRaw, read, resolveTarget, getFormatTarget });
   const source = async options => {
@@ -54,9 +54,10 @@ export const createAgentConfigurationService = ({ store, getContext, getMessages
     getAgentModelInfo: async options => {
       const c = context(options), config = options.config || read(options).config;
       if (!captureModel || config.modelMode === 'none' || !checkContext(c)) return null;
-      const model = await captureModel(config, c);
+      // 按「跟随」读取，得到模型配置自身的请求超时，供编辑器显示「跟随模型配置 · N 秒」。
+      const model = await captureModel({ ...config, timeoutMode: 'follow', timeoutSeconds: null }, c);
       // Credentials and request overrides must never be exposed to the editor.
-      return checkContext(c) ? { provider: model.provider, model: model.model, baseUrl: model.baseUrl } : null;
+      return checkContext(c) ? { provider: model.provider, model: model.model, baseUrl: model.baseUrl, requestTimeoutMs: Number(model.timeout) || 0 } : null;
     },
     listAgentReferenceSources: async options => {
       const c = context(options); if (!checkContext(c)) return [];

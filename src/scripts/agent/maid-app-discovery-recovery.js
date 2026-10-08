@@ -10,6 +10,13 @@ const namedRemoval = /(?:把|将)[^，,。；;！？!?\n]{1,60}(?:删了|删掉|
 // A complaint can put the media object before its imperative. Require a new
 // replacement (换一个/换成…) so a description of an earlier change stays chat.
 const mediaReplacement = /(?:壁纸|头像|wallpaper|avatar)[^，,。；;！？!?\n]{0,24}(?:换(?:一)?(?:个|张)|换成|改成)/iu;
+const mediaGeneration = /(?:给|帮|替|为)[^，,。；;！？!?\n]{0,60}(?:头像|壁纸)[^，,。；;！？!?\n]{0,24}(?:生(?:一|个|张)|生成|补(?:一|个|张))|\b(?:generate|draw)\s+(?:\w+\s+){0,4}(?:avatars?|wallpapers?)\b/iu;
+const noMediaGeneration = /(?:不要|别|不用|不必|不需要)[^，,。；;！？!?\n]{0,80}(?:生成|生(?:一|个|张)|补(?:一|个|张))|\b(?:do not|don't|never)\s+(?:generate|draw)\b/iu;
+export const hasMaidMediaGenerationIntent = input => {
+  const text = trim(input).normalize('NFKC');
+  return mediaGeneration.test(text) && !noMediaGeneration.test(text);
+};
+const memoryForget = /^(?:请|麻烦|帮我)?\s*(?:忘掉|忘记|不再记住)(?:我(?:说过|之前说|曾说)|(?:那|这)(?:条|个|项)?(?:偏好|记忆)|关于.{1,50}的(?:偏好|记忆))|^(?:please\s+)?forget\s+(?:what I (?:said|told you)|my .{1,60}preference|(?:that|this) (?:preference|memory))/iu;
 
 // A copy name alone does not identify an APP operation or a private target.
 // Only an explicit merge command qualifies, and its recovery queries the public
@@ -28,18 +35,19 @@ export const shouldRecoverMaidAppDiscovery = ({ input = '', decision = {}, conte
   if (!text || context.signal?.aborted || context.maidDiscoveryRecovery || context.runContinuation
     || context.operationIntentPolicy?.mode === 'no_tool'
     || (Array.isArray(context.maidReactSteps) && context.maidReactSteps.length)) return false;
-  if (noLookup.test(text) || cancellation.test(text) || discussion.test(text)) return false;
+  if (noLookup.test(text) || cancellation.test(text) || discussion.test(text) || noMediaGeneration.test(text)) return false;
   if (/permission|denied|forbidden|cancel|aborted|not_configured|权限|拒绝/iu.test(trim(decision.reason))) return false;
   const earlyStop = decision.ok === false && ['unsupported_intent', 'no_tool'].includes(trim(decision.reason))
     || decision.ok === true && decision.action === 'final'
       && ['clarify', 'unsupported', 'no_tool'].includes(trim(decision.providerFcControl));
   if (!earlyStop) return false;
-  return hasMergeCommand(text) || mediaReplacement.test(text)
+  return hasMergeCommand(text) || mediaReplacement.test(text) || hasMaidMediaGenerationIntent(text) || memoryForget.test(text)
     || command.test(text) && (appResource.test(text) || namedRemoval.test(text));
 };
 
 const discoveryQuery = (input = '') => {
   const text = trim(input);
+  if (memoryForget.test(text)) return 'maid.memory.archive';
   // Capability terms identify the operation, never a guessed resource type or
   // target. A name-only deletion must discover all registered deletion domains.
   if (hasMergeCommand(text)) return '合并';

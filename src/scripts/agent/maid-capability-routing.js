@@ -11,7 +11,7 @@ import { readMaidSkill } from './maid-skill-catalog.js';
 import { getMaidLoadedSkillFeatures } from './maid-skill-context.js';
 
 export const MAID_CAPABILITY_ROUTING_CONFIG_KEY = 'maid_capability_routing_v1';
-export const MAID_CAPABILITY_RETRIEVER_VERSION = 'maid-capability-retriever-v4';
+export const MAID_CAPABILITY_RETRIEVER_VERSION = 'maid-capability-retriever-v5';
 
 export const MAID_CAPABILITY_ROUTING_MODES = Object.freeze({
   shadow: 'shadow',
@@ -450,6 +450,7 @@ const buildToolProjection = ({ feature = {}, toolRegistry = null, permissionEval
   const allowedTools = [];
   const allowedDefinitions = [];
   const toolSchemas = {};
+  const toolMetadata = {};
   const excludedTools = [];
   for (const toolName of list(feature?.tools)) {
     const definition = toolRegistry?.get?.(toolName) || null;
@@ -475,6 +476,7 @@ const buildToolProjection = ({ feature = {}, toolRegistry = null, permissionEval
     allowedTools.push(toolName);
     allowedDefinitions.push(definition);
     toolSchemas[toolName] = clone(definition.schema, { type: 'object' });
+    toolMetadata[toolName] = { title: trim(definition.title), description: trim(definition.description) };
   }
   if (!allowedTools.length) return { feature: null, excludedTools };
   const version = trim(feature?.version, '1');
@@ -498,6 +500,7 @@ const buildToolProjection = ({ feature = {}, toolRegistry = null, permissionEval
       ...clone(feature, {}),
       tools: allowedTools,
       toolSchemas,
+      toolMetadata,
       riskLevel,
       writes,
       capabilityRef: {
@@ -551,6 +554,12 @@ const buildRetrievalTexts = (input = '', context = {}, steps = []) => {
   const listSteps = Array.isArray(steps) ? steps : [];
   const last = listSteps.at(-1) || null;
   if (last) {
+    // Resource text describes the user's data, not their next requested action.
+    // Keep operational errors and public capability discoveries as retrieval
+    // signals; full observations still go to the planner unchanged.
+    const useOutput = last.status !== 'succeeded' || [
+      'app.search_feature', 'app.read_feature_doc', 'app.read_skill', 'app.search_skills',
+    ].includes(trim(last.toolName));
     add([
       last.toolName,
       last.featureId,
@@ -558,7 +567,7 @@ const buildRetrievalTexts = (input = '', context = {}, steps = []) => {
       last.failureCode,
       last.summary,
       last.errorMessage,
-      stableJson(last.output || {}).slice(0, 600),
+      useOutput ? stableJson(last.output || {}).slice(0, 600) : '',
     ].filter(Boolean).join(' '), 0.7, 'observation');
   }
   add([context?.activePage, context?.uiMode].filter(Boolean).join(' '), 0.35, 'ui_context');
@@ -870,6 +879,12 @@ export const createMaidCapabilityRoutingRuntime = ({
     });
 
     if (revisionFeatureId) addRecord(projectedById.get(revisionFeatureId), 118, 'pending_action_revision', { pinned: true });
+    // 本轮附带了可识别的文件，或之前上传的文件尚未导入：附件查看／导入常驻候选
+    const fileAttachments = [context?.maidAttachments, context?.maidRecentFileAttachments].flatMap(value => (Array.isArray(value) ? value : []));
+    if (fileAttachments.some(item => item?.file)) {
+      addRecord(projectedById.get('attachment.import'), 117, 'file_attachment', { pinned: true });
+      addRecord(projectedById.get('attachment.inspect'), 116, 'file_attachment', { pinned: true });
+    }
     // 模型读过说明的功能进入下一步候选：提示词只给其余功能的名称索引，“查说明→使用”这条路要走得通
     (Array.isArray(steps) ? steps : []).forEach((step) => {
       if (trim(step?.toolName) !== 'app.read_feature_doc' || trim(step?.status) === 'failed') return;

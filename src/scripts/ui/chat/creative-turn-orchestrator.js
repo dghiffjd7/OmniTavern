@@ -3,7 +3,8 @@
 // - 行内并发受 policy.rowConcurrencyMax 限制；行间等待上一行全部到终态（屏障）。
 // - 同行房子只看到行开始时冻结的产物快照（同行隔离）；下游按行序合并，不按完成顺序。
 // - 正文失败/取消 → 其后所有行 skipped；普通房子失败按 onHouseFailure 决定是否继续。
-// - 取消：未启动 → cancelled(未启动)，进行中 → 透传 signal；超时 → failed(timeout) 并封住迟到结果。
+// - 取消：未启动 → cancelled(未启动)，进行中 → 透传 signal 并封住迟到结果。
+// - 房子不另设时限：每次模型请求的时长由所用模型配置的请求超时决定，卡住时由用户停止整轮。
 // - 执行器必须返回真实终态；resolve 的 status 只接受 succeeded/failed/cancelled/skipped。
 
 import { t } from '../../i18n/index.js';
@@ -86,8 +87,6 @@ export const createCreativeTurnOrchestrator = ({
   executors = {},
   signal = null,
   now = () => Date.now(),
-  setTimeoutFn = (fn, ms) => setTimeout(fn, ms),
-  clearTimeoutFn = id => clearTimeout(id),
   onHouseUpdate = null,
   onRowStart = null,
   logger = console,
@@ -189,21 +188,11 @@ export const createCreativeTurnOrchestrator = ({
     }
     update({ status: HOUSE_STATUS.running, startedAt: now() });
     const controller = linkedController(signal);
-    let timedOut = false;
-    let timer = null;
     let onAbort;
     const abortPromise = new Promise((_, reject) => {
       onAbort = () => reject(createAbortError());
       controller.signal.addEventListener('abort', onAbort, { once: true });
       if (controller.signal.aborted) onAbort();
-    });
-    const timeoutMs = Number(houseDef.kind === 'custom_prompt' ? houseDef.config?.timeoutMs : policy.houseTimeoutMs) || policy.houseTimeoutMs;
-    const timeoutPromise = new Promise((_, reject) => {
-      timer = setTimeoutFn(() => {
-        timedOut = true;
-        controller.abort(createAbortError('house timeout'));
-        reject(createAbortError('house timeout'));
-      }, timeoutMs);
     });
     try {
       const result = await Promise.race([
@@ -214,10 +203,8 @@ export const createCreativeTurnOrchestrator = ({
           rowInput,
           signal: controller.signal,
         })),
-        timeoutPromise,
         abortPromise,
       ]);
-      if (timedOut) throw createAbortError('house timeout');
       if (signal?.aborted) {
         finish(HOUSE_STATUS.cancelled, { reason: 'user_cancelled', error: t('已中止') });
         return state;
@@ -239,16 +226,13 @@ export const createCreativeTurnOrchestrator = ({
         childResults: Array.isArray(result?.childResults) ? result.childResults : [],
       });
     } catch (err) {
-      if (timedOut) {
-        finish(HOUSE_STATUS.failed, { reason: 'timeout', error: t('超时 {value}ms', { value: timeoutMs }) });
-      } else if (isAbortError(err) || signal?.aborted) {
+      if (isAbortError(err) || signal?.aborted) {
         finish(HOUSE_STATUS.cancelled, { reason: 'user_cancelled', error: t('已中止') });
       } else {
         logger?.warn?.('hopscotch house failed', houseDef.id, err);
         finish(HOUSE_STATUS.failed, { reason: 'executor_error', error: String(err?.message || err || '') });
       }
     } finally {
-      if (timer != null) clearTimeoutFn(timer);
       controller.signal.removeEventListener('abort', onAbort);
       controller.dispose?.();
     }

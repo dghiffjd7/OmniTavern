@@ -8,6 +8,8 @@ import { createPresetRequestWorker } from './preset-request-worker.js';
 import { toScriptPreset, fromScriptPreset, mergeScriptPresetChanges, createPresetScriptApi } from './preset-script-api.js';
 import { runScriptGeneration } from './script-generation.js';
 import { patchScriptUiChildren } from './script-ui-dom.js';
+import { buildTavernConnectionSettings, TAVERN_CONNECTION_SETTING_KEYS } from './tavern-connection-settings.js';
+import { resolveRequestConfigProfileId } from '../ui/chat/request-config-profile-utils.js';
 import {
   PresetRequestTransport, isCreativePresetRequest, makePresetRequestBody,
   applyPresetRequestBody, createPresetGenerationClient,
@@ -23,6 +25,17 @@ const SCRIPT_MAX_BYTES = 2 * 1024 * 1024;
 const SCRIPT_TOTAL_BYTES = 8 * 1024 * 1024;
 const SCRIPT_PAYLOAD_LIMIT = 1200000;
 const ST_PROMPT_ORDER_DUMMY_ID = 100001;
+const SCRIPT_UI_INSET_TOP = 'env(safe-area-inset-top, 0px)';
+// 脚本按浏览器写，视口高度单位要换成「状态栏以下」的高度；只改声明值，不碰 @media 等条件里的单位
+const SCRIPT_UI_VIEWPORT_HEIGHT_RE = /(?<![\w.#/"'-])(-?(?:\d+(?:\.\d+)?|\.\d+))(?:d|s|l)?vh(?![\w.-])/gi;
+const SCRIPT_UI_DECLARATION_VH_RE = new RegExp(`${SCRIPT_UI_VIEWPORT_HEIGHT_RE.source}(?=[^{};]*[;}])`, 'gi');
+const toScriptUiViewportHeight = (_, amount) => `calc(${amount} * var(--chatapp-script-vh, 1vh))`;
+export const rewriteScriptUiViewportUnits = (css = '') => String(css || '').replace(SCRIPT_UI_DECLARATION_VH_RE, toScriptUiViewportHeight);
+export const rewriteScriptUiInlineViewportUnits = (html = '') => {
+  const text = String(html || '');
+  if (!/vh\b/i.test(text)) return text;
+  return text.replace(/(\sstyle=")([^"]*)"/g, (_, prefix, value) => `${prefix}${value.replace(SCRIPT_UI_VIEWPORT_HEIGHT_RE, toScriptUiViewportHeight)}"`);
+};
 
 const getScriptDiagnosticRevision = (value) => {
   const content = String(value || '');
@@ -2603,7 +2616,8 @@ const ensureScriptButtonRoot = () => {
   root.style.position = 'fixed';
   root.style.right = '16px';
   root.style.bottom = '84px';
-  root.style.zIndex = '2147483000';
+  // 在脚本 UI 层内部排最底，脚本自己的弹窗（任意正 z-index）可以盖住它
+  root.style.zIndex = '0';
   root.style.display = 'flex';
   root.style.flexDirection = 'column';
   root.style.gap = '6px';
@@ -5579,6 +5593,7 @@ export class ScriptRuntime {
       ...this.uiLayoutPendingIds,
       ...Array.from(nodeIds || []),
     ].map(item => String(item || '').trim()).filter(Boolean));
+    const insetTop = this.getScriptUiInsetTop();
     return Array.from(shadow.querySelectorAll('[data-chatapp-virtual-node-id]')).slice(0, 1500).map((node) => {
       const nodeId = String(node.getAttribute('data-chatapp-virtual-node-id') || '');
       if (!nodeId || (!full && !requestedIds.has(nodeId))) return null;
@@ -5586,9 +5601,9 @@ export class ScriptRuntime {
       return {
         nodeId,
         left: rect.left,
-        top: rect.top,
+        top: rect.top - insetTop,
         right: rect.right,
-        bottom: rect.bottom,
+        bottom: rect.bottom - insetTop,
         width: rect.width,
         height: rect.height,
         clientWidth: node.clientWidth || rect.width,
@@ -5597,6 +5612,21 @@ export class ScriptRuntime {
         scrollHeight: node.scrollHeight || node.clientHeight || rect.height,
       };
     }).filter(Boolean);
+  }
+
+  // 脚本按浏览器写：手机浏览器的视口从状态栏下方开始。APP 是全面屏绘制，
+  // 所以 surface 让开顶部安全区，给 worker 的纵向坐标、视口高度也换算成相对 surface。
+  getScriptUiInsetTop() {
+    if (typeof document === 'undefined' || !document.body || typeof getComputedStyle !== 'function') return 0;
+    const key = typeof window !== 'undefined' ? `${window.innerWidth}x${window.innerHeight}` : '';
+    if (this.uiInsetTopCache?.key === key) return this.uiInsetTopCache.value;
+    const probe = document.createElement('div');
+    probe.style.cssText = `position:fixed;visibility:hidden;pointer-events:none;padding-top:${SCRIPT_UI_INSET_TOP};`;
+    document.body.appendChild(probe);
+    const value = Number.parseFloat(getComputedStyle(probe).paddingTop) || 0;
+    probe.remove();
+    this.uiInsetTopCache = { key, value };
+    return value;
   }
 
   getViewportSnapshot() {
@@ -5615,9 +5645,10 @@ export class ScriptRuntime {
     const fallbackWidth = Number(docElement?.clientWidth || 1024) || 1024;
     const fallbackHeight = Number(docElement?.clientHeight || 768) || 768;
     const visualViewport = window.visualViewport;
+    const insetTop = this.getScriptUiInsetTop();
     return {
       innerWidth: Number(window.innerWidth || fallbackWidth) || fallbackWidth,
-      innerHeight: Number(window.innerHeight || fallbackHeight) || fallbackHeight,
+      innerHeight: Math.max(1, (Number(window.innerHeight || fallbackHeight) || fallbackHeight) - insetTop),
       outerWidth: Number(window.outerWidth || window.innerWidth || fallbackWidth) || fallbackWidth,
       outerHeight: Number(window.outerHeight || window.innerHeight || fallbackHeight) || fallbackHeight,
       devicePixelRatio: Number(window.devicePixelRatio || 1) || 1,
@@ -5629,7 +5660,7 @@ export class ScriptRuntime {
       },
       visualViewport: {
         width: Number(visualViewport?.width || window.innerWidth || fallbackWidth) || fallbackWidth,
-        height: Number(visualViewport?.height || window.innerHeight || fallbackHeight) || fallbackHeight,
+        height: Math.max(1, (Number(visualViewport?.height || window.innerHeight || fallbackHeight) || fallbackHeight) - insetTop),
         offsetLeft: Number(visualViewport?.offsetLeft || 0) || 0,
         offsetTop: Number(visualViewport?.offsetTop || 0) || 0,
         pageLeft: Number(visualViewport?.pageLeft || 0) || 0,
@@ -5856,11 +5887,14 @@ export class ScriptRuntime {
 }
 .chatapp-script-ui-surface {
   position: fixed;
-  inset: 0;
+  top: ${SCRIPT_UI_INSET_TOP};
+  right: 0;
+  bottom: 0;
+  left: 0;
+  --chatapp-script-vh: calc((100dvh - ${SCRIPT_UI_INSET_TOP}) / 100);
   z-index: 2147483000;
   pointer-events: none;
-  width: 100vw;
-  height: 100vh;
+  contain: layout;
   overflow: visible;
   color-scheme: light dark;
 }
@@ -5922,12 +5956,12 @@ export class ScriptRuntime {
       next.appendChild(baseStyle);
       styles.forEach((css) => {
         const style = document.createElement('style');
-        style.textContent = css;
+        style.textContent = rewriteScriptUiViewportUnits(css);
         next.appendChild(style);
       });
       const surface = document.createElement('div');
       surface.className = 'chatapp-script-ui-surface';
-      surface.innerHTML = roots.join('');
+      surface.innerHTML = roots.map(rewriteScriptUiInlineViewportUnits).join('');
       this.applyPendingNativeUiState(surface, workerStateRevision);
       next.appendChild(surface);
       patchScriptUiChildren(shadow, next, { composing: this.uiComposingNodeIds });
@@ -5950,16 +5984,16 @@ export class ScriptRuntime {
     }
   }
 
-  collectUiTouchList(list) {
+  collectUiTouchList(list, insetTop = this.getScriptUiInsetTop()) {
     if (!list || typeof list.length !== 'number') return [];
     return Array.from(list).slice(0, 8).map(touch => ({
       identifier: Number(touch.identifier || 0) || 0,
       clientX: Number(touch.clientX || 0) || 0,
-      clientY: Number(touch.clientY || 0) || 0,
+      clientY: (Number(touch.clientY || 0) || 0) - insetTop,
       screenX: Number(touch.screenX || 0) || 0,
       screenY: Number(touch.screenY || 0) || 0,
       pageX: Number(touch.pageX || 0) || 0,
-      pageY: Number(touch.pageY || 0) || 0,
+      pageY: (Number(touch.pageY || 0) || 0) - insetTop,
     }));
   }
 
@@ -5996,9 +6030,11 @@ export class ScriptRuntime {
     ].forEach((key) => {
       if (event[key] !== undefined) payload[key] = event[key];
     });
-    if (event.touches) payload.touches = this.collectUiTouchList(event.touches);
-    if (event.changedTouches) payload.changedTouches = this.collectUiTouchList(event.changedTouches);
-    if (event.targetTouches) payload.targetTouches = this.collectUiTouchList(event.targetTouches);
+    const insetTop = this.getScriptUiInsetTop();
+    ['clientY', 'pageY'].forEach((key) => { if (typeof payload[key] === 'number') payload[key] -= insetTop; });
+    if (event.touches) payload.touches = this.collectUiTouchList(event.touches, insetTop);
+    if (event.changedTouches) payload.changedTouches = this.collectUiTouchList(event.changedTouches, insetTop);
+    if (event.targetTouches) payload.targetTouches = this.collectUiTouchList(event.targetTouches, insetTop);
     if (target && 'value' in target) payload.value = target.value;
     if (target && 'checked' in target) payload.checked = target.checked === true;
     if (target && 'open' in target) payload.open = target.open === true;
@@ -6282,7 +6318,15 @@ export class ScriptRuntime {
     ].map(item => String(item || '').trim()).filter(Boolean)));
     const activeOpenAiPreset = resolvedOpenAiState?.preset || this.presets?.getActive?.('openai') || {};
     const activeOpenAiPresetId = String(resolvedOpenAiState?.presetId || resolvedOpenAI?.presetId || this.presets?.getActiveId?.('openai') || '').trim();
-    const chatCompletionSettings = clonePlain(activeOpenAiPreset) || {};
+    // 预设里没有连接信息，脚本要读当前 provider / 模型，按本会话实际会用的 API 配置档补上（考虑预设绑定）
+    const requestProfile = resolveRequestConfigProfileId({ presetStore: this.presets, sessionId: sid, uiMode });
+    const connectionConfig = (requestProfile.profileId && this.bridge?.getConfigProfileById?.(requestProfile.profileId))
+      || this.bridge?.getConfig?.()
+      || null;
+    const chatCompletionSettings = {
+      ...(clonePlain(activeOpenAiPreset) || {}),
+      ...buildTavernConnectionSettings(connectionConfig),
+    };
     const presetView = preset => ({
       id: activeOpenAiPresetId,
       name: String(preset?.name || ''),
@@ -6318,7 +6362,8 @@ export class ScriptRuntime {
     const activeUser = this.getActiveUserProfile?.() || null;
     const userName = String(activeUser?.name || '').trim() || 'User';
     const characterName = String((uiMode === 'rp' ? personaName : contact?.name) || personaName || '').trim() || 'Assistant';
-    const model = String(activeOpenAiPreset?.model || '').trim();
+    // 脚本 {{model}} 取本会话实际使用的模型；没有配置档时才退回预设里的 model
+    const model = String(connectionConfig?.model || activeOpenAiPreset?.model || '').trim();
     const input = String(this.chatStore?.getDraft?.(sid) || '');
     return {
       sessionId: sid,
@@ -7541,6 +7586,7 @@ export class ScriptRuntime {
         Object.entries(snapshot).forEach(([key, value]) => {
           const normalizedKey = String(key || '').replace(/[_\-\s]/g, '').toLowerCase();
           if (blockedKeys.has(key) || blockedKeys.has(normalizedKey)) return;
+          if (TAVERN_CONNECTION_SETTING_KEYS.has(key)) return;
           if (key === 'function_calling' && !Object.hasOwn(currentPreset, key)) return;
           if ((key === 'prompts' || key === 'prompt_order' || key === 'prompts_unused') && !Array.isArray(value)) return;
           nextPreset[key] = clonePlain(value);

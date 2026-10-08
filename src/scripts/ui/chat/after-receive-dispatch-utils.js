@@ -1105,8 +1105,9 @@ const buildChatFormatGuardianModelFailureResult = ({
   };
 };
 
+// timeoutMs 只在格式修复设了自定义等待时传入；未传则不另计时，由模型配置的请求超时约束。
 const runChatFormatGuardianBackgroundChatOnce = async (backgroundChat, messages = [], requestOptions = {}, {
-  timeoutMs = 75000,
+  timeoutMs = 0,
 } = {}) => {
   const ms = Number(timeoutMs);
   if (!Number.isFinite(ms) || ms <= 0 || typeof AbortController !== 'function') {

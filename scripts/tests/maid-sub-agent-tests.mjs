@@ -9,6 +9,7 @@ import {
 import { buildMaidSubAgentsPromptBlock, buildMaidModelPlannerMessages } from '../../src/scripts/agent/maid-model-planner.js';
 import { createAppContentAgentTools } from '../../src/scripts/agent/tools/app-content-tools.js';
 import { createMaidSubAgentRuntime } from '../../src/scripts/ui/maid-sub-agent-runtime.js';
+import { runAdHocWebSearchChat } from '../../src/scripts/ui/chat/ad-hoc-web-search-runtime.js';
 import { createMaidRuntimeConfigResolver } from '../../src/scripts/agent/maid-runtime-config.js';
 import { createVoiceAwareMaidRuntimeResolver, createVoiceTaskModelRegistry } from '../../src/scripts/ui/realtime/voice-task-model.js';
 
@@ -21,7 +22,7 @@ import { createVoiceAwareMaidRuntimeResolver, createVoiceTaskModelRegistry } fro
   assert.ok(start >= 0 && end > start);
   const wiring = appSource.slice(start, end);
   const calls = [];
-  const bootstrap = new Function('createMaidSubAgentRuntime', 'chatConfigManager', 'LLMClient', 'buildAdHocWebSearchRuntime', 'logger', 'calls', `
+  const bootstrap = new Function('createMaidSubAgentRuntime', 'chatConfigManager', 'LLMClient', 'runAdHocWebSearchChat', 'logger', 'calls', `
     ${wiring}
     const agentRegistry = { listEnabledAgents: () => [{ id: 'late-sub', name: 'Late sub', modelProfileRef: 'late-profile', capabilityTags: [] }] };
     const requestMaidToolConfirmation = async request => { calls.push(request.toolName); return { decision: 'allow' }; };
@@ -31,7 +32,7 @@ import { createVoiceAwareMaidRuntimeResolver, createVoiceTaskModelRegistry } fro
   const generate = bootstrap(createMaidSubAgentRuntime,
     { getRuntimeConfigByProfileId: async () => ({ model: 'late-model' }) },
     class { async chat() { return 'generated'; } },
-    options => ({ client: options.client, requestOptions: options.requestOptions }),
+    async options => ({ output: await options.client.chat(options.messages, options.requestOptions), route: 'none', degraded: false }),
     { warn() {} }, calls);
   assert.deepEqual(calls, [], 'boot only assembles the runtime');
   const result = await generate({ subAgentId: 'late-sub', prompt: 'fixture', context: { voiceCallId: 'captured-call' } });
@@ -61,7 +62,7 @@ import { createVoiceAwareMaidRuntimeResolver, createVoiceTaskModelRegistry } fro
       listEnabledAgents: () => sub ? [{ id: 'sub', name: 'Sub', modelProfileRef: 'sub', capabilityTags: [] }] : [],
       chatConfigManager: configManager, createClient,
       requestMaidToolConfirmation: async request => { requests.push(request); return { decision: allow ? 'allow' : 'deny' }; },
-      buildAdHocWebSearchRuntime: options => ({ client: options.client, requestOptions: options.requestOptions, plan: { enabled: options.enabled } }),
+      runAdHocWebSearchChat: async options => ({ output: await options.client.chat(options.messages, options.requestOptions), route: 'none', degraded: false, reason: '' }),
       logger: { warn() {} },
     });
     return { generate, calls, resolutions, requests };
@@ -230,7 +231,7 @@ import { createVoiceAwareMaidRuntimeResolver, createVoiceTaskModelRegistry } fro
         if (abortDuringConfirm) { controller.abort(); throw new Error('aborted'); }
         return { decision: allow ? 'allow' : 'deny' };
       },
-      buildAdHocWebSearchRuntime: options => ({ client: options.client, requestOptions: options.requestOptions, plan: { enabled: false } }),
+      runAdHocWebSearchChat: async options => ({ output: await options.client.chat(options.messages, options.requestOptions), route: 'none', degraded: false, reason: '' }),
       logger: { warn() {} },
     });
     return { run: () => generate({ subAgentId: 'sub', prompt: 'p', context: { runId: 'run-1', signal: controller.signal } }), calls, confirms, controller };
@@ -309,4 +310,31 @@ console.log('maid-sub-agent-tests passed');
   assert.equal(store2.getFallbackProfileId(), 'p2', 'fallback 应保留');
   assert.equal(store2.getBoundModelOverride(), 'pro', '模型覆盖应保留');
   console.log('ok - load 合并保留新字段（reload 持久化回归）');
+}
+
+// 女仆生成联网：原生联网失败时降级为不联网生成，而不是整次任务失败（也不触发主模型回退）
+{
+  const calls = [], statuses = [];
+  const client = { chat: async (_messages, options = {}) => {
+    const tools = (options.tools || []).map(tool => tool.type);
+    calls.push(tools);
+    if (tools.includes('openrouter:web_search')) throw Object.assign(new Error('upstream 502'), { status: 502 });
+    return 'plain result';
+  } };
+  const generate = createMaidSubAgentRuntime({
+    resolveMaidRuntimeConfig: async () => ({ configured: true, client, config: { provider: 'openrouter', model: 'main-model' } }),
+    listEnabledAgents: () => [],
+    chatConfigManager: {},
+    createClient: () => client,
+    requestMaidToolConfirmation: async () => ({ decision: 'allow' }),
+    runAdHocWebSearchChat,
+    logger: { warn() {} },
+  });
+  const result = await generate({ prompt: 'fixture', webSearch: true, context: { onStatus: status => statuses.push(status) } });
+  assert.equal(result.ok, true);
+  assert.equal(result.text, 'plain result');
+  assert.equal(result.webSearchUsed, false, 'the degraded run did not use web search');
+  assert.equal(calls.length, 2);
+  assert.ok(statuses.some(status => status.tone === 'warning' && /改为不联网生成/.test(status.message)));
+  console.log('ok - maid generation degrades to plain generation when native web search fails');
 }

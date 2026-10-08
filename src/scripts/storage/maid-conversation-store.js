@@ -1,7 +1,8 @@
 import { safeInvoke } from '../utils/tauri.js';
 import { estimateTokens } from '../memory/memory-prompt-utils.js';
-import { formatMaidMemoryDate } from '../agent/maid-memory-prompt.js';
+import { formatMaidMemoryDate, isExplicitMaidPreferenceInstruction } from '../agent/maid-memory-prompt.js';
 import { normalizeMaidResultBasis } from '../agent/maid-result-basis.js';
+import { selectMaidContextScope } from './maid-context-scope.js';
 
 export const MAID_CONVERSATION_STORE_KEY = 'maid_conversation_store_v1';
 export const MAID_CONVERSATION_STORE_VERSION = 1;
@@ -212,6 +213,7 @@ const buildMaidHistoryContextPlan = ({
   maxTurns = MAID_CONTEXT_RECENT_TURN_LIMIT,
   maxTokens = MAID_CONTEXT_RECENT_TOKEN_LIMIT,
   realtimeHistory = null,
+  includeCompacted = false,
 } = {}) => {
   const turnLimit = Math.max(1, Math.trunc(Number(maxTurns)) || MAID_CONTEXT_RECENT_TURN_LIMIT);
   const tokenLimit = normalizeBudget(maxTokens, MAID_CONTEXT_RECENT_TOKEN_LIMIT);
@@ -220,7 +222,7 @@ const buildMaidHistoryContextPlan = ({
   }
   const included = includedRealtimeTranscripts(realtimeHistory);
   const available = (Array.isArray(turns) ? turns : [])
-    .filter(turn => !turn?.compacted && isProjectableMaidTurn(turn)
+    .filter(turn => (includeCompacted || !turn?.compacted) && isProjectableMaidTurn(turn)
       && !(isRealtimeTranscript(turn) && included.get(trim(turn.id)) === realtimeTranscriptRevision(turn)))
     .slice(-turnLimit);
   const selected = [];
@@ -425,6 +427,11 @@ const buildMaidWorkingContextPlan = ({
     return { text: '', tokenCount: 0, selectedTurnIds: [], selectedMemoryIds: [], diagnostics: [] };
   }
   const candidates = [];
+  (Array.isArray(turns) ? turns : [])
+    .filter(turn => !turn?.compacted && !isRealtimeTranscript(turn) && isExplicitMaidPreferenceInstruction(turn?.input))
+    .slice(-4)
+    .forEach(turn => candidates.push({ id: trim(turn.id), type: 'turn', at: Number(turn.at || 0),
+      label: '用户偏好指示（来自对话，不代表已写入长期记忆）', content: trim(turn.input) }));
   (Array.isArray(turns) ? turns : [])
     .filter(turn => !turn?.compacted && !isRealtimeTranscript(turn) && trim(turn?.compactionProtection))
     .slice(-MAID_CONTEXT_WORKING_ITEM_LIMIT)
@@ -1341,14 +1348,28 @@ export class MaidConversationStore {
     return operation;
   }
 
+  selectContextScope(context = {}) {
+    if (!trim(context?.roleCardId)) return selectMaidContextScope({ turns: this.state.turns, memoryRows: this.state.memoryRows });
+    const archive = this.getLegacyArchive();
+    return selectMaidContextScope({
+      turns: this.state.turns, memoryRows: this.state.memoryRows, context,
+      archivedTurns: [...(archive?.baseline?.turns || []), ...(archive?.evictedTurns || []), ...(archive?.compactedTurns || [])],
+    });
+  }
+
   getContextSnapshot(options = {}) {
     this.ensureLoaded();
+    const scoped = this.selectContextScope(options.context);
     const totalTokenLimit = normalizeBudget(
       options.maxTotalTokens,
       MAID_CONTEXT_TOTAL_TOKEN_LIMIT,
     );
     const historyPlan = buildMaidHistoryContextPlan({
-      turns: this.state.turns,
+      turns: scoped.turns,
+      // Compaction is global; activity on other cards must not erase this card's
+      // retained recent history. Keep the same turn/token caps and never revive
+      // cleared or evicted turns from the recovery archive.
+      includeCompacted: Boolean(trim(options.context?.roleCardId)),
       realtimeHistory: options.realtimeHistory,
       maxTurns: options.maxTurns,
       maxTokens: Math.min(
@@ -1362,7 +1383,7 @@ export class MaidConversationStore {
       totalTokenLimit - historyPlan.tokenCount - separatorAllowance,
     );
     const memoryPlan = buildMaidMemoryContextPlan({
-      rows: this.state.memoryRows,
+      rows: scoped.memoryRows,
       maxRows: options.maxMemoryRows,
       maxTokens: Math.min(
         normalizeBudget(options.maxMemoryTokens, MAID_CONTEXT_MEMORY_TOKEN_LIMIT),
@@ -1417,6 +1438,7 @@ export class MaidConversationStore {
 
   async getContextSnapshotAsync(options = {}) {
     this.ensureLoaded();
+    const scoped = this.selectContextScope(options.context);
     const query = options.query || options.input || '';
     const totalTokenLimit = normalizeBudget(
       options.maxTotalTokens,
@@ -1427,7 +1449,8 @@ export class MaidConversationStore {
       totalTokenLimit,
     );
     const historyPlan = buildMaidHistoryContextPlan({
-      turns: this.state.turns,
+      turns: scoped.turns,
+      includeCompacted: Boolean(trim(options.context?.roleCardId)),
       realtimeHistory: options.realtimeHistory,
       maxTurns: options.maxTurns,
       maxTokens: historyBudget,
@@ -1443,14 +1466,13 @@ export class MaidConversationStore {
     );
     const semanticStore = this.semanticMemoryStore;
     const activeSemanticTasks = typeof semanticStore?.listMemories === 'function'
-      ? semanticStore.listMemories({
+      ? scoped.filterMemories(semanticStore.listMemories({
         kind: 'task_state',
         status: 'active',
-        limit: MAID_CONTEXT_WORKING_ITEM_LIMIT,
-      })
+      })).slice(0, MAID_CONTEXT_WORKING_ITEM_LIMIT)
       : [];
     const activeLongTerm = typeof semanticStore?.listMemories === 'function'
-      ? semanticStore.listMemories({ status: 'active' })
+      ? scoped.filterMemories(semanticStore.listMemories({ status: 'active' }))
         .filter(memory => memory.kind !== 'task_state')
       : [];
     const semanticRetrieval = typeof semanticStore?.retrieveMemories === 'function'
@@ -1462,6 +1484,7 @@ export class MaidConversationStore {
         limit: MAID_CONTEXT_LATEST_MEMORY_ROWS + MAID_CONTEXT_RELEVANT_MEMORY_ROWS,
       })
       : { memories: [], matches: [], latestIds: [], relevantIds: [] };
+    semanticRetrieval.memories = scoped.filterMemories(semanticRetrieval.memories);
     const validatedSemantic = typeof semanticStore?.validateResourcesForInjection === 'function'
       ? await semanticStore.validateResourcesForInjection(semanticRetrieval.memories, {
         validateResource: options.validateResource,
@@ -1515,7 +1538,7 @@ export class MaidConversationStore {
     const workingPlan = addSection(
       '工作记忆',
       maxTokens => buildMaidWorkingContextPlan({
-        turns: this.state.turns,
+        turns: scoped.turns,
         semanticTasks: activeSemanticTasks,
         maxItems: options.maxWorkingItems,
         maxTokens,
@@ -1556,7 +1579,7 @@ export class MaidConversationStore {
       ? addSection(
         '旧轮次归档 · legacy',
         maxTokens => buildMaidMemoryContextPlan({
-          rows: this.state.memoryRows,
+          rows: scoped.memoryRows,
           query,
           maxRows: options.maxLegacyRows || 4,
           maxTokens,
@@ -1611,6 +1634,11 @@ export class MaidConversationStore {
       realtimeTranscripts: historyPlan.realtimeTranscripts,
       selectedWorkingTurnIds: workingPlan.selectedTurnIds || [],
       selectedSemanticMemoryIds,
+      preferences: validatedSemantic.memories.filter(memory => memory.kind === 'preference'
+        && selectedSemanticMemoryIds.includes(memory.id)).map(memory => ({
+        id: memory.id, kind: memory.kind, status: memory.status, content: memory.content,
+        explicit: memory.confidence === 'explicit', updatedAt: memory.updatedAt,
+      })),
       selectedLegacyMemoryIds: safeLegacyPlan.selectedMemoryIds || [],
       selectedMemoryIds: [
         ...selectedSemanticMemoryIds,

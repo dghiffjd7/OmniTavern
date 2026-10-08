@@ -44,6 +44,12 @@ export const editHopscotchBoard = (board, action = {}) => {
       sourceRow.houses.splice(sourceRow.houses.indexOf(house), 1);
       insert(house);
       break;
+    case 'retype':
+      // 停用的房子即草稿：原位换成另一种类型，序号、行与 ID 不变，仍保持停用。
+      if (!house || house.kind === 'body' || house.kind === 'variable_rules' || house.enabled !== false) return { ok: false, reason: 'retype_unavailable' };
+      sourceRow.houses.splice(sourceRow.houses.indexOf(house), 1, { ...action.house, id: house.id, kind: action.kind, enabled: false });
+      if (action.kind === 'variable_rules') next.policy.variableRuleExclusions = (next.policy.variableRuleExclusions || []).filter(phase => phase !== (action.house?.config?.phase || 'after'));
+      break;
     case 'copy':
       if (house?.kind !== 'custom_prompt') return { ok: false, reason: 'custom_only' };
       sourceRow.houses.push({ ...cloneData(house), id: newId('house') });

@@ -22,6 +22,56 @@ const kimiNativePlan = {
   diagnostics: { maxContinuationTurns: 3 },
 };
 
+// Tool failures are ordinary receipts, not thrown errors. Check both shared transports.
+for (const stream of [false, true]) {
+  for (const partialSuccess of [false, true]) {
+    const statuses = [];
+    const sources = [];
+    const outcomes = [];
+    const usages = [];
+    let turns = 0;
+    const chat = async (_messages, options) => {
+      turns += 1;
+      options.onProviderUsage?.({ totalTokens: 1 });
+      if (turns === 1) {
+        options.onProviderToolCallDelta({ choices: [{ message: { tool_calls: [
+          { id: 'failed-search', type: 'function', function: { name: 'web_search', arguments: '{}' } },
+          ...(partialSuccess ? [{ id: 'good-search', type: 'function', function: { name: 'web_research', arguments: '{}' } }] : []),
+        ] }, finish_reason: 'tool_calls' }] }, { provider: 'deepseek', model: 'deepseek-chat' });
+        return '';
+      }
+      return 'answer based on receipts';
+    };
+    const wrapped = createWebSearchGenerationClient({
+      client: { chat, async *streamChat(messages, options) { yield await chat(messages, options); } },
+      plan: fallbackPlan, provider: 'deepseek', model: 'deepseek-chat',
+      onSearchOutcome: outcome => outcomes.push(outcome),
+      toolRuntime: { executeTool: async name => name === 'web.search'
+        ? { status: 'failed', result: { ok: false, reason: 'service down', results: [{ url: 'https://failed.example/' }] } }
+        : { status: 'succeeded', result: { ok: true, results: [{ url: 'https://good.example/' }] } },
+      },
+    });
+    const options = {
+      onWebSearchStatus: status => statuses.push(status),
+      onProviderSources: report => sources.push(...report),
+      onProviderUsage: usage => usages.push(usage),
+    };
+    if (stream) {
+      let text = '';
+      for await (const chunk of wrapped.streamChat([], options)) text += chunk;
+      assert.equal(text, 'answer based on receipts');
+    } else {
+      assert.equal(await wrapped.chat([], options), 'answer based on receipts');
+    }
+    assert.equal(turns, 2);
+    assert.deepEqual(outcomes, [{ attempted: partialSuccess ? 2 : 1, succeeded: partialSuccess ? 1 : 0, failed: 1, reason: 'service down' }]);
+    assert.equal(statuses.at(-1).state, partialSuccess ? 'done' : 'failed');
+    assert.deepEqual(sources.map(item => item.url), partialSuccess ? ['https://good.example/'] : []);
+    assert.equal(usages.at(-1).webSearch, partialSuccess);
+  }
+}
+console.log('ok - chat and stream report failed/partial tool receipts without false success or stale sources');
+
 {
   const calls = [];
   const statuses = [];

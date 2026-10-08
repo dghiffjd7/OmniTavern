@@ -70,7 +70,8 @@ export const createTextEditRuntime = ({ getContext, getMessage, getMessages, get
     const cancel = () => controller.abort();
     signal?.addEventListener('abort', cancel, { once: true });
     if (signal?.aborted) cancel();
-    const timeout = setTimeout(cancel, agentRequestTimeoutMs(job.config, 120000));
+    const limitMs = agentRequestTimeoutMs(job.config);
+    const timeout = limitMs ? setTimeout(cancel, limitMs) : null;
     try {
       const model = await captureModel(job.config, sessionId);
       const source = await getRaw(message, sessionId);

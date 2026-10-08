@@ -166,6 +166,11 @@ export const MAID_RUN_CARD_STYLE = `
 .mrc-approval-items.is-detailed li.is-skipped::before { background: var(--app-text-muted, #94a3b8); }
 .mrc-approval-item-label { color: var(--app-text-primary, #0f172a); font-weight: 500; overflow-wrap: anywhere; }
 .mrc-approval-item-meta { font-size: 11px; color: var(--app-text-muted, #94a3b8); overflow-wrap: anywhere; }
+.mrc-approval-items.is-open { max-height: 240px; overflow-y: auto; overscroll-behavior: contain; }
+.mrc-approval-more { padding-left: 35px; }
+.mrc-approval-more-btn { min-height: 24px; padding: 2px 10px; border-radius: 999px; border: 1px dashed var(--mrc-line); background: transparent; font: inherit; font-size: 11.5px; font-weight: 600; color: var(--mrc-tone); cursor: pointer; }
+.mrc-approval-more-btn:hover { background: color-mix(in srgb, var(--mrc-tone) 8%, transparent); }
+.mrc-approval-more-btn:focus-visible { outline: 2px solid var(--mrc-tone); outline-offset: 2px; }
 .mrc-approval-hint { padding-left: 35px; font-size: 11.5px; color: var(--app-text-muted, #94a3b8); }
 .mrc-approval-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; padding-top: 2px; }
 .mrc-btn.is-link { margin-right: auto; padding: 0 4px; border-color: transparent; background: transparent; color: var(--app-text-muted, #94a3b8); font-weight: 500; text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 3px; }
@@ -244,21 +249,26 @@ const rowInnerHtml = (row, expanded) => {
 
 // 有附注（如“修改：旧 ⇒ 新”、影响范围）或不会执行的项目时逐行列出，否则用紧凑小标签
 const SKIPPED_APPROVAL_STATUSES = new Set(['skipped', 'protected', 'missing', 'ambiguous', 'failed']);
-const approvalItemsHtml = (items, shown) => {
-  const detailed = shown.some(item => item.meta || SKIPPED_APPROVAL_STATUSES.has(item.status));
-  const more = items.length > shown.length ? `<li>+${items.length - shown.length}</li>` : '';
-  if (!detailed) return `<ul class="mrc-approval-items">${shown.map(item => `<li>${escapeHtml(item.label)}</li>`).join('')}${more}</ul>`;
-  return `<ul class="mrc-approval-items is-detailed">${shown.map((item) => {
+// 超过 APPROVAL_ITEMS_PREVIEW 项时先列前几项，其余点列表下方的按钮展开、再点收起（展开后列表限高滚动，按钮留在列表外始终可点）
+const APPROVAL_ITEMS_PREVIEW = 6;
+const approvalItemsHtml = (items, shown, open) => {
+  const detailed = items.some(item => item.meta || SKIPPED_APPROVAL_STATUSES.has(item.status));
+  const more = items.length > APPROVAL_ITEMS_PREVIEW
+    ? `<div class="mrc-approval-more"><button type="button" class="mrc-approval-more-btn" data-mrc-action="approval-items" aria-expanded="${open ? 'true' : 'false'}">${escapeHtml(open ? t('收起') : t('展开其余 {count} 项', { count: items.length - APPROVAL_ITEMS_PREVIEW }))}</button></div>`
+    : '';
+  const listClass = `mrc-approval-items${detailed ? ' is-detailed' : ''}${open ? ' is-open' : ''}`;
+  if (!detailed) return `<ul class="${listClass}">${shown.map(item => `<li>${escapeHtml(item.label)}</li>`).join('')}</ul>${more}`;
+  return `<ul class="${listClass}">${shown.map((item) => {
     const skipped = SKIPPED_APPROVAL_STATUSES.has(item.status);
     return `<li${skipped ? ' class="is-skipped"' : ''}><span class="mrc-approval-item-label">${escapeHtml(item.label)}</span>`
       + (skipped ? `<span class="mrc-approval-item-meta">${escapeHtml(t('不会执行'))}</span>` : (item.meta ? `<span class="mrc-approval-item-meta">${escapeHtml(item.meta)}</span>` : ''))
       + '</li>';
-  }).join('')}${more}</ul>`;
+  }).join('')}</ul>${more}`;
 };
 
-const approvalHtml = (approval, { voice = false } = {}) => {
+const approvalHtml = (approval, { voice = false, itemsOpen = false } = {}) => {
   const items = Array.isArray(approval.items) ? approval.items : [];
-  const shown = items.slice(0, 6);
+  const shown = itemsOpen ? items : items.slice(0, APPROVAL_ITEMS_PREVIEW);
   const danger = approval.tone === 'danger';
   return '<div class="mrc-approval-head">'
     + `<span class="mrc-approval-icon" aria-hidden="true">${danger ? MAID_RUN_ICONS.alert : MAID_RUN_ICONS.shield}</span>`
@@ -266,7 +276,7 @@ const approvalHtml = (approval, { voice = false } = {}) => {
     + (approval.actionLabel ? `<span class="mrc-approval-badge">${escapeHtml(approval.actionLabel)}</span>` : '')
     + '</div>'
     + (approval.message ? `<p class="mrc-approval-message">${escapeHtml(approval.message)}</p>` : '')
-    + (shown.length ? approvalItemsHtml(items, shown) : '')
+    + (shown.length ? approvalItemsHtml(items, shown, itemsOpen) : '')
     + (voice ? `<span class="mrc-approval-hint">${escapeHtml(t('也可以直接说“允许”'))}</span>` : '')
     + '<div class="mrc-approval-actions">'
     + (approval.allowAlways && !voice ? `<button type="button" class="mrc-btn is-link" data-mrc-action="allow_always">${escapeHtml(t('始终允许'))}</button>` : '')
@@ -309,7 +319,7 @@ export const createMaidRunCardView = ({
 
   const rowNodes = new Map();
   let rowOrder = [];
-  const ui = { expanded: new Set(), foldOpen: false, thoughtOpen: false, collapsed: null };
+  const ui = { expanded: new Set(), foldOpen: false, thoughtOpen: false, collapsed: null, approvalItemsOpenFor: '' };
   let model = null;
   let extras = { thoughts: [], liveText: '', approval: null, voice: false, touch: false };
   let ticker = null;
@@ -390,10 +400,11 @@ export const createMaidRunCardView = ({
 
   const renderExtras = () => {
     const approval = extras.approval && !model.terminal ? extras.approval : null;
-    const approvalKey = approval ? JSON.stringify([approval.id, approval.title, approval.message, approval.items?.length, approval.tone, extras.voice]) : '';
+    const itemsOpen = Boolean(approval && ui.approvalItemsOpenFor === approval.id);
+    const approvalKey = approval ? JSON.stringify([approval.id, approval.title, approval.message, approval.items?.length, approval.tone, extras.voice, itemsOpen]) : '';
     if (approvalKey !== approvalSignature) {
       approvalSignature = approvalKey;
-      approvalEl.innerHTML = approval ? approvalHtml(approval, { voice: extras.voice }) : '';
+      approvalEl.innerHTML = approval ? approvalHtml(approval, { voice: extras.voice, itemsOpen }) : '';
       if (approval) {
         approvalEl.dataset.approvalId = approval.id;
         approvalEl.dataset.tone = approval.tone === 'danger' ? 'danger' : 'caution';
@@ -501,6 +512,14 @@ export const createMaidRunCardView = ({
       else ui.expanded.add(id);
       render({ animate: false });
       onLayoutChange?.({ reason: 'row', expanded: ui.expanded.has(id) });
+      return true;
+    }
+    if (action === 'approval-items') {
+      const approvalId = extras.approval?.id;
+      if (!approvalId) return false;
+      ui.approvalItemsOpenFor = ui.approvalItemsOpenFor === approvalId ? '' : approvalId;
+      render({ animate: false });
+      onLayoutChange?.({ reason: 'approval-items' });
       return true;
     }
     if (['deny', 'allow_once', 'allow_always'].includes(action)) {

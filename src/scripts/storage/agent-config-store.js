@@ -3,9 +3,10 @@ import { getAgentInvocationMode } from '../agent/agent-invocation.js';
 import { normalizeAgentReferenceConfig } from '../agent/agent-reference-context.js';
 import { normalizeAgentIcon } from '../agent/agent-icons.js';
 import { normalizeAgentGenerationSettings } from '../agent/agent-generation-settings.js';
+import { RECAP_AGENT_ID, buildRecapAgentConfig } from '../agent/recap-agent.js';
 import { normalizeFormatRepairProfiles, mergeFormatRepairProfiles, diffFormatRepairProfiles, resolveFormatRepairProfile, formatRepairProfileTooLong } from '../agent/format-repair-profiles.js';
 export const AGENT_CONFIG_KEY = 'agent_config_library_v1';
-export const CONFIGURABLE_AGENT_IDS = ['text_completion', 'reply_check', 'archive_naming', 'reply_scoring'];
+export const CONFIGURABLE_AGENT_IDS = ['text_completion', 'reply_check', 'archive_naming'];
 const clone = value => value == null ? value : JSON.parse(JSON.stringify(value));
 export const BODY_SELECTOR_ID = 'body-selector';
 const storedId = id => id === BODY_SELECTOR_ID || isConfigurableAgent(id);
@@ -25,8 +26,8 @@ export const agentConfigScopeKey = (context = {}, scope = 'local') => {
     : c.place === 'writing' ? [c.place, 'card', c.sessionId] : [c.place, 'chat', c.scopeId, c.sessionId]);
 };
 export const normalizeAgentConfiguration = (value = {}, id = value.id) => ({
-  id: text(id), kind: ['archive_naming', 'reply_scoring'].includes(id) ? id : id === 'text_completion' ? 'input_suggestion' : String(id).startsWith('input-agent:') ? 'input_agent' : id === 'reply_check' ? 'format_review' : 'text_edit',
-  title: text(value.title).slice(0, 80) || ({ archive_naming: '小管家', reply_scoring: '正文评分' }[id] || (id === 'text_completion' ? '文本建议' : String(id).startsWith('input-agent:') ? '输入助手' : id === 'reply_check' ? '格式修复' : '正文润色')),
+  id: text(id), kind: id === 'archive_naming' ? id : id === 'text_completion' ? 'input_suggestion' : String(id).startsWith('input-agent:') ? 'input_agent' : id === 'reply_check' ? 'format_review' : 'text_edit',
+  title: text(value.title).slice(0, 80) || (id === 'archive_naming' ? '小管家' : (id === 'text_completion' ? '文本建议' : String(id).startsWith('input-agent:') ? '输入助手' : id === 'reply_check' ? '格式修复' : '正文润色')),
   icon: normalizeAgentIcon(value.icon),
   enabled: value.enabled === true,
   modelMode: ['none', 'profile', 'follow_current'].includes(value.modelMode) ? value.modelMode : 'none',
@@ -51,10 +52,9 @@ export const normalizeAgentConfiguration = (value = {}, id = value.id) => ({
     pattern: String(value.target?.pattern ?? ''), flags: text(value.target?.flags), group: integer(value.target?.group, 1, 1, 20) },
   inputConsent: value.inputConsent === true,
   ...normalizeAgentGenerationSettings(value, id),
-  ...(['archive_naming', 'reply_scoring'].includes(id) ? {
-    invocationMode: id === 'archive_naming' ? 'auto' : 'manual', triggerMode: id === 'archive_naming' ? 'auto' : 'manual',
-    ...normalizeAgentGenerationSettings({ reasoningMode: 'off', maxTokens: id === 'archive_naming' ? 128 : 4096, timeoutSeconds: 60, ...value }, id),
-    scoreThreshold: value.scoreThreshold == null || !Number.isFinite(Number(value.scoreThreshold)) ? .6 : Math.min(1, Math.max(0, Number(value.scoreThreshold))),
+  ...(id === 'archive_naming' ? {
+    invocationMode: 'auto', triggerMode: 'auto',
+    ...normalizeAgentGenerationSettings({ reasoningMode: 'off', maxTokens: 128, ...value }, id),
   } : {}),
   updatedAt: Number(value.updatedAt) || 0,
   ...(id === 'reply_check' ? { repairProfiles: normalizeFormatRepairProfiles(value.repairProfiles, value), repairCheckType: value.repairCheckType === 'tableEdit' ? 'tableEdit' : 'custom' } : {}),
@@ -89,7 +89,7 @@ export const createAgentConfigStore = ({ storage = globalThis.localStorage, load
     const legacy = getLegacy(id, c, { includeLocal: scope !== 'global' && !local?.follow }) || null;
     let entry = local?.follow ? shared : local || shared;
     const source = entry ? (entry === local ? 'local' : 'global') : legacy ? 'legacy' : 'default';
-    const config = entry?.deleted ? null : entry?.config || (legacy || (CONFIGURABLE_AGENT_IDS.includes(id) ? {} : null));
+    const config = entry?.deleted ? null : entry?.config || (legacy || (CONFIGURABLE_AGENT_IDS.includes(id) ? {} : id === RECAP_AGENT_ID ? buildRecapAgentConfig() : null));
     let normalized = config ? clone(normalizeAgentConfiguration(config, id)) : null;
     let repairProfileSources, repairGlobalProfileIds;
     if (id === 'reply_check' && normalized) {
@@ -110,7 +110,7 @@ export const createAgentConfigStore = ({ storage = globalThis.localStorage, load
   const list = (context, scope = 'effective') => {
     const global = state.scopes[agentConfigScopeKey(context, 'global')] || {};
     const local = scope === 'global' ? {} : state.scopes[agentConfigScopeKey(context)] || {};
-    return [...new Set([...CONFIGURABLE_AGENT_IDS, ...Object.keys(global), ...Object.keys(local)])]
+    return [...new Set([...CONFIGURABLE_AGENT_IDS, RECAP_AGENT_ID, ...Object.keys(global), ...Object.keys(local)])]
       .filter(isConfigurableAgent).map(id => read(id, context, scope)).filter(item => item.config);
   };
   const commit = (options, makeEntry) => {

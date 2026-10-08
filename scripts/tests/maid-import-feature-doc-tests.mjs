@@ -31,7 +31,8 @@ const doc = await execute('app.read_feature_doc', { featureId });
 assert.equal(doc.ok, true);
 assert.deepEqual(doc.feature.uiPath, ['顶部头像', '角色卡管理', '导入角色卡', '选择文件（PNG / JSON）']);
 assert.match(doc.feature.doc, /用户.*选择.*确认/);
-assert.match(doc.feature.doc, /女仆.*附件.*不会.*导入/);
+// 角色卡作为女仆附件时走同一角色卡导入服务，默认不切换、失败整体撤销
+assert.match(doc.feature.doc, /附件.*attachment\.import.*同一个角色卡导入服务.*默认不切换/);
 
 const routing = createMaidCapabilityRoutingRuntime({
   features: listAppFeatures(), toolRegistry: registry, permissionEvaluator, storage: null,

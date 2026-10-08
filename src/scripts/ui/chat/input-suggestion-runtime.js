@@ -1,6 +1,6 @@
 import { buildConfigurableInputMessages } from '../../agent/agent-request-builder.js';
 import { allowsAgentInvocation } from '../../agent/agent-invocation.js';
-import { agentRequestTimeoutMs, buildAgentGenerationOptions } from '../../agent/agent-generation-settings.js';
+import { agentRequestTimeoutMs, applyAgentTimeout, buildAgentGenerationOptions } from '../../agent/agent-generation-settings.js';
 
 // 输入阶段的短句续写：独立模型、可取消请求；不进入发送链或 Agent 运行记录。
 export const buildInputSuggestionMessages = buildConfigurableInputMessages;
@@ -43,7 +43,7 @@ export const createInputSuggestionRequest = ({ getProfileConfig, createClient, r
     ? await resolveReference(snapshot, signal) : snapshot.referenceContext;
   if (signal?.aborted) return '';
   const agentConfig = { ...settings, id: 'text_completion' };
-  const modelConfig = { ...config, ...(settings.modelOverride ? { model: settings.modelOverride } : {}), timeout: agentRequestTimeoutMs(agentConfig) };
+  const modelConfig = applyAgentTimeout({ ...config, ...(settings.modelOverride ? { model: settings.modelOverride } : {}) }, agentConfig);
   const client = createClient(modelConfig);
   const params = buildAgentGenerationOptions({ maxTokens: settings.maxTokens || 96, temperature: 0.3 }, modelConfig, agentConfig);
   return client.chat(buildInputSuggestionMessages({ ...snapshot, referenceContext }), { signal, requestContext: snapshot.requestContext,
@@ -53,7 +53,7 @@ export const createInputSuggestionRequest = ({ getProfileConfig, createClient, r
 
 export const createInputSuggestionRuntime = ({
   getSnapshot, request, onSuggestion = () => {}, onStatus = () => {},
-  delayMs = 500, maxPerMinute = 12, timeoutMs = 12000, requestBudget = null,
+  delayMs = 500, maxPerMinute = 12, requestBudget = null,
   now = Date.now, setTimer = setTimeout, clearTimer = clearTimeout,
 } = {}) => {
   let timer = null, controller = null, epoch = 0, disposed = false;
@@ -91,7 +91,8 @@ export const createInputSuggestionRuntime = ({
       const activeController = new AbortController();
       controller = activeController;
       recent.push(now());
-      const timeout = setTimer(() => activeController.abort(), agentRequestTimeoutMs(snapshot.settings, timeoutMs));
+      const limitMs = agentRequestTimeoutMs(snapshot.settings);
+      const timeout = limitMs ? setTimer(() => activeController.abort(), limitMs) : null;
       try {
         onStatus('requesting');
         const result = await request(snapshot, activeController.signal);

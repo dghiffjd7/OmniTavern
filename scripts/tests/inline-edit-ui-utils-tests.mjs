@@ -124,6 +124,33 @@ const createFakeDocument = () => {
 }
 
 {
+  // 量高度时先把编辑框收成 auto，聊天列表变短会把滚动位置截短；量完要放回原位置（编辑的气泡后面还有消息、列表在接近底部时会跳到气泡上方）
+  const documentLike = createFakeDocument();
+  const scheduled = [];
+  const bubble = { children: [], style: {}, classList: { add() {}, remove() {}, contains() { return false; } }, innerHTML: '',
+    appendChild(child) { this.children = [child]; this.lastChild = child; return child; } };
+  const scrollEl = {
+    scrollTop: 600,
+    querySelector(selector) {
+      if (selector !== '[data-msg-id="m1"]') return null;
+      return { classList: { add() {}, remove() {}, contains() { return false; } }, querySelector: next => (next === '.QQ_chat_msgdiv' ? bubble : null) };
+    },
+  };
+  const runtime = createInlineEditUiRuntime({ documentLike, schedule: cb => scheduled.push(cb), onConfirmEdit: () => true });
+  runtime.startInlineEdit({ scrollEl, message: { id: 'm1', role: 'user', content: 'long text' } });
+  const textarea = bubble.lastChild.children[0];
+  let height = '';
+  textarea.style = {
+    get height() { return height; },
+    set height(value) { height = value; if (value === 'auto') scrollEl.scrollTop = Math.min(scrollEl.scrollTop, 205); },
+  };
+  textarea.emit('input');
+  assert.equal(height, '72px');
+  assert.equal(scrollEl.scrollTop, 600);
+  console.log('ok - resizing the editor keeps the chat list scroll position');
+}
+
+{
   const documentLike = createFakeDocument();
   const renderedNode = { kind: 'rendered-rich-content' };
   const bubble = {
@@ -377,18 +404,20 @@ const createFakeDocument = () => {
     documentLike,
     schedule: cb => cb(),
     onConfirmEdit: () => {
-      throw new Error('outside click must cancel, not save');
+      throw new Error('clicking elsewhere must neither save nor cancel');
     },
   });
   runtime.startInlineEdit({
     scrollEl: { querySelector: () => wrapper },
     message: { id: 'm5', content: 'origin' },
   });
-  const textarea = bubble.lastChild.children[0];
-  textarea.value = 'changed but abandoned';
-  documentListeners.get('pointerdown')?.({ target: { kind: 'somewhere-else' } });
-  assert.deepEqual(bubble.children, [renderedNode]);
-  assert.equal(documentListeners.has('pointerdown'), false);
-  assert.equal(wrapper.classList.contains('is-inline-editing'), false);
-  console.log('ok - clicking outside the bubble cancels the edit and detaches the listener');
+  const shell = bubble.lastChild;
+  const textarea = shell.children[0];
+  textarea.value = 'changed and kept';
+  // 点击气泡外：不挂文档级监听，编辑保持原样，修改不丢
+  assert.equal(documentListeners.has('pointerdown'), false, 'no outside-click listener is registered');
+  assert.deepEqual(bubble.children, [shell]);
+  assert.equal(textarea.value, 'changed and kept');
+  assert.equal(wrapper.classList.contains('is-inline-editing'), true);
+  console.log('ok - clicking outside the bubble keeps the edit open with its changes');
 }

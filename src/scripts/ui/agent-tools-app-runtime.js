@@ -10,7 +10,7 @@ import { t } from '../i18n/index.js';
 // Agent 配置、输入候选、回复修改与工具箱的装配及生命周期；app.js 提供模型和持久化能力。
 export const createAgentToolsAppRuntime = ({ ui, store, getContext, getMessages, findMessage, getRaw, getProfiles, getEvidence,
   captureModel, request, previewRequest, commitReply, notifyReply, getDisplaySource, getReasoningBoundaries, getCurrentModelLabel, resolveReference, listReferenceSources, listAvailableTools, buildFormatPreview, runFormat, getFormatTarget, buildFormatOptions, budget,
-  openAgent, openCenter, toolboxContainer, toolboxAnchor, onToolboxOpen, storage, documentRef = document } = {}) => {
+  openAgent, openCenter, getToolGate, toolboxContainer, toolboxAnchor, onToolboxOpen, storage, documentRef = document } = {}) => {
   const win = documentRef.defaultView;
   const resolveTarget = getDisplaySource ? createRenderedAgentTargetResolver({ getDisplaySource, getReasoningBoundaries, documentRef }) : undefined;
   const changed = event => () => win.dispatchEvent(new win.CustomEvent(event));
@@ -45,7 +45,7 @@ export const createAgentToolsAppRuntime = ({ ui, store, getContext, getMessages,
     getInput: () => ({before:ui.inputEl.value.slice(0,ui.inputEl.selectionStart),after:ui.inputEl.value.slice(ui.inputEl.selectionEnd)}),
     getInputRuntime: () => inputAgents, buildInputPreview: config => inputAgents.preview(config),
   });
-  const toolbox = createAgentToolbox({input:ui.inputEl,actions,getContext,getMessages,getInputSnapshot:inputAgents.snapshot,openAgent,openCenter,
+  const toolbox = createAgentToolbox({input:ui.inputEl,actions,getContext,getMessages,getInputSnapshot:inputAgents.snapshot,openAgent,openCenter,getToolGate,
     triggerContainer:toolboxContainer,anchorEl:toolboxAnchor,targetEventRoot:ui.scrollEl,beforeOpen:onToolboxOpen,documentRef,storage});
   const inputContainer = ui.inputEl?.closest?.('.chat-input-container') || null;
   const suggestionBanner = createAgentSuggestionBanner({ container: inputContainer, before: inputContainer?.querySelector('#composer-attachments'),

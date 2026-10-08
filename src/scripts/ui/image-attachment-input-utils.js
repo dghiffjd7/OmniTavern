@@ -28,14 +28,15 @@ const collectFilesFromItems = (items = []) => {
   return files;
 };
 
-export const collectImageFilesFromDataTransfer = (dataTransfer = null) => {
+// 取出剪贴板／拖放里的全部文件（去重）；filter 为空时不按类型过滤
+export const collectFilesFromDataTransfer = (dataTransfer = null, { filter = null } = {}) => {
   if (!dataTransfer) return [];
   const files = [];
   if (dataTransfer.files?.length) files.push(...Array.from(dataTransfer.files));
   if (dataTransfer.items?.length) files.push(...collectFilesFromItems(dataTransfer.items));
   const seen = new Set();
   return files
-    .filter(isImageAttachmentFile)
+    .filter(file => (typeof filter === 'function' ? filter(file) : true))
     .filter((file) => {
       const key = `${trim(file.name)}:${trim(file.type)}:${Number(file.size || 0)}`;
       if (seen.has(key)) return false;
@@ -43,6 +44,10 @@ export const collectImageFilesFromDataTransfer = (dataTransfer = null) => {
       return true;
     });
 };
+
+export const collectImageFilesFromDataTransfer = (dataTransfer = null) => (
+  collectFilesFromDataTransfer(dataTransfer, { filter: isImageAttachmentFile })
+);
 
 export const collectImageFilesFromPasteEvent = (event = null) => (
   collectImageFilesFromDataTransfer(event?.clipboardData || null)

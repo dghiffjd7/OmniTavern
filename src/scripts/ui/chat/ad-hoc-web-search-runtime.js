@@ -119,6 +119,9 @@ export const buildAdHocWebSearchRuntime = ({
   toolRuntime = undefined,
   onStatus = null,
   onSources = null,
+  onSearchOutcome = null,
+  // 原生联网失败后的回退：按非原生服务商规划，改用 APP 搜索工具（实际请求仍发给原模型）
+  forceToolFallback = false,
 } = {}) => {
   const baseOptions = requestOptions && typeof requestOptions === 'object' ? { ...requestOptions } : {};
   if (baseOptions.requestContext || sessionId) {
@@ -130,7 +133,7 @@ export const buildAdHocWebSearchRuntime = ({
     .filter(Boolean);
   const plan = buildWebSearchRequestPlan({
     enabled: enabled === true,
-    provider: config?.provider,
+    provider: forceToolFallback ? 'app_tool_fallback' : config?.provider,
     baseUrl: config?.baseUrl,
     model: config?.model,
     existingOptions: [baseOptions],
@@ -186,6 +189,96 @@ export const buildAdHocWebSearchRuntime = ({
     provider: config?.provider,
     model: config?.model,
     sessionId,
+    onSearchOutcome,
   });
   return { client: generationClient, requestOptions: mergedOptions, plan };
+};
+
+const isAbortError = error => error?.name === 'AbortError';
+
+const readErrorStatus = (error) => {
+  const status = Number(error?.status ?? error?.statusCode ?? error?.response?.status);
+  if (Number.isFinite(status) && status > 0) return status;
+  const match = String(error?.message || '').match(/\b(4\d\d|5\d\d)\b/);
+  return match ? Number(match[1]) : 0;
+};
+
+// 鉴权类错误与联网无关，换联网方式重试只会重复失败
+const isRetryableWebSearchFailure = error => !isAbortError(error) && ![401, 403].includes(readErrorStatus(error));
+
+// 报错时写明实际调用的服务商与模型，便于分辨是谁返回的错误（如 429）
+export const describeAdHocModel = (config = {}) => [trim(config?.provider), trim(config?.model)].filter(Boolean).join(' · ');
+
+const shortError = error => trim(error?.message, '未知错误').slice(0, 120);
+
+// 带回退的单次生成：原生联网 → 失败改用 APP 搜索服务 → 仍失败或不可用则不联网生成。
+// 返回 { output, route: 'native' | 'tool' | 'none', degraded }；中止与鉴权错误直接抛出。
+export const runAdHocWebSearchChat = async ({
+  client = null,
+  config = {},
+  enabled = false,
+  sessionId = '',
+  requestOptions = {},
+  messages = [],
+  toolRuntime = undefined,
+  onStatus = null,
+  onSources = null,
+} = {}) => {
+  const notify = (status) => { try { onStatus?.(status); } catch {} };
+  const build = (extra = {}) => {
+    const attempt = { sources: [], sourceMeta: {}, outcome: null };
+    const generation = buildAdHocWebSearchRuntime({
+      client, config, enabled, sessionId, toolRuntime, onStatus, ...extra,
+      // 每次尝试独立收集来源。chat 成功后才提交，避免失败响应污染降级回答。
+      requestOptions: {
+        ...requestOptions,
+        onProviderSources: (sources, meta = {}) => {
+          attempt.sources = mergeWebSources(attempt.sources, sources || []);
+          attempt.sourceMeta = meta;
+        },
+      },
+      onSearchOutcome: outcome => { attempt.outcome = outcome; },
+    });
+    return { ...generation, attempt };
+  };
+  const first = build();
+  const reason = String(first.plan?.diagnostics?.reason || '');
+  const complete = async (generation, degraded = false) => {
+    const output = await generation.client.chat(messages, generation.requestOptions);
+    const { attempt, plan } = generation;
+    const route = plan?.enabled !== true ? 'none'
+      : (plan.native === true ? 'native' : (attempt.outcome?.succeeded > 0 ? 'tool' : 'none'));
+    const sources = route === 'none' ? [] : attempt.sources.slice();
+    try { requestOptions?.onProviderSources?.(sources, attempt.sourceMeta); } catch {}
+    try { onSources?.(sources, attempt.sourceMeta); } catch {}
+    return {
+      output,
+      route,
+      degraded: degraded || (plan?.fallback === true && attempt.outcome?.failed > 0),
+      reason: attempt.outcome?.reason || reason,
+    };
+  };
+  try {
+    return await complete(first);
+  } catch (error) {
+    if (first.plan?.enabled !== true || !isRetryableWebSearchFailure(error)) throw error;
+    if (first.plan.native === true) {
+      const viaTools = build({ forceToolFallback: true });
+      if (viaTools.plan?.enabled === true) {
+        notify({ state: 'fallback', message: `原生联网失败（${shortError(error)}），改用搜索服务…` });
+        try {
+          return await complete(viaTools, true);
+        } catch (toolError) {
+          if (!isRetryableWebSearchFailure(toolError)) throw toolError;
+          notify({ state: 'fallback', message: `搜索服务也失败（${shortError(toolError)}），改为不联网生成…` });
+        }
+      } else {
+        notify({ state: 'fallback', message: `原生联网失败（${shortError(error)}），未配置可用的搜索服务，改为不联网生成…` });
+      }
+    } else {
+      notify({ state: 'fallback', message: `联网失败（${shortError(error)}），改为不联网生成…` });
+    }
+    const plain = build({ enabled: false, onStatus: null });
+    return complete(plain, true);
+  }
 };

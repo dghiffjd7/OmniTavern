@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
 
 import {
   FORMAT_FUNCTION_BLOCK_KINDS,
@@ -128,6 +130,49 @@ test('reused function blocks can be replaced only in the render copy', () => {
   );
   assert.equal(rendered, 'before\n[img-existing]\nafter');
   assert.equal(source.includes('<image_prompt>'), true);
+});
+
+test('app edit writeback executes an added tableEdit through the in-scope memory handler', async () => {
+  // 回归：executeFormatFunctionSideEffectPlan 在 handleSend 外层，曾调用只存在于 handleSend 内的
+  // handleMemoryEditsFromRaw，编辑气泡后新增的 tableEdit 抛 ReferenceError 被吞掉，记忆表格不更新。
+  const app = readFileSync(new URL('../../src/scripts/ui/app.js', import.meta.url), 'utf8');
+  const start = app.indexOf('const resolveFormatFunctionEffectTarget = ');
+  const end = app.indexOf('const applyRepairedProtocolTextToChat = ', start);
+  assert.ok(start >= 0 && end > start, 'app seam: format function side-effect executor');
+  const tableEdit = '<tableEdit>\n{"action":"insert","table_id":"rp_important_people","data":{"name":"林念初"}}\n</tableEdit>';
+  const message = { id: 'm1', role: 'assistant', rawOriginal: `正文\n\n${tableEdit}`, meta: {} };
+  const memoryCalls = [];
+  const warnings = [];
+  const sandbox = {
+    FORMAT_FUNCTION_BLOCK_KINDS,
+    buildFormatFunctionExecutionLedger,
+    uiMode: 'rp',
+    chatStore: { findMessage: id => (id === 'm1' ? message : null), updateMessage: () => message },
+    contactsStore: { getContact: () => null },
+    logger: { warn: (...args) => warnings.push(args) },
+    resolveMessageTimelineTurnNumber: () => 3,
+    handleMemoryEditsFromRawForRuntime: async (raw, options) => {
+      memoryCalls.push({ raw, options });
+      return { actions: [{ action: 'insert' }] };
+    },
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(`${app.slice(start, end)}\nglobalThis.execute = executeFormatFunctionSideEffectPlan;`, sandbox);
+  const plan = buildFormatFunctionSideEffectPlan({ originalText: '正文', candidateText: message.rawOriginal });
+  const results = await sandbox.execute({
+    plan,
+    capturedMessages: [{ messageId: 'm1', targetSessionId: 'rp:persona_a' }],
+    fallbackSessionId: 'rp:persona_a',
+    turnId: 'edit:m1',
+  });
+  assert.deepEqual(warnings, [], 'side effect must not fail');
+  assert.equal(results['table_edit:1'].status, 'succeeded');
+  assert.equal(memoryCalls.length, 1);
+  assert.equal(memoryCalls[0].raw, tableEdit);
+  assert.equal(memoryCalls[0].options.sessionId, 'rp:persona_a');
+  assert.equal(memoryCalls[0].options.memoryPlace, 'writing');
+  assert.equal(memoryCalls[0].options.force, true);
+  assert.equal(memoryCalls[0].options.timelineMessageId, 'm1');
 });
 
 let failed = 0;

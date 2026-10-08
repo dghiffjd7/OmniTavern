@@ -40,6 +40,7 @@ export const createAssistantStreamRuntime = ({
   const updateActiveGenerationStreamCache = (text, meta = {}, payload = null) => {
     withMatchingGeneration((generation) => {
       generation.streamText = String(text ?? '');
+      generation.lastActivityAt = Date.now();
       generation.streamPayload = clonePayload(payload);
       generation.streamMeta = mergeMeta(generation.streamMeta, meta);
     });

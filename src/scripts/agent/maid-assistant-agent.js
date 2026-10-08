@@ -25,7 +25,10 @@ import {
   validateMaidImportedCardWorkflowSnapshot,
 } from './maid-imported-card-workflow.js';
 import { buildMaidSourceGroundingContext } from './maid-source-grounding.js';
+import { resolveMaidRunFollowup, handleMaidRunFollowup, runBelongsToMaidContext, settleMaidRunContinuation, getMaidContinuationPendingTodos, guardMaidContinuationResult } from './maid-run-followup.js';
 import { findUnsupportedMaidWebAmounts } from './maid-web-observations.js';
+import { findMaidVisualPreferenceConflict } from './maid-visual-preferences.js';
+import { findMaidImageTargetMismatch } from './maid-image-target-evidence.js';
 import { applyMaidResultPresentation } from './maid-result-presentation.js';
 import { createMaidAppDiscoveryPlan, shouldRecoverMaidAppDiscovery } from './maid-app-discovery-recovery.js';
 import { createMaidSkillContext, mergeMaidSkillCatalog, restoreMaidSkillContext, serializeMaidSkillContext, stripMaidSkillObservationBodies } from './maid-skill-context.js';
@@ -465,6 +468,7 @@ const createMaidRunTracker = ({ agentTaskRuntime = null, input = '', context = {
       summary: truncateForRun(trackedGoal, 200),
       metadata: {
         goal: trackedGoal,
+        maidTaskScope: { roleCardId: trim(context.roleCardId), sessionId: trim(context.sessionId), uiMode: trim(context.uiMode) },
         maidSkills: serializeMaidSkillContext(context.maidSkillContext),
         ...(context.maidTaskInputs ? { maidTaskInputs: clone(context.maidTaskInputs) } : {}),
         ...(context.pendingGroupPreviewRevision ? { groupPreviewRevision: clone(context.pendingGroupPreviewRevision) } : {}),
@@ -474,7 +478,7 @@ const createMaidRunTracker = ({ agentTaskRuntime = null, input = '', context = {
         ...(trim(continuation?.sourceRunId) ? {
           resumedFromRunId: trim(continuation.sourceRunId),
           continuationVersion: trim(continuation.version),
-          todos: clone(continuation.remainingTodos || []),
+          todos: clone(agentTaskRuntime.getRun?.(continuation.sourceRunId)?.metadata?.todos || continuation.remainingTodos || []),
         } : {}),
       },
     });
@@ -596,7 +600,7 @@ const createMaidRunTracker = ({ agentTaskRuntime = null, input = '', context = {
       try { void agentTaskRuntime.flush?.(); } catch {}
       return;
     }
-    agentTaskRuntime.finishRun(run.id, {
+    const finishedRun = agentTaskRuntime.finishRun(run.id, {
       status: cancelled ? 'cancelled' : (ok ? 'succeeded' : 'failed'),
       summary,
       errorMessage: ok || cancelled ? '' : truncateForRun(result?.reason || result?.message || ''),
@@ -604,6 +608,7 @@ const createMaidRunTracker = ({ agentTaskRuntime = null, input = '', context = {
       usage: runUsage,
       metadata,
     });
+    settleMaidRunContinuation({ runtime: agentTaskRuntime, context, continuation, childRun: finishedRun, result });
   };
   const markWaitingPermission = (pending = true) => {
     if (!canTrack || !run || typeof agentTaskRuntime.updateRun !== 'function') return;
@@ -1614,23 +1619,6 @@ const buildUnchangedTodoExecution = () => ({
   message: '',
 });
 
-const MAID_MODEL_CALL_TIMEOUT_MS = 240_000;
-
-// 模型请求可能无限挂起（API 端异常），包一层超时让 run 可失败、可继续，而不是永久 running。
-const callModelWithTimeout = async (invoke, { timeoutMs = MAID_MODEL_CALL_TIMEOUT_MS, label = 'model_call' } = {}) => {
-  let timer = null;
-  try {
-    return await Promise.race([
-      invoke(),
-      new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`${label}_timeout`)), timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-};
-
 const formatMaidPromptText = (key, fallback, replacements = {}) => {
   let text = getLocalizedPromptText(key, fallback);
   Object.entries(replacements).forEach(([name, value]) => {
@@ -2188,10 +2176,11 @@ const buildReusedGeneratedMediaExecution = (match = {}) => ({
       appliedVariantCount: Number(match?.appliedCount || 0),
       generatedVariantCount: Number(match?.generatedCount || 0),
       requestedVariantQuota: Number(match?.targetQuota || 1),
-      reason: match?.appliedStep ? 'generated_media_already_applied' : 'generated_media_quota_reached',
+      generationState: 'completed',
+      reason: match?.appliedStep ? 'generated_media_already_applied' : 'requested_media_already_generated',
       message: match?.appliedStep
         ? '同一对象与用途已完成用户要求的图片数量并成功写回；本次未重复产生计费生图调用，请继续下一个未完成目标。'
-        : 'The requested number of images for this target and purpose has already been generated. Reuse this attachment for the preview, or apply it only if authorized. No additional billed generation was performed.',
+        : 'The image for THIS user message was successfully generated and attachmentId is ready. This APP guard skipped a duplicate call; provider credits and rate limits have not failed. Present this actual image, or apply this attachment only if authorized. Do not ask the user to wait, retry or regenerate an image that is already available.',
     },
     summary: match?.appliedStep
       ? 'generated media already applied; duplicate billed generation skipped'
@@ -2462,6 +2451,8 @@ const projectFullPersonaObservationForModel = (output = {}) => {
 const projectMaidReactStepsForModel = (steps = []) => (
   (Array.isArray(steps) ? steps : []).map((step) => {
     const projected = clone(step);
+    // Native paths restore attachments locally; planners only need their IDs.
+    if (isPlainObject(projected.output)) delete projected.output.attachmentReference;
     if (
       trim(projected?.toolName) === 'app.read_resource' &&
       trim(projected?.output?.resource).toLowerCase() === 'persona' &&
@@ -4167,7 +4158,8 @@ export const createMaidAssistantAgent = ({
       let decision = null;
       try {
         throwIfMaidAborted(context?.signal);
-        decision = await callModelWithTimeout(() => plannerFn(input, decisionContext), { label });
+        // 规划请求的时长由所用模型配置的请求超时约束（API 异常挂起时由请求层中止），不另包计时。
+        decision = await plannerFn(input, decisionContext);
         throwIfMaidAborted(context?.signal);
       } catch (error) {
         const cancelled = isMaidAbortError(error, context?.signal);
@@ -4527,6 +4519,7 @@ export const createMaidAssistantAgent = ({
     let lastOk = false;
     let cyclesUsed = 0;
     let webEvidenceCorrectionUsed = false;
+    let continuationCompletionReviewUsed = false;
     const steps = [];
     const crossRunFallbackPlans = new Map();
     let stepBudget = resolveReactStepBudget({
@@ -4630,6 +4623,15 @@ export const createMaidAssistantAgent = ({
         }
 
         let execution = null;
+        const visualConflict = findMaidVisualPreferenceConflict({ input, plan: currentPlan,
+          preferences: context.maidConversationContextRef?.current?.preferences || [] });
+        if (visualConflict) return {
+          ok: true, status: 'responded', responseType: 'chat', reason: 'maid_visual_preference_conflict',
+          input: trim(input), steps: clone(steps), preferenceConflict: visualConflict,
+          message: t('你之前说过不喜欢{colors}，但「{subject}」的拟定形象包含这些颜色。要保留设定，还是避开这些颜色？', {
+            colors: [...new Set(visualConflict.conflicts.map(item => t(item.color)))].join('、'), subject: visualConflict.subject,
+          }),
+        };
         const reusableSessionCreate = findVerifiedIdempotentSessionCreate(currentPlan, steps);
         const reusableGeneratedMedia = findGeneratedMediaAtQuota({
           input,
@@ -4638,7 +4640,15 @@ export const createMaidAssistantAgent = ({
         });
         // 删除幂等：本轮已删除的目标不再交给工具，全部已删则整步跳过
         const alreadyDeleted = findAlreadyDeletedTargets(currentPlan, steps);
-        if (crossRunResumeMatch?.status === 'verified') {
+        const imageTargetMismatch = findMaidImageTargetMismatch({plan:currentPlan,steps});
+        if (imageTargetMismatch) {
+          const output = {toolName:currentPlan.toolName,status:'failed',result:imageTargetMismatch,
+            summary:'Image target must match an observed identity; no provider call sent.'};
+          const step = tracker.startToolStep(currentPlan);
+          tracker.finishToolStep(step,{status:'failed',summary:output.summary,
+            errorMessage:imageTargetMismatch.reason,output});
+          execution = {output,guided:false,guide:null,message:''};
+        } else if (crossRunResumeMatch?.status === 'verified') {
           execution = buildReusedCrossRunExecution(crossRunResumeMatch);
         } else if (reusableSessionCreate) {
           execution = buildReusedSessionCreateExecution(reusableSessionCreate);
@@ -5132,6 +5142,19 @@ export const createMaidAssistantAgent = ({
           },
         });
         loopProbe(`step-${stepIndex}:react-done`);
+        if (decision?.ok && decision.action === 'final' && context.runContinuation && tracker.canTrack && !continuationCompletionReviewUsed) {
+          const pending = getMaidContinuationPendingTodos(context.runContinuation, agentTaskRuntime?.getRun?.(tracker.getRunId()));
+          if (pending.length) {
+            continuationCompletionReviewUsed = true;
+            decision = await callRoutedPlanner({ plannerFn: reactPlanner, phase: 'react', label: 'maid_react_continuation_review',
+              extraContext: {
+                maidReactSteps: modelReactSteps,
+                lastPlan: clone(observedPlan), lastOutput: clone(modelReactSteps.at(-1)?.output ?? observedOutput), lastToolOk: ok,
+                maidContinuationFeedback: { reason: 'original_todos_unfinished', todos: pending },
+              },
+            });
+          }
+        }
         if (decision?.ok && decision.action === 'final') {
           const pendingWorkflowPlan = buildPendingWorldbookPreviewApplyPlan({
             input,
@@ -5442,6 +5465,9 @@ export const createMaidAssistantAgent = ({
     const run = agentTaskRuntime?.getRun?.(restoreId) || runs.find(item => item.id === restoreId);
     if (!run && !agentTaskRuntime) return { context: { ...context, maidSkillContext: context.maidSkillContext || createMaidSkillContext(), maidSkillContextPrepared: true }, useDraftSkills: false };
     if (!run) throw Object.assign(new Error('skill_snapshot_unavailable'), { code: 'skill_snapshot_unavailable' });
+    if (sourceRunId && trim(context.roleCardId) && !runBelongsToMaidContext(run, context)) {
+      throw Object.assign(new Error('maid_previous_task_scope_mismatch'), { code: 'maid_previous_task_scope_mismatch' });
+    }
     const maidSkillContext = restoreMaidSkillContext(run) || { ...createMaidSkillContext(), catalogNeedsRefresh: true };
     return { context: { ...context, ...(run.metadata?.maidTaskInputs?.context || {}), maidSkillContext, maidSkillContextPrepared: true,
       ...(run.metadata?.maidTaskInputs ? { maidTaskInputs: clone(run.metadata.maidTaskInputs) } : {}),
@@ -5508,9 +5534,40 @@ export const createMaidAssistantAgent = ({
       ? context.runContinuation
       : null;
     const resumeRunId = runContinuation ? '' : extractMaidResumeRunId(input);
-    if (resumeRunId && typeof agentTaskRuntime?.getRun === 'function') {
+    const previousRuns = agentTaskRuntime?.listRuns?.({ kind: 'maid_assistant', limit: 100 }) || [];
+    const pendingConfirmation = resolvePendingMaidAction(previousRuns, { context }) || resolvePendingMaidImportedCardWorkflow(previousRuns, { context });
+    if (!groupWorkflow && !runContinuation && !resumeRunId && !pendingConfirmation) {
+      const followup = resolveMaidRunFollowup({ input, context,
+        runs: previousRuns });
+      if (followup) {
+        const current = getCurrentContext?.();
+        if (current && trim(current.roleCardId) !== trim(context.roleCardId)) {
+          return groupReplyResult(input, 'maid_previous_task_scope_changed', t('角色卡已变化，请在原角色卡中处理这条任务。'), 'cancelled');
+        }
+        const reply = handleMaidRunFollowup({ followup, runtime: agentTaskRuntime, input, context });
+        if (reply) {
+          if (reply.reason === 'maid_previous_task_cancelled') {
+            let persisted = false;
+            try { persisted = await agentTaskRuntime?.flush?.() !== false; } catch {}
+            if (!persisted) return { ...reply, ok: false, reason: 'maid_previous_task_cancel_not_persisted',
+              message: t('已停止当前会话中的后续执行，但取消状态尚未确认保存，请稍后检查任务历史。') };
+          }
+          return reply;
+        }
+        runContinuation = followup.continuation;
+      }
+    }
+    const requestedSourceId = resumeRunId || trim(runContinuation?.sourceRunId);
+    if (requestedSourceId && typeof agentTaskRuntime?.getRun === 'function') {
       try {
-        const sourceRun = agentTaskRuntime.getRun(resumeRunId);
+        const sourceRun = agentTaskRuntime.getRun(requestedSourceId);
+        const current = getCurrentContext?.();
+        if (!sourceRun || (current && trim(context.roleCardId) && trim(current.roleCardId) !== trim(context.roleCardId))
+          || (trim(context.roleCardId) && !runBelongsToMaidContext(sourceRun, context)
+          || sourceRun.metadata?.continuationResolution || sourceRun.metadata?.continuedByRunId
+          || sourceRun.cancelReason === 'user_cancelled_followup' || sourceRun.status === 'succeeded')) {
+          return groupReplyResult(input, 'maid_previous_task_unavailable', t('这条任务已结束、已有后续任务，或不属于当前角色卡。请从当前任务历史选择。'), 'cancelled');
+        }
         if (
           sourceRun?.kind === 'maid_assistant' &&
           (
@@ -5519,6 +5576,8 @@ export const createMaidAssistantAgent = ({
           )
         ) {
           runContinuation = resolveMaidRunContinuationFromRun(sourceRun);
+        } else {
+          return groupReplyResult(input, 'maid_previous_task_unavailable', t('这条任务已结束、已有后续任务，或不属于当前角色卡。请从当前任务历史选择。'), 'cancelled');
         }
       } catch (error) {
         logger?.debug?.('maid run continuation lookup skipped', error);
@@ -5587,7 +5646,7 @@ export const createMaidAssistantAgent = ({
       },
     };
     tracker = createMaidRunTracker({ agentTaskRuntime, input: rawUserInput, context: routedContext, promptStartedAt });
-    if (routedContext.maidSkillContext?.loaded?.length) tracker.ensureRun();
+    if (routedContext.maidSkillContext?.loaded?.length || runContinuation) tracker.ensureRun();
     try {
       const rawResult = await runPromptWithTracker(input, routedContext, tracker, groupWorkflow);
       const result = applyMaidResultPresentation(rawResult, {
@@ -5603,7 +5662,9 @@ export const createMaidAssistantAgent = ({
           logger?.debug?.('maid capability request finish skipped', error);
         }
       }
-      const finalResult = { ...result, input: rawUserInput,
+      const checkedResult = tracker.canTrack ? guardMaidContinuationResult({ result, continuation: runContinuation,
+        run: agentTaskRuntime?.getRun?.(tracker.getRunId()) }) : result;
+      const finalResult = { ...checkedResult, input: rawUserInput,
         ...(rawUserInput !== trim(input) ? { planningInput: trim(input) } : {}),
         ...(capabilityRouting ? { capabilityRouting } : {}) };
       tracker.finish(finalResult, modelUsageEntries);

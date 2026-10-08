@@ -1,5 +1,7 @@
 // Library entry point for Android and other platforms
 
+mod app_update;
+mod charx;
 mod commands;
 mod external_links;
 mod memory_db;
@@ -30,7 +32,9 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(microphone_permission::init());
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    let builder = builder.plugin(tauri_plugin_dialog::init());
+    let builder = builder
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build());
     builder
         .invoke_handler(tauri::generate_handler![
             reply_notifications::reply_notification_settings,
@@ -39,6 +43,8 @@ pub fn run() {
             reply_notifications::reply_notification_take_activation,
             reply_notifications::reply_notification_complete,
             external_links::open_external_url,
+            app_update::app_version,
+            app_update::app_update_install,
             commands::exit_app,
             commands::restart_app,
             commands::save_config,
@@ -113,6 +119,9 @@ pub fn run() {
             commands::delete_raw_reply,
             commands::read_plugin_zip,
             commands::read_zip_entries,
+            charx::read_charx,
+            charx::save_persona_charx,
+            charx::export_charx,
             commands::init_database,
             commands::create_memory,
             commands::update_memory,

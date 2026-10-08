@@ -39,7 +39,7 @@ export const buildInputAgentRequest = (config, snapshot, referenceContext = null
 
 // 输入候选与消息存储隔离；每个 Agent 只保留最新候选，写回前检查草稿修订与会话身份。
 export const createInputAgentRuntime = ({ getSnapshot, getConfig, listConfigs, captureModel, request, review, commit,
-  onChange = () => {}, resolveReference = null, budget, delayMs = 900, timeoutMs = 30000, maxConcurrent = 2,
+  onChange = () => {}, resolveReference = null, budget, delayMs = 900, maxConcurrent = 2,
   setTimer = setTimeout, clearTimer = clearTimeout } = {}) => {
   const jobs = new Map();
   let timer = null, epoch = 0, sequence = 0, disposed = false;
@@ -76,7 +76,8 @@ export const createInputAgentRuntime = ({ getSnapshot, getConfig, listConfigs, c
     while (jobs.size >= 20) { const old = [...jobs.values()].find(j => j.status !== 'running'); if (!old) break; jobs.delete(old.id); }
     const job = { id: `input-run-${Date.now()}-${++sequence}`, agentId, config, output, snapshot, invocation, scope, key, controller: new AbortController(), status: 'running' };
     jobs.set(job.id, job); emit();
-    const timeout = setTimer(() => job.controller.abort(), agentRequestTimeoutMs(config, config.tools?.enabled ? 120000 : timeoutMs));
+    const limitMs = agentRequestTimeoutMs(config);
+    const timeout = limitMs ? setTimer(() => job.controller.abort(), limitMs) : null;
     try {
       job.reference = resolveReference ? await resolveReference({ config: config.context, context: snapshot.context, messages: snapshot.messages, signal: job.controller.signal }) : null;
       if (!fresh(job)) throw new Error('任务已取消或草稿已变化');

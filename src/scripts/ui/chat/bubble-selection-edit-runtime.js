@@ -6,6 +6,14 @@ import { translateUiText as t } from '../../i18n/index.js';
 const fields = ['rawOriginal', 'rawInput', 'rawSource', 'raw'];
 const stale = () => new Error(t('消息、回复分支或存档已变化，请重新选择文字'));
 const unmapped = () => new Error(t('所选文字无法准确对应原文，请缩小选区或使用小铅笔编辑'));
+// 对不上时说明是哪一种原因；都保留「无法准确对应」，便于用户与测试识别。
+const UNMAPPED_REASONS = {
+  rendered_target_ambiguous: '所选文字在原文中出现了不止一次，无法准确对应，请多选一些上下文或使用小铅笔编辑',
+  rendered_target_unmapped: '所选文字与原文不一致，无法准确对应（可能经过正则替换或以表格显示），请使用小铅笔编辑',
+  rendered_target_order: '所选文字的显示顺序与原文不同，无法准确对应，请使用小铅笔编辑',
+  target_too_long: '所选文字过长，无法准确对应，请缩小选区或使用小铅笔编辑',
+};
+const branchWithoutOriginal = () => new Error(t('这个回复分支没有保存原文，无法准确对应，请使用小铅笔编辑'));
 const key = value => JSON.stringify(value);
 const textFields = message => Object.fromEntries(fields.filter(name => typeof message?.[name] === 'string').map(name => [name, message[name]]));
 
@@ -34,13 +42,15 @@ const reasoningRanges = (source, { prefix, suffix } = {}) => {
   }
   return ranges;
 };
-const mapText = (source, selection, boundaries) => {
-  const result = resolveRenderedAgentTarget(source, selection, { excludedRanges: reasoningRanges(source, boundaries) });
-  if (!result.ok) throw unmapped();
+// 选区可跨过标签与 Markdown 记号（逐字对应）；写回时只改动到的字，记号原样保留。
+// collapseSpaces：选区所在气泡会合并连续空白，显示的一个空格对应原文一串空格
+const mapText = (source, selection, boundaries, collapseSpaces = false) => {
+  const result = resolveRenderedAgentTarget(source, selection, { excludedRanges: reasoningRanges(source, boundaries), allowProjected: true, collapseSpaces });
+  if (!result.ok) throw UNMAPPED_REASONS[result.reason] ? new Error(t(UNMAPPED_REASONS[result.reason])) : unmapped();
   return result;
 };
-const replaceText = (target, text, boundaries) => {
-  const next = spliceRenderedAgentTarget(target, text);
+const replaceText = (target, text, boundaries, ops = null) => {
+  const next = spliceRenderedAgentTarget(target, text, { ops });
   const functions = source => extractFormatFunctionBlocks(source).map(block => block.raw);
   const thoughts = source => collectRenderedAgentExcludedRanges(source, reasoningRanges(source, boundaries))
     .map(range => source.slice(range.start, range.end));
@@ -55,13 +65,13 @@ const replaceText = (target, text, boundaries) => {
 export const createBubbleSelectionEditRuntime = ({ getContext, findMessage, loadOriginal,
   getSourceTurn = async () => null, getEnvelope = () => null, getBoundaries = () => ({}),
   renderContent = message => message.raw ?? message.content, commit, onSaved = () => {} } = {}) => {
-  const open = async ({ messageId, selectedText }) => {
+  const open = async ({ messageId, selectedText, collapseSpaces = false }) => {
     const context = { ...getContext() }, contextKey = key(context);
     const originalMessage = findMessage(messageId, context.sessionId);
     if (!canEditBubbleText(originalMessage)) throw stale();
     const active = resolveActiveSwipeMessageCore(originalMessage);
     if (Number(active.meta?.activeSwipe) > 0 && typeof active.rawOriginal !== 'string'
-      && (originalMessage.rawOriginal || originalMessage.rawOriginalRef)) throw unmapped();
+      && (originalMessage.rawOriginal || originalMessage.rawOriginalRef)) throw branchWithoutOriginal();
     const before = revision(originalMessage);
     const loaded = originalMessage.role === 'assistant' ? await loadOriginal?.(originalMessage, context) : undefined;
     const current = findMessage(messageId, context.sessionId);
@@ -75,7 +85,7 @@ export const createBubbleSelectionEditRuntime = ({ getContext, findMessage, load
     // refusing a rewritten/ambiguous source is preferable to updating only half of it.
     const boundaries = { ...getBoundaries(context) }, targets = {};
     for (const [name, source] of Object.entries(sources)) {
-      if (source.length) targets[name] = mapText(source, selectedText, boundaries);
+      if (source.length) targets[name] = mapText(source, selectedText, boundaries, collapseSpaces);
     }
     const primary = Object.values(targets)[0];
     if (!primary) throw unmapped();
@@ -99,16 +109,17 @@ export const createBubbleSelectionEditRuntime = ({ getContext, findMessage, load
     let used = false;
     return {
       text: primary.text, role: message.role,
-      async save(text) {
+      // ops：编辑器的逐字来源（与 text 对应的 eq/del/ins），保证写回与屏幕上的绿增红删一致
+      async save(text, { ops = null } = {}) {
         if (used || !fresh()) throw stale();
         const value = String(text ?? '');
         if (value === primary.text) return false;
-        const patch = Object.fromEntries(Object.entries(targets).map(([name, target]) => [name, replaceText(target, value, boundaries)]));
+        const patch = Object.fromEntries(Object.entries(targets).map(([name, target]) => [name, replaceText(target, value, boundaries, ops)]));
         // Re-read metadata to preserve independent reactions/reading state changes.
         const stored = findMessage(messageId, context.sessionId);
         const latest = resolveActiveSwipeMessageCore(stored);
         const meta = { ...(stored.meta || {}) };
-        if (imageTarget) meta.autoImagePromptRawContent = replaceText(imageTarget, value, boundaries);
+        if (imageTarget) meta.autoImagePromptRawContent = replaceText(imageTarget, value, boundaries, ops);
         const index = Number(latest.meta?.activeSwipe) || 0;
         if (meta.swipes?.length) {
           meta.activeSwipe = index;
@@ -123,7 +134,7 @@ export const createBubbleSelectionEditRuntime = ({ getContext, findMessage, load
         if (meta.swipes?.length) meta.swipes[index].content = patch.content;
         if (latest.role === 'user') patch.editedAt = Date.now();
         const sourceEnvelope = envelope ? { sourceSessionId: turn.sourceSessionId, expected: envelope,
-          text: replaceText(turnTarget, value, boundaries) } : null;
+          text: replaceText(turnTarget, value, boundaries, ops) } : null;
         if (sourceEnvelope?.text.length > 220000) throw new Error(t('修改后的原文过长，请缩短片段'));
         if (!fresh()) throw stale();
         const updated = commit({ messageId, sessionId: context.sessionId, patch, sourceEnvelope });

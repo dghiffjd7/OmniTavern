@@ -1,5 +1,6 @@
 import { t } from '../i18n/index.js';
 import { appConfirm } from './app-confirm.js';
+import { AGENT_TIMEOUT_MAX_SECONDS } from '../agent/agent-generation-settings.js';
 
 const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const statuses = { queued: '等待中', running: '处理中', succeeded: '已完成', failed: '失败', cancelled: '已停止' };
@@ -8,7 +9,6 @@ export const createUtilityAgentEditor = ({ actions, id, scope = 'local', context
   let saved = actions.getAgentConfiguration({ id, scope, context });
   context = saved.context; scope = saved.scope;
   let config = structuredClone(saved.config), disposed = false, pending = false;
-  const scoring = id === 'reply_scoring';
   const node = doc.createElement('div'); node.className = 'agent-config-editor'; node.dataset.agentCommonEditor = id;
   const options = () => ({ id, scope, context, config, revision: saved.revision });
   const hasDraft = () => JSON.stringify(config) !== JSON.stringify(saved.config);
@@ -23,8 +23,7 @@ export const createUtilityAgentEditor = ({ actions, id, scope = 'local', context
         <small>${escape([job.model, `${(job.durationMs / 1000).toFixed(1)}s`].filter(Boolean).join(' · '))} · ${tokens == null ? escape(t('未返回用量')) : `${tokens} tokens`}</small>
         ${['queued', 'running'].includes(job.status) ? `<button type="button" class="agent-center-card-action" data-cancel="${escape(job.id)}">${escape(t('停止'))}</button>` : ''}</div>
         ${job.message ? `<p role="status" class="ac-utility-message">${escape(t(job.message))}</p>` : ''}
-        ${job.title ? `<p class="ac-utility-title">${escape(job.title)}${job.previewOnly ? ` <span class="ac-utility-flag">${escape(t('仅预览'))}</span>` : ''}</p>` : ''}
-        ${(job.scores || []).map(row => `<div class="ac-utility-score${row.score >= job.threshold ? ' is-flagged' : ''}"><div class="ac-utility-score-head"><strong>${escape(row.id)}</strong><span class="ac-utility-meter" aria-hidden="true"><span style="width:${Math.round(row.score * 100)}%"></span></span><strong>${row.score.toFixed(2)}</strong>${row.score >= job.threshold ? `<span class="ac-utility-flag">${escape(t('建议关注'))}</span>` : ''}</div><p>${escape(row.text)}</p>${row.reason ? `<small>${escape(row.reason)}</small>` : ''}</div>`).join('')}</div>`;
+        ${job.title ? `<p class="ac-utility-title">${escape(job.title)}${job.previewOnly ? ` <span class="ac-utility-flag">${escape(t('仅预览'))}</span>` : ''}</p>` : ''}</div>`;
     }).join('');
   };
   let profileOptions = saved.profiles || [], renderVersion = 0;
@@ -32,20 +31,19 @@ export const createUtilityAgentEditor = ({ actions, id, scope = 'local', context
     const version = ++renderVersion;
     const sample = node.querySelector('[name=sample]')?.value || '';
     node.innerHTML = `<div class="ac-utility-head"><label>${escape(t('配置范围'))}<select name="scope"><option value="local" ${scope === 'local' ? 'selected' : ''}>${escape(t(context.place === 'writing' ? '当前角色' : '当前聊天'))}</option><option value="global" ${scope === 'global' ? 'selected' : ''}>${escape(t('全局'))}</option></select></label>
-    <p class="ac-hint">${escape(t(scoring ? '分数越高，越建议修改。评分仅供参考，不会修改正文。' : '新存档未填写名称时自动命名；手动名称保持不变。'))}</p></div>
+    <p class="ac-hint">${escape(t('新存档未填写名称时自动命名；手动名称保持不变。'))}</p></div>
     <section class="ac-utility-card">
-    <label class="ac-switch ac-utility-toggle"><span>${escape(t(scoring ? '启用评分预览' : '自动命名存档'))}</span><input type="checkbox" role="switch" name="enabled" ${config.enabled ? 'checked' : ''}></label>
+    <label class="ac-switch ac-utility-toggle"><span>${escape(t('自动命名存档'))}</span><input type="checkbox" role="switch" name="enabled" ${config.enabled ? 'checked' : ''}></label>
     <label>${escape(t('模型配置'))}<select name="profile"></select></label>
     <label>${escape(t('补充要求（可选）'))}<textarea name="prompt" rows="3">${escape(config.prompt)}</textarea></label>
-    ${scoring ? `<label>${escape(t('关注阈值'))}<input type="number" name="scoreThreshold" min="0" max="1" step="0.05" value="${config.scoreThreshold}"></label>` : ''}
-    <details class="ac-utility-disclosure"><summary>${escape(t('生成设置'))}</summary><div class="ac-row"><label>${escape(t('最大输出 token'))}<input type="number" name="maxTokens" min="16" max="16000" value="${config.maxTokens}"></label><label>${escape(t('超时（秒）'))}<input type="number" name="timeoutSeconds" min="5" max="300" value="${config.timeoutSeconds}"></label></div></details>
+    <details class="ac-utility-disclosure"><summary>${escape(t('生成设置'))}</summary><div class="ac-row"><label>${escape(t('最大输出 token'))}<input type="number" name="maxTokens" min="16" max="16000" value="${config.maxTokens}"></label><label>${escape(t('最长等待'))}<select name="timeoutMode"><option value="follow" ${config.timeoutMode !== 'custom' ? 'selected' : ''}>${escape(t('跟随模型配置'))}</option><option value="custom" ${config.timeoutMode === 'custom' ? 'selected' : ''}>${escape(t('自定义'))}</option></select></label>${config.timeoutMode === 'custom' ? `<label>${escape(t('自定义等待（秒）'))}<input type="number" name="timeoutSeconds" min="5" max="${AGENT_TIMEOUT_MAX_SECONDS}" value="${config.timeoutSeconds ?? ''}"></label>` : ''}</div>${config.timeoutMode === 'custom' ? `<p class="ac-hint">${escape(t('自定义优先于 API 配置的请求超时。'))}</p>` : ''}</details>
     <div class="ac-actions"><button type="button" class="agent-center-card-action is-primary" data-action="save">${escape(t('保存'))}</button><button type="button" class="agent-center-card-action" data-action="reset">${escape(t(scope === 'global' ? '恢复默认' : '跟随全局配置'))}</button><small data-status role="status" aria-live="polite"></small></div>
     </section>
-    <details class="ac-utility-card ac-utility-trial" ${scoring ? 'open' : ''}><summary>${escape(t(scoring ? '手动评分' : '试运行'))}</summary>
-      <p class="ac-hint">${escape(t(scoring ? '按行分段；超过 40 行时按空行段落或相邻行合并，最多 12000 个字符。' : '试运行只预览名称，不修改存档。'))}</p>
+    <details class="ac-utility-card ac-utility-trial"><summary>${escape(t('试运行'))}</summary>
+      <p class="ac-hint">${escape(t('试运行只预览名称，不修改存档。'))}</p>
       ${scope === 'global' && actions.getAgentConfiguration({ id, scope: 'local', context })?.inherited === false ? `<p class="ac-hint">${escape(t('当前聊天有单独配置，试运行按当前聊天的配置执行。'))}</p>` : ''}
-      <label>${escape(t(scoring ? '待评分正文' : '对话摘录'))}<textarea name="sample" rows="6" maxlength="12000"></textarea></label>
-      <div class="ac-actions"><button type="button" class="agent-center-card-action" data-action="load">${escape(t(scoring ? '载入最近回复' : '载入最近对话'))}</button><button type="button" class="agent-center-card-action is-primary" data-action="run">${escape(t(scoring ? '开始评分' : '试运行'))}</button></div>
+      <label>${escape(t('对话摘录'))}<textarea name="sample" rows="6" maxlength="12000"></textarea></label>
+      <div class="ac-actions"><button type="button" class="agent-center-card-action" data-action="load">${escape(t('载入最近对话'))}</button><button type="button" class="agent-center-card-action is-primary" data-action="run">${escape(t('试运行'))}</button></div>
     </details><div data-runs class="ac-utility-results" aria-live="polite"></div>`;
     node.querySelector('[name=sample]').value = sample;
     const marker = doc.createElement('input'); marker.type = 'text'; marker.hidden = true; marker.name = 'agent-config-draft';
@@ -67,7 +65,13 @@ export const createUtilityAgentEditor = ({ actions, id, scope = 'local', context
     if (field === 'enabled') config.enabled = event.target.checked;
     else if (field === 'profile') { config.modelMode = event.target.value ? 'profile' : 'none'; config.modelProfileId = event.target.value; }
     else if (field === 'prompt') config.prompt = event.target.value;
-    else if (['maxTokens', 'timeoutSeconds', 'scoreThreshold'].includes(field)) config[field] = Number(event.target.value);
+    else if (field === 'maxTokens') config.maxTokens = Number(event.target.value);
+    else if (field === 'timeoutSeconds') { config.timeoutMode = 'custom'; config.timeoutSeconds = Number(event.target.value); }
+    else if (field === 'timeoutMode') {
+      config.timeoutMode = event.target.value === 'custom' ? 'custom' : 'follow';
+      config.timeoutSeconds = config.timeoutMode === 'custom' ? config.timeoutSeconds || 60 : null;
+      render(); node.querySelector('.ac-utility-disclosure').open = true; node.querySelector('[name=timeoutMode]')?.focus();
+    }
     updateDraft();
   });
   node.addEventListener('change', async event => {

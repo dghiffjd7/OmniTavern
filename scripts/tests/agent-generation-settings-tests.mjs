@@ -11,8 +11,17 @@ import { createCustomAgentAppRuntime } from '../../src/scripts/ui/chat/custom-ag
 import { LLMClient } from '../../src/scripts/api/client.js';
 
 const legacy = normalizeAgentConfiguration({}, 'text_completion');
-assert.deepEqual(normalizeAgentGenerationSettings(legacy), { reasoningMode: 'off', reasoningEffort: 'auto', maxTokens: 96, timeoutSeconds: 12 });
-assert.equal(normalizeAgentGenerationSettings({}, 'reply_check').timeoutSeconds, 60);
+assert.deepEqual(normalizeAgentGenerationSettings(legacy), { reasoningMode: 'off', reasoningEffort: 'auto', maxTokens: 96, timeoutMode: 'custom', timeoutSeconds: 12 }, '文本建议保留 12 秒，且明确标为自定义');
+// 其余 Agent 默认跟随所用模型配置的请求超时；旧版自动填入的默认值迁移为跟随，用户改过的值保留为自定义
+assert.deepEqual([normalizeAgentGenerationSettings({}, 'reply_check').timeoutMode, normalizeAgentGenerationSettings({}, 'reply_check').timeoutSeconds], ['follow', null]);
+assert.equal(normalizeAgentGenerationSettings({ timeoutSeconds: 120 }, 'text-edit:one').timeoutMode, 'follow');
+assert.equal(normalizeAgentGenerationSettings({ timeoutSeconds: 60 }, 'reply_check').timeoutMode, 'follow');
+assert.equal(normalizeAgentGenerationSettings({ timeoutSeconds: 60 }, 'archive_naming').timeoutMode, 'follow');
+assert.deepEqual([normalizeAgentGenerationSettings({ timeoutSeconds: 150 }, 'text-edit:one').timeoutMode, normalizeAgentGenerationSettings({ timeoutSeconds: 150 }, 'text-edit:one').timeoutSeconds], ['custom', 150]);
+assert.equal(normalizeAgentGenerationSettings({ timeoutMode: 'custom', timeoutSeconds: 120 }, 'text-edit:one').timeoutSeconds, 120, '明确自定义的值即使等于旧默认值也保留');
+assert.equal(normalizeAgentGenerationSettings({ timeoutMode: 'custom', timeoutSeconds: 6000 }, 'text-edit:one').timeoutSeconds, 6000, '上限与 API 配置一致，不再截到 300 秒');
+assert.equal(normalizeAgentGenerationSettings({ timeoutMode: 'follow', timeoutSeconds: 30 }, 'text_completion').timeoutMode, 'follow', '文本建议也可改为跟随');
+assert.equal(changeAgentReasoningMode({ timeoutMode: 'follow' }, 'on').timeoutSeconds, null, '开启思考不改动跟随的超时');
 assert.equal(normalizeAgentGenerationSettings({}, 'text-edit:one').reasoningMode, 'default');
 const enabled = { ...legacy, ...changeAgentReasoningMode(legacy, 'on'), reasoningEffort: 'low', modelMode: 'profile', modelProfileId: 'test', enabled: true };
 assert.equal(enabled.maxTokens, 4096); assert.equal(enabled.timeoutSeconds, 60);
@@ -32,7 +41,7 @@ assert.equal(store.read('reply_check', context).config.reasoningMode, 'default')
 const restored = createAgentConfigStore({ storage }).read(legacy.id, context).config;
 assert.equal(restored.reasoningEffort, 'low'); assert.equal(restored.timeoutSeconds, 60);
 let repair = normalizeAgentConfiguration({}, 'reply_check');
-const draft = { ...createFormatRepairProfileDraft(repair), reasoningMode: 'on', reasoningEffort: 'max', timeoutSeconds: 180, maxTokens: 12000 };
+const draft = { ...createFormatRepairProfileDraft(repair), reasoningMode: 'on', reasoningEffort: 'max', timeoutMode: 'custom', timeoutSeconds: 180, maxTokens: 12000 };
 repair = saveFormatRepairProfileDraft(draft, { id: draft.repairProfileId, name: 'Thinking repair' });
 await store.save({ id: 'reply_check', context, config: repair });
 repair = store.read('reply_check', context).config;
@@ -92,8 +101,14 @@ await assert.rejects(unavailable.preview(payload.messages, {}), /missing connect
 
 const bound = createCustomAgentAppRuntime({ getProfileConfig: async () => model });
 assert.equal((await bound.captureModel({ ...enabled, timeoutSeconds: 200 }, context)).timeout, 200000);
-const service = createAgentConfigurationService({ store, getContext: () => context, getProfiles: () => [model], captureModel: async () => model });
-assert.deepEqual(await service.getAgentModelInfo({ id: legacy.id, context, config: enabled }), { provider: model.provider, model: model.model, baseUrl: model.baseUrl });
+const followBound = createCustomAgentAppRuntime({ getProfileConfig: async () => ({ ...model, timeout: 6000000 }) });
+assert.equal((await followBound.captureModel({ ...enabled, timeoutMode: 'follow' }, context)).timeout, 6000000, '跟随时保留模型配置自身的请求超时');
+let infoConfig = null;
+const service = createAgentConfigurationService({ store, getContext: () => context, getProfiles: () => [{ ...model, timeout: 6000000 }],
+  captureModel: async config => { infoConfig = config; return { ...model, timeout: 6000000 }; } });
+assert.deepEqual(await service.getAgentModelInfo({ id: legacy.id, context, config: enabled }), { provider: model.provider, model: model.model, baseUrl: model.baseUrl, requestTimeoutMs: 6000000 });
+assert.equal(infoConfig.timeoutMode, 'follow', '显示「跟随模型配置 · N 秒」时读取的是模型配置自身的超时');
+assert.equal(service.getAgentConfiguration({ id: legacy.id, context }).profiles[0].requestTimeoutMs, 6000000);
 assert.equal(service.getAgentConfiguration({ id: legacy.id, context }).profiles[0].apiKey, undefined);
 
 // Configured waits reach the actual autocomplete abort timer; late output is discarded.

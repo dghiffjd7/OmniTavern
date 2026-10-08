@@ -1,9 +1,9 @@
 import { translateUiText as t } from '../../i18n/index.js';
 import { createRpMessageIconMarkup } from './rp-message-actions-ui-utils.js';
-import { createTextFragmentEditor } from './text-fragment-editor.js';
+import { createInlineTextEditor } from './inline-text-editor.js';
 import { agentIconMarkup } from '../../agent/agent-icons.js';
 
-const controls = 'a[href],button,input,textarea,select,summary,audio,video,canvas,iframe,[contenteditable="true"],.chat-reasoning,.chat-reply-preview,[data-i18n-skip-selection]';
+const controls = 'a[href],button,input,textarea,select,summary,audio,video,canvas,iframe,[contenteditable="true"],.inline-text-editor,.chat-reasoning,.chat-reply-preview,[data-i18n-skip-selection]';
 const elementOf = node => node?.nodeType === 1 ? node : node?.parentElement;
 
 // Delegated listeners survive pagination/rerenders. Touch scrolling stays native
@@ -12,7 +12,12 @@ export const bindBubbleTextSelection = ({ ui, runtime, canEdit = () => true, too
   onError = message => window.toastr?.info?.(t(message)) } = {}) => {
   const win = documentRef.defaultView, root = ui.scrollEl, selection = () => win.getSelection();
   if (!root) return { dispose() {} };
-  const editor = createTextFragmentEditor({ documentRef }), bindings = [];
+  // 聊天列表的上下留白被顶栏、输入栏盖住，编辑按钮条只停在留白以内
+  const contentBounds = () => {
+    const rect = root.getBoundingClientRect(), style = win.getComputedStyle(root);
+    return { top: rect.top + (parseFloat(style.paddingTop) || 0), bottom: rect.bottom - (parseFloat(style.paddingBottom) || 0) };
+  };
+  const editor = createInlineTextEditor({ documentRef, onError, getBounds: contentBounds }), bindings = [];
   const bar = documentRef.createElement('button'); bar.type = 'button'; bar.className = 'bubble-selection-edit'; bar.hidden = true;
   bar.innerHTML = createRpMessageIconMarkup('edit', { size:18 });
   const tools = documentRef.createElement('button'); tools.type = 'button'; tools.className = 'bubble-selection-tools'; tools.hidden = true;
@@ -140,10 +145,12 @@ export const bindBubbleTextSelection = ({ ui, runtime, canEdit = () => true, too
     const request = chosen, version = generation;
     opening = true; hideBar(); hideMenu();
     try {
-      const draft = await runtime.open({ messageId:request.messageId, selectedText:request.text });
+      // 气泡按普通排版合并连续空白时，选区里的一个空格对应原文一串空格
+      const collapseSpaces = ['normal', 'nowrap', 'pre-line'].includes(win.getComputedStyle(elementOf(request.range.startContainer)).whiteSpace);
+      const draft = await runtime.open({ messageId:request.messageId, selectedText:request.text, collapseSpaces });
       if (version !== generation || !request.bubble.isConnected) return;
       selection().removeAllRanges(); chosen = null;
-      await editor.show(draft);
+      await editor.show({ draft, range:request.range, bubble:request.bubble });
     } catch (error) { if (version === generation) onError(error.message); }
     finally { opening = false; }
   });
@@ -162,7 +169,10 @@ export const bindBubbleTextSelection = ({ ui, runtime, canEdit = () => true, too
     start: () => { picking = true; selection().removeAllRanges(); chosen = null; hideBar(); hideMenu(); },
     cancel: () => { picking = false; hideBar(); },
   });
-  const observer = new win.MutationObserver(() => { if (chosen && !chosen.bubble.isConnected) { chosen = null; hideBar(); } });
+  const observer = new win.MutationObserver(() => {
+    if (chosen && !chosen.bubble.isConnected) { chosen = null; hideBar(); }
+    if (editor.detached) editor.close();
+  });
   observer.observe(root, { childList:true, subtree:true });
   return {
     closeEditor({ dryRun = false } = {}) { if (!editor.isOpen) return false; if (!dryRun) editor.close(); return true; },

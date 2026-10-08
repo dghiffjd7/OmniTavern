@@ -9,6 +9,7 @@ import {
   buildMaidImageAttachmentSummary,
   buildMaidUserContentWithImages,
   getMaidImageAttachmentsFromContext,
+  buildMaidFileAttachmentSummary,
 } from './maid-attachment-parts.js';
 import {
   buildMaidImageGenerationContextPromptBlock,
@@ -22,7 +23,7 @@ import { MAID_APP_DISCOVERY_RULE, MAID_APP_DISCOVERY_RECOVERY_FEEDBACK } from '.
 import { buildMaidVisualSpecPromptBlock } from './maid-visual-spec.js';
 import { isMaidUserAbort } from './maid-failure-codes.js';
 import { buildMaidGenerationOptions } from './maid-generation-settings.js';
-import { MAID_MEMORY_REFERENCE_RULE, buildMaidMemoryPromptBlock } from './maid-memory-prompt.js';
+import { MAID_MEMORY_REFERENCE_RULE, MAID_MEDIA_READINESS_RULE, buildMaidMemoryPromptBlock } from './maid-memory-prompt.js';
 import {
   MAID_PROMPTED_JSON_MODE,
   MAID_PROVIDER_FC_MODE,
@@ -541,6 +542,7 @@ export const buildMaidModelPlannerMessages = ({
   const historyText = trim(conversationContext?.historyText);
   const imageAttachments = getMaidImageAttachmentsFromContext(context);
   const imageSummary = buildMaidImageAttachmentSummary(imageAttachments);
+  const fileSummary = buildMaidFileAttachmentSummary(context?.maidAttachments, { recent: context?.maidRecentFileAttachments });
   const selectionBlock = buildMaidSelectionPromptBlock(context?.userSelection);
   const subAgentsBlock = buildMaidSubAgentsPromptBlock(context?.subAgents);
   const imageGenerationBlock = buildMaidImageGenerationContextPromptBlock(context?.imageGenerationContext);
@@ -561,6 +563,7 @@ export const buildMaidModelPlannerMessages = ({
     selectionBlock,
     subAgentsBlock,
     imageSummary ? `用户附图：\n${imageSummary}` : '',
+    fileSummary ? `用户附带的文件：\n${fileSummary}` : '',
     imageGenerationBlock,
     `当前会话：${trim(context?.sessionId, '-')}`,
     `UI 模式：${trim(context?.uiMode, '-')}`,
@@ -600,6 +603,7 @@ export const buildMaidModelPlannerMessages = ({
         '教我、一步步、引导等教学请求与普通展示不同：APP 的内建新手任务由本地流程处理；功能首次引导由执行层处理，不要把普通后台任务改写成界面教学。',
         '如果用户要求把附图设置为头像或壁纸，选择对应头像/壁纸工具；工具参数只传 target/name/sessionId/attachmentId 等小字段，不要把 base64 或图片 data URL 写进 args。省略 attachmentId 时工具会使用第一张附图。',
         '调用 media.generate_image 时必须完整传 subject、subjectAliases（提示词使用别名时）、target、purpose、appearance、outfit、style、targetAspectRatio；subject 或别名必须实际出现在 prompt。后续同一主体必须复用 <maid_visual_specs> 的外貌、服装与画风，不得自行改写。',
+        MAID_MEDIA_READINESS_RULE,
           '生成头像/壁纸时，target 必须精确对应随后写回的角色、联系人或聊天室；当前生图尺寸与 targetAspectRatio 不符时先停下说明，不要把错误比例图片写回。',
           'History resultBasis.artifacts records successful image references in turn order, including the observed target and design. For the same subject, retain those identity details unless the user changes them. To reuse the first or a previous image, use that exact attachmentId with the matching target and purpose; do not generate a replacement and call it the original. A recorded reference does not prove current availability or authorize an overwrite: honor tool validation and APP confirmation, and report an unavailable attachment honestly.',
         '如果 <user_selection> 提供区域ID，且用户询问图片内容、布局、配色、错位、重叠或遮挡等视觉问题，优先调用 ui.capture_region 查看该区域截图；纯文字和结构化语义已经足够时不要截图。只能传区域ID，不能自行编造坐标。',
@@ -1006,6 +1010,7 @@ export const buildMaidModelReActMessages = ({
   const historyText = trim(conversationContext?.historyText);
   const imageAttachments = getMaidImageAttachmentsFromContext(context);
   const imageSummary = buildMaidImageAttachmentSummary(imageAttachments);
+  const fileSummary = buildMaidFileAttachmentSummary(context?.maidAttachments, { recent: context?.maidRecentFileAttachments });
   const selectionBlock = buildMaidSelectionPromptBlock(context?.userSelection);
   const subAgentsBlock = buildMaidSubAgentsPromptBlock(context?.subAgents);
   const imageGenerationBlock = buildMaidImageGenerationContextPromptBlock(context?.imageGenerationContext);
@@ -1040,6 +1045,7 @@ export const buildMaidModelReActMessages = ({
     selectionBlock,
     subAgentsBlock,
     imageSummary ? `用户附图：\n${imageSummary}` : '',
+    fileSummary ? `用户附带的文件：\n${fileSummary}` : '',
     imageGenerationBlock,
     `当前会话：${trim(context?.sessionId, '-')}`,
     `UI 模式：${trim(context?.uiMode, '-')}`,
@@ -1051,6 +1057,7 @@ export const buildMaidModelReActMessages = ({
     buildMaidWorldbookObservationPromptBlock({ steps: stepList, context }),
     context?.maidWebEvidenceFeedback ? `APP evidence feedback (amount coverage only, not a factual verdict): ${JSON.stringify(context.maidWebEvidenceFeedback)}. If these are claimed as current prices, read their source or remove the unsupported claims and state what remains unconfirmed. Historical comparisons, user budgets and calculated totals may be legitimate: distinguish them explicitly and show their basis or calculation instead of inventing a current price.` : '',
     context?.maidDiscoveryRecovery ? MAID_APP_DISCOVERY_RECOVERY_FEEDBACK : '',
+    context?.maidContinuationFeedback ? `APP continuation review: ${JSON.stringify(context.maidContinuationFeedback)}. These original obligations are still unresolved. Check actual successful tool results; complete the remaining work or update maid.todo.write with the same content strings and accurate statuses. Never repeat verified writes, drop obligations, or mark them completed without evidence. If blocked, explain what remains.` : '',
     `已执行步骤与观察结果：\n${stepsText}`,
   ].filter(Boolean).join('\n');
   return [
@@ -1081,6 +1088,8 @@ export const buildMaidModelReActMessages = ({
         'APP 界面可能以简体中文、繁体中文或英文显示；识别与操作元素时优先使用 inspect 返回的 semanticKey/ref，不要假定可见文案固定为某一种语言。',
         '作品资料世界书必须用 sourceLayer 区分 canon、user_original、creative_extension；canon 的 sourceRefs 只能引用 <maid_source_grounding> 中 relevant 的完整 URL。严格“不编造”任务不得省略资料层，也不得把创意扩写当 canon。',
         'media.generate_image 必须完整传 subject/subjectAliases/target/purpose/appearance/outfit/style/targetAspectRatio，并复用 <maid_visual_specs> 的冻结设计；生成附件只能写回相同 target 与 purpose。',
+        MAID_MEDIA_READINESS_RULE,
+        'A successful media.generate_image with attachmentId completes that image generation, including a requested visual revision. Continue to the authorized application or present the image. Do not keep rewriting its prompt and generating again in the same turn. requested_media_already_generated / localToolExecutionSkipped means the APP reused an already successful image; report it as available, never as provider quota exhaustion or generation failure.',
         'app.ui.inspect 拿到按钮 ref 后，如果用户要求点击，下一步使用 featureId=app.ui.click、toolName=ui.click_element 并传该 ref；不要改写 featureId，也不要用 todo 代替点击。',
         '最终回答只能陈述已执行工具步骤中真实完成的操作；用户要求的操作（如点击、切换、发送）如果没有对应的成功步骤，就不能说已完成——要么先用工具真正执行，要么如实说明你改用了什么方式（如“从页面统计直接读到了数字，没有切换过滤器”）。',
         '任务规划判据：todo 只用于跨 3 个及以上不同功能域、且包含写入、生成或较长处理链的复杂任务；多个结构化资源的只读比较不需要 todo，打开→检查→点击这类短界面序列也不要写清单。',

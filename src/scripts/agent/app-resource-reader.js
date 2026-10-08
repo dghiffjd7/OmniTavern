@@ -1,6 +1,7 @@
 import { extractSafeRegexFormatEvidence } from '../storage/maid-format-profile-evidence-utils.js';
 import { readWorldAiGenerationSettings as readSharedWorldAiGenerationSettings } from '../utils/world-ai-generation.js';
 import { captureWorldbookResourceOwnership } from './worldbook-resource-ownership.js';
+import { normalizeCharacterCard } from '../utils/character-card.js';
 
 export const SUPPORTED_APP_RESOURCES = Object.freeze([
   'chat',
@@ -637,6 +638,10 @@ const createProfileReader = (deps, kind = 'persona') => async (args = {}) => {
       const projected = projectAppProfile(item, activeId, requestedFields, includeFull);
       if (kind === 'persona' && requestedFields.includes('associations')) {
         projected.associations = projectPersonaAssociations(item);
+      }
+      if (kind === 'persona' && requestedFields.includes('greetings')) {
+        const card = normalizeCharacterCard(item.originalCard || {});
+        projected.greetings = sanitizeAppResourceValue([card.first_mes, ...card.alternate_greetings].filter(Boolean));
       }
       return projected;
     }),

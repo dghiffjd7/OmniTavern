@@ -594,6 +594,8 @@ export const buildAgentCenterView = ({
   continuationCommitPolicy = null,
   resourceStatus = {},
   memoryMode = 'table',
+  // 自动生图总开关（APP 设置）；生图 Agent 卡片的开关跟随它
+  autoImageEnabled = undefined,
   limit = 50,
 } = {}) => {
   const normalizedMemoryMode = normalizeMemoryMode(memoryMode);
@@ -624,6 +626,7 @@ export const buildAgentCenterView = ({
     agentCenterSettings,
     runView,
     memoryMode: normalizedMemoryMode,
+    cardEnabledOverrides: typeof autoImageEnabled === 'boolean' ? { image_director: autoImageEnabled } : {},
   });
   const promptModules = buildAgentPromptModuleCardList({
     agentCenterSettings,

@@ -987,7 +987,6 @@
       "src/scripts/ui/agent-toolbox.js#ui-call",
       "src/scripts/ui/agent-toolbox.js#ui-definition",
       "src/scripts/ui/app.js#dom-assignment",
-      "src/scripts/ui/chat/text-fragment-editor.js#ui-call",
       "src/scripts/ui/maid-settings-panel.js#dom-assignment"
     ]
   },
@@ -1110,6 +1109,13 @@
     ]
   },
   {
+    "source": "{name}·表情",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/character-card-asset-writer.js#ui-call"
+    ]
+  },
+  {
     "source": "{name}（{count} 行）",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -1210,12 +1216,6 @@
     "source": "{value} 测试期间不会自动保存或启用规则。",
     "references": [
       "src/scripts/ui/chat-fc-compatibility-panel.js#ui-property"
-    ]
-  },
-  {
-    "source": "{value} 超时",
-    "references": [
-      "src/scripts/ui/chat/hopscotch-turn-runtime.js#ui-call"
     ]
   },
   {
@@ -1772,6 +1772,12 @@
     "source": "「{name}」的回复已完成",
     "references": [
       "src/scripts/ui/app.js#ui-call"
+    ]
+  },
+  {
+    "source": "「{previous}」→「{next}」，原世界书仍会保留",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -2568,13 +2574,6 @@
     ]
   },
   {
-    "source": "按段查看正文的修改必要性评分，手动运行并保留原文。",
-    "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual",
-      "src/scripts/ui/agent-center-card-catalog.js#ui-definition"
-    ]
-  },
-  {
     "source": "按发送，把第一句话交给角色。",
     "references": [
       "src/scripts/ui/maid-onboarding-flows.js#ui-definition"
@@ -2666,12 +2665,6 @@
   },
   {
     "source": "按行拆分条目",
-    "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
-    ]
-  },
-  {
-    "source": "按行分段；超过 40 行时按空行段落或相邻行合并，最多 12000 个字符。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -2878,6 +2871,12 @@
     ]
   },
   {
+    "source": "白色",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "败",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -2904,6 +2903,7 @@
   {
     "source": "版本",
     "references": [
+      "src/index.html#html-text",
       "src/scripts/ui/maid-skill-ui.js#ui-call"
     ]
   },
@@ -2957,9 +2957,21 @@
     ]
   },
   {
+    "source": "绑定创意写作专属世界书",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "绑定到当前聊天室",
     "references": [
       "src/scripts/ui/app.js#html-text"
+    ]
+  },
+  {
+    "source": "绑定到该预设，会改变聊天内容的显示或发送给模型的文本",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -3001,6 +3013,18 @@
   },
   {
     "source": "绑定世界书：",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "绑定世界书到角色卡",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "绑定世界书到聊天室",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -3171,6 +3195,13 @@
     "source": "保存 Key 失败",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "保存（Ctrl+Enter）",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/chat/inline-text-editor.js#ui-call"
     ]
   },
   {
@@ -3497,7 +3528,7 @@
     "source": "保存修改",
     "references": [
       "src/scripts/ui/agent-center-panel.js#html-text",
-      "src/scripts/ui/chat/text-fragment-editor.js#ui-call"
+      "src/scripts/ui/chat/inline-text-editor.js#ui-call"
     ]
   },
   {
@@ -3631,6 +3662,13 @@
       "src/scripts/ui/app.js#html-text",
       "src/scripts/ui/image-generation-params-utils.js#ui-builder",
       "src/scripts/ui/image-generation-params-utils.js#ui-definition"
+    ]
+  },
+  {
+    "source": "背景 1 张（设为该角色创意写作的聊天背景）",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/character-card-importer.js#ui-call"
     ]
   },
   {
@@ -4158,6 +4196,18 @@
     ]
   },
   {
+    "source": "比较世界书并提出合并方案",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "比较同名联系人并提出方案",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "比较值",
     "references": [
       "src/scripts/ui/world-editor/world-node-editor-core.js#html-text",
@@ -4352,12 +4402,6 @@
     ]
   },
   {
-    "source": "编辑片段",
-    "references": [
-      "src/scripts/ui/chat/text-fragment-editor.js#ui-call"
-    ]
-  },
-  {
     "source": "编辑启用项的附加字段；停用项保留在列表。生成参数仍由预设管理，原值保留供整理。",
     "references": [
       "src/scripts/ui/request-params-panel.js#ui-call"
@@ -4411,6 +4455,19 @@
     "source": "编辑摘要",
     "references": [
       "src/scripts/ui/moment-summary-panel.js#html-text"
+    ]
+  },
+  {
+    "source": "编辑中的文字",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/chat/inline-text-editor.js#ui-call"
+    ]
+  },
+  {
+    "source": "编修群聊成员",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -4992,6 +5049,13 @@
     ]
   },
   {
+    "source": "表情 {count} 张（作为该角色的表情贴图包）",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/character-card-importer.js#ui-call"
+    ]
+  },
+  {
     "source": "表情包",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -5202,6 +5266,18 @@
   },
   {
     "source": "补全完成，已写入内容并保存",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "补全完成，已写入内容并保存（联网失败，本次未联网）",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "补全完成，已写入内容并保存（原生联网失败，已改用搜索服务）",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -6305,6 +6381,12 @@
     ]
   },
   {
+    "source": "查看脚本",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "查看结果",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
@@ -6316,6 +6398,12 @@
     "references": [
       "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
       "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
+    ]
+  },
+  {
+    "source": "查看女仆长期记忆",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -6335,6 +6423,12 @@
     "references": [
       "src/scripts/ui/agent-reference-editor.js#ui-call",
       "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "查看世界书列表",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -6363,6 +6457,18 @@
       "src/scripts/ui/agent-run-cards.js#ui-definition",
       "src/scripts/ui/agent-toolbox.js#ui-definition",
       "src/scripts/ui/chat/agent-suggestion-banner.js#ui-call"
+    ]
+  },
+  {
+    "source": "查看选区截图",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "查看预设",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -6405,10 +6511,22 @@
     ]
   },
   {
+    "source": "查看正则",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "查看指定应用功能的使用方法。",
     "references": [
       "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
       "src/scripts/agent/custom-agent-tool-catalog.js#ui-property"
+    ]
+  },
+  {
+    "source": "查看最近错误",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -6594,22 +6712,9 @@
     ]
   },
   {
-    "source": "超时 {value}ms",
-    "references": [
-      "src/scripts/ui/chat/creative-turn-orchestrator.js#ui-call"
-    ]
-  },
-  {
-    "source": "超时（毫秒）",
-    "references": [
-      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
-    ]
-  },
-  {
     "source": "超时（秒）",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual",
-      "src/scripts/ui/utility-agent-editor.js#ui-call"
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -6752,6 +6857,12 @@
     ]
   },
   {
+    "source": "成功操作记录：{items}。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "成功获取 {count} 个可用模型",
     "references": [
       "src/scripts/ui/realtime/realtime-settings-panel.js#ui-call",
@@ -6861,6 +6972,12 @@
     ]
   },
   {
+    "source": "橙色",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "持有者",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
@@ -6944,6 +7061,13 @@
       "src/scripts/ui/world-editor/world-variable-picker.js#dom-assignment",
       "src/scripts/ui/world-editor/world-variable-picker.js#html-attribute",
       "src/scripts/ui/world-editor/world-variable-picker.js#html-text"
+    ]
+  },
+  {
+    "source": "除角色资料、开场白、世界书等公共内容外，还会导入：{items}。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/character-card-importer.js#ui-call"
     ]
   },
   {
@@ -7161,6 +7285,12 @@
   },
   {
     "source": "创建后打开群聊。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "创建角色卡",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -7512,6 +7642,18 @@
     "source": "磁性男声",
     "references": [
       "src/scripts/ui/realtime/realtime-voice-catalog.js#ui-definition"
+    ]
+  },
+  {
+    "source": "此 .charx 包含不安全的资源路径，已拒绝导入。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "此 .charx 资源过大，已停止导入。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -8063,6 +8205,12 @@
     ]
   },
   {
+    "source": "打开 API 配置",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "打开 FC 兼容性失败: {value}",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -8078,6 +8226,12 @@
     "source": "打开编辑器失败",
     "references": [
       "src/scripts/ui/world-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "打开变量",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -8100,9 +8254,21 @@
     ]
   },
   {
+    "source": "打开会话配置",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "打开会话配置管理",
     "references": [
       "src/scripts/ui/preset-panel.js#dom-assignment"
+    ]
+  },
+  {
+    "source": "打开记忆",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -8112,9 +8278,35 @@
     ]
   },
   {
+    "source": "打开建群界面",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "打开角色关系图失败",
     "references": [
       "src/scripts/ui/app.js#ui-call"
+    ]
+  },
+  {
+    "source": "打开角色卡「{name}」",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/maid-import-result-actions.js#ui-call"
+    ]
+  },
+  {
+    "source": "打开脚本",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/maid-import-result-actions.js#ui-call"
+    ]
+  },
+  {
+    "source": "打开聊天室",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -8142,6 +8334,19 @@
     ]
   },
   {
+    "source": "打开世界书",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "打开世界书「{name}」",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/maid-import-result-actions.js#ui-call"
+    ]
+  },
+  {
     "source": "打开世界书定位失败",
     "references": [
       "src/scripts/ui/app.js#ui-call"
@@ -8152,6 +8357,20 @@
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/scripts/ui/microphone-permission-recovery.js#ui-property"
+    ]
+  },
+  {
+    "source": "打开预设",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/maid-import-result-actions.js#ui-call"
+    ]
+  },
+  {
+    "source": "打开正则",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/maid-import-result-actions.js#ui-call"
     ]
   },
   {
@@ -8316,6 +8535,12 @@
     ]
   },
   {
+    "source": "待办清单（可能未同步，以成功操作记录为准）：{items}。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "待保存候选",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -8386,12 +8611,6 @@
   },
   {
     "source": "待判断",
-    "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
-    ]
-  },
-  {
-    "source": "待评分正文",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -8690,6 +8909,12 @@
     "source": "当前{kind}：{name}；切换用户或角色卡",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "当前版本 v{version}。",
+    "references": [
+      "src/scripts/ui/app-update-runtime.js#ui-call"
     ]
   },
   {
@@ -9055,6 +9280,12 @@
     ]
   },
   {
+    "source": "当前环境不支持导出 .charx",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "当前环境不支持该扩展面板。",
     "references": [
       "src/scripts/ui/extensions-panel.js#html-text"
@@ -9220,12 +9451,6 @@
     "source": "当前环境暂不支持生成画像候选",
     "references": [
       "src/scripts/ui/contact-settings-panel.js#ui-call"
-    ]
-  },
-  {
-    "source": "当前回复 · 所选文字",
-    "references": [
-      "src/scripts/ui/chat/text-fragment-editor.js#ui-call"
     ]
   },
   {
@@ -9550,6 +9775,12 @@
   },
   {
     "source": "当前角色卡没有角色世界书绑定。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "当前角色卡中没有找到符合条件的任务，没有更改任何任务。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -10919,9 +11150,27 @@
     ]
   },
   {
+    "source": "导入后绑定到该世界书，会改变聊天内容的显示或发送给模型的文本",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "导入后保持关闭，需要时再单独启用",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "导入后启用",
     "references": [
       "src/scripts/ui/maid-skill-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "导入后切换到新角色卡",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -10951,6 +11200,12 @@
   },
   {
     "source": "导入角色卡：{value}",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "导入角色卡「{name}」",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -11101,6 +11356,12 @@
     ]
   },
   {
+    "source": "导入世界书「{name}」",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "导入完成",
     "references": [
       "src/scripts/ui/character-card-transfer.js#ui-property",
@@ -11194,6 +11455,12 @@
     ]
   },
   {
+    "source": "导入预设「{name}」",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "导入整套预设",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -11208,6 +11475,12 @@
   },
   {
     "source": "导入正则 {value}",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "导入正则规则",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -11845,6 +12118,13 @@
     "references": [
       "src/scripts/ui/agent-toolbox.js#ui-call",
       "src/scripts/ui/agent-toolbox.js#ui-definition"
+    ]
+  },
+  {
+    "source": "点一下恢复",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/chat/inline-text-editor.js#ui-call"
     ]
   },
   {
@@ -12627,6 +12907,18 @@
     ]
   },
   {
+    "source": "读取 .charx 失败",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "读取 APP 结构化资源",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "读取 APP 状态",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -12670,6 +12962,12 @@
   },
   {
     "source": "读取当前角色卡会话清单",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "读取当前界面摘要",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -12808,6 +13106,12 @@
   },
   {
     "source": "读取世界书「{value}」索引",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "读取世界书内容",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -13007,7 +13311,8 @@
   {
     "source": "对话摘录",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/utility-agent-editor.js#ui-call"
     ]
   },
   {
@@ -13027,12 +13332,6 @@
     "source": "对象({value})",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
-    ]
-  },
-  {
-    "source": "对照原文",
-    "references": [
-      "src/scripts/ui/chat/text-fragment-editor.js#ui-call"
     ]
   },
   {
@@ -13298,6 +13597,12 @@
     ]
   },
   {
+    "source": "发现新版本 v{version}",
+    "references": [
+      "src/scripts/ui/app-update-runtime.js#ui-call"
+    ]
+  },
+  {
     "source": "发消息",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
@@ -13494,9 +13799,15 @@
     ]
   },
   {
-    "source": "房子超时须为正数",
+    "source": "房子不存在",
     "references": [
-      "src/scripts/ui/chat/hopscotch-board-utils.js#ui-call"
+      "src/scripts/ui/chat/hopscotch-house-types.js#ui-call"
+    ]
+  },
+  {
+    "source": "房子类型",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-court-view.js#ui-call"
     ]
   },
   {
@@ -13678,12 +13989,6 @@
     ]
   },
   {
-    "source": "分数越高，越建议修改。评分仅供参考，不会修改正文。",
-    "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
-    ]
-  },
-  {
     "source": "分享精简",
     "references": [
       "src/scripts/ui/custom-bundle-exporter.js#html-text"
@@ -13784,6 +14089,12 @@
     "source": "分组重命名为「{value}」",
     "references": [
       "src/scripts/ui/group-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "粉色",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -13957,6 +14268,18 @@
     ]
   },
   {
+    "source": "附带脚本 {count} 个",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "附带正则 {count} 组",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "附加",
     "references": [
       "src/scripts/ui/request-params-panel.js#ui-call"
@@ -14025,6 +14348,12 @@
     "source": "附加图片",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "附件",
+    "references": [
+      "src/scripts/ui/maid-command-input-runtime-utils.js#ui-call"
     ]
   },
   {
@@ -14439,6 +14768,12 @@
     ]
   },
   {
+    "source": "覆盖同名世界书「{name}」",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "覆盖头像",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -14643,6 +14978,12 @@
   },
   {
     "source": "该任务不是由指令条启动的当前任务，无法从这里停止。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "该任务没有保存逐项待办，以上状态来自任务记录。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -15343,6 +15684,21 @@
     ]
   },
   {
+    "source": "跟随模型配置",
+    "references": [
+      "src/scripts/ui/agent-generation-editor.js#ui-call",
+      "src/scripts/ui/agent-generation-editor.js#ui-definition",
+      "src/scripts/ui/utility-agent-editor.js#ui-call"
+    ]
+  },
+  {
+    "source": "跟随模型配置 · {value} 秒",
+    "references": [
+      "src/scripts/ui/agent-generation-editor.js#ui-call",
+      "src/scripts/ui/agent-generation-editor.js#ui-definition"
+    ]
+  },
+  {
     "source": "跟随默认",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
@@ -15502,6 +15858,12 @@
     ]
   },
   {
+    "source": "更换角色卡「{persona}」绑定的世界书",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "更换角色世界书",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -15524,6 +15886,12 @@
     "source": "更换音档",
     "references": [
       "src/scripts/ui/realtime/realtime-enrollment-view.js#ui-definition"
+    ]
+  },
+  {
+    "source": "更新",
+    "references": [
+      "src/scripts/ui/app-update-runtime.js#ui-call"
     ]
   },
   {
@@ -15705,6 +16073,12 @@
     "source": "工具设置",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "工具箱",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-court-view.js#ui-call"
     ]
   },
   {
@@ -16027,6 +16401,12 @@
     "source": "故障降级（主模型请求失败时自动用备用配置重试一次）",
     "references": [
       "src/scripts/ui/maid-settings-panel.js#html-text"
+    ]
+  },
+  {
+    "source": "挂到「{value}」旁",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
   },
   {
@@ -16516,13 +16896,6 @@
     ]
   },
   {
-    "source": "关注阈值",
-    "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual",
-      "src/scripts/ui/utility-agent-editor.js#ui-call"
-    ]
-  },
-  {
     "source": "观察",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -16730,6 +17103,12 @@
   },
   {
     "source": "归档女仆长期记忆",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "规划模型请求失败",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -17238,6 +17617,12 @@
     ]
   },
   {
+    "source": "黑色",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "黑体 · 清爽",
     "references": [
       "src/index.html#html-text"
@@ -17251,6 +17636,12 @@
   },
   {
     "source": "哼",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "红色",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -17552,6 +17943,12 @@
     ]
   },
   {
+    "source": "黄色",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "恢复",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
@@ -17821,6 +18218,12 @@
     ]
   },
   {
+    "source": "会改变聊天内容的显示或发送给模型的文本",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "会话",
     "references": [
       "src/index.html#html-text",
@@ -17881,6 +18284,12 @@
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
+    ]
+  },
+  {
+    "source": "会话格式画像",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -18919,6 +19328,8 @@
   {
     "source": "继续导入",
     "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/character-card-importer.js#ui-property",
       "src/scripts/ui/experience-pack-transfer.js#ui-property"
     ]
   },
@@ -19154,6 +19565,13 @@
     ]
   },
   {
+    "source": "检测到 CCv3 角色卡",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/character-card-importer.js#ui-property"
+    ]
+  },
+  {
     "source": "检测到 MVU 变量卡",
     "references": [
       "src/scripts/ui/character-card-importer.js#ui-property"
@@ -19266,6 +19684,19 @@
     "references": [
       "src/scripts/ui/agent-toolbox.js#ui-definition",
       "src/scripts/ui/chat/context-menu-ui-utils.js#ui-property"
+    ]
+  },
+  {
+    "source": "检查更新",
+    "references": [
+      "src/index.html#html-text",
+      "src/scripts/ui/app-update-runtime.js#ui-call"
+    ]
+  },
+  {
+    "source": "检查更新失败，请稍后再试。",
+    "references": [
+      "src/scripts/ui/app-update-runtime.js#ui-call"
     ]
   },
   {
@@ -19398,6 +19829,12 @@
     ]
   },
   {
+    "source": "检索女仆能力",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "简化结构",
     "references": [
       "src/scripts/ui/app.js#html-text"
@@ -19461,13 +19898,6 @@
     "source": "建议保留相同原文和双方独有内容；同名原文不同的条目请逐项选择左侧、右侧或两者。确认方案后仍须通过 APP 的写入确认，不会自动覆盖或删除任何一本。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
-    ]
-  },
-  {
-    "source": "建议关注",
-    "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual",
-      "src/scripts/ui/utility-agent-editor.js#ui-call"
     ]
   },
   {
@@ -19574,6 +20004,30 @@
     "source": "将创建新联系人并导入变量/世界书/正则等配置。",
     "references": [
       "src/scripts/ui/character-card-transfer.js#ui-property"
+    ]
+  },
+  {
+    "source": "将从附件导入角色卡「{name}」，包含以下内容。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "将从附件导入世界书「{name}」（{count} 条），请确认以下内容。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "将从附件向「{target}」导入 {count} 条正则规则，它们会改变聊天内容的显示或发送给模型的文本。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "将导入预设并切换为当前创意写作预设，同时导入附带的正则。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -20030,7 +20484,8 @@
     "source": "角色卡",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
-      "src/scripts/ui/app.js#html-text"
+      "src/scripts/ui/app.js#html-text",
+      "src/scripts/ui/maid-command-input-runtime-utils.js#ui-call"
     ]
   },
   {
@@ -20086,6 +20541,12 @@
     "source": "角色卡导入",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "角色卡导入失败，已撤销本次导入：{value}",
+    "references": [
+      "src/scripts/ui/character-card-importer.js#ui-call"
     ]
   },
   {
@@ -20185,7 +20646,19 @@
     ]
   },
   {
+    "source": "角色卡文件导入说明",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "角色卡详情",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "角色卡已变化，请在原角色卡中处理这条任务。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -20243,7 +20716,7 @@
   {
     "source": "角色设定",
     "references": [
-      "src/scripts/ui/character-card-importer.js#ui-property"
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -20350,6 +20823,12 @@
     "source": "脚本",
     "references": [
       "src/scripts/ui/extensions-panel.js#ui-property"
+    ]
+  },
+  {
+    "source": "脚本 {count} 个",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -20873,6 +21352,12 @@
     ]
   },
   {
+    "source": "界面点击操作",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "界面与调试",
     "references": [
       "src/scripts/ui/general-settings-panel.js#html-text"
@@ -21063,12 +21548,6 @@
     ]
   },
   {
-    "source": "仅替换所选文字",
-    "references": [
-      "src/scripts/ui/chat/text-fragment-editor.js#ui-call"
-    ]
-  },
-  {
     "source": "仅替换选定范围",
     "references": [
       "src/scripts/agent/text-edit-runtime.js#ui-definition"
@@ -21215,6 +21694,12 @@
   },
   {
     "source": "仅支持 PNG 或 JSON 角色卡",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "仅支持 PNG、JSON 或 .charx 角色卡",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -21589,6 +22074,12 @@
     ]
   },
   {
+    "source": "开场白 {count} 个",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "开场白 {value}",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -21773,12 +22264,6 @@
     "source": "开始聊天",
     "references": [
       "src/scripts/ui/maid-onboarding-flows.js#ui-definition"
-    ]
-  },
-  {
-    "source": "开始评分",
-    "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -22449,6 +22934,12 @@
     ]
   },
   {
+    "source": "蓝色",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "朗读",
     "references": [
       "src/scripts/ui/chat/context-menu-dom-utils.js#dom-assignment",
@@ -22479,6 +22970,7 @@
     "source": "类型",
     "references": [
       "src/scripts/memory/default-template.js#ui-definition",
+      "src/scripts/ui/chat/hopscotch-court-view.js#ui-call",
       "src/scripts/ui/chat/hopscotch-variable-card-view.js#ui-call",
       "src/scripts/ui/request-params-panel.js#ui-call",
       "src/scripts/ui/variable-panel-runtime.js#html-text",
@@ -22659,6 +23151,12 @@
     "source": "历史之前（默认）",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "立即更新",
+    "references": [
+      "src/scripts/ui/app-update-runtime.js#ui-call"
     ]
   },
   {
@@ -22976,6 +23474,18 @@
     ]
   },
   {
+    "source": "联网失败，本次未联网",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "联网失败（{value}），改为不联网生成…",
+    "references": [
+      "src/scripts/ui/chat/ad-hoc-web-search-runtime.js#ui-property"
+    ]
+  },
+  {
     "source": "联网搜索",
     "references": [
       "src/scripts/agent/custom-agent-tool-catalog.js#ui-definition",
@@ -22996,7 +23506,19 @@
     ]
   },
   {
+    "source": "联网搜索网页",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "联网搜索未完成",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "联网搜索未完成，将继续不联网生成。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -23380,6 +23902,12 @@
     "references": [
       "src/scripts/ui/chat/conversation-export-utils.js#html-attribute",
       "src/scripts/ui/experience-pack-transfer.js#html-text"
+    ]
+  },
+  {
+    "source": "聊天记录导出说明",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -24002,6 +24530,12 @@
   },
   {
     "source": "路径诊断：{value} -> {value2}",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "绿色",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -24870,6 +25404,7 @@
   {
     "source": "模板",
     "references": [
+      "src/scripts/ui/chat/hopscotch-court-view.js#ui-call",
       "src/scripts/ui/variable-panel-runtime.js#html-text",
       "src/scripts/ui/variable-panel.js#html-attribute",
       "src/scripts/ui/variable-panel.js#html-text",
@@ -25241,12 +25776,6 @@
   },
   {
     "source": "模型返回了空回复（HTTP {value}{value2}）{value3}",
-    "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
-    ]
-  },
-  {
-    "source": "模型返回了无效评分",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -25989,12 +26518,6 @@
     ]
   },
   {
-    "source": "内建 Agent",
-    "references": [
-      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
-    ]
-  },
-  {
     "source": "内建房子「{value}」每板最多一个",
     "references": [
       "src/scripts/ui/chat/hopscotch-board-utils.js#ui-call"
@@ -26226,6 +26749,12 @@
     ]
   },
   {
+    "source": "你之前说过不喜欢{colors}，但「{subject}」的拟定形象包含这些颜色。要保留设定，还是避开这些颜色？",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "拟建群聊「{value}」与现有私聊同名，请先换一个群名。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -26365,6 +26894,12 @@
       "src/scripts/ui/chat/execution-flow-runtime-utils.js#html-text",
       "src/scripts/ui/maid-run-card-dom.js#ui-call",
       "src/scripts/ui/maid-run-card-model.js#ui-call"
+    ]
+  },
+  {
+    "source": "女仆任务清单",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -26794,6 +27329,12 @@
     ]
   },
   {
+    "source": "批量绑定世界书到聊天室",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "批量编辑",
     "references": [
       "src/scripts/ui/contact-settings-panel.js#html-attribute",
@@ -26975,30 +27516,6 @@
     ]
   },
   {
-    "source": "评分段落与原文不匹配",
-    "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
-    ]
-  },
-  {
-    "source": "评分结果缺少段落，请检查模型或评分要求",
-    "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
-    ]
-  },
-  {
-    "source": "评分预览最多处理 12000 个字符，请缩小范围",
-    "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
-    ]
-  },
-  {
-    "source": "评分预览最多处理 40 段，请缩小范围",
-    "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
-    ]
-  },
-  {
     "source": "评论",
     "references": [
       "src/scripts/ui/moments-card-view-utils.js#html-text",
@@ -27096,6 +27613,13 @@
     ]
   },
   {
+    "source": "其他资源 {count} 个（远程、音频等）",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/character-card-importer.js#ui-call"
+    ]
+  },
+  {
     "source": "其中 {value} 个脚本可运行，是否立即启用？",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -27115,6 +27639,24 @@
   },
   {
     "source": "启动耗时过长。以下是诊断信息，请截图或复制发给开发者。\n原因推断：",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "启停脚本",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "启停预设条目",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "启停正则",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -27283,12 +27825,6 @@
     "references": [
       "src/scripts/ui/contact-settings-panel.js#html-text",
       "src/scripts/ui/general-settings-panel.js#ui-property"
-    ]
-  },
-  {
-    "source": "启用评分预览",
-    "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -27490,6 +28026,12 @@
     ]
   },
   {
+    "source": "前情提要",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-house-types.js#ui-property"
+    ]
+  },
+  {
     "source": "前往设置",
     "references": [
       "src/scripts/ui/request-params-panel.js#ui-call"
@@ -27685,6 +28227,12 @@
   },
   {
     "source": "切换角色卡工作域",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "切换模型渠道",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -28662,12 +29210,6 @@
     ]
   },
   {
-    "source": "请填写待评分正文",
-    "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
-    ]
-  },
-  {
     "source": "请填写豆包 App ID",
     "references": [
       "src/scripts/ui/realtime/realtime-provider-catalog.js#ui-definition"
@@ -29029,6 +29571,12 @@
     ]
   },
   {
+    "source": "请先填写提示词",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-house-types.js#ui-call"
+    ]
+  },
+  {
     "source": "请先填写提示词模板",
     "references": [
       "src/scripts/ui/app.js#ui-call"
@@ -29193,6 +29741,12 @@
     "source": "请先选中要整理的节点",
     "references": [
       "src/scripts/ui/world-editor/world-node-editor-core.js#ui-call"
+    ]
+  },
+  {
+    "source": "请先在 Agent 配置中开启",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
   },
   {
@@ -29645,13 +30199,13 @@
       "src/scripts/ui/app.js#html-text",
       "src/scripts/ui/app.js#ui-property",
       "src/scripts/ui/character-card-importer.js#html-text",
+      "src/scripts/ui/character-card-importer.js#ui-property",
       "src/scripts/ui/character-card-transfer.js#ui-property",
       "src/scripts/ui/chat-image-prompt-modal.js#html-text",
       "src/scripts/ui/chat/code-viewer-ui-utils.js#dom-assignment",
       "src/scripts/ui/chat/inline-edit-ui-utils.js#html-attribute",
       "src/scripts/ui/chat/reaction-ui-utils.js#ui-call",
       "src/scripts/ui/chat/selection-mode-ui-utils.js#dom-assignment",
-      "src/scripts/ui/chat/text-fragment-editor.js#ui-call",
       "src/scripts/ui/config-panel.js#html-text",
       "src/scripts/ui/contact-group-renderer.js#html-text",
       "src/scripts/ui/contact-settings-panel.js#html-text",
@@ -29693,9 +30247,16 @@
     ]
   },
   {
+    "source": "取消（Esc）",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/chat/inline-text-editor.js#ui-call"
+    ]
+  },
+  {
     "source": "取消编辑",
     "references": [
-      "src/scripts/ui/chat/text-fragment-editor.js#ui-call",
+      "src/scripts/ui/chat/inline-text-editor.js#ui-call",
       "src/scripts/ui/maid-settings-panel.js#html-text"
     ]
   },
@@ -31202,6 +31763,13 @@
     ]
   },
   {
+    "source": "群聊专用开场白 {count} 个",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/character-card-importer.js#ui-call"
+    ]
+  },
+  {
     "source": "群聊总体大纲",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
@@ -31390,6 +31958,12 @@
     ]
   },
   {
+    "source": "任务「{goal}」：{status}。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "任务保存的版本",
     "references": [
       "src/scripts/ui/maid-skill-ui.js#ui-call"
@@ -31424,6 +31998,12 @@
   },
   {
     "source": "任务模板可编辑，输出协议由程序组装",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "任务取消未保存成功，请从任务历史中重试。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -31748,6 +32328,7 @@
       "src/scripts/ui/chat-fc-compatibility-panel.js#html-text",
       "src/scripts/ui/chat-fc-compatibility-panel.js#ui-property",
       "src/scripts/ui/chat/context-menu-ui-utils.js#ui-property",
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call",
       "src/scripts/ui/chat/selection-mode-ui-utils.js#dom-assignment",
       "src/scripts/ui/config-panel.js#dom-assignment",
       "src/scripts/ui/config-panel.js#html-attribute",
@@ -32041,6 +32622,12 @@
     ]
   },
   {
+    "source": "删除后不再自动出现在正文旁；需要时可从「+」的模板加回。",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
+    ]
+  },
+  {
     "source": "删除后无法恢复，确定要删除这条动态吗？",
     "references": [
       "src/scripts/ui/moments-menu-runtime-utils.js#ui-property"
@@ -32131,6 +32718,12 @@
     "source": "删除评论",
     "references": [
       "src/scripts/ui/moments-menu-runtime-utils.js#ui-property"
+    ]
+  },
+  {
+    "source": "删除前情提要",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
   },
   {
@@ -32739,6 +33332,18 @@
     ]
   },
   {
+    "source": "尚未完成",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "尚未完成：{items}。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "尚未选择连线配置",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -32778,6 +33383,7 @@
   {
     "source": "稍后",
     "references": [
+      "src/scripts/ui/app-update-runtime.js#ui-call",
       "src/scripts/ui/character-card-transfer.js#ui-property",
       "src/scripts/ui/custom-bundle-import-diagnostics-utils.js#ui-property",
       "src/scripts/ui/experience-pack-import-utils.js#ui-property",
@@ -32923,7 +33529,25 @@
     ]
   },
   {
+    "source": "设置角色卡头像",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "设置快捷键",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "设置联系人头像",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "设置聊天室壁纸",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -32956,6 +33580,12 @@
     "source": "设置已保存",
     "references": [
       "src/scripts/ui/app.js#ui-call"
+    ]
+  },
+  {
+    "source": "设置用户头像",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -33262,6 +33892,12 @@
     ]
   },
   {
+    "source": "生成失败（{value}）：{value}",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "生成失败（含主模型回退）。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -33315,6 +33951,18 @@
     ]
   },
   {
+    "source": "生成图片发到聊天室",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "生成图片附件",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "生成图片缺少视觉规格，不能自动写回。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -33358,6 +34006,18 @@
   },
   {
     "source": "生成完成，已写入内容并保存",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "生成完成，已写入内容并保存（联网失败，本次未联网）",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "生成完成，已写入内容并保存（原生联网失败，已改用搜索服务）",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -33780,6 +34440,12 @@
     ]
   },
   {
+    "source": "实际成功步骤：{items}。待办状态可能尚未同步，请以这些操作记录为准。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "实际路由",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -34147,13 +34813,6 @@
     ]
   },
   {
-    "source": "使用选定模型返回的评分作参考，不自动润色或修改消息。",
-    "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual",
-      "src/scripts/ui/agent-center-card-catalog.js#ui-definition"
-    ]
-  },
-  {
     "source": "使用选取",
     "references": [
       "src/scripts/ui/agent-configuration-editor.js#ui-definition"
@@ -34244,6 +34903,12 @@
     "references": [
       "src/scripts/ui/agent-reference-editor.js#ui-call",
       "src/scripts/ui/agent-reference-editor.js#ui-definition"
+    ]
+  },
+  {
+    "source": "世界书 {count} 条",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -34647,13 +35312,15 @@
   {
     "source": "试运行",
     "references": [
-      "src/scripts/ui/agent-configuration-editor.js#ui-definition"
+      "src/scripts/ui/agent-configuration-editor.js#ui-definition",
+      "src/scripts/ui/utility-agent-editor.js#ui-call"
     ]
   },
   {
     "source": "试运行只预览名称，不修改存档。",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/utility-agent-editor.js#ui-call"
     ]
   },
   {
@@ -34823,6 +35490,7 @@
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/scripts/ui/chat/execution-flow-runtime-utils.js#html-attribute",
+      "src/scripts/ui/maid-run-card-dom.js#ui-call",
       "src/scripts/ui/maid-voice-orb-ui.js#ui-call"
     ]
   },
@@ -34884,9 +35552,10 @@
     "references": [
       "src/scripts/agent/agent-invocation.js#ui-definition",
       "src/scripts/ui/agent-configuration-editor.js#ui-definition",
-      "src/scripts/ui/app.js#ui-call",
       "src/scripts/ui/chat/hopscotch-activation-utils.js#ui-call",
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call",
+      "src/scripts/ui/chat/hopscotch-court-view.js#ui-call",
+      "src/scripts/ui/chat/hopscotch-house-types.js#ui-property",
       "src/scripts/ui/variable-panel-runtime.js#html-text"
     ]
   },
@@ -34904,12 +35573,6 @@
   },
   {
     "source": "手动更新",
-    "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
-    ]
-  },
-  {
-    "source": "手动评分",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -36086,6 +36749,12 @@
     ]
   },
   {
+    "source": "搜索服务也失败（{value}），改为不联网生成…",
+    "references": [
+      "src/scripts/ui/chat/ad-hoc-web-search-runtime.js#ui-property"
+    ]
+  },
+  {
     "source": "搜索工具",
     "references": [
       "src/scripts/ui/agent-reference-editor.js#ui-call",
@@ -36409,9 +37078,33 @@
     ]
   },
   {
+    "source": "所选文字的显示顺序与原文不同，无法准确对应，请使用小铅笔编辑",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "所选文字过长，无法准确对应，请缩小选区或使用小铅笔编辑",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "所选文字无法准确对应原文，请缩小选区或使用小铅笔编辑",
     "references": [
       "src/scripts/ui/chat/bubble-selection-edit-runtime.js#ui-call"
+    ]
+  },
+  {
+    "source": "所选文字与原文不一致，无法准确对应（可能经过正则替换或以表格显示），请使用小铅笔编辑",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "所选文字在原文中出现了不止一次，无法准确对应，请多选一些上下文或使用小铅笔编辑",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -37392,6 +38085,12 @@
     ]
   },
   {
+    "source": "跳过此版本",
+    "references": [
+      "src/scripts/ui/app-update-runtime.js#ui-call"
+    ]
+  },
+  {
     "source": "跳过此组",
     "references": [
       "src/scripts/ui/regex-panel.js#ui-property"
@@ -38018,7 +38717,6 @@
       "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/scripts/ui/app.js#html-text",
       "src/scripts/ui/chat/creative-execution-lane-runtime-utils.js#ui-property",
-      "src/scripts/ui/maid-command-input-runtime-utils.js#ui-call",
       "src/scripts/ui/preset-prompt-inject-utils.js#ui-property"
     ]
   },
@@ -39442,6 +40140,12 @@
     ]
   },
   {
+    "source": "未识别的 JSON",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "未授权",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -39986,6 +40690,12 @@
     ]
   },
   {
+    "source": "未执行联网检索",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "未指定对白声音时，会沿用有效的旁白声音。",
     "references": [
       "src/index.html#html-text"
@@ -40174,6 +40884,12 @@
     ]
   },
   {
+    "source": "文件超过 20MB，暂不支持：{name}",
+    "references": [
+      "src/scripts/ui/maid-file-attachments.js#ui-call"
+    ]
+  },
+  {
     "source": "文件读取失败",
     "references": [
       "src/scripts/ui/maid-skill-messages.js#ui-call"
@@ -40244,12 +40960,6 @@
     "source": "我备好了四堂新手小课，选一堂就手把手陪主人完成。",
     "references": [
       "src/scripts/ui/maid-onboarding-entry-ui.js#ui-definition"
-    ]
-  },
-  {
-    "source": "我的消息 · 所选文字",
-    "references": [
-      "src/scripts/ui/chat/text-fragment-editor.js#ui-call"
     ]
   },
   {
@@ -40446,6 +41156,19 @@
     ]
   },
   {
+    "source": "无法打开下载链接，请稍后再试",
+    "references": [
+      "src/scripts/ui/app.js#ui-call"
+    ]
+  },
+  {
+    "source": "无法读取 .charx：{reason}",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/maid-file-attachments.js#ui-call"
+    ]
+  },
+  {
     "source": "无法读取 Realtime 绑定的设置档",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -40513,6 +41236,12 @@
   },
   {
     "source": "无法建立角色卡图片画布",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "无法解析的 JSON",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -40699,7 +41428,31 @@
     ]
   },
   {
+    "source": "无效的 .charx：不是有效的 ZIP 文件。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "无效的 .charx：根目录缺少 card.json。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "无效的 baseUrl: {value}",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "无效的 CCv3 角色数据：{value}",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "无效的 CCv3 角色数据：card.json 解析失败",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -40898,6 +41651,12 @@
     ]
   },
   {
+    "source": "系统提示词（另存为预设，不启用）",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "系统提示词已导入为预设",
     "references": [
       "src/scripts/ui/character-card-importer.js#ui-call"
@@ -41056,6 +41815,12 @@
     "source": "下载动图失败：{value}",
     "references": [
       "src/scripts/ui/app.js#ui-call"
+    ]
+  },
+  {
+    "source": "下载更新",
+    "references": [
+      "src/scripts/ui/app-update-runtime.js#ui-call"
     ]
   },
   {
@@ -41240,6 +42005,13 @@
     ]
   },
   {
+    "source": "显示或隐藏修改标记",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/chat/inline-text-editor.js#ui-call"
+    ]
+  },
+  {
     "source": "显示名称",
     "references": [
       "src/scripts/ui/voice-registry-panel.js#html-text"
@@ -41305,6 +42077,12 @@
     "source": "显示正文在原文中重复出现，请改用指定部分",
     "references": [
       "src/scripts/agent/agent-rendered-target.js#ui-definition"
+    ]
+  },
+  {
+    "source": "现有 {before} 条 → 导入 {after} 条",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -41660,6 +42438,12 @@
     ]
   },
   {
+    "source": "新版本 v{version} 可以更新",
+    "references": [
+      "src/scripts/ui/app-update-runtime.js#ui-call"
+    ]
+  },
+  {
     "source": "新表格",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -41668,7 +42452,8 @@
   {
     "source": "新存档未填写名称时自动命名；手动名称保持不变。",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/utility-agent-editor.js#ui-call"
     ]
   },
   {
@@ -41713,12 +42498,6 @@
     ]
   },
   {
-    "source": "新建 Agent",
-    "references": [
-      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
-    ]
-  },
-  {
     "source": "新建：{after}",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -41757,6 +42536,12 @@
   },
   {
     "source": "新建副本",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "新建或修改正则",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -41984,7 +42769,6 @@
   {
     "source": "新增并行房子",
     "references": [
-      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call",
       "src/scripts/ui/chat/hopscotch-court-view.js#ui-call"
     ]
   },
@@ -42108,6 +42892,12 @@
     ]
   },
   {
+    "source": "新增随时待命 Agent",
+    "references": [
+      "src/scripts/ui/chat/hopscotch-court-view.js#ui-call"
+    ]
+  },
+  {
     "source": "新增条件链",
     "references": [
       "src/scripts/ui/world-editor/world-node-editor-core.js#ui-property"
@@ -42128,7 +42918,6 @@
   {
     "source": "新增一行",
     "references": [
-      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call",
       "src/scripts/ui/chat/hopscotch-court-view.js#ui-call",
       "src/scripts/ui/chat/hopscotch-pointer-drag.js#ui-call"
     ]
@@ -42314,6 +43103,12 @@
   },
   {
     "source": "修复候选与当前正文一致，无需应用",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "修复回复格式",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -42513,19 +43308,8 @@
   {
     "source": "修改文本",
     "references": [
-      "src/scripts/ui/chat/hopscotch-board-utils.js#ui-property"
-    ]
-  },
-  {
-    "source": "修改文本：选择回复正文并生成修改建议，确认后替换。自定义提示词：独立执行任务，结果可供后续房子引用。",
-    "references": [
-      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
-    ]
-  },
-  {
-    "source": "修改文字",
-    "references": [
-      "src/scripts/ui/chat/text-fragment-editor.js#ui-call"
+      "src/scripts/ui/chat/hopscotch-board-utils.js#ui-property",
+      "src/scripts/ui/chat/hopscotch-house-types.js#ui-property"
     ]
   },
   {
@@ -42797,8 +43581,9 @@
     ]
   },
   {
-    "source": "选择 SillyTavern 兼容格式。PNG 会把角色资料写入头像图片；JSON 只导出角色资料。",
+    "source": "选择 SillyTavern 兼容格式。PNG 会把角色资料（V2 与 CCv3 两份）写入头像图片；JSON 只导出角色资料；.charx 为 CCv3 资源包，含头像及导入时附带的资源。",
     "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/scripts/ui/persona-panel.js#ui-property"
     ]
   },
@@ -43591,6 +44376,12 @@
     ]
   },
   {
+    "source": "移除附件",
+    "references": [
+      "src/scripts/ui/maid-command-input-runtime-utils.js#ui-call"
+    ]
+  },
+  {
     "source": "移除技能",
     "references": [
       "src/scripts/ui/maid-skill-ui.js#ui-call"
@@ -43608,12 +44399,6 @@
       "src/scripts/ui/agent-configuration-editor.js#ui-call",
       "src/scripts/ui/agent-configuration-editor.js#ui-definition",
       "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition"
-    ]
-  },
-  {
-    "source": "移除图片",
-    "references": [
-      "src/scripts/ui/maid-command-input-runtime-utils.js#ui-call"
     ]
   },
   {
@@ -44468,6 +45253,12 @@
     ]
   },
   {
+    "source": "已更新到 v{version}",
+    "references": [
+      "src/scripts/ui/app-update-runtime.js#ui-call"
+    ]
+  },
+  {
     "source": "已更新记忆表格生效位置",
     "references": [
       "src/scripts/ui/general-settings-panel.js#ui-call"
@@ -45068,6 +45859,12 @@
     ]
   },
   {
+    "source": "已取消这条未完成任务，已完成的结果保留，剩余步骤不再继续。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "已确认",
     "references": [
       "src/scripts/ui/realtime/realtime-usage-utils.js#ui-call"
@@ -45167,6 +45964,18 @@
     "source": "已失效",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "已是最新版本 v{version}",
+    "references": [
+      "src/scripts/ui/app-update-runtime.js#ui-call"
+    ]
+  },
+  {
+    "source": "已是最新正式版",
+    "references": [
+      "src/scripts/ui/app-update-runtime.js#ui-call"
     ]
   },
   {
@@ -45337,6 +46146,12 @@
     ]
   },
   {
+    "source": "已停止当前会话中的后续执行，但取消状态尚未确认保存，请稍后检查任务历史。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "已停止后续写表执行",
     "references": [
       "src/scripts/ui/chat/memory-update-runtime-utils.js#ui-call"
@@ -45392,6 +46207,12 @@
     "source": "已完成 {count} 步 · 展开",
     "references": [
       "src/scripts/ui/maid-run-card-dom.js#ui-call"
+    ]
+  },
+  {
+    "source": "已完成：{items}。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -45756,7 +46577,7 @@
   {
     "source": "已有 Agent",
     "references": [
-      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
+      "src/scripts/ui/chat/hopscotch-court-view.js#ui-call"
     ]
   },
   {
@@ -46002,6 +46823,13 @@
     "source": "以下类型与展示配置会在点击「保存配置」后写入。",
     "references": [
       "src/scripts/ui/variable-schema-editor.js#html-text"
+    ]
+  },
+  {
+    "source": "以下内容暂不导入：{items}。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/character-card-importer.js#ui-call"
     ]
   },
   {
@@ -46962,6 +47790,12 @@
     ]
   },
   {
+    "source": "优化回复正文",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "优化结果与原文一致，无需修改。",
     "references": [
       "src/scripts/ui/app.js#ui-property"
@@ -47100,6 +47934,12 @@
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/scripts/ui/realtime/realtime-maid-task-session.js#ui-call"
+    ]
+  },
+  {
+    "source": "有多条未完成的任务，请说明任务名称，例如：取消任务「任务名称」。也可从任务历史选择继续。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -47948,6 +48788,24 @@
     ]
   },
   {
+    "source": "原生联网失败，已改用搜索服务",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "原生联网失败（{value}），改用搜索服务…",
+    "references": [
+      "src/scripts/ui/chat/ad-hoc-web-search-runtime.js#ui-property"
+    ]
+  },
+  {
+    "source": "原生联网失败（{value}），未配置可用的搜索服务，改为不联网生成…",
+    "references": [
+      "src/scripts/ui/chat/ad-hoc-web-search-runtime.js#ui-property"
+    ]
+  },
+  {
     "source": "原生联网搜索完成",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -47988,6 +48846,13 @@
     "source": "原始角色卡数据无效",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "原始卡片数据会完整保存。是否继续？",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/character-card-importer.js#ui-call"
     ]
   },
   {
@@ -48151,6 +49016,12 @@
   },
   {
     "source": "远景大纲",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "阅读参考的对话历史与这条回复，整理到目前为止的前情提要：按时间顺序分条列出关键事件、人物关系的变化和尚未解决的线索。只总结已经发生的内容，不续写、不评价。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -48567,13 +49438,8 @@
   {
     "source": "载入最近对话",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
-    ]
-  },
-  {
-    "source": "载入最近回复",
-    "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/utility-agent-editor.js#ui-call"
     ]
   },
   {
@@ -48598,6 +49464,18 @@
     "source": "暂不思考，优先最稳格式",
     "references": [
       "src/scripts/ui/chat-fc-compatibility-panel.js#html-text"
+    ]
+  },
+  {
+    "source": "暂不支持加密的 .charx 文件。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "暂不支持这类文件：{name}",
+    "references": [
+      "src/scripts/ui/maid-file-attachments.js#ui-call"
     ]
   },
   {
@@ -49619,6 +50497,13 @@
     ]
   },
   {
+    "source": "展开其余 {count} 项",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/maid-run-card-dom.js#ui-call"
+    ]
+  },
+  {
     "source": "展开请求预览",
     "references": [
       "src/scripts/ui/agent-center-panel.js#ui-call",
@@ -49803,6 +50688,13 @@
     "source": "找不到当前角色卡",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "找不到对应的 Agent，请重新选择类型",
+    "references": [
+      "src/scripts/ui/app.js#ui-call",
+      "src/scripts/ui/chat/hopscotch-house-types.js#ui-call"
     ]
   },
   {
@@ -49993,6 +50885,12 @@
     ]
   },
   {
+    "source": "这个回复分支没有保存原文，无法准确对应，请使用小铅笔编辑",
+    "references": [
+      "src/scripts/ui/chat/bubble-selection-edit-runtime.js#ui-call"
+    ]
+  },
+  {
     "source": "这个技能标识已存在，请换一个",
     "references": [
       "src/scripts/ui/maid-skill-messages.js#ui-call"
@@ -50076,12 +50974,6 @@
     "source": "这里仅展示注入构成、请求配置与响应诊断；完整消息正文只在“完整 Prompt”分页出现。",
     "references": [
       "src/scripts/ui/chat/prompt-preview-view-utils.js#html-text"
-    ]
-  },
-  {
-    "source": "这里显示当前落点可添加的功能；已放入流程或融合组的项目可直接在房子中配置。",
-    "references": [
-      "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
     ]
   },
   {
@@ -50232,6 +51124,18 @@
   },
   {
     "source": "这条阶段条件需要改写",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "这条任务尚未确认全部完成，已保留已完成的结果和剩余步骤。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "这条任务已结束、已有后续任务，或不属于当前角色卡。请从当前任务历史选择。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
@@ -50580,15 +51484,6 @@
     "source": "正文可优化",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
-    ]
-  },
-  {
-    "source": "正文评分",
-    "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual",
-      "src/scripts/storage/agent-config-store.js#ui-definition",
-      "src/scripts/ui/agent-center-card-catalog.js#ui-definition",
-      "src/scripts/ui/agent-center-card-catalog.js#ui-property"
     ]
   },
   {
@@ -50965,6 +51860,12 @@
     ]
   },
   {
+    "source": "正在检查更新…",
+    "references": [
+      "src/scripts/ui/app-update-runtime.js#ui-call"
+    ]
+  },
+  {
     "source": "正在检查任务调用与结果回传…",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
@@ -51223,6 +52124,12 @@
     ]
   },
   {
+    "source": "正在下载更新，安装完成后会自动重启。",
+    "references": [
+      "src/scripts/ui/app-update-runtime.js#ui-call"
+    ]
+  },
+  {
     "source": "正在写入本地资料...",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -51335,6 +52242,12 @@
     "source": "正则",
     "references": [
       "src/scripts/ui/app.js#ui-property"
+    ]
+  },
+  {
+    "source": "正则 {count} 条",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -51493,6 +52406,7 @@
     "source": "知道了",
     "references": [
       "src/scripts/ui/agent-center-panel.js#ui-property",
+      "src/scripts/ui/app-update-runtime.js#ui-call",
       "src/scripts/ui/character-card-importer.js#ui-property",
       "src/scripts/ui/chat/agent-suggestion-banner.js#ui-call",
       "src/scripts/ui/preset-panel.js#ui-property"
@@ -52065,6 +52979,12 @@
     "source": "中断",
     "references": [
       "src/scripts/ui/maid-settings-panel.js#ui-property"
+    ]
+  },
+  {
+    "source": "中断原因：{reason}。",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -53000,6 +53920,12 @@
     ]
   },
   {
+    "source": "紫色",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "字段",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -53094,12 +54020,15 @@
   {
     "source": "自定义",
     "references": [
+      "src/scripts/ui/agent-generation-editor.js#ui-call",
+      "src/scripts/ui/agent-generation-editor.js#ui-definition",
       "src/scripts/ui/chat/reaction-ui-utils.js#ui-call",
       "src/scripts/ui/custom-bundle-exporter.js#html-text",
       "src/scripts/ui/image-prompt/image-prompt-editor.js#ui-definition",
       "src/scripts/ui/maid-skill-panel.js#ui-call",
       "src/scripts/ui/realtime/realtime-provider-catalog.js#ui-definition",
-      "src/scripts/ui/realtime/realtime-provider-catalog.js#ui-property"
+      "src/scripts/ui/realtime/realtime-provider-catalog.js#ui-property",
+      "src/scripts/ui/utility-agent-editor.js#ui-call"
     ]
   },
   {
@@ -53185,6 +54114,14 @@
     ]
   },
   {
+    "source": "自定义等待（秒）",
+    "references": [
+      "src/scripts/ui/agent-generation-editor.js#ui-call",
+      "src/scripts/ui/agent-generation-editor.js#ui-definition",
+      "src/scripts/ui/utility-agent-editor.js#ui-call"
+    ]
+  },
+  {
     "source": "自定义反应",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
@@ -53244,7 +54181,8 @@
   {
     "source": "自定义提示词",
     "references": [
-      "src/scripts/ui/chat/hopscotch-board-utils.js#ui-property"
+      "src/scripts/ui/chat/hopscotch-board-utils.js#ui-property",
+      "src/scripts/ui/chat/hopscotch-house-types.js#ui-property"
     ]
   },
   {
@@ -53292,6 +54230,14 @@
       "src/scripts/ui/variable-panel-runtime.js#html-attribute",
       "src/scripts/ui/variable-schema-editor.js#dom-assignment",
       "src/scripts/ui/variable-schema-editor.js#html-attribute"
+    ]
+  },
+  {
+    "source": "自定义优先于 API 配置的请求超时。",
+    "references": [
+      "src/scripts/ui/agent-generation-editor.js#ui-call",
+      "src/scripts/ui/agent-generation-editor.js#ui-definition",
+      "src/scripts/ui/utility-agent-editor.js#ui-call"
     ]
   },
   {
@@ -53436,6 +54382,12 @@
     ]
   },
   {
+    "source": "自动更新失败，已为你打开下载页面。",
+    "references": [
+      "src/scripts/ui/app-update-runtime.js#ui-call"
+    ]
+  },
+  {
     "source": "自动换行",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
@@ -53477,7 +54429,8 @@
   {
     "source": "自动命名存档",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/utility-agent-editor.js#ui-call"
     ]
   },
   {
@@ -54095,10 +55048,11 @@
     ]
   },
   {
-    "source": "最长等待（秒）",
+    "source": "最长等待",
     "references": [
       "src/scripts/ui/agent-generation-editor.js#ui-call",
-      "src/scripts/ui/agent-generation-editor.js#ui-definition"
+      "src/scripts/ui/agent-generation-editor.js#ui-definition",
+      "src/scripts/ui/utility-agent-editor.js#ui-call"
     ]
   },
   {
@@ -54405,7 +55359,7 @@
     ]
   },
   {
-    "source": "Agent 执行超时，请稍后重试",
+    "source": "Agent 执行超时（超过此 Agent 自定义的等待时间）",
     "references": [
       "src/scripts/agent/custom-agent-request-runtime.js#ui-definition"
     ]
@@ -54969,6 +55923,12 @@
     ]
   },
   {
+    "source": "App 搜索工具已完成检索，正在整理回答…",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
     "source": "APP 已保留实际读取的世界书资料，请明确要比较的两本世界书；尚未选择合并目标，也未执行修改。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -55136,6 +56096,12 @@
     "source": "card.json 读取失败",
     "references": [
       "src/scripts/ui/character-card-transfer.js#ui-call"
+    ]
+  },
+  {
+    "source": "card.json 解析失败",
+    "references": [
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -55780,12 +56746,6 @@
   },
   {
     "source": "MVU 变量已转换到创意写作会话",
-    "references": [
-      "src/scripts/ui/character-card-importer.js#ui-call"
-    ]
-  },
-  {
-    "source": "MVU 转换失败，已跳过",
     "references": [
       "src/scripts/ui/character-card-importer.js#ui-call"
     ]

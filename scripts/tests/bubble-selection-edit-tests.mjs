@@ -118,3 +118,54 @@ const setup = (message = assistant(), options = {}) => {
   await(await f.open()).save('');assert.equal(f.store.findMessage('a1',f.context.sessionId).rawOriginal,'');assert.equal(deleted,1);
   console.log('ok - deleting the complete selection clears its old disk original');
 }
+{
+  // 选区跨过 XML 标签与 Markdown 记号：每份原文副本都逐字对应，写回只改动到的字，标签与记号保留
+  const original = '<think>想一想。</think>\n<content>"走吧。"*她拉起他的手*，<span class="q">"别怕。"</span></content>';
+  const display = '"走吧。"*她拉起他的手*，<span class="q">"别怕。"</span>';
+  const message = { id:'a1', role:'assistant', type:'text', status:'sent', rawOriginal:original, rawSource:display, raw:display, content:display };
+  const f = setup(message);
+  const draft = await f.runtime.open({ messageId:'a1', selectedText:'"走吧。"她拉起他的手，"别怕。"' });
+  await draft.save('"走吧。"她轻轻拉起他的手，"别怕，有我。"');
+  const saved = f.store.findMessage('a1', f.context.sessionId);
+  assert.equal(saved.rawOriginal, '<think>想一想。</think>\n<content>"走吧。"*她轻轻拉起他的手*，<span class="q">"别怕，有我。"</span></content>');
+  assert.equal(saved.raw, '"走吧。"*她轻轻拉起他的手*，<span class="q">"别怕，有我。"</span>');
+  assert.equal(saved.rawSource, saved.raw);
+  console.log('ok - selections across XML tags and markdown markers map every raw mirror and keep the markup');
+}
+{
+  // 编辑器的逐字来源（ops）传到每份原文副本：新增按屏幕显示的位置写回
+  const raw = '衣服*湿了*。';
+  const f = setup({ id:'a1', role:'assistant', type:'text', status:'sent', raw, rawSource:raw, content:raw });
+  const draft = await f.runtime.open({ messageId:'a1', selectedText:'衣服湿了。' });
+  await draft.save('衣服湿了湿了。', { ops:[{ type:'eq', text:'衣服' }, { type:'ins', text:'湿了' }, { type:'eq', text:'湿了。' }] });
+  const saved = f.store.findMessage('a1', f.context.sessionId);
+  assert.equal(saved.raw, '衣服湿了*湿了*。');
+  assert.equal(saved.rawSource, saved.raw);
+  console.log('ok - editor provenance ops decide where projected insertions land');
+}
+{
+  // 选区两侧的空格在原文里紧挨着所选文字时一起编辑：整段删掉不留空格
+  const raw = '前文  拉拉  后文';
+  const f = setup({ id:'a1', role:'assistant', type:'text', status:'sent', raw, rawSource:raw, content:raw });
+  const draft = await f.runtime.open({ messageId:'a1', selectedText:'  拉拉  ' });
+  assert.equal(draft.text, '  拉拉  ');
+  await draft.save('');
+  assert.equal(f.store.findMessage('a1', f.context.sessionId).raw, '前文后文');
+  // 合并空白的气泡：选区里显示的一个空格带上原文整串空格
+  const g = setup({ id:'a1', role:'assistant', type:'text', status:'sent', raw, rawSource:raw, content:raw });
+  const collapsed = await g.runtime.open({ messageId:'a1', selectedText:' 拉拉 ', collapseSpaces:true });
+  assert.equal(collapsed.text, '  拉拉  ');
+  await collapsed.save('');
+  assert.equal(g.store.findMessage('a1', g.context.sessionId).raw, '前文后文');
+  console.log('ok - edge spaces that exist in the raw text are edited with the selection');
+}
+{
+  // 对不上时说明具体原因
+  const ambiguous = setup({ id:'a1', role:'assistant', type:'text', status:'sent', raw:'*好的*。\n他点头。\n好的。', content:'好的。\n他点头。\n好的。' });
+  await assert.rejects(ambiguous.runtime.open({ messageId:'a1', selectedText:'好的。' }), /出现了不止一次/);
+  const rewritten = setup({ id:'a1', role:'assistant', type:'text', status:'sent', raw:'他沉默了...', content:'他沉默了……' });
+  await assert.rejects(rewritten.runtime.open({ messageId:'a1', selectedText:'他沉默了……' }), /与原文不一致/);
+  const branch = assistant(); delete branch.meta.swipes[1].rawOriginal;
+  await assert.rejects(setup(branch).open(), /没有保存原文/);
+  console.log('ok - unmapped selections explain whether the text repeats, was rewritten for display or the branch lacks its original');
+}

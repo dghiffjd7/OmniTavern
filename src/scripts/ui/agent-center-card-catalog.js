@@ -16,11 +16,6 @@ const AGENT_CARD_DEFINITIONS = Object.freeze([
     enabledDefault: false, toggleKind: 'feature', runtimeKinds: ['archive_naming'], promptRefs: [], resourceRefs: [], settingRefs: [],
   },
   {
-    id: 'reply_scoring', title: '正文评分', summary: '按段查看正文的修改必要性评分，手动运行并保留原文。',
-    detail: ['使用选定模型返回的评分作参考，不自动润色或修改消息。'], category: 'creative', accent: 'check', implemented: true,
-    enabledDefault: false, toggleKind: 'feature', runtimeKinds: ['reply_scoring'], promptRefs: [], resourceRefs: [], settingRefs: [],
-  },
-  {
     id: 'image_director',
     title: '生图 Agent',
     summary: '根据对话自动整理生图标签和图片提示词。',
@@ -294,18 +289,21 @@ const buildFeatureCards = (featureAgents = []) => (Array.isArray(featureAgents) 
     ].filter(Boolean),
   }));
 
+// cardEnabledOverrides：卡片开关由 APP 设置决定时传入（如生图 Agent 跟随自动生图总开关），与卡片状态同时为真才算开启
 const buildCatalogCards = ({
   agentCenterSettings = {},
   runs = [],
   memoryMode = 'table',
+  cardEnabledOverrides = {},
 } = {}) => AGENT_CARD_DEFINITIONS.map((definition) => {
   const state = normalizeCardSettingState(agentCenterSettings, definition.id, definition.enabledDefault !== false);
   const cardGroup = classifyCatalogCard(definition.id);
+  const override = isPlainObject(cardEnabledOverrides) ? cardEnabledOverrides[definition.id] : undefined;
   return {
     ...definition,
     cardType: cardGroup === 'agent' ? 'catalog' : cardGroup,
     cardGroup,
-    enabled: state.enabled,
+    enabled: typeof override === 'boolean' ? override && state.enabled : state.enabled,
     updatedAt: state.updatedAt,
     runtimeState: pickLatestRuntimeState(definition.runtimeKinds, runs),
   };
@@ -316,6 +314,7 @@ export const buildAgentCardList = ({
   agentCenterSettings = {},
   runView = {},
   memoryMode = 'table',
+  cardEnabledOverrides = {},
 } = {}) => {
   const runs = Array.isArray(runView?.runs) ? runView.runs : [];
   const featureCards = buildFeatureCards(featureAgents)
@@ -325,7 +324,7 @@ export const buildAgentCardList = ({
       cardGroup: 'agent',
       runtimeState: pickLatestRuntimeState(card.runtimeKinds, runs),
     }));
-  const catalogCards = buildCatalogCards({ agentCenterSettings, runs, memoryMode });
+  const catalogCards = buildCatalogCards({ agentCenterSettings, runs, memoryMode, cardEnabledOverrides });
   return featureCards.concat(catalogCards.filter(card => card.cardGroup === 'agent')).filter(card => trim(card.id));
 };
 

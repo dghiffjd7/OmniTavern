@@ -1,4 +1,6 @@
 import { normalizeMaidImageAttachments } from '../maid-attachment-parts.js';
+import { buildTavernV2CharacterCard } from '../../utils/character-card-export.js';
+import { normalizeCharacterCard } from '../../utils/character-card.js';
 import { validateMaidWorldbookSourcePlan } from '../maid-source-grounding.js';
 import { BUILTIN_PHONE_FORMAT_WORLDBOOK_ID } from '../../storage/builtin-worldbooks.js';
 import { resolveWorldSessionBindingMutation } from '../../storage/world-session-binding-utils.js';
@@ -1514,6 +1516,8 @@ export const createAppContentAgentTools = ({
       properties: {
         name: { type: 'string', minLength: 1, maxLength: 80 },
         description: { type: 'string', maxLength: 12000 },
+        greetings: { type: 'array', minItems: 1, maxItems: 10, description: 'Opening messages saved to the character card. The first is the default; the rest are selectable alternatives. Include the total number the user requested.',
+          items: { type: 'string', minLength: 1, maxLength: 4000 } },
         avatar: { type: 'string', maxLength: 500000 },
         setActive: { type: 'boolean' },
         allowDuplicate: { type: 'boolean' },
@@ -1526,10 +1530,15 @@ export const createAppContentAgentTools = ({
         return { ok: false, created: false, reason: 'persona_store_unavailable' };
       }
       const existing = args.allowDuplicate === true ? null : findStoreItem(personaStore, name);
+      const greetings = (Array.isArray(args.greetings) ? args.greetings : []).map(value => trim(value)).filter(Boolean).slice(0, 10);
       const profile = existing || await personaStore.create({
         name,
         avatar: trim(args.avatar),
         description: trim(args.description),
+        ...(greetings.length ? { originalCard: buildTavernV2CharacterCard({
+          persona: { name, description: trim(args.description) },
+          rawCard: { first_mes: greetings[0], alternate_greetings: greetings.slice(1) },
+        }) } : {}),
         source: {
           type: 'character_card',
           cardName: name,
@@ -1541,11 +1550,13 @@ export const createAppContentAgentTools = ({
         if (typeof switchPersona === 'function') await switchPersona(profile.id || name);
         else if (typeof personaStore.setActive === 'function') await personaStore.setActive(profile.id);
       }
+      const storedCard = normalizeCharacterCard(profile?.originalCard || {});
       return {
         ok: true,
         created: !existing,
         personaId: trim(profile?.id),
         profile: summarizeProfile(profile),
+        ...(greetings.length ? { greetings: [storedCard.first_mes, ...storedCard.alternate_greetings].filter(Boolean) } : {}),
       };
     },
     summarizeResult: result => result?.created
@@ -3899,8 +3910,8 @@ export const createAppContentAgentTools = ({
         waitForReply: { type: 'boolean' },
       },
     },
-    timeoutMs: 180000,
-    timeoutErrorCode: 'generation_failed',
+    // 等待角色回复的时长跟随聊天所用模型配置的请求超时，工具层不另设上限。
+    timeoutMs: 0,
     execute: async (args = {}, context = {}) => {
       const content = trim(args.content || args.message || args.text);
       if (!content) return { ok: false, sent: false, reason: 'missing_content' };
@@ -4040,7 +4051,8 @@ export const createAppContentAgentTools = ({
       destructive: 'never',
       description: 'Generates a new image and appends it as a chat message; it does not edit or delete existing content.',
     },
-    timeoutMs: 180000,
+    // 生图时长跟随生图模型配置的请求超时。
+    timeoutMs: 0,
     schema: {
       type: 'object',
       required: ['prompt'],

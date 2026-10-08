@@ -474,13 +474,21 @@ const createStorage = () => {
     new URL('../../src/scripts/ui/persona-panel.js', import.meta.url),
     'utf8',
   );
-  const greetingWriteIndex = importerSource.indexOf('this.rpSessionStore.setGreetings(');
-  const importFinalizedIndex = importerSource.indexOf('emitWorldInfoChanged(');
-  const greetingReadyIndex = importerSource.indexOf('this.onGreetingsImported?.(');
+  // 写入顺序在角色卡导入服务的 commit 里：开场白 → 世界书／正则／脚本 → 回写角色来源并通知世界书变化；
+  // 导入器在 commit 完成后才调用开场白就绪回调
+  const serviceSource = await readFile(
+    new URL('../../src/scripts/import/character-card-import-service.js', import.meta.url),
+    'utf8',
+  );
+  const commitBody = serviceSource.slice(serviceSource.indexOf('const commit = async'));
+  const greetingWriteIndex = commitBody.indexOf('await writeGreetings(');
+  const importFinalizedIndex = commitBody.indexOf('onWorldInfoChanged(');
   assert.ok(greetingWriteIndex >= 0);
   assert.ok(importFinalizedIndex > greetingWriteIndex);
+  assert.ok(importerSource.includes('this.rpSessionStore.setGreetings('));
+  const importCardBody = importerSource.slice(importerSource.indexOf('async importCard('));
   assert.ok(
-    greetingReadyIndex > importFinalizedIndex,
+    importCardBody.indexOf('this.onGreetingsImported?.(') > importCardBody.indexOf('await this.service.commit('),
     '导入完成回调必须等世界书、正则和角色来源资料完成后，才播种并刷新开场白',
   );
   assert.match(personaPanelSource, /onGreetingsImported:[\s\S]*this\.notifyGreetingsImported/);

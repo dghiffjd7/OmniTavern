@@ -81,6 +81,20 @@ test('captured initial JSON unsupported gets one public discovery before claimin
   assert.ok(replayed.calls.length <= 2, 'one recovery must not loop on repeated unsupported');
 });
 
+test('K03 captured memory refusal discovers the actual archive tool without changing memories', async () => {
+  const initial = { ok: false, reason: 'unsupported_intent', message: '抱歉，我目前没有删除或修改长期记忆条目的工具，只能查看和归档记忆。您可以打开记忆面板手动删除那条「不喜欢粉色」的记录。' };
+  const replayed = await replay({ input: '忘掉我说过不喜欢粉色的事', initial });
+  assert.deepEqual(replayed.executed.map(tool => tool.name), ['app.search_feature']);
+  assert.ok(replayed.executed[0].output.result.features.some(feature => feature.id === 'maid.memory.archive'));
+  assert.ok(replayed.calls.length <= 2);
+});
+
+test('memory discovery does not interpret reassurance, negation or no-lookup as archive permission', () => {
+  for (const input of ['忘掉烦恼吧，陪我聊聊', '不要忘记我说过不喜欢粉色', '忘记偏好是什么意思', '忘掉那个偏好，但不要查记忆', "Don't forget my preference", 'I wish I could forget that memory']) {
+    assert.equal(shouldRecoverMaidAppDiscovery({ input, decision: capturedUnsupported }), false, input);
+  }
+});
+
 test('captured colloquial APP requests discover real tools before claiming they are unavailable', async () => {
   for (const [input, message, featureId] of colloquialRefusals) {
     const replayed = await replay({ input, initial: { ok: false, reason: 'unsupported_intent', message } });
@@ -198,5 +212,15 @@ test('failed public lookup is attempted once and existing task evidence prevents
   assert.ok(replayed.calls.length <= 2);
   for (const context of [{ maidDiscoveryRecovery: {} }, { maidReactSteps: [{ toolName: 'worldbook.list', status: 'succeeded' }] }, { runContinuation: { successfulSteps: [] } }]) {
     assert.equal(shouldRecoverMaidAppDiscovery({ input: '把旧世界书删了', decision: capturedUnsupported, context }), false);
+  }
+});
+
+test('colloquial batch avatar generation discovers single-target tools without inventing permission', async () => {
+  for (const input of ['给所有没头像的人都生一个', '帮没头像的好友补一张', 'generate avatars for contacts without one']) {
+    const result = await replay({ input });
+    assert.equal(result.executed[0]?.name, 'app.search_feature', input);
+  }
+  for (const input of ['不要给所有没头像的人都生一个', '给所有没头像的人都生一个，但不要查', '如何给没头像的人都生一个']) {
+    assert.equal(shouldRecoverMaidAppDiscovery({ input, decision: capturedUnsupported }), false, input);
   }
 });

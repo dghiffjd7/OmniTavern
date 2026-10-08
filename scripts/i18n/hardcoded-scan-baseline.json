@@ -96,6 +96,36 @@
     "reason": "This chooser is rendered before locale selection and deliberately presents English, Simplified Chinese, and Traditional Chinese together."
   },
   {
+    "file": "src/scripts/import/attachment-file-inspector.js",
+    "text": "CCv3 群聊专用开场白 \u0000 个暂不导入",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/import/attachment-file-inspector.js",
+    "text": "CCv3 资源 \u0000 个暂不导入（\u0000）",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/import/attachment-file-inspector.js",
+    "text": "整套预设设定档需在预设面板导入（选择覆盖或合并）",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/import/attachment-file-inspector.js",
+    "text": "世界书没有条目",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/import/attachment-file-inspector.js",
+    "text": "脚本文件为空",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
     "file": "src/scripts/memory/contact-profile-utils.js",
     "text": "这个",
     "category": "language_data",
@@ -2095,7 +2125,7 @@
   },
   {
     "file": "src/scripts/ui/realtime/realtime-maid-tools.js",
-    "text": "Delegate an app request to the maid agent, inspect its progress, stop it, revise an unfinished request, or confirm a pending permission request. Execute returns",
+    "text": "Delegate app work with execute. For an unfinished task, use revise when the user changes or adds constraints to the same goal; select its task_id. For independe",
     "category": "agent_semantic_source",
     "reason": "Model-facing realtime tool descriptions and task-update protocol text. The quoted confirmation keyword (允许 / yes) must match what users actually say to confirm, so it is not UI copy; user-visible strings in these files use t()."
   },
@@ -2274,6 +2304,66 @@
     "reason": "Remaining strings are message/media sentinels, legacy Chinese parser aliases, stable role names, or embedded bridge contracts; changing them would break existing chats or imports."
   },
   {
+    "file": "src/scripts/utils/character-card-assets.js",
+    "text": "暂不支持的资源类型",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/utils/character-card-assets.js",
+    "text": "远程资源（不自动下载）",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/utils/character-card-assets.js",
+    "text": "文件中没有附带",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/utils/character-card-assets.js",
+    "text": "默认资源",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/utils/character-card-assets.js",
+    "text": "无法识别的资源地址",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/utils/character-card-assets.js",
+    "text": "不是图片",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/utils/character-card-assets.js",
+    "text": "多余的背景（只导入第一张）",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/utils/character-card-assets.js",
+    "text": "资源数量超出上限",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/utils/character-card-assets.js",
+    "text": "资源缺失",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/utils/character-card-assets.js",
+    "text": "资源过大",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
     "file": "src/scripts/utils/phone-format-time-prompt.js",
     "text": "前后依然要加发言人和时间",
     "category": "protocol_compatibility",
@@ -2446,11 +2536,5 @@
     "text": "根据本轮对话判断好感度变化（-5~+5 之间的整数，只输出数字）。",
     "category": "prompt_fallback",
     "reason": "These literals are canonical fallbacks behind prompt-locale builders; English actual-send output is asserted by prompt-locale and memory-template tests."
-  },
-  {
-    "file": "src/scripts/ui/realtime/realtime-maid-tools.js",
-    "text": "Delegate app work with execute. For an unfinished task, use revise when the user changes or adds constraints to the same goal; select its task_id. For independe",
-    "category": "agent_semantic_source",
-    "reason": "Realtime tool JSON Schema instructions. Chinese permission words are canonical intent examples for the model, not product UI copy."
   }
 ]

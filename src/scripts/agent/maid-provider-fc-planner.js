@@ -4,6 +4,7 @@ import { buildProviderFcRequestPlan, resolveProviderFcTransport } from './provid
 import { toProviderToolModelName } from './provider-tool-name-map.js';
 import { buildMaidReasoningBaseOptions, hasReasoningOptions } from './maid-generation-settings.js';
 import { getReasoningCapability } from '../api/model-capabilities.js';
+import { findExplicitReadToolOwner } from './maid-capability-routing.js';
 
 export const MAID_PROVIDER_FC_MODE = 'provider_fc';
 export const MAID_PROMPTED_JSON_MODE = 'prompted_json';
@@ -189,7 +190,8 @@ const buildToolDescription = (feature = {}, toolName = '') => truncate([
 ].filter(Boolean).join('。'), 480);
 
 const selectOfferedToolOwner = (owners = [], toolName = '') => (
-  owners.find(feature => trim(feature.id) === toolName)
+  findExplicitReadToolOwner(toolName, owners)
+  || owners.find(feature => trim(feature.id) === toolName)
   || owners.filter(feature => feature.writes === false)
     .sort((left, right) => Number(trim(right.directAction) === toolName) - Number(trim(left.directAction) === toolName)
       || trim(left.id).localeCompare(trim(right.id)))[0]
@@ -225,14 +227,17 @@ export const buildMaidProviderFcToolPlan = ({
         missingSchemas.push({ featureId: trim(feature?.id), toolName: internalName });
         return;
       }
-      const auxiliaryRead = feature.writes === true && SERIAL_READ_TOOLS.has(internalName);
+      const auxiliaryRead = SERIAL_READ_TOOLS.has(internalName)
+        && trim(feature.id) !== internalName && trim(feature.directAction) !== internalName;
+      const toolMetadata = feature.toolMetadata?.[internalName] || {};
       toolMappings.push({
         providerName: toProviderSafeName(internalName, usedNames),
         internalName,
         featureId: trim(feature?.id),
         title: auxiliaryRead ? internalName : trim(feature?.title, feature?.id || internalName),
         description: auxiliaryRead
-          ? `Read-only auxiliary tool ${internalName}, offered under APP capability ${trim(feature.id)}. This call reads data only; it does not create, bind, or otherwise complete the parent capability's write operation. Use the parameters in this tool's schema. APP capability: ${trim(feature.id)}; internal tool: ${internalName}`
+          ? truncate([trim(toolMetadata.title), trim(toolMetadata.description),
+            `Read-only auxiliary tool ${internalName}. Use this tool's schema; its parent workflow is not this tool's action. APP capability: ${trim(feature.id)}; internal tool: ${internalName}`].filter(Boolean).join(' '), 480)
           : buildToolDescription(feature, internalName),
         schema: clone(schemas[internalName], { type: 'object' }),
         control: false,

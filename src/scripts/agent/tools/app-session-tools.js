@@ -354,6 +354,7 @@ export const createAppSessionAgentTools = ({
           offset: { type: 'integer', minimum: 0 },
           includeGroups: { type: 'boolean' },
           groupsOnly: { type: 'boolean' },
+          hasAvatar: { type: 'boolean', description: 'Filter by whether the contact has an avatar, before pagination. Use false to find missing avatars.' },
         },
       },
       execute: async (args = {}) => {
@@ -363,8 +364,9 @@ export const createAppSessionAgentTools = ({
         const matching = resolveContactList(contactsStore)
           .filter(contact => !isRpLikeId(contact?.id))
           .filter(contact => includeGroups || !(contact?.isGroup === true || isGroupLikeId(contact?.id)))
-          .filter(contact => args.groupsOnly !== true || contact?.isGroup === true || isGroupLikeId(contact?.id));
-        const contacts = matching.slice(offset, offset + limit).map(summarizeContact);
+          .filter(contact => args.groupsOnly !== true || contact?.isGroup === true || isGroupLikeId(contact?.id))
+          .filter(contact => typeof args.hasAvatar !== 'boolean' || Boolean(trim(contact?.avatar)) === args.hasAvatar);
+        const contacts = matching.slice(offset, offset + limit).map(contact => ({ ...summarizeContact(contact), hasAvatar: Boolean(trim(contact?.avatar)) }));
         const hasMore = offset + contacts.length < matching.length;
         return {
           count: contacts.length,

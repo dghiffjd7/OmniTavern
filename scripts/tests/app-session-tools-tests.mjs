@@ -104,7 +104,7 @@ const createHarness = () => {
   assert.equal(page.count, 1);
   assert.equal(page.hasMore, true);
   assert.equal(page.nextOffset, 2);
-  assert.deepEqual(page.contacts, [{ id: 'group-flag', name: 'Two', isGroup: true, memberCount: 1 }]);
+  assert.deepEqual(page.contacts, [{ id: 'group-flag', name: 'Two', isGroup: true, memberCount: 1, hasAvatar: false }]);
   const list = getTool(h.tools, 'session.list');
   const privateOnly = await list.execute({ includeGroups: false, limit: 100 });
   assert.equal(privateOnly.total, 31);
@@ -117,6 +117,23 @@ const createHarness = () => {
   assert.equal(h.contacts.size, 35);
   assert.deepEqual(h.entered, []);
   console.log('ok - session.list filters groups before paging and preserves explicit exclusions');
+}
+
+{
+  const h = createHarness();
+  for (let i = 0; i < 30; i++) h.contacts.set(`person-${i}`, { id: `person-${i}`, name: `Person ${i}`, avatar: i % 4 ? 'saved-avatar' : '' });
+  h.contacts.set('group:empty', { id: 'group:empty', isGroup: true });
+  h.contacts.set('rp:empty', { id: 'rp:empty' });
+  const list = getTool(h.tools, 'session.list');
+  const first = await list.execute({ includeGroups: false, hasAvatar: false, limit: 5 });
+  const last = await list.execute({ includeGroups: false, hasAvatar: false, offset: first.nextOffset, limit: 5 });
+  assert.equal(first.total, 8);
+  assert.equal(last.total, 8);
+  assert.equal(last.hasMore, false);
+  assert.deepEqual([...first.contacts, ...last.contacts].map(v => v.id), Array.from({ length: 8 }, (_, i) => `person-${i * 4}`));
+  assert.ok(first.contacts.every(v => v.hasAvatar === false));
+  assert.equal((await list.execute({ includeGroups: false, hasAvatar: true })).total, 22);
+  console.log('ok - avatar presence is filtered before paging and excludes groups and RP when requested');
 }
 
 {

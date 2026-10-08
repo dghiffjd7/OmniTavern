@@ -113,7 +113,10 @@ import { registerAppSessionAgentTools } from '../agent/tools/app-session-tools.j
 import { registerGroupChatAgentTools } from '../agent/tools/group-chat-agent-tools.js';
 import { registerAppContentAgentTools } from '../agent/tools/app-content-tools.js';
 import { registerPresetRegexScriptAgentTools } from '../agent/tools/preset-regex-script-tools.js';
+import { registerAttachmentImportAgentTools } from '../agent/tools/attachment-import-tools.js';
+import { createAttachmentImportService } from '../import/attachment-import-service.js';
 import { registerMaidMediaAssetTools } from '../agent/tools/media-asset-tools.js';
+import { createMaidMediaAttachmentPersistence } from './maid-media-attachment-persistence.js';
 import { registerAppUiCaptureTools } from '../agent/tools/app-ui-capture-tools.js';
 import { registerWebSearchAgentTools } from '../agent/tools/web-search-tools.js';
 import { registerMomentsAgentTools } from '../agent/tools/moments-tools.js';
@@ -168,6 +171,9 @@ import {
   createImageAttachmentFromFile,
   eventHasImageFiles,
 } from './image-attachment-input-utils.js';
+import { createMaidAttachmentsFromFiles, createMaidFileAttachmentRegistry } from './maid-file-attachments.js';
+import { buildMaidImportOpenActions } from './maid-import-result-actions.js';
+import { createCharacterCardAssetWriter } from './character-card-asset-writer.js';
 import { prepareImageDataUrlForAsset } from './image-transform-utils.js';
 import {
   buildGuideRects,
@@ -180,7 +186,7 @@ import { getCharacterCardBoundUserId as readCharacterCardBoundUserId, getCharact
 import { logger } from '../utils/logger.js';
 import { buildNameWithBadgesHtml, escapeHtml, getContactBadges } from '../utils/name-badges.js';
 import { FEATHER_DEFAULT, resolveLineAvatar } from '../utils/line-avatar.js';
-import { normalizeCharacterCard } from '../utils/character-card.js';
+import { normalizeCharacterCard, readCharxCard } from '../utils/character-card.js';
 import {
   initMediaAssets,
   isAssetRef,
@@ -240,8 +246,10 @@ import {
 } from './persona-runtime-utils.js';
 import {
   getRegexStore,
+  listRegexLocalSets,
   syncPresetRegexBindings,
   syncWorldRegexBindings,
+  upsertRegexLocalSet,
   waitForRegexStoreReady,
 } from './regex-store-runtime-utils.js';
 import { getScriptStore } from './script-runtime-utils.js';
@@ -552,6 +560,8 @@ import { createCustomAgentRequestRuntime } from '../agent/custom-agent-request-r
 import { createBubbleSelectionEditRuntime, canEditBubbleText } from './chat/bubble-selection-edit-runtime.js';
 import { bindBubbleTextSelection } from './chat/bubble-text-selection.js';
 import { allowsAgentInvocation, createInputRequestBudget } from '../agent/agent-invocation.js';
+import { resolveAgentToolStage } from '../agent/agent-tool-stage.js';
+import { isAgentToolReply } from '../agent/agent-tool-targets.js';
 import { createAgentReferenceAppRuntime } from './chat/agent-reference-app-runtime.js';
 import { createCustomAgentAppRuntime } from './chat/custom-agent-app-runtime.js';
 import { createAgentModelRequest } from '../agent/agent-model-request.js';
@@ -930,10 +940,11 @@ import {
   writeModeSwitchPosition,
 } from './mode-switch-position-runtime-utils.js';
 import { appConfirm, appChoice, appPromptText } from './app-confirm.js';
+import { APP_UPDATE_RELEASES_URL, bindAppUpdateUi, createAppUpdateRuntime } from './app-update-runtime.js';
 import {
-  buildAdHocWebSearchRuntime,
   createAdHocWebSearchToggleRuntime,
   renderAdHocWebSources,
+  runAdHocWebSearchChat,
 } from './chat/ad-hoc-web-search-runtime.js';
 import { bindBackdropActivation } from './backdrop-activation-utils.js';
 import {
@@ -2741,6 +2752,20 @@ const initApp = async () => {
     getMemoryStorageMode,
     getPersonaScopeKey,
     getRpSessionIdForPersona: personaId => getRpSessionId(personaId),
+    // CCv3 卡附带的表情 → 该角色创意写作会话的贴图包；背景 → 该会话的聊天背景（依赖在调用时读取）
+    cardAssetWriter: createCharacterCardAssetWriter({
+      stickerPackStore,
+      saveStickerAsset: (dataUrl, name) => saveStickerAsset(dataUrl, name, STICKER_PACK_ASSET_SESSION),
+      deleteStickerAsset: path => safeInvoke('delete_attachment', { sessionId: STICKER_PACK_ASSET_SESSION, path }),
+      compressSticker: dataUrl => (/^data:image\/gif/i.test(dataUrl)
+        ? dataUrl
+        : compressImageDataUrl(dataUrl, { maxDim: 640, quality: 0.86, maxBytes: 600_000 })),
+      chatStore,
+      saveWallpaper: args => safeInvoke('save_wallpaper', args),
+      deleteWallpaper: args => safeInvoke('delete_wallpaper', args),
+      saveOriginalCharxFile: (id, bytes) => safeInvoke('save_persona_charx', { id, bytes: Array.from(bytes) }),
+      getRpSessionId: personaId => getRpSessionId(personaId),
+    }),
     onUserPersonaSwitch: markUserPersonaSwitch,
     onPersonaChanged: async () => {
       await applyPersonaScope({ personaId: personaStore.getActive?.()?.id });
@@ -3613,7 +3638,7 @@ const initApp = async () => {
     listEnabledAgents: () => agentRegistry.listEnabledAgents(),
     chatConfigManager, createClient: config => new LLMClient(config),
     requestMaidToolConfirmation: (request, options) => requestMaidToolConfirmation(request, options),
-    buildAdHocWebSearchRuntime, logger,
+    runAdHocWebSearchChat, logger,
   });
   registerAppContentAgentTools(agentToolRegistry, {
     generateWithSubAgent,
@@ -3839,6 +3864,30 @@ const initApp = async () => {
     onRegexChanged: () => window.dispatchEvent(new CustomEvent('regex-changed')),
     onScriptsChanged: () => window.appBridge.restartScriptWorker?.('脚本已重新加载'),
   });
+  // 女仆附件导入（世界书／正则）：附件缓存与导入服务在女仆输入条装配处创建，这里按需读取
+  registerAttachmentImportAgentTools(agentToolRegistry, {
+    getAttachmentRegistry: () => maidFileAttachmentRegistry,
+    getImportService: () => maidAttachmentImportService,
+    personaStore,
+    chatStore,
+    contactsStore,
+    readWorldbookSnapshot: id => window.appBridge.getWorldInfoSnapshot?.(id),
+    // 角色卡与手动导入共用角色卡导入服务：女仆按用户的话决定导入内容与是否切换，失败整体回滚
+    planCharacterCardFile: ({ bytes, name, mime }) => personaPanel.planCardFile(new File([bytes], name, { type: mime })),
+    commitCharacterCardPlan: (planned, options) => personaPanel.commitCardPlan(planned, options),
+    scriptStore,
+    presetStore,
+    getScriptSettings: () => appSettings.get(),
+    // 预设走预设面板的同一导入流程（类型识别、切换为当前预设、附带正则／脚本的绑定方式与手动导入一致）
+    importPresetJson: ({ json, fileName, decisions }) => presetPanel.importPresetJson(json, { fileName, decisions }),
+    inspectPresetBindings: (json) => {
+      const sets = json?.boundRegexSets || json?.bound_regex_sets;
+      return {
+        regexSetCount: Array.isArray(sets) && sets.length ? sets.length : presetPanel.extractStRegexBindingSets(json).length,
+        scriptCount: presetPanel.extractPresetScripts(json).length,
+      };
+    },
+  });
   const buildCurrentMaidImageGenerationContext = ({
     config = {},
     preset = {},
@@ -3868,6 +3917,10 @@ const initApp = async () => {
     });
   };
   registerMaidMediaAssetTools(agentToolRegistry, {
+    attachmentPersistence: createMaidMediaAttachmentPersistence({
+      getReferenceStore: () => imageGenerationReferenceStore,
+      listRuns: () => agentRunStore.listRuns({ kind: 'maid_assistant', limit: 0 }), logger,
+    }),
     personaStore,
     userStore,
     contactsStore,
@@ -3930,6 +3983,7 @@ const initApp = async () => {
       const dataUrl = String(asset?.output?.dataUrl || '').trim();
       return {
         dataUrl,
+        storedImage: { path: asset?.output?.path || '', sessionId: targetSessionId || 'maid_generated_images' },
         mime: String(asset?.output?.mime || '').trim(),
         bytes: Number(asset?.output?.bytes || 0) || 0,
         generationContext: buildCurrentMaidImageGenerationContext({
@@ -4084,8 +4138,9 @@ const initApp = async () => {
       source,
     });
   };
-  const getMaidConversationContext = ({ input = '' } = {}) => maidConversationStore.getContextSnapshot({
+  const getMaidConversationContext = ({ input = '', context = {} } = {}) => maidConversationStore.getContextSnapshot({
     query: input,
+    context,
   });
   const validateMaidSemanticResource = createMaidSemanticResourceValidator({
     appBridge: window.appBridge,
@@ -4097,9 +4152,10 @@ const initApp = async () => {
     regexStore,
     scriptStore,
   });
-  const prepareMaidConversationContext = ({ input = '', realtimeHistory = null } = {}) => (
+  const prepareMaidConversationContext = ({ input = '', context = {}, realtimeHistory = null } = {}) => (
     maidConversationStore.getContextSnapshotAsync({
       query: input,
+      context,
       realtimeHistory,
       validateResource: validateMaidSemanticResource,
     })
@@ -4556,10 +4612,17 @@ const initApp = async () => {
         importGlobalSemanticPromptLibrary: (options = {}) => (
           agentCenterSettingsStore.importGlobalSemanticPromptLibrary(options?.payload || {})
         ),
-        setAgentCardEnabled: (options = {}) => agentCenterSettingsStore.setCardEnabled(
-          options?.id,
-          options?.enabled === true,
-        ),
+        setAgentCardEnabled: (options = {}) => {
+          // 生图 Agent 的开关就是自动生图总开关；关闭时保留卡片状态，免得在设置里重新打开后仍被卡片挡住
+          if (String(options?.id || '').trim() === 'image_director') {
+            appSettings.update({ autoImagePromptEnabled: options?.enabled === true });
+            if (options?.enabled !== true) return { ok: true };
+          }
+          return agentCenterSettingsStore.setCardEnabled(
+            options?.id,
+            options?.enabled === true,
+          );
+        },
         getAgentCenterProfileView: async (options = {}) => {
           const resolved = await ensureAgentCenterResolvedProfiles(options || {});
           return agentCenterSettingsStore.buildProfileView({
@@ -13766,7 +13829,7 @@ const initApp = async () => {
           try { stickerAiTextAbortController?.abort(); } catch {}
           const abortController = new AbortController();
           stickerAiTextAbortController = abortController;
-          const generation = buildAdHocWebSearchRuntime({
+          const { output, route, degraded } = await runAdHocWebSearchChat({
             client,
             config,
             enabled: useWebSearch,
@@ -13781,17 +13844,19 @@ const initApp = async () => {
                 'loading',
               );
             },
+            messages: buildMessages(),
             onSources: sources => {
               if (token !== stickerAiTextRequestToken) return;
               renderAdHocWebSources(webSourcesEl, sources);
             },
           });
-          const messages = buildMessages();
-          const output = await generation.client.chat(messages, generation.requestOptions);
           if (token !== stickerAiTextRequestToken) return;
           finalInput.value = String(output || '').trim();
           scheduleTextSave(true);
           setStatus(doneText, 'success');
+          if (useWebSearch && degraded) {
+            window.toastr?.info?.(route === 'tool' ? '原生联网失败，已改用搜索服务' : '联网失败，本次未联网');
+          }
         } catch (err) {
           if (err?.name === 'AbortError') {
             if (token === stickerAiTextRequestToken) setStatus('已停止本次生成', '');
@@ -15421,12 +15486,13 @@ const initApp = async () => {
       height: round(rect.height),
     };
   };
+  let appRuntimeVersion = '';
   let lastKeyboardVisibleDebugInfo = null;
   let captureKeyboardVisibleDebugInfo = () => {};
   const buildViewportKeyboardDebugInfo = (base, { includeLast = true } = {}) => ({
     ...base,
-    // 与 package.json / tauri.conf.json 保持一致，供诊断导出确认用户所装版本
-    appVersion: '0.7.1',
+    // 运行时读取的实际安装版本（APP 更新检查启动后填入），供诊断导出确认用户所装版本
+    appVersion: appRuntimeVersion,
     capturedAt: new Date().toISOString(),
     appState: {
       uiMode,
@@ -24174,23 +24240,45 @@ const initApp = async () => {
     isApiConfigured: () => hasConfiguredMaidProfile(),
     logger,
   });
-  const buildMaidImageAttachments = async (files = [], { source = 'maid-image-input' } = {}) => {
-    const attachments = [];
-    for (const file of Array.from(files || [])) {
-      const attachment = await createImageAttachmentFromFile(file, {
-        readFileAsDataUrl,
-        compressImageDataUrl,
-        isGifFile,
-        maxDim: 1280,
-        quality: 0.82,
-        maxBytes: 1_200_000,
-        mime: 'image/jpeg',
-        source,
-      });
-      if (attachment) attachments.push(attachment);
-    }
-    return attachments;
-  };
+  // 女仆附件：图片照旧压缩看图；JSON／角色卡 PNG 的原文件留在内存缓存，供本地解析与导入
+  const maidFileAttachmentRegistry = createMaidFileAttachmentRegistry();
+  const maidAttachmentImportService = createAttachmentImportService({
+    getAttachment: id => maidFileAttachmentRegistry.get(id),
+    worldbooks: {
+      listIds: async () => (await window.appBridge.listWorlds?.()) || [],
+      getSnapshot: id => window.appBridge.getWorldInfoSnapshot(id),
+      save: (id, world, options) => window.appBridge.saveWorldInfo(id, world, options),
+    },
+    bindWorldbook: {
+      global: async id => window.appBridge.setGlobalWorldIds([...window.appBridge.getGlobalWorldIds(), id]),
+      chatRoom: async (sessionId, id) => {
+        const result = window.appBridge.updateWorldSessionBinding(sessionId, { worldbookId: id, mode: 'append', silent: false });
+        if (result?.ok === false) throw new Error(result.reason || 'binding_update_failed');
+      },
+      roleCard: async (personaId, id) => {
+        await window.appBridge.assignRoleWorldToPersona(personaId, id);
+        await refreshChatAndContacts?.();
+      },
+    },
+    regex: {
+      ready: () => waitForRegexStoreReady(window.appBridge),
+      listLocalSets: () => listRegexLocalSets(window.appBridge),
+      upsertLocalSet: set => upsertRegexLocalSet(window.appBridge, set),
+      getGlobal: () => regexStore.getGlobal(),
+      setGlobal: value => regexStore.setGlobal(value),
+      getSession: sessionId => regexStore.getSession(sessionId),
+      setSession: (sessionId, value) => regexStore.setSession(sessionId, value),
+    },
+    onRegexChanged: () => window.dispatchEvent(new CustomEvent('regex-changed')),
+    onWorldbookImported: () => emitWorldInfoChanged(window.appBridge),
+  });
+  const buildMaidAttachments = (files = [], { source = 'maid-input' } = {}) => createMaidAttachmentsFromFiles(files, {
+    source,
+    registry: maidFileAttachmentRegistry,
+    imageOptions: { readFileAsDataUrl, compressImageDataUrl, isGifFile, maxDim: 1280, quality: 0.82, maxBytes: 1_200_000, mime: 'image/jpeg' },
+    notify: message => window.toastr?.warning?.(message),
+    readCharx: bytes => readCharxCard(bytes),
+  });
   const checkMaidVisionInput = async (attachments = [], context = {}, runtimeConfig = null) => {
     const hasImages = Array.isArray(attachments) && attachments.some(item => item?.kind === 'image' && (item.url || item.llmUrl));
     if (!hasImages) return { ok: true, capability: null };
@@ -24284,13 +24372,25 @@ const initApp = async () => {
     // 指令条盖住悬浮球：非交互区按下转发球拖拽（运行中也可挪开）
     getBallDragRuntime: () => modeSwitchInteractionRuntime,
     maxImageAttachments: 4,
-    onAttachFiles: buildMaidImageAttachments,
+    onAttachFiles: buildMaidAttachments,
     onSubmit: createMaidCommandSubmit({
       getVoiceRuntime: () => maidVoiceRuntime,
       getOnboardingRuntime: () => maidOnboardingRuntime,
       // hasConfiguredMaidProfile 在后面才赋值为真实实现，这里必须在调用时再读取
       matchMaidIntent, hasConfiguredMaidProfile: () => hasConfiguredMaidProfile(), resolveMaidRuntimeConfig: resolveMaidTaskRuntimeConfig,
       logger, checkMaidVisionInput, maidSettingsStore, buildAppFeatureSearchContextText,
+      markFileAttachmentsSubmitted: (attachments, turnContext) => attachments.forEach(item => maidFileAttachmentRegistry.markSubmitted(item.id, turnContext)),
+      listRecentFileAttachments: options => maidFileAttachmentRegistry.listRecent(options),
+      buildResultActions: result => buildMaidImportOpenActions(result?.steps, {
+        worldbook: worldId => worldPanel.openEditor(worldId),
+        roleCard: async (personaId) => {
+          await personaPanel.show();
+          personaPanel.openEdit(personaId);
+        },
+        preset: () => presetPanel.show(),
+        regex: () => regexPanel.show(),
+        script: () => scriptPanel.show(),
+      }),
       getAppContext: () => ({ sessionId: chatStore.getCurrent(), roleCardId: String(personaStore.getActive?.()?.id || ''), agentId: 'maid-assistant', uiMode, activePage, userSelection: maidSelectionMode.getItems() }),
       maidAssistantAgent,
       resolveSelectionRegion: (regionId, context) => context.source === 'maid_realtime' && (context.sessionId !== chatStore.getCurrent() || context.activePage !== activePage)
@@ -27117,6 +27217,18 @@ const initApp = async () => {
     getFormatTarget: (message, context) => resolveChatFormatRepairTarget(message, context.sessionId),
     openAgent: (id, options = {}) => agentCenterPanel.show({ tab: 'agents', agentId: id, configure: true, ...options }),
     openCenter: () => agentCenterPanel.show({ tab: 'agents' }),
+    // 流程中的 Agent 等回复走过它前面的阶段才出现在工具箱；进行中的创意写作轮次按各房子状态判断。
+    getToolGate: context => {
+      const sid = String(context?.sessionId || '');
+      if (!sid || !hopscotchTurnRuntime) return null;
+      const place = context.place === 'writing' ? 'writing' : 'chat';
+      const turn = place === 'writing' && hopscotchTurnRuntime.isSessionBusy(sid) ? hopscotchTurnRuntime.getLatestTurn(sid) : null;
+      const board = turn?.board || hopscotchTurnRuntime.resolveBoard(sid, { place }).board;
+      const states = turn ? Object.fromEntries(turn.getHouseStates().map(state => [state.id, state.status])) : null;
+      const generating = Boolean(activeGeneration && !activeGeneration.cancelled && String(activeGeneration.sessionId || '') === sid);
+      const hasReply = (chatStore.getMessages(sid) || []).some(isAgentToolReply);
+      return config => resolveAgentToolStage({ agentId: config.id, board, states, generating, hasReply }).ready;
+    },
   });
   const { textEditRuntime, actions: agentConfigurationActions } = agentToolsRuntime;
   const utilityRequests = createCustomAgentRequestRuntime({ createClient: config => new LLMClient(config) });
@@ -27323,6 +27435,17 @@ const initApp = async () => {
     },
     createTextAgent: options => agentConfigurationActions.createTextEditAgent(options),
     listTextAgents: target => agentConfigStore.list(getAgentConfigContext(), target === 'global' ? 'global' : 'effective').filter(item => item.config.kind === 'text_edit').map(item => item.config),
+    patchTextAgent: async (id, patch, { scope = 'local' } = {}) => {
+      const context = getAgentConfigContext();
+      const saved = agentConfigurationActions.getAgentConfiguration({ id, context, scope });
+      if (!saved?.config) return { ok: false, message: t('找不到对应的 Agent，请重新选择类型') };
+      return agentConfigurationActions.saveAgentConfiguration({ id, context, scope, revision: saved.revision, config: { ...saved.config, ...patch } });
+    },
+    removeTextAgent: async (id, { scope = 'local' } = {}) => {
+      const context = getAgentConfigContext();
+      const saved = agentConfigurationActions.getAgentConfiguration({ id, context, scope });
+      return agentConfigurationActions.removeAgentConfiguration({ id, context, scope, revision: saved?.revision });
+    },
     onScopeChange: () => agentCenterPanel.refresh(),
     openTextAgent: (id, options = {}) => { agentCenterPanel.openFloatingAgentCard(id, { ...options, context: getAgentConfigContext() }); },
     openInputSuggestion: () => agentCenterPanel.openFloatingAgentCard(AGENT_FEATURE_IDS.textCompletion),
@@ -27331,16 +27454,17 @@ const initApp = async () => {
       return { ...resolveFormatReviewAvailability(config, { place: uiMode === 'rp' ? 'writing' : 'chat', hasFormatGuide: Boolean(config.formatGuide.trim()) }), manualEnabled: allowsAgentInvocation(config, 'manual'), invocationMode: config.invocationMode };
     },
     openFormatReview: () => agentCenterPanel.openFloatingAgentCard(AGENT_FEATURE_IDS.replyCheck),
-    // 与流程无关的默认 Agent：正文评分挂在正文旁（手动），小管家与动态 Agent 排进“随时待命”
+    // 与每轮流程无关的内建 Agent 排进“随时待命”；未放入流程的自定义 Agent 由编排板补在其后
     getStandbyAgents: () => {
       const item = (id, trigger) => { const card = agentCenterPanel.getAgentCardById(id); return card?.implemented ? { id, title: card.title, enabled: card.enabled === true, trigger } : null; };
-      return { satellites: [item('reply_scoring', t('手动'))].filter(Boolean), standby: [item('archive_naming', t('保存存档时')), item('moment_agent', t('发布或评论动态时'))].filter(Boolean) };
+      return { standby: [item('archive_naming', t('保存存档时')), item('moment_agent', t('发布或评论动态时'))].filter(Boolean) };
     },
     openStandbyAgent: id => agentCenterPanel.openFloatingAgentCard(id),
     getWritePreviewSwitch: () => Boolean(agentCenterPanel.getAgentCardById(AGENT_FEATURE_IDS.writePreview)),
     getEnabled: () => appSettings.get().creativeHopscotchEnabled === true,
     enable: value => appSettings.update({ creativeHopscotchEnabled: value === true }),
   });
+  hopscotchTurnRuntime.subscribe(() => agentToolsRuntime.toolbox.refresh());
   patchDebugUiRegistry((registry) => {
     registry.stores.hopscotchBoardStore = hopscotchBoardStore;
     registry.stores.hopscotchTurnRuntime = hopscotchTurnRuntime;
@@ -27410,7 +27534,8 @@ const initApp = async () => {
         }
         if (entry.kind === FORMAT_FUNCTION_BLOCK_KINDS.tableEdit) {
           const contact = contactsStore.getContact(targetSessionId);
-          const parsed = await handleMemoryEditsFromRaw(blockText, {
+          // handleMemoryEditsFromRaw 只存在于 handleSend 内部；这里在其外层，须用外层的 runtime 版本
+          const parsed = await handleMemoryEditsFromRawForRuntime(blockText, {
             sessionId: targetSessionId,
             isGroup: Boolean(contact?.isGroup) || targetSessionId.startsWith('group:'),
             uiMode,
@@ -29079,9 +29204,9 @@ const initApp = async () => {
       logger,
     });
     if (activeGeneration && !activeGeneration.cancelled) {
-      // 流挂死等异常路径可能留下僵尸记录（finally 未执行）：超龄强制回收，避免发送被永久锁死。
+      // 流挂死等异常路径可能留下僵尸记录（finally 未执行）：超过「请求超时 + 缓冲」仍无任何输出才回收，避免发送被永久锁死；正常的长时间生成不受影响。
       if (isGenerationRecordStale(activeGeneration)) {
-        logger.warn('stale active generation reclaimed before send', { id: activeGeneration.id, startedAt: activeGeneration.startedAt });
+        logger.warn('stale active generation reclaimed before send', { id: activeGeneration.id, startedAt: activeGeneration.startedAt, lastActivityAt: activeGeneration.lastActivityAt, requestTimeoutMs: activeGeneration.requestTimeoutMs });
         cancelActiveGeneration('stale_reclaim');
       } else {
         recordSendFlowTraceEvent(buildSendBlockedTraceEvent({
@@ -30711,6 +30836,8 @@ const initApp = async () => {
 
     const requestRuntimeConfig = await window.appBridge.resolveRequestRuntimeConfig?.(requestPresetContext);
     const config = requestRuntimeConfig?.config || window.appBridge.getConfig();
+    // 卡死回收按这次请求的超时判断「多久没有输出」。
+    if (generationRecord) generationRecord.requestTimeoutMs = Number(config?.timeout) || 0;
     const assistantAvatar = getAssistantAvatarForSession(sessionId);
     const sysp = resolveEnabledPreset(window.appBridge, 'sysprompt', requestPresetContext);
     const protocolFlags = resolveSyspromptProtocolFlags({
@@ -33138,6 +33265,10 @@ const initApp = async () => {
       refreshChatAndContacts,
     });
   });
+  // 切换 API 配置档后，脚本（如预设伴生脚本）读到的当前 provider / 模型要跟着更新
+  window.addEventListener('config-profile-changed', () => {
+    scriptRuntime?.syncContext?.().catch(() => {});
+  });
   registerAppSessionEventListeners({
     windowLike: window,
     onOpenSessionConfig: () => sessionConfigPanel.show(),
@@ -34615,6 +34746,51 @@ const initApp = async () => {
     logger,
   });
   androidBackRuntime.start();
+  // APP 更新：启动稍后再检查 GitHub 正式版，不拖慢启动；结果用弹窗（每版一次）与小红点提示
+  {
+    let renderAppUpdate = () => {};
+    const appUpdateRuntime = createAppUpdateRuntime({
+      getCurrentVersion: () => safeInvoke('app_version'),
+      fetchReleases: async () => {
+        const controller = typeof AbortController === 'function' ? new AbortController() : null;
+        const timer = setTimeout(() => controller?.abort(), 12000);
+        try {
+          const response = await fetch(APP_UPDATE_RELEASES_URL, {
+            headers: { Accept: 'application/vnd.github+json' },
+            signal: controller?.signal,
+          });
+          if (!response.ok) throw new Error(`github_releases_http_${response.status}`);
+          return await response.json();
+        } finally {
+          clearTimeout(timer);
+        }
+      },
+      loadChangelog: async () => {
+        const response = await fetch('./assets/CHANGELOG.md', { cache: 'no-store' });
+        return response.ok ? response.text() : '';
+      },
+      getSettings: () => appSettings.get(),
+      updateSettings: patch => appSettings.update(patch),
+      choose: appChoice,
+      openExternal: url => safeInvoke('open_external_url', { url }).then(() => true, (error) => {
+        logger.warn('open app update url failed', error);
+        window.toastr?.error?.(t('无法打开下载链接，请稍后再试'));
+        return false;
+      }),
+      installDesktopUpdate: version => safeInvoke('app_update_install', { expectedVersion: version }),
+      isMobile: () => isLikelyAndroidDevice(),
+      toast: window.toastr,
+      onStateChange: view => {
+        appRuntimeVersion = view.currentVersion || appRuntimeVersion;
+        renderAppUpdate(view);
+      },
+      logger,
+    });
+    renderAppUpdate = bindAppUpdateUi({ documentRef: document, runtime: appUpdateRuntime });
+    setTimeout(() => {
+      appUpdateRuntime.start().catch(error => logger.debug('app update start failed', error));
+    }, 3000);
+  }
   void replyNotificationService.start({
     open: route => openReplyNotificationRoute(route, {
       chatStore,

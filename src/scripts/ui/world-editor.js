@@ -9,9 +9,10 @@ import { LLMClient } from '../api/client.js';
 import { bindBackdropActivation } from './backdrop-activation-utils.js';
 import { appChoice, appConfirm } from './app-confirm.js';
 import {
-    buildAdHocWebSearchRuntime,
     createAdHocWebSearchToggleRuntime,
+    describeAdHocModel,
     renderAdHocWebSources,
+    runAdHocWebSearchChat,
 } from './chat/ad-hoc-web-search-runtime.js';
 import { canInitClient as canUseApiConfig } from '../api/client-config-utils.js';
 import { ConfigManager } from '../storage/config.js';
@@ -744,7 +745,7 @@ export class WorldEditorModal {
     }
 
     applyDebugFocus({ entryId = '', blockId = '', nodeId = '' } = {}) {
-        const targetEntryId = String(entryId || '').trim();
+        const targetEntryId = String(entryId ?? '').trim();
         if (!targetEntryId) return false;
         const targetBlockId = String(blockId || '').trim();
         const targetNodeId = String(nodeId || '').trim();
@@ -2219,7 +2220,8 @@ export class WorldEditorModal {
     }
 
     async ensureChatConfigReady() {
-        const config = await this.chatConfigManager.load();
+        // 每次都重新读取：load() 会缓存首次结果，切换 API 模型档后仍会沿用旧档（曾导致选了 OpenRouter 却在调用 Gemini）
+        const config = await this.chatConfigManager.reload();
         if (!canUseApiConfig(config)) {
             window.toastr?.warning?.('请先配置聊天模型 API');
             return null;
@@ -2228,14 +2230,14 @@ export class WorldEditorModal {
     }
 
     resolveEntryById(entryId) {
-        const targetId = String(entryId || '').trim();
+        const targetId = String(entryId ?? '').trim();
         if (!targetId) {
             this.traceAi('entry.resolve.skip-empty', { entryId });
             return { idx: -1, entry: null };
         }
         const idx = this.data.entries.findIndex((entry, entryIdx) => {
             const localId = this.getEntryId(entry, entryIdx);
-            const refId = String(entry?._refEntryId || '').trim();
+            const refId = String(entry?._refEntryId ?? '').trim();
             return localId === targetId || refId === targetId;
         });
         if (idx < 0) {
@@ -2471,12 +2473,25 @@ export class WorldEditorModal {
             try { this.aiAbortController?.abort(); } catch {}
             const abortController = new AbortController();
             this.aiAbortController = abortController;
-            const generation = buildAdHocWebSearchRuntime({
+            const messages = mode === 'continue'
+                ? buildWorldAiContinueMessages(template, inputText, draft)
+                : buildWorldAiMessages(template, inputText);
+            this.traceAi('run.request', {
+                requestId,
+                mode,
+                model: describeAdHocModel(config),
+                webSearch: useWebSearch,
+                messageCount: messages.length,
+                firstMessageSummary: summarizeTraceText(messages?.[0]?.content || ''),
+            });
+            // 原生联网失败时依次改用搜索服务、不联网生成，不让整次生成失败
+            const { output, route, degraded } = await runAdHocWebSearchChat({
                 client,
                 config,
                 enabled: useWebSearch,
                 sessionId: `world-ai:${this.worldName || 'editor'}`,
                 requestOptions: { temperature: 0.6, signal: abortController.signal },
+                messages,
                 onStatus: status => {
                     if (requestId !== this.aiRequestId) return;
                     this.setAiStatus(
@@ -2491,19 +2506,11 @@ export class WorldEditorModal {
                     renderAdHocWebSources(this.aiWebSourcesEl, sources);
                 },
             });
-            const messages = mode === 'continue'
-                ? buildWorldAiContinueMessages(template, inputText, draft)
-                : buildWorldAiMessages(template, inputText);
-            this.traceAi('run.request', {
-                requestId,
-                mode,
-                messageCount: messages.length,
-                firstMessageSummary: summarizeTraceText(messages?.[0]?.content || ''),
-            });
-            const output = await generation.client.chat(messages, generation.requestOptions);
             this.traceAi('run.response', {
                 requestId,
                 mode,
+                webSearchRoute: route,
+                webSearchDegraded: degraded,
                 outputSummary: summarizeTraceText(output),
             });
             if (requestId !== this.aiRequestId) {
@@ -2548,7 +2555,16 @@ export class WorldEditorModal {
                 worldName: this.worldName,
             }, saved ? 'info' : 'warn');
             if (saved) {
-                const successText = mode === 'continue' ? '补全完成，已写入内容并保存' : '生成完成，已写入内容并保存';
+                const fallbackRoute = useWebSearch && degraded ? route : '';
+                const successText = mode === 'continue'
+                    ? ({
+                        tool: '补全完成，已写入内容并保存（原生联网失败，已改用搜索服务）',
+                        none: '补全完成，已写入内容并保存（联网失败，本次未联网）',
+                    }[fallbackRoute] || '补全完成，已写入内容并保存')
+                    : ({
+                        tool: '生成完成，已写入内容并保存（原生联网失败，已改用搜索服务）',
+                        none: '生成完成，已写入内容并保存（联网失败，本次未联网）',
+                    }[fallbackRoute] || '生成完成，已写入内容并保存');
                 this.setAiStatus(successText, 'success');
                 window.toastr?.success?.(mode === 'continue' ? 'AI 补全已写入并保存' : 'AI 生成已写入并保存');
             } else {
@@ -2562,12 +2578,15 @@ export class WorldEditorModal {
                 return;
             }
             logger.error(mode === 'continue' ? 'AI 补全世界书失败' : 'AI 生成世界书失败', err);
+            const modelLabel = describeAdHocModel(config);
             this.traceAi('run.error', {
                 requestId,
                 mode,
+                model: modelLabel,
                 message: err?.message || 'unknown',
             }, 'error');
-            this.setAiStatus(`生成失败：${err?.message || '未知错误'}`, 'error');
+            const errorMessage = err?.message || '未知错误';
+            this.setAiStatus(modelLabel ? `生成失败（${modelLabel}）：${errorMessage}` : `生成失败：${errorMessage}`, 'error');
             window.toastr?.error?.(mode === 'continue' ? 'AI 补全失败' : 'AI 生成失败');
         } finally {
             if (requestId === this.aiRequestId) {
@@ -2598,7 +2617,7 @@ export class WorldEditorModal {
     getEntryId(entry, idx = 0) {
         const raw = entry && typeof entry === 'object' ? entry : {};
         const id = raw.id ?? raw.uid ?? `entry-${idx}`;
-        return String(id || '').trim();
+        return String(id ?? '').trim();
     }
 
     getEntryDisplayName(entry, idx = 0) {

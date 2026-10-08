@@ -124,20 +124,13 @@ export const createInlineEditUiRuntime = ({
     shell.appendChild(status);
     shell.appendChild(actions);
 
-    const onOutsidePointerDown = (event) => {
-      if (settled || saving || composing) return;
-      const target = event?.target || null;
-      if (target && typeof shell.contains === 'function' && shell.contains(target)) return;
-      restoreOriginal();
-    };
-
+    // 点击气泡外不结束编辑：只有 ✔（保存）或 ×／Esc（放弃）才结束，避免误点丢掉修改
     const cleanupEditState = () => {
       wrapper?.classList?.remove?.('is-inline-editing');
       bubble.classList?.remove?.('is-inline-editing');
       bubble.style.minWidth = originalBubbleStyle.minWidth;
       bubble.style.boxShadow = originalBubbleStyle.boxShadow;
       bubble.style.transition = originalBubbleStyle.transition;
-      documentLike.removeEventListener?.('pointerdown', onOutsidePointerDown, true);
     };
 
     const restoreOriginal = () => {
@@ -154,9 +147,12 @@ export const createInlineEditUiRuntime = ({
       }
     };
 
+    // 先收成 auto 量高度时聊天列表会变短，滚在接近底部的列表会被截短滚动位置；量完放回原位置
     const resize = () => {
+      const listTop = scrollEl?.scrollTop;
       ta.style.height = 'auto';
       ta.style.height = `${ta.scrollHeight}px`;
+      if (typeof listTop === 'number' && scrollEl.scrollTop !== listTop) scrollEl.scrollTop = listTop;
     };
     ta.addEventListener('input', resize);
 
@@ -225,8 +221,6 @@ export const createInlineEditUiRuntime = ({
       resize();
       ta.focus?.();
       ta.setSelectionRange?.(ta.value.length, ta.value.length);
-      // 延迟到下一拍再挂外部点击取消，避免触发编辑的那次点击立刻关闭编辑器。
-      if (!settled) documentLike.addEventListener?.('pointerdown', onOutsidePointerDown, true);
     });
     return true;
   },

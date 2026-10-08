@@ -315,3 +315,28 @@ const run = (overrides = {}) => ({
   assert.doesNotMatch(approvalEl.innerHTML, /始终允许/, '不可记忆的确认不提供始终允许');
   console.log('ok - inline approval lists item notes and skipped items');
 }
+
+{
+  // 确认项很多时先列前 6 项，其余可点开展开、再点收起；换一个确认后重新收起
+  const card = createMaidRunCardView({ documentRef: new FakeDocument() });
+  const many = Array.from({ length: 14 }, (_, i) => ({ label: `测试角色${i + 1}`, status: 'planned' }));
+  card.update(projectMaidRunToTraceView(run({ status: 'waiting_permission' })), {
+    approval: { id: 'c3', title: '批量删除角色卡', message: '', tone: 'danger', allowAlways: false, confirmLabel: '确认删除', cancelLabel: '取消', items: many },
+  });
+  const approvalEl = card.el.children[1].children[1];
+  const labels = () => (approvalEl.innerHTML.match(/测试角色\d+/g) || []).length;
+  assert.equal(labels(), 6);
+  assert.match(approvalEl.innerHTML, /data-mrc-action="approval-items"[^>]*aria-expanded="false"[^>]*>展开其余 8 项/);
+  assert.equal(card.handleAction('approval-items'), true);
+  assert.equal(labels(), 14, '展开后列出全部');
+  assert.match(approvalEl.innerHTML, /mrc-approval-items[^"]*is-open/);
+  assert.match(approvalEl.innerHTML, /aria-expanded="true"[^>]*>收起/);
+  card.handleAction('approval-items');
+  assert.equal(labels(), 6, '再点收起');
+  card.handleAction('approval-items');
+  card.update(projectMaidRunToTraceView(run({ status: 'waiting_permission' })), {
+    approval: { id: 'c4', title: '批量删除角色卡', message: '', allowAlways: false, items: many },
+  });
+  assert.equal(labels(), 6, '新的确认重新收起');
+  console.log('ok - long inline approval lists expand and collapse');
+}

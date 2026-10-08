@@ -210,28 +210,28 @@ console.log('ok - internal maintenance failure is partial, preserves body and ob
   assert.equal(result.bodyDelivered, true);
 }
 
-for (const cancel of [true, false]) {
+{
   let lateResolve, requestSignal;
-  const { turn, runtime } = await savedTableTurn({ policy: { houseTimeoutMs: 50 }, request: (_, { signal }) => {
+  const { turn, runtime } = await savedTableTurn({ request: (_, { signal }) => {
     requestSignal = signal;
     return new Promise(resolve => { lateResolve = resolve; });
   } });
   await tick();
-  if (cancel) turn.abort();
+  turn.abort();
   const result = await turn.turnPromise;
-  assert.equal(result.status, cancel ? 'cancelled' : 'partial');
+  assert.equal(result.status, 'cancelled');
   assert.equal(result.bodyDelivered, true);
   assert.equal(result.houses.body.status, 'succeeded');
   const child = result.houses.body.childResults[0];
-  assert.equal(child.status, cancel ? 'cancelled' : 'failed');
-  assert.equal(child.reason, cancel ? 'user_cancelled' : 'timeout');
+  assert.equal(child.status, 'cancelled');
+  assert.equal(child.reason, 'user_cancelled');
   assert.equal(requestSignal.aborted, true);
   assert.equal(runtime.isSessionBusy('rp:table'), false);
   lateResolve({ status: 'succeeded', artifact: { text: 'late' } });
   await tick();
   assert.equal(turn.getHouseStates().find(h => h.id === 'body').childResults[0].status, child.status);
 }
-console.log('ok - maintenance cancellation/timeout preserves body and rejects late results');
+console.log('ok - maintenance cancellation preserves body and rejects late results');
 
 for (const options of [
   { changeBoard: board => { delete board.policy.tableSummaryMaintenance; } },
