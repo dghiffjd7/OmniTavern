@@ -6,15 +6,14 @@ import {
 } from '../../src/scripts/ui/contact-settings-runtime-utils.js';
 
 {
-  const title = { textContent: '' };
+  const titleAttrs = {};
+  const title = { textContent: '', setAttribute: (key, value) => { titleAttrs[key] = value; } };
   const subtitle = { textContent: '' };
-  const bridgeTitle = { style: {} };
   const panel = {
     querySelector(selector) {
       return {
         '#contact-settings-title': title,
         '#contact-settings-sub': subtitle,
-        '#contact-bridge-block-title': bridgeTitle,
       }[selector] || null;
     },
   };
@@ -82,14 +81,14 @@ import {
   assert.equal(result.isRpSession, false);
   assert.equal(currentAvatar, 'avatar:1');
   assert.equal(title.textContent, '好友设置');
-  assert.equal(subtitle.textContent, '会话：contact:1');
+  assert.equal(subtitle.textContent, '好友甲 · 私聊');
+  assert.equal(titleAttrs['data-help'], 'contact:1');
   assert.equal(nameInput.value, '好友甲');
   assert.equal(labelsInput.value, '旧友, 测试');
   assert.equal(voiceSelect.value, 'voice-a');
   assert.equal(voiceSection.style.display, 'block');
   assert.equal(templateToggle.checked, false);
   assert.equal(scriptToggle.checked, true);
-  assert.equal(bridgeTitle.style.display, 'block');
   assert.equal(rpBridgeSection.style.display, 'none');
   assert.equal(memoryShareSection.style.display, 'block');
   assert.equal(exportExperiencePackBtn.style.display, 'flex');
@@ -101,15 +100,14 @@ import {
 }
 
 {
-  const title = { textContent: '' };
+  const titleAttrs = {};
+  const title = { textContent: '', setAttribute: (key, value) => { titleAttrs[key] = value; } };
   const subtitle = { textContent: '' };
-  const bridgeTitle = { style: {} };
   const panel = {
     querySelector(selector) {
       return {
         '#contact-settings-title': title,
         '#contact-settings-sub': subtitle,
-        '#contact-bridge-block-title': bridgeTitle,
       }[selector] || null;
     },
   };
@@ -168,7 +166,8 @@ import {
   assert.equal(currentAvatar, '');
   assert.equal(title.textContent, '设置');
   assert.equal(nameInput.value, '角色甲');
-  assert.equal(bridgeTitle.style.display, 'none');
+  assert.equal(subtitle.textContent, '角色甲 · 创意写作');
+  assert.equal(titleAttrs['data-help'], 'rp:hero');
   assert.equal(voiceSection.style.display, 'none');
   assert.equal(exportExperiencePackBtn.style.display, 'none');
   assert.equal(exportExperiencePackBtn.disabled, true);

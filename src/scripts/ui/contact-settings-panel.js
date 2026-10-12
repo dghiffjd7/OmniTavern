@@ -7,7 +7,7 @@ import { avatarDataUrlFromFile } from '../utils/image.js';
 import { appSettings } from '../storage/app-settings.js';
 import { getSummaryTableIdsForContext, isRpSessionId } from '../memory/memory-context-utils.js';
 import { MemoryTableEditor } from './memory-table-editor.js';
-import { appChoice, appConfirm, appPromptText } from './app-confirm.js';
+import { appConfirm, appPromptText } from './app-confirm.js';
 import { normalizeBadgeList } from '../utils/name-badges.js';
 import { FEATHER_DEFAULT, resolveLineAvatar } from '../utils/line-avatar.js';
 import { bindCustomSelectButton, closeCustomSelectMenu, refreshCustomSelectButton } from './custom-select.js';
@@ -16,34 +16,28 @@ import {
     runContactSettingsSaveFlow,
 } from './contact-settings-runtime-utils.js';
 import { createContactMemoryShareRuntime } from './contact-memory-share-runtime-utils.js';
+import { t, translateUiText } from '../i18n/index.js';
 import { getMemoryTableStore, getMemoryTemplateStore } from './memory-store-runtime-utils.js';
-import { createSessionPanelShell } from './session-panel-shell-utils.js';
 import {
     applySessionPanelMemoryMode,
     runSessionPanelShowFlow,
 } from './session-panel-display-runtime-utils.js';
 import {
-    buildSessionAvatarButtonStyle,
-    buildSessionBlockButtonStyle,
-    buildSessionCheckboxInputStyle,
-    buildSessionCheckboxLabelStyle,
-    buildSessionCompactInputStyle,
-    buildSessionCoverImageStyle,
-    buildSessionFlexRowStyle,
     buildSessionFooterStyle,
-    buildSessionFieldLabelStyle,
-    buildSessionHelperTextStyle,
-    buildSessionIconButtonStyle,
-    buildSessionListContainerStyle,
     buildSessionSurfaceBoxStyle,
-    buildSessionSectionStyle,
     buildSessionSummaryRowStyle,
-    buildSessionTextInputStyle,
-    buildSessionTextActionButtonStyle,
-    buildSessionUtilityButtonStyle,
-    buildSessionWideActionButtonStyle,
     SESSION_PANEL_STYLES,
 } from './session-panel-style-utils.js';
+import {
+    bindSettingsTagInput,
+    buildSessionSettingsCloseInnerHtml,
+    buildSessionSettingsNavHtml,
+    createSessionSettingsChrome,
+    isSettingsReducedMotion,
+    SESSION_SETTINGS_ICONS,
+    SETTINGS_DISCARD_CONFIRM,
+    splitSettingsTags,
+} from './session-settings-chrome-utils.js';
 import {
     bindSessionMemoryShareButton,
     bindSessionPanelSharedWindowEvents,
@@ -68,7 +62,15 @@ import {
 } from './session-summary-utils.js';
 import { emitMemoryRowsUpdated as emitSharedMemoryRowsUpdated } from './session-memory-event-utils.js';
 import { createSessionSummarySectionRuntime } from './session-summary-section-runtime-utils.js';
-import { runSessionConversationExportFlow } from './session-conversation-export-utils.js';
+import { loadConversationExportState, runSessionConversationExportFlow } from './session-conversation-export-utils.js';
+import { openConversationExportDialog } from './conversation-export-dialog.js';
+import {
+    bindConversationImportDropZone,
+    pickConversationImportFile,
+    runSessionConversationImportFlow,
+} from './session-conversation-import-utils.js';
+import { openConversationImportDialog } from './conversation-import-dialog.js';
+import { highlightSessionArchiveRow } from './session-archive-view-utils.js';
 import {
     createSessionArchiveEmptyState,
     createSessionArchiveManagerModal,
@@ -244,7 +246,7 @@ export class ContactSettingsPanel {
     }
 
     show() {
-        return runSessionPanelShowFlow({
+        const shown = runSessionPanelShowFlow({
             ensureUi: () => {
                 if (!this.panel) this.createUI();
             },
@@ -255,45 +257,51 @@ export class ContactSettingsPanel {
             renderCompactedSummary: () => this.renderCompactedSummary(),
             getMemoryMode: getMemoryStorageMode,
             renderMemoryTable: () => this.memoryTableEditor?.render?.(),
-            getOverlayEl: () => this.overlay,
-            getPanelEl: () => this.panel,
+            // 显示与动画交给 settingsChrome，避免在基线记录前就露出面板。
+            getOverlayEl: () => null,
+            getPanelEl: () => null,
         });
+        if (shown) this.settingsChrome?.show();
+        return shown;
     }
 
     hide() {
         this.hideArchiveManager();
-        if (this.overlay) this.overlay.style.display = 'none';
-        if (this.panel) this.panel.style.display = 'none';
+        this.settingsChrome?.hide();
+    }
+
+    requestClose() {
+        return this.settingsChrome ? this.settingsChrome.requestClose() : Promise.resolve(true);
     }
 
     applyMemoryMode() {
-        return applySessionPanelMemoryMode({
+        const result = applySessionPanelMemoryMode({
             memoryMode: getMemoryStorageMode(),
             memoryFeaturesSection: this.memoryFeaturesSection,
             summarySection: this.summarySection,
             memoryTableSection: this.memoryTableSection,
             renderMemoryTable: () => this.memoryTableEditor?.render?.(),
         });
+        this.settingsChrome?.syncSections();
+        return result;
     }
 
     createUI() {
-        const shell = createSessionPanelShell({
-            documentRef: document,
-            overlayId: 'contact-settings-overlay',
-            panelId: 'contact-settings-panel',
-            titleId: 'contact-settings-title',
-            subtitleId: 'contact-settings-sub',
-            closeId: 'contact-settings-close',
-            title: '好友设置',
-            overlayOpacity: 0.4,
-            overlayZIndex: 20000,
-            panelZIndex: 21000,
-            inset: 10,
-            radius: 12,
-        });
-        this.overlay = shell.overlay;
-        this.panel = shell.panel;
-        this.overlay.onclick = () => this.hide();
+        this.overlay = document.createElement('div');
+        this.overlay.id = 'contact-settings-overlay';
+        this.overlay.className = 'app-themed-overlay ssp-overlay';
+        this.overlay.style.display = 'none';
+        this.overlay.addEventListener('click', () => void this.requestClose());
+
+        this.panel = document.createElement('div');
+        this.panel.id = 'contact-settings-panel';
+        this.panel.className = 'app-themed-panel ssp-panel';
+        this.panel.style.display = 'none';
+        this.panel.tabIndex = -1;
+        this.panel.setAttribute('role', 'dialog');
+        this.panel.setAttribute('aria-modal', 'true');
+        this.panel.setAttribute('aria-labelledby', 'contact-settings-title');
+        this.panel.addEventListener('click', (event) => event.stopPropagation());
 
         this.fileInput = document.createElement('input');
         this.fileInput.type = 'file';
@@ -305,200 +313,176 @@ export class ContactSettingsPanel {
             try {
                 this.currentAvatar = await avatarDataUrlFromFile(file, { maxDim: 256, quality: 0.84, maxBytes: 420_000 });
                 if (this.avatarPreview) this.avatarPreview.src = this.currentAvatar;
+                this.settingsChrome?.refreshDirty();
             } catch (err) {
                 logger.warn('读取/压缩头像失败', err);
                 window.toastr?.error?.('读取头像失败');
             }
         };
 
-        const featuresSectionStyle = buildSessionSectionStyle({ marginTop: 16, paddingTop: 14 });
-        const manageSectionStyle = buildSessionSectionStyle({ marginTop: 20, paddingTop: 14 });
-        const archiveListStyle = buildSessionListContainerStyle({ maxHeight: 160, radius: 8, background: 'var(--app-surface-subtle)' });
-        const summariesListStyle = buildSessionListContainerStyle({ maxHeight: 160, radius: 8 });
-        const compactedListStyle = buildSessionListContainerStyle({ maxHeight: 200, radius: 8 });
-        const newChatButtonStyle = buildSessionWideActionButtonStyle({ accent: true, marginBottom: 10 });
-        const exportButtonStyle = buildSessionWideActionButtonStyle({ marginBottom: 10 });
-        const toolbarIconButtonStyle = buildSessionIconButtonStyle();
-        const batchEditButtonStyle = buildSessionIconButtonStyle({ width: 34, height: 30, fontSize: 16 });
-        const batchDeleteButtonStyle = buildSessionIconButtonStyle({ danger: true, width: 34, height: 30, fontSize: 16 });
-        const batchCancelButtonStyle = buildSessionIconButtonStyle({ width: 34, height: 30, fontSize: 18 });
-        const compactedDangerButtonStyle = buildSessionIconButtonStyle({ danger: true });
-        const clearTextButtonStyle = buildSessionTextActionButtonStyle({ danger: true });
-        const utilitySmallButtonStyle = buildSessionUtilityButtonStyle({ padding: '8px 12px', fontSize: 12 });
-        const utilityButtonStyle = buildSessionUtilityButtonStyle({ whiteSpace: 'nowrap' });
-        const footerStyle = buildSessionFooterStyle({ safeAreaBottom: true, alignItems: 'center' });
-        const avatarButtonStyle = buildSessionAvatarButtonStyle();
-        const coverImageStyle = buildSessionCoverImageStyle();
-        const topRowStyle = buildSessionFlexRowStyle({ gap: 14, wrap: true });
-        const summaryHeaderRowStyle = buildSessionFlexRowStyle({ justify: 'space-between', gap: 10, margin: '0 0 6px' });
-        const toolbarRowStyle = buildSessionFlexRowStyle({ gap: 8 });
-        const checkboxRowStyle = buildSessionCheckboxLabelStyle({ margin: '0 0 8px' });
-        const checkboxInputStyle = buildSessionCheckboxInputStyle();
-        const bridgeCardStyle = buildSessionSurfaceBoxStyle({ display: 'none', margin: '0 0 10px' });
-        const bridgeLimitRowStyle = buildSessionCheckboxLabelStyle({
-            justify: 'space-between',
-            gap: 8,
-            margin: '10px 0 0',
-            fontSize: 12,
-            color: 'var(--app-text-secondary)',
-        });
-        const bridgeLimitInputStyle = buildSessionCompactInputStyle();
-        const summariesBatchBarStyle = buildSessionFlexRowStyle({ display: 'none', justify: 'flex-end', gap: 8, margin: '6px 0 8px' });
-        const memoryTableBoxStyle = buildSessionSurfaceBoxStyle({
-            display: 'none',
-            margin: '14px 0 0',
-            padding: 12,
-            borderStyle: 'dashed',
-            background: 'var(--app-surface-subtle)',
-        });
-        const fieldLabelStyle = buildSessionFieldLabelStyle();
-        const fieldInputStyle = buildSessionTextInputStyle();
-        const helperTextStyle = buildSessionHelperTextStyle({ marginTop: 6 });
-        const helperCaptionStyle = buildSessionHelperTextStyle({ marginBottom: 6 });
-        const sectionTitleStyle = buildSessionHelperTextStyle();
-        const bridgeNoteStyle = buildSessionHelperTextStyle({ marginTop: 6, color: 'var(--app-text-secondary)' });
-        const memoryShareButtonStyle = buildSessionBlockButtonStyle();
-        const memoryShareSummaryStyle = buildSessionHelperTextStyle({ marginTop: 8 });
-        const bridgeTitleStyle = buildSessionFieldLabelStyle({ marginBottom: 10 });
-        const contactProfileButtonStyle = buildSessionUtilityButtonStyle({
-            padding: '7px 10px',
-            fontSize: 12,
-            whiteSpace: 'nowrap',
-        });
-
-        shell.body.innerHTML = `
-                <div style="${topRowStyle}">
-                    <button id="contact-avatar-btn" type="button" style="${avatarButtonStyle}">
-                        <img id="contact-avatar-preview" alt="" style="${coverImageStyle}">
-                    </button>
-                    <div style="flex:1; min-width:220px;">
-                        <div class="has-help" data-help="仅修改显示名称，不会改变聊天室 ID。" style="${fieldLabelStyle}">名称</div>
-                        <input id="contact-name-input" style="${fieldInputStyle}">
-                    </div>
+        this.panel.innerHTML = `
+            <header class="ssp-header">
+                <div class="ssp-heading">
+                    <h2 id="contact-settings-title" class="ssp-title has-help" data-help-title="会话 ID" data-help="">设置</h2>
+                    <span id="contact-settings-sub" class="ssp-subtitle"></span>
                 </div>
-
-                <div style="margin-top:12px;">
-                    <div class="has-help" data-help="用于展示标签；不设置则界面保持原样。" style="${fieldLabelStyle}">标签</div>
-                    <input
-                        id="contact-labels-input"
-                        placeholder="用逗号分隔，如：重制版, SG线"
-                        style="${fieldInputStyle}"
-                    >
-                </div>
-
-                <div id="contact-voice-section" style="margin-top:12px;">
-                    <div class="has-help" data-help="人物声音在 API 设置 → 语音模型 → 人物声音库中管理。" style="${fieldLabelStyle}">声音</div>
-                    <select id="contact-voice-select" style="${fieldInputStyle}"></select>
-                    <div style="${helperTextStyle}">默认（全局）会跟随当前 TTS 设置；声音绑定仅保存在本机。</div>
-                </div>
-
-	                <div style="${featuresSectionStyle}">
-	                    <div class="has-help" data-help="正则与变量属于高级脚本配置；重置仅清空本会话 local 变量，不影响全局变量。" style="${bridgeTitleStyle}">模板与脚本（本会话）</div>
-                    <label style="${checkboxRowStyle}">
-                        <input type="checkbox" id="contact-template-enabled" style="${checkboxInputStyle}">
-                        <span>启用模板处理</span>
-                    </label>
-                    <label style="${checkboxRowStyle}">
-                        <input type="checkbox" id="contact-script-enabled" style="${checkboxInputStyle}">
-                        <span>启用脚本</span>
-                    </label>
-                    <div style="${buildSessionFlexRowStyle({ gap: 8, wrap: true, margin: '8px 0 8px' })}">
-                        <button id="contact-open-regex" type="button" style="${utilitySmallButtonStyle}">
-                            正规表达式
-                        </button>
-                        <button id="contact-open-vars-panel" type="button" style="${utilitySmallButtonStyle}">
-                            变量管理器
-                        </button>
-                    </div>
-                    <button id="contact-reset-vars" type="button" style="${utilitySmallButtonStyle}">
-                        重置本会话变量
-                    </button>
-	                </div>
-
-                    <div id="contact-memory-features-section" style="margin-top:16px; border-top:1px solid var(--app-border-subtle); padding-top:14px;">
-                        <div id="contact-bridge-block-title" style="${bridgeTitleStyle}">聊天 / 创意写作桥接（当前会话）</div>
-                        <div id="contact-rp-bridge-section" style="${bridgeCardStyle}">
-                            <label style="${buildSessionCheckboxLabelStyle({ justify: 'space-between', gap: 10 })}">
-                                <span class="has-help" data-help="默认来源为当前角色的创意写作会话。" data-help-mode="press" style="${fieldLabelStyle}">注入创意写作总体大纲</span>
-                                <input type="checkbox" id="contact-rp-bridge-enabled" style="${checkboxInputStyle}">
-                            </label>
-                            <div id="contact-rp-bridge-source-note" style="${bridgeNoteStyle}"></div>
-                            <label style="${bridgeLimitRowStyle}">
-                                <span>注入条数（0=全部）</span>
-                                <input type="number" id="contact-rp-bridge-limit" min="0" step="1"
-                                       style="${bridgeLimitInputStyle}">
-                            </label>
-                        </div>
-                        <div id="contact-memory-share-section" style="display:none;">
-                            <button id="contact-memory-share-manage" type="button" style="${memoryShareButtonStyle}">
-                                记忆共享
+                <button id="contact-settings-close" type="button" class="ssp-icon-btn ssp-close ssp-ctl" aria-label="关闭设置">${buildSessionSettingsCloseInnerHtml()}</button>
+            </header>
+            <div class="ssp-main">
+                <nav class="ssp-nav" aria-label="设置分区">
+                    <span class="ssp-nav-indicator" aria-hidden="true"></span>
+                    ${buildSessionSettingsNavHtml([
+                        { id: 'basic', label: '基本资料', icon: 'profile' },
+                        { id: 'script', label: '模板与脚本', icon: 'script' },
+                        { id: 'memory-share', label: '记忆共享', icon: 'memory' },
+                        { id: 'archives', label: '聊天与存档', icon: 'archive' },
+                        { id: 'summary', label: '摘要', icon: 'summary' },
+                        { id: 'memory-table', label: '记忆表格', icon: 'table' },
+                    ])}
+                </nav>
+                <div class="ssp-scroll">
+                    <section class="ssp-card" data-settings-section="basic">
+                        <div class="ssp-row ssp-basic">
+                        <div class="ssp-avatar-col">
+                            <button id="contact-avatar-btn" type="button" class="ssp-avatar ssp-ctl" aria-label="更换头像" title="点击更换头像">
+                                <img id="contact-avatar-preview" alt="">
+                                <span class="ssp-avatar-badge" aria-hidden="true">${SESSION_SETTINGS_ICONS.edit}</span>
                             </button>
-                            <div id="contact-memory-share-summary" style="${memoryShareSummaryStyle}; line-height:1.5;"></div>
+                            <button id="contact-avatar-clear" type="button" class="ssp-link-btn ssp-ctl">清除头像</button>
                         </div>
-                    </div>
-
-	                <div style="${manageSectionStyle}">
-                    <div style="${bridgeTitleStyle}">聊天管理</div>
-                    <button id="contact-new-chat" style="${newChatButtonStyle}">
-                        <span>✨</span> 开启新聊天（存档当前）
-                    </button>
-                    <button id="contact-export-experience-pack" type="button" style="${exportButtonStyle}">
-                        <span>📦</span> 导出角色体验包
-                    </button>
-                    <div style="${summaryHeaderRowStyle}">
-                        <div style="${helperCaptionStyle}; margin-bottom:0;">历史存档（点击加载）</div>
-                        <button id="contact-archives-manage" type="button" style="${utilitySmallButtonStyle}">管理</button>
-                    </div>
-                    <div id="contact-archives-list" style="${archiveListStyle}"></div>
-
-                    <div id="contact-summary-section">
-	                    <div style="margin-top:14px;">
-	                        <div style="${summaryHeaderRowStyle}">
-	                            <div style="${sectionTitleStyle}">摘要（每次对话保存一条）</div>
-                                <div style="${toolbarRowStyle}">
-	                                <button id="contact-summaries-batch" type="button" title="批量操作" style="${toolbarIconButtonStyle}">☰</button>
-	                                <button id="contact-summaries-clear" type="button" style="${clearTextButtonStyle}">清空</button>
+                        <div class="ssp-basic-fields">
+                            <label class="ssp-field">
+                                <span class="ssp-label has-help" data-help="仅修改显示名称，不会改变聊天室 ID。">名称</span>
+                                <input id="contact-name-input" class="ssp-input" autocomplete="off">
+                            </label>
+                            <div class="ssp-field">
+                                <label for="contact-labels-entry" class="ssp-label has-help" data-help="用来分类和展示；输入后按回车或逗号添加，最多 8 个。">标签</label>
+                                <div class="ssp-tags-box">
+                                    <span id="contact-labels-chips" class="ssp-tags"></span>
+                                    <input id="contact-labels-entry" class="ssp-tags-entry ssp-ctl" autocomplete="off" placeholder="添加标签">
                                 </div>
-	                        </div>
-                            <div id="contact-summaries-batchbar" style="${summariesBatchBarStyle}">
-                                <button id="contact-summaries-batch-edit" type="button" title="批量编辑" style="${batchEditButtonStyle}">✎</button>
-                                <button id="contact-summaries-batch-delete" type="button" title="批量删除" style="${batchDeleteButtonStyle}">🗑</button>
-                                <button id="contact-summaries-batch-cancel" type="button" title="退出批量" style="${batchCancelButtonStyle}">×</button>
+                                <input id="contact-labels-input" type="hidden">
                             </div>
-	                        <div id="contact-summaries-list" style="${summariesListStyle}"></div>
-	                    </div>
-
-                        <div style="margin-top:14px;">
-                            <div style="${summaryHeaderRowStyle}">
-                                <div style="${sectionTitleStyle}">大总结（自动生成）</div>
-                                <div style="${toolbarRowStyle}">
-                                    <button id="contact-compacted-raw" type="button" title="查看原始回复" style="${toolbarIconButtonStyle}">📄</button>
-                                    <button id="contact-compacted-edit" type="button" title="编辑" style="${toolbarIconButtonStyle}">✎</button>
-                                    <button id="contact-compacted-run" type="button" title="手动生成/刷新" style="${toolbarIconButtonStyle}">↻</button>
-                                    <button id="contact-compacted-clear" type="button" title="删除" style="${compactedDangerButtonStyle}">🗑</button>
-                                </div>
+                            <div id="contact-voice-section">
+                                <label class="ssp-field">
+                                    <span class="ssp-label has-help" data-help="默认（全局）跟随当前 TTS 设置；声音绑定仅保存在本机。人物声音在 API 设置 → 语音模型 → 人物声音库中管理。">声音</span>
+                                    <select id="contact-voice-select" class="ssp-input"></select>
+                                </label>
                             </div>
-                            <div id="contact-compacted-summary" style="${compactedListStyle}"></div>
+                            <button id="contact-export-experience-pack" type="button" class="ssp-btn ssp-ctl ssp-pack-btn" data-help="把角色卡、世界书与相关设置打包，方便分享给别人体验。" data-help-mode="press">导出角色体验包</button>
                         </div>
-                    </div>
+                        </div>
+                    </section>
 
-                    <div id="contact-memory-table-section" style="${memoryTableBoxStyle}">
-                        <div style="${summaryHeaderRowStyle}">
-                            <div style="${fieldLabelStyle}; margin-bottom:0;">记忆表格</div>
-                            <button id="contact-profile-manage" type="button" style="${contactProfileButtonStyle}">联系人画像</button>
+                    <section class="ssp-card" data-settings-section="script">
+                        <div class="ssp-row is-wrap">
+                        <h3 class="ssp-card-title has-help" data-help="这里的设置只对本会话生效。">模板与脚本</h3>
+                        <label class="ssp-switch has-help" data-help="执行角色卡模板（生成前与渲染后）。" data-help-mode="press">
+                            <span>模板处理</span>
+                            <input type="checkbox" id="contact-template-enabled" class="ssp-switch-input">
+                        </label>
+                        <label class="ssp-switch has-help" data-help="允许角色卡脚本参与运行时逻辑。" data-help-mode="press">
+                            <span>脚本</span>
+                            <input type="checkbox" id="contact-script-enabled" class="ssp-switch-input">
+                        </label>
+                        <div class="ssp-card-actions">
+                            <button id="contact-open-regex" type="button" class="ssp-btn ssp-ctl">正则</button>
+                            <button id="contact-open-vars-panel" type="button" class="ssp-btn ssp-ctl">变量</button>
+                            <button id="contact-reset-vars" type="button" class="ssp-btn is-danger-soft ssp-ctl" data-help="清空本会话的 local 变量，不影响全局变量。" data-help-mode="press">重置变量</button>
                         </div>
-                        <div id="contact-memory-table-content"></div>
-                    </div>
-	                </div>
+                        </div>
+                    </section>
+
+                    <section id="contact-memory-features-section" class="ssp-card" data-settings-section="memory-share">
+                        <div id="contact-memory-share-section" style="display:none;">
+                            <div class="ssp-row ssp-share-row">
+                                <h3 class="ssp-card-title has-help" data-help="哪些记忆表格在聊天与创意写作之间共享。">记忆共享</h3>
+                                <div id="contact-memory-share-summary" class="ssp-muted ssp-share-summary"></div>
+                                <button id="contact-memory-share-manage" type="button" class="ssp-btn ssp-ctl">调整</button>
+                            </div>
+                        </div>
+                        <div id="contact-rp-bridge-section" class="ssp-bridge" style="display:none;">
+                            <label class="ssp-switch">
+                                <span class="has-help" data-help="默认来源为当前角色的创意写作会话。" data-help-mode="press">注入创意写作总体大纲</span>
+                                <input type="checkbox" id="contact-rp-bridge-enabled" class="ssp-switch-input">
+                            </label>
+                            <div id="contact-rp-bridge-source-note" class="ssp-muted"></div>
+                            <label class="ssp-inline-field">
+                                <span>注入条数（0=全部）</span>
+                                <input type="number" id="contact-rp-bridge-limit" class="ssp-input is-compact" min="0" step="1">
+                            </label>
+                        </div>
+                    </section>
+
+                    <section class="ssp-card" data-settings-section="archives">
+                        <div class="ssp-card-head">
+                            <h3 class="ssp-card-title has-help" data-help="点存档可加载；当前聊天会先自动存档。">聊天与存档</h3>
+                            <div class="ssp-card-actions">
+                                <button id="contact-archives-import" type="button" class="ssp-btn ssp-ctl" data-help="导入本 APP 导出的 md／txt 聊天记录，存成新存档；电脑上也可以把文件拖到这里。" data-help-mode="press">导入</button>
+                                <button id="contact-archives-manage" type="button" class="ssp-btn ssp-ctl">管理</button>
+                                <button id="contact-new-chat" type="button" class="ssp-btn is-accent-outline ssp-ctl" data-help="把当前聊天存档后，开始新的聊天。" data-help-mode="press">${SESSION_SETTINGS_ICONS.plus}<span>新聊天</span></button>
+                            </div>
+                        </div>
+                        <div id="contact-archives-list" class="ssp-list"></div>
+                    </section>
+
+                    <section id="contact-summary-section" class="ssp-card" data-settings-section="summary">
+                        <div class="ssp-card-head">
+                            <h3 class="ssp-card-title has-help" data-help="每次对话保存一条摘要（与聊天存档绑定）。">摘要</h3>
+                            <div class="ssp-card-actions">
+                                <button id="contact-summaries-batch" type="button" title="批量操作" aria-label="批量操作" class="ssp-icon-btn is-bordered ssp-ctl">☰</button>
+                                <button id="contact-summaries-clear" type="button" class="ssp-btn is-danger-soft ssp-ctl">清空</button>
+                            </div>
+                        </div>
+                        <div id="contact-summaries-batchbar" class="ssp-batchbar" style="display:none;">
+                            <button id="contact-summaries-batch-edit" type="button" title="批量编辑" aria-label="批量编辑" class="ssp-icon-btn is-bordered ssp-ctl">✎</button>
+                            <button id="contact-summaries-batch-delete" type="button" title="批量删除" aria-label="批量删除" class="ssp-icon-btn is-bordered is-danger ssp-ctl">🗑</button>
+                            <button id="contact-summaries-batch-cancel" type="button" title="退出批量" aria-label="退出批量" class="ssp-icon-btn is-bordered ssp-ctl">×</button>
+                        </div>
+                        <div id="contact-summaries-list" class="ssp-list"></div>
+                        <div class="ssp-card-head ssp-subhead">
+                            <h4 class="ssp-subtitle-title has-help" data-help="摘要满记忆 Agent「触发与频率」设定的条数或字数时，会自动生成大总结（与聊天存档绑定）。">大总结</h4>
+                            <div class="ssp-card-actions">
+                                <button id="contact-compacted-raw" type="button" title="查看原始回复" aria-label="查看原始回复" class="ssp-icon-btn is-bordered ssp-ctl">📄</button>
+                                <button id="contact-compacted-edit" type="button" title="编辑" aria-label="编辑" class="ssp-icon-btn is-bordered ssp-ctl">✎</button>
+                                <button id="contact-compacted-run" type="button" title="手动生成/刷新" aria-label="手动生成/刷新" class="ssp-icon-btn is-bordered ssp-ctl">↻</button>
+                                <button id="contact-compacted-clear" type="button" title="删除" aria-label="删除" class="ssp-icon-btn is-bordered is-danger ssp-ctl">🗑</button>
+                            </div>
+                        </div>
+                        <div id="contact-compacted-summary" class="ssp-list"></div>
+                    </section>
+
+                    <section id="contact-memory-table-section" class="ssp-card" data-settings-section="memory-table" style="display:none;">
+                        <div class="ssp-card-head">
+                            <h3 class="ssp-card-title has-help" data-help="AI 在对话中自动维护的记忆，跟随聊天存档切换。">记忆表格</h3>
+                            <div class="ssp-card-actions">
+                                <button id="contact-profile-manage" type="button" class="ssp-btn ssp-ctl">联系人画像</button>
+                            </div>
+                        </div>
+                        <div class="ssp-table-summary">
+                            <span class="ssp-muted" data-role="table-overview">…</span>
+                            <button type="button" class="ssp-btn is-accent-outline ssp-ctl" data-action="open-tables">打开</button>
+                        </div>
+                        <div id="contact-memory-table-content" class="ssp-table-host"></div>
+                    </section>
+                </div>
+            </div>
+            <footer class="ssp-footer">
+                <span class="ssp-dirty" aria-live="polite"><i aria-hidden="true"></i>有未保存的更改</span>
+                <div class="ssp-footer-actions">
+                    <button id="contact-settings-cancel" type="button" class="ssp-btn is-large ssp-ctl">取消</button>
+                    <button id="contact-settings-save" type="button" class="ssp-btn is-large is-primary ssp-ctl" title="保存（Ctrl+S）">保存</button>
+                </div>
+            </footer>
+            <div class="ssp-subpage-scrim" aria-hidden="true"></div>
+            <section class="ssp-subpage" hidden aria-hidden="true">
+                <header class="ssp-subpage-header">
+                    <button type="button" class="ssp-icon-btn ssp-subpage-back ssp-ctl" aria-label="返回设置">${SESSION_SETTINGS_ICONS.back}</button>
+                    <h2 class="ssp-subpage-title has-help"></h2>
+                </header>
+                <div class="ssp-subpage-body"></div>
+            </section>
         `;
-        const footer = document.createElement('div');
-        footer.style.cssText = footerStyle;
-        footer.innerHTML = `
-            <button id="contact-avatar-clear" type="button" style="${utilityButtonStyle}">清除头像</button>
-            <button id="contact-settings-cancel" type="button" style="${SESSION_PANEL_STYLES.secondaryActionButton}">取消</button>
-            <button id="contact-settings-save" type="button" style="${SESSION_PANEL_STYLES.primaryActionButton}">保存</button>
-        `;
-        this.panel.appendChild(footer);
 
         document.body.appendChild(this.overlay);
         document.body.appendChild(this.panel);
@@ -532,6 +516,33 @@ export class ContactSettingsPanel {
         this.memoryShareSummary = this.panel.querySelector('#contact-memory-share-summary');
         this.exportExperiencePackBtn = this.panel.querySelector('#contact-export-experience-pack');
         this.contactProfileButton = this.panel.querySelector('#contact-profile-manage');
+        this.labelsTagInput = bindSettingsTagInput({
+            hiddenInput: this.labelsInput,
+            entryInput: this.panel.querySelector('#contact-labels-entry'),
+            chipsEl: this.panel.querySelector('#contact-labels-chips'),
+        });
+        this.settingsChrome = createSessionSettingsChrome({
+            overlayEl: this.overlay,
+            panelEl: this.panel,
+            scrollEl: this.panel.querySelector('.ssp-scroll'),
+            navEl: this.panel.querySelector('.ssp-nav'),
+            dirtyEl: this.panel.querySelector('.ssp-dirty'),
+            getSessionId: () => this.getSessionId(),
+            readSnapshot: () => this.readSettingsSnapshot(),
+            confirmDiscard: () => appConfirm(SETTINGS_DISCARD_CONFIRM),
+            onSave: () => this.save(),
+            onCloseConfirmed: () => this.hide(),
+            isReducedMotion: isSettingsReducedMotion,
+            subpageEl: this.panel.querySelector('.ssp-subpage'),
+        });
+        this.tableOverview = this.panel.querySelector('[data-role="table-overview"]');
+        this.panel.querySelector('[data-action="open-tables"]')?.addEventListener('click', () => {
+            this.settingsChrome.openSubpage({
+                title: translateUiText('记忆表格'),
+                help: translateUiText('AI 在对话中自动维护的记忆，跟随聊天存档切换。'),
+                contentEl: this.memoryTableContent,
+            });
+        });
         const summariesClearButton = this.panel.querySelector('#contact-summaries-clear');
         const summariesBatchButton = this.panel.querySelector('#contact-summaries-batch');
         const summariesBatchCancelButton = this.panel.querySelector('#contact-summaries-batch-cancel');
@@ -547,8 +558,8 @@ export class ContactSettingsPanel {
             }
         };
 
-        this.panel.querySelector('#contact-settings-close').onclick = () => this.hide();
-        this.panel.querySelector('#contact-settings-cancel').onclick = () => this.hide();
+        this.panel.querySelector('#contact-settings-close').onclick = () => void this.requestClose();
+        this.panel.querySelector('#contact-settings-cancel').onclick = () => void this.requestClose();
         this.exportExperiencePackBtn?.addEventListener('click', async () => {
             const sid = String(this.getSessionId?.() || '').trim();
             if (!sid || typeof this.onExportExperiencePack !== 'function') return;
@@ -584,15 +595,16 @@ export class ContactSettingsPanel {
                     size: 96,
                 });
             }
+            this.settingsChrome?.refreshDirty();
         };
         this.panel.querySelector('#contact-settings-save').onclick = () => this.save();
         this.rpBridgeToggle?.addEventListener('change', syncBridgeControls);
-        this.openRegexBtn?.addEventListener('click', () => {
-            this.hide();
+        this.openRegexBtn?.addEventListener('click', async () => {
+            if (!await this.requestClose()) return;
             this.onOpenRegex?.();
         });
-        this.openVariablesBtn?.addEventListener('click', () => {
-            this.hide();
+        this.openVariablesBtn?.addEventListener('click', async () => {
+            if (!await this.requestClose()) return;
             this.onOpenVariables?.();
         });
         bindSessionMemoryShareButton({
@@ -611,7 +623,8 @@ export class ContactSettingsPanel {
             if (!sid) return;
             const ok = await appConfirm({
                 title: '重置变量',
-                message: '确定要清空本会话的全部 local 变量吗？',
+                message: '会清空本会话的全部 local 变量（变量面板与状态栏会回到空白），全局变量不受影响。此操作无法撤销。',
+                confirmText: '清空变量',
                 danger: true,
             });
             if (!ok) return;
@@ -625,6 +638,13 @@ export class ContactSettingsPanel {
         });
         this.panel.querySelector('#contact-new-chat').onclick = () => this.startNewChat();
         this.archiveManageButton?.addEventListener('click', () => this.openArchiveManager());
+        this.panel.querySelector('#contact-archives-import')?.addEventListener('click', () => {
+            pickConversationImportFile({ onFile: file => this.importConversationFile(file) });
+        });
+        bindConversationImportDropZone({
+            zoneEl: this.panel.querySelector('[data-settings-section=archives]'),
+            onFile: file => this.importConversationFile(file),
+        });
         bindSessionSummarySectionControls({
             clearButtonEl: summariesClearButton,
             batchButtonEl: summariesBatchButton,
@@ -665,6 +685,9 @@ export class ContactSettingsPanel {
                 contactsStore: this.contactsStore,
                 chatStore: this.chatStore,
                 includeGlobal: true,
+                onRendered: ({ tableCount, rowCount }) => {
+                    if (this.tableOverview) this.tableOverview.textContent = t('{tables} 张表 · {rows} 行', { tables: tableCount, rows: rowCount });
+                },
             });
         }
 
@@ -676,6 +699,18 @@ export class ContactSettingsPanel {
             renderSummaries: () => this.renderSummaries(),
             renderCompactedSummary: () => this.renderCompactedSummary(),
         });
+    }
+
+    readSettingsSnapshot() {
+        const pendingLabels = this.panel?.querySelector?.('#contact-labels-entry')?.value || '';
+        return {
+            avatar: String(this.currentAvatar || ''),
+            name: String(this.nameInput?.value || ''),
+            labels: splitSettingsTags(`${this.labelsInput?.value || ''},${pendingLabels}`),
+            voice: String(this.voiceSelect?.value || ''),
+            template: this.templateToggle?.checked === true,
+            script: this.scriptToggle?.checked === true,
+        };
     }
 
     ensureSummaryRuntime() {
@@ -852,8 +887,39 @@ export class ContactSettingsPanel {
             current,
             title: current ? '当前聊天' : (archive?.name || '未命名存档'),
             sourceLabel: current ? '当前聊天' : `存档：${archive?.name || archive?.id || '未命名存档'}`,
-            appChoiceFn: appChoice,
+            openExportDialog: options => openConversationExportDialog({ ...options, isReducedMotion: isSettingsReducedMotion }),
+            loadState: () => loadConversationExportState({
+                chatStore: this.chatStore,
+                sessionId,
+                archive,
+                current,
+                buildMemoryTableSnapshot: ({ sessionId: sid }) => (getMemoryStorageMode() === 'table'
+                    ? this.buildMemoryTableSnapshot({ sessionId: sid, isGroup: false })
+                    : null),
+                readArchiveState: (sid, aid) => window.appBridge?.readArchiveTransferState?.(sid, aid),
+            }),
             toastSuccess: text => window.toastr?.success?.(text),
+            toastWarning: text => window.toastr?.warning?.(text),
+            toastError: text => window.toastr?.error?.(text),
+            logger,
+        });
+    }
+
+    importConversationFile(file) {
+        const sessionId = String(this.getSessionId() || '').trim();
+        return runSessionConversationImportFlow({
+            file,
+            chatStore: this.chatStore,
+            sessionId,
+            resolveMemoryTemplateId: () => this.resolveDefaultMemoryTemplateId(),
+            getMemoryStorageMode,
+            bindImportedState: (sid, aid, payload) => window.appBridge?.bindImportedArchiveState?.(sid, aid, payload),
+            openImportDialog: options => openConversationImportDialog({ ...options, isReducedMotion: isSettingsReducedMotion }),
+            onImported: ({ archiveId }) => {
+                this.renderArchives();
+                highlightSessionArchiveRow(this.archivesList, archiveId);
+            },
+            loadArchive: archiveId => this.ensureArchiveRuntime().loadArchive(archiveId),
             toastWarning: text => window.toastr?.warning?.(text),
             toastError: text => window.toastr?.error?.(text),
             logger,
@@ -1340,7 +1406,7 @@ export class ContactSettingsPanel {
     populate() {
         this.syncVoiceOptions();
         void Promise.resolve(this.voiceRegistryStore?.ready).then(() => this.syncVoiceOptions());
-        return runContactSettingsPopulateFlow({
+        const result = runContactSettingsPopulateFlow({
             sessionId: this.getSessionId(),
             contactsStore: this.contactsStore,
             chatStore: this.chatStore,
@@ -1367,9 +1433,14 @@ export class ContactSettingsPanel {
             defaultAvatar: FEATHER_DEFAULT,
             logger,
         });
+        const labelsEntry = this.panel?.querySelector?.('#contact-labels-entry');
+        if (labelsEntry) labelsEntry.value = '';
+        this.labelsTagInput?.render();
+        return result;
     }
 
     save() {
+        this.labelsTagInput?.commitPending();
         return runContactSettingsSaveFlow({
             sessionId: this.getSessionId(),
             contactsStore: this.contactsStore,

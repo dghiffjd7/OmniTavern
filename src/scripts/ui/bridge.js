@@ -162,6 +162,7 @@ import {
   runRuntimeHookLifecycleEvent,
 } from './chat/hook-lifecycle-trace-utils.js';
 import { createSillyTavernSlashCompat } from './chat/sillytavern-slash-compat.js';
+import { applyPromptHistoryRegex } from './chat/output-regex-utils.js';
 import {
   buildTemplateInjectRegex as buildRegexFromTag,
   parseTemplateInjectTags,
@@ -177,6 +178,7 @@ import {
   normalizeMemoryUpdateMode,
   normalizeTokenMode,
   parseMemoryPromptPositions,
+  resolveMemorySummaryInjectionLimit,
 } from '../memory/memory-prompt-utils.js';
 import { buildMemoryEditGuide } from '../memory/memory-edit-guide.js';
 import { applyMemoryPromptFields, mergeMemoryPromptDraft } from '../memory/memory-prompt-editor.js';
@@ -1384,7 +1386,9 @@ class AppBridge {
       });
     const rows = matchingRows.filter(row => row?.is_active !== false);
     // 分层逻辑收敛到共享纯函数：离线评测器回放同一实现，别在这里另写口径
-    const rowLayers = buildMemoryPromptRowLayers(matchingRows);
+    const rowLayers = buildMemoryPromptRowLayers(matchingRows, {
+      summaryRowLimit: tableId => resolveMemorySummaryInjectionLimit(appSettings.get(), tableId),
+    });
     const workingRows = rowLayers.workingRows;
     const resolveRowSortKey = (row, tableId = '', fallback = 0) => resolveMemoryRowOrderKey(row, tableId, fallback);
     const limitedRows = rowLayers.limitedRows;
@@ -6707,6 +6711,14 @@ class AppBridge {
       personality: context?.character?.personality || '',
     };
 
+    // 摘要模式注入条数：按条数触发时发到「触发与频率」设定的条数（私聊至少 30 条），压缩前不漏摘要；
+    // 按字数触发时未合并的摘要全部发送，避免压缩前 AI 失忆。
+    const getSummaryModeInjectionLimits = () => {
+      const tableId = uiMode === 'rp' ? 'rp_summary' : (isGroupChat ? 'group_summary' : 'chat_summary');
+      const limit = resolveMemorySummaryInjectionLimit(appSettings.get(), tableId) || Infinity;
+      return { limitPlain: Math.max(30, limit), limitPlainGroup: limit, limitWithCompacted: Math.max(30, limit), limitWithCompactedGroup: limit };
+    };
+
     const getSessionSummaryItems = (sid, { limitPlain = 30, limitPlainGroup = 10, limitWithCompacted = 2, limitWithCompactedGroup = 3 } = {}) => {
       const id = String(sid || '').trim();
       if (!id || !this.chatStore?.getSummaries) return { compacted: null, summaries: [] };
@@ -8267,13 +8279,12 @@ const stringifyMessageContent = (content) => {
       const history = historyRaw.map((m, idx) => {
         const role = m?.role === 'user' ? 'user' : 'assistant';
         const content = String(m?.content ?? '');
-        const depth = historyRaw.length - 1 - idx; // 0 = last message
-        const placement = role === 'user' ? regex_placement.USER_INPUT : regex_placement.AI_OUTPUT;
-        const out = this.regex.apply(content, this.getRegexContext(), placement, {
-          isMarkdown: false,
-          isPrompt: true,
-          isEdit: false,
-          depth,
+        const out = applyPromptHistoryRegex(content, {
+          role,
+          depth: historyRaw.length - 1 - idx, // 0 = last message
+          regex: this.regex,
+          context: this.getRegexContext(),
+          placements: regex_placement,
         });
         const speaker = role === 'assistant' && isGroupChat
           ? (String(m?.name || '').trim() || name2)
@@ -8466,14 +8477,7 @@ const stringifyMessageContent = (content) => {
       const sessionSummary = (() => {
         if (!useSummaryMemory) return { compacted: null, summaries: [] };
         try {
-          // Group chat requirement: last 10 OR (compacted + last 3).
-          // Non-group: keep previous behavior (last 30).
-          return getSessionSummaryItems(sessionIdForSummary, {
-            limitPlain: 30,
-            limitPlainGroup: 10,
-            limitWithCompacted: 30, // unused for non-group
-            limitWithCompactedGroup: 3,
-          });
+          return getSessionSummaryItems(sessionIdForSummary, getSummaryModeInjectionLimits());
         } catch {
           return { compacted: null, summaries: [] };
         }
@@ -8512,16 +8516,26 @@ const stringifyMessageContent = (content) => {
 	                });
 	              }
 	            } else {
-	              if (summaries.length) {
+	              // 私聊/写作同样带上大总结：压缩后普通摘要只留最新几条，被合并的内容只在大总结里。
+	              const rows = [];
+	              if (compactedText) rows.push(formatMemoryPromptText(
+	                'memory.summary.long_line',
+	                '- 大总结：{value}',
+	                { value: compactedText },
+	              ));
+	              rows.push(
+	                ...summaries
+	                  .map(s => String(typeof s === 'string' ? s : s?.text || '').trim())
+	                  .filter(Boolean)
+	                  .map(t => `- ${t}`),
+	              );
+	              if (rows.length) {
 	                blocks.push({
 	                  role: 'system',
 	                  content: `${formatMemoryPromptText(
 	                    'memory.summary.private_history_header',
 	                    '以下为该聊天室的简要摘要回顾：',
-	                  )}\n${summaries
-	                    .map(s => `- ${String(typeof s === 'string' ? s : s?.text || '').trim()}`)
-	                    .filter(Boolean)
-	                    .join('\n')}`.trim(),
+	                  )}\n${rows.join('\n')}`.trim(),
 	                });
 	              }
 	            }
@@ -8959,7 +8973,8 @@ const stringifyMessageContent = (content) => {
     })) : [];
     // Prefix speaker names to reduce model confusion (role is still preserved)
     try {
-      for (const m of history) {
+      const regexContext = this.getRegexContext();
+      for (const [idx, m] of history.entries()) {
         if (!m || typeof m !== 'object') continue;
         if (m.role !== 'user' && m.role !== 'assistant') continue;
 
@@ -8978,6 +8993,15 @@ const stringifyMessageContent = (content) => {
         } else if (m.type === 'audio' || (typeof contentText === 'string' && contentText.startsWith('data:audio'))) {
           contentText = '[语音]';
         }
+
+        // 与预设区块路径一致：仅提示词正则与深度隐藏同样作用于这里发出的历史
+        contentText = applyPromptHistoryRegex(contentText, {
+          role: m.role,
+          depth: history.length - 1 - idx,
+          regex: this.regex,
+          context: regexContext,
+          placements: regex_placement,
+        });
 
         const speaker = m.role === 'assistant' && isGroupChat
           ? (String(m?.name || '').trim() || name2)
@@ -9085,12 +9109,7 @@ const stringifyMessageContent = (content) => {
 	        if (momentSummary) messages.push(momentSummary);
 	      } catch {}
 	      try {
-	        const sessionSummary = getSessionSummaryItems(sessionIdForSummary, {
-	          limitPlain: 30,
-	          limitPlainGroup: 10,
-	          limitWithCompacted: 30,
-	          limitWithCompactedGroup: 3,
-	        });
+	        const sessionSummary = getSessionSummaryItems(sessionIdForSummary, getSummaryModeInjectionLimits());
 	        const compactedText = String(sessionSummary?.compacted?.text || '').trim();
 	        const summaries = Array.isArray(sessionSummary?.summaries) ? sessionSummary.summaries : [];
 	        if (isGroupChat) {
@@ -9116,16 +9135,26 @@ const stringifyMessageContent = (content) => {
 	            });
 	          }
 	        } else {
-	          if (summaries.length) {
+	          // 私聊/写作同样带上大总结：压缩后普通摘要只留最新几条，被合并的内容只在大总结里。
+	          const rows = [];
+	          if (compactedText) rows.push(formatMemoryPromptText(
+	            'memory.summary.long_line',
+	            '- 大总结：{value}',
+	            { value: compactedText },
+	          ));
+	          rows.push(
+	            ...summaries
+	              .map(s => String(typeof s === 'string' ? s : s?.text || '').trim())
+	              .filter(Boolean)
+	              .map(t => `- ${t}`),
+	          );
+	          if (rows.length) {
 	            messages.push({
 	              role: 'system',
 	              content: `${formatMemoryPromptText(
 	                'memory.summary.private_history_header',
 	                '以下为该聊天室的简要摘要回顾：',
-	              )}\n${summaries
-	                .map(s => `- ${String(typeof s === 'string' ? s : s?.text || '').trim()}`)
-	                .filter(Boolean)
-	                .join('\n')}`.trim(),
+	              )}\n${rows.join('\n')}`.trim(),
 	            });
 	          }
 	        }

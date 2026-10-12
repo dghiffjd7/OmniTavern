@@ -3,6 +3,9 @@ import { extractHouseReferences } from './hopscotch-board-utils.js';
 import { resolveFormatReviewAvailability } from './format-review-settings-utils.js';
 import { allowsAgentInvocation, getAgentInvocationMode } from '../../agent/agent-invocation.js';
 
+// 格子上的短状态：摘要模式单独标出，其余停用原因统一显示「已停用」（完整原因见提示）。
+export const hopscotchInactiveBadgeLabel = reason => reason === 'memory_summary_mode' ? t('摘要模式') : t('已停用');
+
 export const hopscotchInactiveLabel = reason => ({
   disabled: t('已停用'),
   variable_runtime_disabled: t('变量功能已关闭'),
@@ -10,6 +13,7 @@ export const hopscotchInactiveLabel = reason => ({
   no_variable_updates: t('当前变量暂无更新请求'),
   independent_variable_rules: t('此角色使用独立变量规则'),
   memory_disabled: t('记忆表格功能已关闭'),
+  memory_summary_mode: t('摘要模式：摘要随正文一起生成，不更新记忆表格'),
   image_prompt_disabled: t('图片提示已停用'),
   no_variable_rules: t('当前角色暂无此阶段的变量规则'),
   dependency_disabled: t('依赖的房子已停用'),
@@ -25,18 +29,20 @@ export const resolveHopscotchActivation = (board, settings = {}) => {
   const body = all.find(house => house.kind === 'body');
   const prompt = all.find(house => house.kind === 'image_prompt');
   const memoryOff = settings.memory && (settings.memory.storageMode !== 'table' || settings.memory.placeEnabled === false || settings.memory.writingEnabled === false);
+  // 摘要模式下表格更新同样不运行，但要标明是摘要模式而不是被停用。
+  const memoryReason = settings.memory?.storageMode === 'summary' ? 'memory_summary_mode' : 'memory_disabled';
   const variable = settings.variables?.activity;
   const status = (requested, reason = '') => ({ requested, enabled: requested && !reason, reason: requested ? reason : 'disabled' });
   for (const kind of body?.fused || []) {
     let reason = '';
-    if (kind === 'memory_table' && memoryOff) reason = 'memory_disabled';
+    if (kind === 'memory_table' && memoryOff) reason = memoryReason;
     if (kind === 'variable' && (variable ? !variable.enabled : settings.variables?.enabled === false)) reason = variable?.reason || 'variable_runtime_disabled';
     if (kind === 'variable' && variable?.available && Array.isArray(variable.updateModes) && !variable.updateModes.includes('inline')) reason = 'independent_variable_rules';
     fused[kind] = status(body.fusedEnabled?.[kind] !== false, reason);
   }
   for (const house of all) {
     let reason = '';
-    if (house.kind === 'memory_table' && memoryOff) reason = 'memory_disabled';
+    if (house.kind === 'memory_table' && memoryOff) reason = memoryReason;
     if (house.kind === 'format_review' && settings.replyCheck) reason = resolveFormatReviewAvailability(settings.replyCheck, { place: settings.place, hasFormatGuide: settings.replyCheck.hasFormatGuide }).reason;
     if (house.kind === 'variable' && variable && (!variable.enabled || !variable.updateModes?.includes('inline'))) reason = variable.reason || 'no_variable_updates';
     if (house.kind === 'variable_rules' && variable && (!variable.enabled || !variable.rulePhases?.includes(house.config.phase))) reason = variable.reason || 'no_variable_rules';

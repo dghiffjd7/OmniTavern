@@ -227,7 +227,7 @@ const DEFAULT_MOMENT_PUBLISH_COMMENT_RULES = `
 `.trim();
 
 // 摘要提示词：每次回复末尾输出 <details><summary>摘要</summary>...</details>（纯中文）
-const DEFAULT_SUMMARY_RULES = [
+export const DEFAULT_SUMMARY_RULES = [
     '每次输出结束后，**紧跟着**以一句话概括本次互动的摘要，确保<details><summary>摘要</summary>',
     '<内容>',
     '</details>标签顺序正确，摘要**纯中文输出**，不得夹杂其它语言',

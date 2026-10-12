@@ -81,3 +81,16 @@ export const applyOutputRegexPairSafe = (
   });
   return { stored, display };
 };
+
+// 发给 AI 的历史消息套用正则（含仅提示词与深度，深度 0 = 最后一条）；自定义提示词区块开或关的两条组装路径共用。
+export const applyPromptHistoryRegex = (content, { role, depth, regex, context, placements } = {}) => {
+  const text = normalizeRegexResult(content);
+  if (typeof regex?.apply !== 'function') return text;
+  const placement = role === 'user' ? placements?.USER_INPUT : placements?.AI_OUTPUT;
+  return normalizeRegexResult(regex.apply(text, context, placement, {
+    isMarkdown: false,
+    isPrompt: true,
+    isEdit: false,
+    depth,
+  }));
+};

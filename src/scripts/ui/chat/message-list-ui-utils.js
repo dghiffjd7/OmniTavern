@@ -238,6 +238,44 @@ export const prependHistoryCore = ({
   return true;
 };
 
+// 在指定节点前插入一批历史消息（折叠占位前后补内容用）。keepViewport：以 beforeNode 为锚保持画面不跳。
+export const insertHistoryCore = ({
+  messages = [],
+  scrollEl,
+  documentLike,
+  beforeNode = null,
+  keepViewport = false,
+  isRp = false,
+  buildMessageElement,
+  refreshRpFloorMarkers,
+  refreshScrollDateBadge,
+  scheduleScrollBottomButtonRefresh,
+} = {}) => {
+  const list = Array.isArray(messages) ? messages : [];
+  if (!list.length || !scrollEl) return false;
+  const anchor = beforeNode && beforeNode.parentNode === scrollEl ? beforeNode : null;
+  const anchorTopBefore = keepViewport && anchor ? anchor.getBoundingClientRect().top : 0;
+  const fragment = documentLike.createDocumentFragment();
+  for (const message of list) {
+    const element = buildMessageElement?.(
+      buildHistoryRenderMessage(message, {
+        lazyRichMount: Boolean(message?.meta?.renderRich),
+      }),
+    );
+    if (element) fragment.appendChild(element);
+  }
+  if (anchor) scrollEl.insertBefore(fragment, anchor);
+  else scrollEl.appendChild(fragment);
+  if (isRp) refreshRpFloorMarkers?.();
+  if (keepViewport && anchor) {
+    const shift = anchor.getBoundingClientRect().top - anchorTopBefore;
+    if (shift) scrollEl.scrollTop += shift;
+  }
+  refreshScrollDateBadge?.();
+  scheduleScrollBottomButtonRefresh?.({ immediate: true });
+  return true;
+};
+
 export const refreshAvatarsCore = ({
   scrollEl,
   resolver,

@@ -121,7 +121,7 @@ console.log('ok - compaction waits actual completion and rejects late persistenc
 }
 
 // 保存新默认板后，表格维护仍受行屏障/取消/超时管理，不需要可见的摘要房子。
-const savedTableTurn = async ({ mode = 'inline', request, memoryResult = { status: 'succeeded' }, bodyStatus = 'succeeded', policy = {}, changeBoard = () => {}, storageMode = 'table', placeEnabled = true } = {}) => {
+const savedTableTurn = async ({ mode = 'inline', request, memoryResult = { status: 'succeeded' }, bodyStatus = 'succeeded', policy = {}, changeBoard = () => {}, storageMode = 'table', placeEnabled = true, postGate = null } = {}) => {
   const cache = new Map();
   const boardStore = createHopscotchBoardStore({ storage: { getItem: k => cache.get(k), setItem: (k, v) => cache.set(k, v) } });
   const events = [];
@@ -145,7 +145,7 @@ const savedTableTurn = async ({ mode = 'inline', request, memoryResult = { statu
         runTimelineRepair: async () => { events.push('repair'); },
       },
       compaction: { place: 'writing', request: async (sid, options) => { events.push('compaction'); return request ? request(sid, options) : false; } },
-      custom: { backgroundChat: async () => { events.push('post'); return 'note'; } },
+      custom: { backgroundChat: async () => { events.push('post'); if (postGate) await postGate; return 'note'; } },
     }),
     logger: { warn() {} },
   });
@@ -171,43 +171,46 @@ for (const mode of ['inline', 'separate']) {
     assert.equal(expectedAdapterKind, 'memory_table');
     return new Promise(resolve => { finish = resolve; });
   } });
-  await tick();
-  assert.equal(events.filter(e => e === 'compaction').length, 1, '保存默认板不能丢失表格内部摘要维护');
-  assert.equal(events.includes('post'), false, '后续行必须等待维护结束');
-  assert.equal(runtime.isSessionBusy('rp:table'), true);
-  const host = mode === 'inline' ? 'body' : 'memory';
-  assert.ok(!laneUpdates.some(([id, status]) => id === host && status === 'succeeded'), '维护完成前泳道不能提前完成');
-  assert.equal(turn.getHouseStates().find(h => h.id === host).childResults[0].status, 'running');
-  finish(false);
+  // 维护在后台：后续行照跑、整轮照常收尾（发送键解锁），不再卡在「正文生成」。
   const result = await turn.turnPromise;
+  assert.equal(events.filter(e => e === 'compaction').length, 1, '保存默认板不能丢失表格内部摘要维护');
+  assert.equal(events.includes('post'), true, '后续行不等待后台维护');
+  assert.equal(runtime.isSessionBusy('rp:table'), false, '整轮收尾后会话不再忙碌');
+  const host = mode === 'inline' ? 'body' : 'memory';
+  assert.ok(laneUpdates.some(([id, status]) => id === host && status === 'succeeded'), '宿主交付后泳道立即显示完成');
+  const firstDone = laneUpdates.findIndex(([id, status]) => id === host && status === 'succeeded');
+  assert.ok(!laneUpdates.slice(firstDone).some(([id, status]) => id === host && status === 'running'), '宿主完成后泳道不能再变回执行中');
   assert.equal(result.status, 'succeeded');
   assert.equal(result.bodyDelivered, true);
-  assert.equal(result.houses[host].childResults[0].reason, 'threshold_not_reached');
   assert.equal(result.houses[host].status, 'succeeded');
-  assert.equal(events.at(-1), 'post');
+  assert.equal(turn.getHouseStates().find(h => h.id === host).childResults[0].status, 'running');
   if (mode === 'separate') assert.deepEqual(events, ['memory', 'repair', 'compaction', 'post']);
-  assert.equal(runtime.isSessionBusy('rp:table'), false);
+  finish(false);
+  await turn.maintenancePromise;
+  assert.equal(turn.getHouseStates().find(h => h.id === host).childResults[0].reason, 'threshold_not_reached');
 }
-console.log('ok - saved inline/separate defaults retain tracked table maintenance and row barrier');
+console.log('ok - saved inline/separate defaults run table maintenance in the background without holding later rows or the turn');
 
 for (const onHouseFailure of ['continue', 'stop_following_rows']) {
   const { turn } = await savedTableTurn({ policy: { onHouseFailure }, request: async () => { throw new Error('maintenance failed'); } });
   const result = await turn.turnPromise;
-  assert.equal(result.status, 'partial');
+  await turn.maintenancePromise;
   assert.equal(result.bodyDelivered, true, '维护失败不能抹掉正文交付');
   assert.equal(result.artifacts.body.messageId, 'delivered');
   assert.equal(result.houses.body.status, 'succeeded');
-  assert.equal(result.houses.body.childResults[0].status, 'failed');
-  assert.equal(result.houses.post.status, onHouseFailure === 'continue' ? 'succeeded' : 'skipped');
+  // 失败时机取决于后台请求，整轮只可能是完成或部分失败，绝不能因维护而失败或取消。
+  assert.ok(['succeeded', 'partial'].includes(result.status), result.status);
+  const body = turn.getHouseStates().find(h => h.id === 'body');
+  assert.equal(body.childResults[0].status, 'failed');
 }
-console.log('ok - internal maintenance failure is partial, preserves body and obeys failure policy');
+console.log('ok - internal maintenance failure is recorded on the host and never erases the delivered body');
 
 {
   const { turn } = await savedTableTurn({ request: async () => ({ status: 'cancelled', reason: 'request_aborted' }) });
   const result = await turn.turnPromise;
-  assert.equal(result.status, 'partial', '子请求自行取消，未停止整轮，也不能报告全部完成');
-  assert.equal(result.houses.body.childResults[0].status, 'cancelled');
+  await turn.maintenancePromise;
   assert.equal(result.bodyDelivered, true);
+  assert.equal(turn.getHouseStates().find(h => h.id === 'body').childResults[0].status, 'cancelled');
 }
 
 {
@@ -216,22 +219,55 @@ console.log('ok - internal maintenance failure is partial, preserves body and ob
     requestSignal = signal;
     return new Promise(resolve => { lateResolve = resolve; });
   } });
-  await tick();
-  turn.abort();
   const result = await turn.turnPromise;
-  assert.equal(result.status, 'cancelled');
   assert.equal(result.bodyDelivered, true);
-  assert.equal(result.houses.body.status, 'succeeded');
-  const child = result.houses.body.childResults[0];
+  assert.equal(runtime.isSessionBusy('rp:table'), false);
+  turn.abort();
+  await turn.maintenancePromise;
+  const child = turn.getHouseStates().find(h => h.id === 'body').childResults[0];
   assert.equal(child.status, 'cancelled');
   assert.equal(child.reason, 'user_cancelled');
-  assert.equal(requestSignal.aborted, true);
-  assert.equal(runtime.isSessionBusy('rp:table'), false);
+  assert.equal(requestSignal.aborted, true, '整轮收尾后仍可停止后台维护');
+  assert.equal(turn.getHouseStates().find(h => h.id === 'body').status, 'succeeded');
   lateResolve({ status: 'succeeded', artifact: { text: 'late' } });
   await tick();
   assert.equal(turn.getHouseStates().find(h => h.id === 'body').childResults[0].status, child.status);
 }
-console.log('ok - maintenance cancellation preserves body and rejects late results');
+console.log('ok - background maintenance stays cancellable after the turn and rejects late results');
+
+{
+  let requestSignal;
+  const { turn, runtime } = await savedTableTurn({ request: (_, { signal }) => {
+    requestSignal = signal;
+    return new Promise(() => {});
+  } });
+  await turn.turnPromise;
+  runtime.clearScope();
+  await turn.maintenancePromise;
+  assert.equal(requestSignal.aborted, true, '切换作用域必须取消仍在后台的维护');
+}
+console.log('ok - scope change cancels background maintenance');
+
+{
+  // 停止发生在正文之后的行时，后台维护一并取消
+  let requestSignal, releasePost;
+  const { turn } = await savedTableTurn({
+    request: (_, { signal }) => { requestSignal = signal; return new Promise(() => {}); },
+    changeBoard: board => {
+      board.rows.at(-1).houses[0].config.prompt = 'post';
+    },
+    postGate: new Promise(resolve => { releasePost = resolve; }),
+  });
+  await tick();
+  turn.abort();
+  releasePost?.();
+  const result = await turn.turnPromise;
+  await turn.maintenancePromise;
+  assert.equal(result.status, 'cancelled');
+  assert.equal(result.bodyDelivered, true);
+  assert.equal(requestSignal.aborted, true);
+}
+console.log('ok - stopping the turn while later rows run also cancels background maintenance');
 
 for (const options of [
   { changeBoard: board => { delete board.policy.tableSummaryMaintenance; } },
@@ -273,8 +309,9 @@ for (const cancel of [false, true]) {
   finish('summary');
   await requestCompletion;
   const result = await turn.turnPromise;
-  assert.equal(result.status, cancel ? 'cancelled' : 'succeeded');
+  await turn.maintenancePromise;
   assert.equal(result.bodyDelivered, true);
+  assert.equal(turn.getHouseStates().find(h => h.id === 'body').childResults[0].status, cancel ? 'cancelled' : 'succeeded');
   assert.equal(writes, cancel ? 0 : 2, '真实压缩运行时只允许未取消的表格维护提交');
 }
 console.log('ok - saved-default maintenance reaches compaction persistence and blocks aborted writes');

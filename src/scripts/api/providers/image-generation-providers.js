@@ -640,6 +640,26 @@ export class Automatic1111ImageProvider extends ImageProviderBase {
   }
 }
 
+// ComfyUI 校验不通过时回 400 + { error, node_errors }；整理成「节点 id（类型）：原因」，看得出是哪个参数不对。
+const formatComfyUIPromptError = (status, body) => {
+  const raw = String(body || '').trim();
+  let data = null;
+  try {
+    data = JSON.parse(raw);
+  } catch {}
+  if (!data?.error) return `comfyui API Error: ${status}${raw ? ` - ${raw.slice(0, 500)}` : ''}`;
+  const clip = text => String(text || '').trim().slice(0, 300);
+  const nodeLines = Object.entries(data.node_errors || {}).flatMap(([nodeId, node]) => (
+    (Array.isArray(node?.errors) ? node.errors : []).map(error => (
+      `节点 ${nodeId}（${node?.class_type || '?'}）：${clip(error?.details || error?.message)}`
+    ))
+  ));
+  const summary = nodeLines.length
+    ? nodeLines.join('；')
+    : `${clip(data.error.message)}${data.error.details ? `（${clip(data.error.details)}）` : ''}`;
+  return `ComfyUI 拒绝了工作流（HTTP ${status}）：${summary}`;
+};
+
 export class ComfyUIImageProvider extends ImageProviderBase {
   constructor(config = {}) {
     super({
@@ -654,6 +674,11 @@ export class ComfyUIImageProvider extends ImageProviderBase {
     const raw = String(options.workflowJson || options.workflow_json || '').trim();
     if (!raw) {
       throw new Error('ComfyUI 需要先在图片生成参数中填写 API Format workflow JSON');
+    }
+    // 模型栏默认是占位的 workflow；工作流用 %model% 时会被当成模型名，ComfyUI 校验回 400。
+    const model = String(this.model || '').trim();
+    if (raw.includes('%model%') && (!model || model === 'workflow')) {
+      throw new Error('ComfyUI 工作流用了 %model%，请先在图片 API 配置的模型栏选择 ComfyUI 里的模型');
     }
     const seed = toRandomSeed(options.seed);
     const replacements = {
@@ -680,13 +705,20 @@ export class ComfyUIImageProvider extends ImageProviderBase {
   async generateImage(prompt, options = {}) {
     const { signal } = options || {};
     const workflow = this.buildWorkflow(String(prompt || '').trim(), options);
-    const queued = await this.requestJson({
+    const queuedRes = await this.request({
       url: joinUrl(this.baseUrl, '/prompt'),
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt: workflow }),
       signal,
     });
+    if (!queuedRes.ok) throw new Error(formatComfyUIPromptError(queuedRes.status, queuedRes.body));
+    let queued = null;
+    try {
+      queued = JSON.parse(queuedRes.body || '{}');
+    } catch (err) {
+      throw new Error(`comfyui API returned invalid JSON: ${err.message}`);
+    }
     const promptId = String(queued?.prompt_id || '').trim();
     if (!promptId) throw new Error('ComfyUI 未返回 prompt_id');
 

@@ -56,11 +56,38 @@ import {
       { role: 'assistant', content: '显示', rawOriginal: '原文', meta: { reasoningDisplay: '推理' } },
     ],
   });
-  assert.match(text, /^# 测试聊天/);
+  assert.match(text, /^<!-- omnitavern-export v1 mode=chat content=full count=2 -->\n# 测试聊天/);
   assert.match(text, /导出模式：完整/);
   assert.match(text, /\*\*请求推理\*\*/);
   assert.match(text, /原文/);
   console.log('ok - formatConversationExport builds readable markdown with reasoning section');
+}
+
+{
+  // 导出标记 v1：md 用不可见注释标出文件头、每条消息与思考段；名字含特殊字符时编码
+  const messages = [
+    { role: 'user', name: '阿兰 · A', content: '## 3. 这不是标题', timestamp: 1791400000000 },
+    { role: 'assistant', name: '苏晓彤', content: '显示', rawOriginal: '原文', meta: { reasoningDisplay: '想一想' }, timestamp: 1791400060000 },
+  ];
+  const md = formatConversationExport({ messages, title: 'T', mode: 'full', format: 'md', sessionMode: 'rp', exportedAt: new Date(0) });
+  assert.match(md, /^<!-- omnitavern-export v1 mode=rp content=full count=2 -->/);
+  assert.match(md, /<!-- omnitavern-message index=1 role=user name=%E9%98%BF%E5%85%B0%20%C2%B7%20A ts=1791400000000 -->\n## 1\. /);
+  assert.match(md, /<!-- omnitavern-message index=2 role=assistant name=%E8%8B%8F%E6%99%93%E5%BD%A4 ts=1791400060000 -->/);
+  assert.match(md, /<!-- omnitavern-reasoning -->\n\*\*请求推理\*\*\n\n想一想\n<!-- \/omnitavern-reasoning -->\n\n原文/);
+  const body = formatConversationExport({ messages, title: 'T', mode: 'body', format: 'md', sessionMode: 'chat', exportedAt: new Date(0) });
+  assert.match(body, /^<!-- omnitavern-export v1 mode=chat content=body count=2 -->/);
+  assert.doesNotMatch(body, /omnitavern-reasoning/);
+
+  const txt = formatConversationExport({ messages, title: 'T', mode: 'full', format: 'txt', sessionMode: 'rp', exportedAt: new Date(0) });
+  const lines = txt.split('\n');
+  assert.equal(lines[0], '【OmniTavern 导出 v1 · 创意写作 · 完整】');
+  assert.ok(lines.some(line => /^\[1\] 阿兰 · A（我） · /.test(line)));
+  assert.ok(lines.some(line => /^\[2\] 苏晓彤（AI） · /.test(line)));
+  assert.match(txt, /【请求推理】\n想一想\n\n【正文】\n原文/);
+  const txtBody = formatConversationExport({ messages, title: 'T', mode: 'body', format: 'txt', sessionMode: 'chat', exportedAt: new Date(0) });
+  assert.equal(txtBody.split('\n')[0], '【OmniTavern 导出 v1 · 聊天 · 正文】');
+  assert.doesNotMatch(txtBody, /【正文】/);
+  console.log('ok - exports carry v1 import markers for messages, roles and reasoning');
 }
 
 {

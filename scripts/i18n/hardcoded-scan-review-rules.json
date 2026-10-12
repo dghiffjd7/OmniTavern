@@ -153,6 +153,18 @@
       "pathPrefixes": ["src/scripts/storage/"],
       "category": "storage_internal",
       "reason": "Remaining storage-layer Han text is a legacy identity/sentinel, persistence diagnostic, or migration fallback. User-visible labels and errors are handled by the UI catalog or stable content localization."
+    },
+    {
+      "scope": "source",
+      "paths": ["src/scripts/ui/chat/conversation-export-utils.js"],
+      "category": "protocol_compatibility",
+      "reason": "Conversation export v1 markers (TXT header prefix, 【请求推理】/【正文】 section labels and （我）/（AI）/（系统） role suffixes, and the 【附加数据 v1 …】 state section title) are parsed by chat-history import and must stay identical in every UI language."
+    },
+    {
+      "scope": "source",
+      "paths": ["src/scripts/ui/chat/conversation-import-utils.js"],
+      "category": "protocol_compatibility",
+      "reason": "Chat-history import matches the fixed labels written by conversation export (导出模式：/完整/正文/创意写作/聊天 and legacy role names); they are file-format tokens, not UI text."
     }
   ]
 }

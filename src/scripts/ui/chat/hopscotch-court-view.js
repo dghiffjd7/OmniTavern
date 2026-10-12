@@ -1,6 +1,6 @@
 import { t, translateUiText } from '../../i18n/index.js';
 import { getHopscotchHouseDisplayStatus } from './hopscotch-board-utils.js';
-import { hopscotchInactiveLabel, resolveHopscotchActivation } from './hopscotch-activation-utils.js';
+import { hopscotchInactiveBadgeLabel, hopscotchInactiveLabel, resolveHopscotchActivation } from './hopscotch-activation-utils.js';
 import { agentInvocationLabel } from '../../agent/agent-invocation.js';
 import { agentIconMarkup } from '../../agent/agent-icons.js';
 import { isHopscotchHouseDraft } from './hopscotch-house-types.js';
@@ -104,7 +104,7 @@ export const renderHopscotchCourt = (board, { editable = false, states = {}, sta
   };
   const roofGlyph = !status || status === 'succeeded' ? courtIcon('finish') : glyphFor(status);
   const visibleEnabled = active => active?.enabled !== false || active?.manualEnabled === true;
-  const inactiveBadge = active => !visibleEnabled(active) ? `<span class="hop-disabled-mark" title="${e(hopscotchInactiveLabel(active.reason))}"><span aria-hidden="true">Ⅱ</span>${e(t('已停用'))}</span>` : active?.invocationMode && active.invocationMode !== 'manual' ? `<span class="hop-input-stage-label">${e(t(agentInvocationLabel(active)))}</span>` : '';
+  const inactiveBadge = active => !visibleEnabled(active) ? `<span class="hop-disabled-mark" title="${e(hopscotchInactiveLabel(active.reason))}"><span aria-hidden="true">Ⅱ</span>${e(hopscotchInactiveBadgeLabel(active.reason))}</span>` : active?.invocationMode && active.invocationMode !== 'manual' ? `<span class="hop-input-stage-label">${e(t(agentInvocationLabel(active)))}</span>` : '';
   // 草稿（停用）房子可原位切换类型。
   const typeBadge = house => editable && isHopscotchHouseDraft(house) ? `<span class="hop-type-badge${typeTray?.houseId === house.id ? ' is-open' : ''}" data-hop-type-trigger aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M7 4 4 7l3 3M4 7h12M17 20l3-3-3-3M20 17H8"/></svg></span>` : '';
   const pill = house => {

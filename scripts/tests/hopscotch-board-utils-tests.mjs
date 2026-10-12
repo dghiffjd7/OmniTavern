@@ -8,6 +8,7 @@ import {
   extractHouseReferences,
   findBodyRowIndex,
   getHopscotchHouseDisplayStatus,
+  isHopscotchMaintenanceRunning,
   normalizeCustomHouseConfig,
   normalizeHopscotchBoard,
   validateHopscotchBoard,
@@ -18,12 +19,17 @@ const custom = (id, config = {}) => ({ id, kind: 'custom_prompt', label: id, con
 const bodyRow = (fused = []) => ({ id: 'rb', houses: [{ id: 'body', kind: 'body', fused }] });
 
 {
-  for (const [childStatus, expected] of [['running', 'running'], ['succeeded', 'succeeded'], ['skipped', 'succeeded'], ['failed', 'partial'], ['cancelled', 'cancelled']]) {
+  // 维护在后台进行时宿主照样算完成（不再像正文仍在生成），另由 isHopscotchMaintenanceRunning 标示。
+  for (const [childStatus, expected] of [['running', 'succeeded'], ['queued', 'succeeded'], ['succeeded', 'succeeded'], ['skipped', 'succeeded'], ['failed', 'partial'], ['cancelled', 'cancelled']]) {
     const state = { status: 'succeeded', childResults: [{ status: childStatus }] };
     assert.equal(getHopscotchHouseDisplayStatus(state), expected);
     assert.equal(state.status, 'succeeded', '显示子任务状态但不重写主产物交付状态');
   }
   assert.equal(getHopscotchHouseDisplayStatus({ status: 'failed', childResults: [{ status: 'succeeded' }] }), 'failed');
+  assert.equal(isHopscotchMaintenanceRunning({ status: 'succeeded', childResults: [{ status: 'running' }] }), true);
+  assert.equal(isHopscotchMaintenanceRunning({ status: 'succeeded', childResults: [{ status: 'queued' }] }), true);
+  assert.equal(isHopscotchMaintenanceRunning({ status: 'succeeded', childResults: [{ status: 'failed' }] }), false);
+  assert.equal(isHopscotchMaintenanceRunning({ status: 'running', childResults: [{ status: 'running' }] }), false);
   console.log('ok - house display includes internal work without rewriting delivery status');
 }
 

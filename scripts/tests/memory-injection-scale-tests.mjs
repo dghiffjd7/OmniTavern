@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';
+import { readFileSync } from 'node:fs';
 
 import {
   buildMemoryTablePlan,
   estimateTokens,
   limitSummaryRowsForPrompt,
+  resolveMemorySummaryCompactionThreshold,
+  resolveMemorySummaryInjectionLimit,
+  resolveMemorySummaryRowLimit,
 } from '../../src/scripts/memory/memory-prompt-utils.js';
 import {
   reflowUnusedRecallToRecent,
@@ -190,4 +194,91 @@ console.log('ok - 3000-row memory injection obeys bridge summary cap, row/token 
     assert.ok(total <= B, `scale=${scale} 总注入 ${total} 超过预算 ${B}`);
   }
   console.log('ok - end-to-end synthetic pipeline keeps total injection within user budget B');
+}
+
+{
+  // 聊天一轮很短，摘要条数单独设（默认 20）；写作与动态沿用原来的条数（默认 10）。
+  assert.equal(resolveMemorySummaryRowLimit({}, 'chat_summary'), 20);
+  assert.equal(resolveMemorySummaryRowLimit({}, 'group_summary'), 20);
+  assert.equal(resolveMemorySummaryRowLimit({}, 'rp_summary'), 10);
+  assert.equal(resolveMemorySummaryRowLimit({}, 'moment_summary'), 10);
+  assert.equal(resolveMemorySummaryRowLimit({}), 10);
+  const settings = { memorySummaryRowLimit: 12, memorySummaryRowLimitChat: 30 };
+  assert.equal(resolveMemorySummaryRowLimit(settings, 'chat_summary'), 30);
+  assert.equal(resolveMemorySummaryRowLimit(settings, 'rp_summary'), 12);
+  assert.equal(resolveMemorySummaryRowLimit({ memorySummaryRowLimitChat: 999 }, 'chat_summary'), 50);
+
+  const mk = (tableId, n) => Array.from({ length: n }, (_, i) => ({ id: `${tableId}-${i}`, table_id: tableId, sort_order: i, row_data: {} }));
+  const limited = limitSummaryRowsForPrompt([...mk('chat_summary', 25), ...mk('rp_summary', 25)], tableId => resolveMemorySummaryRowLimit({}, tableId));
+  assert.equal(limited.filter(row => row.table_id === 'chat_summary').length, 20);
+  assert.equal(limited.filter(row => row.table_id === 'rp_summary').length, 10);
+  console.log('ok - summary row limit is resolved per table (chat 20, writing 10)');
+}
+
+{
+  // 压缩失败或还没跑完时摘要会超过条数：保留滚动大总结，裁最旧的普通摘要。
+  const rows = [{ id: 'rolling', table_id: 'rp_summary', sort_order: 8, row_data: { _coverage: { from: 1, to: 8 }, _summary_compaction: { level: 'rolling' } } }];
+  for (let i = 9; i <= 20; i += 1) rows.push({ id: `r${i}`, table_id: 'rp_summary', sort_order: i, row_data: { _coverage: { from: i, to: i } } });
+  const limited = limitSummaryRowsForPrompt(rows, 10).map(row => row.id);
+  assert.deepEqual(limited, ['rolling', 'r12', 'r13', 'r14', 'r15', 'r16', 'r17', 'r18', 'r19', 'r20']);
+  console.log('ok - summary row limit always keeps the rolling compacted summary');
+}
+
+{
+  const rolling = createRows('rp_summary', 5, 'summary').map((row, index) => ({
+    ...row,
+    id: `rolling-${index}`,
+    row_data: { ...row.row_data, _summary_compaction: { level: 'rolling' } },
+  }));
+  const plain = createRows('rp_summary', 5, 'summary').map(row => ({ ...row, sort_order: row.sort_order + 10 }));
+  assert.deepEqual(limitSummaryRowsForPrompt([...rolling.slice(0, 4), ...plain], 4).map(row => row.id),
+    rolling.slice(0, 4).map(row => row.id), '滚动摘要用完名额时不能把 -0 当作保留全部普通摘要');
+  assert.deepEqual(limitSummaryRowsForPrompt([...rolling, ...plain], 4).map(row => row.id),
+    rolling.map(row => row.id), '滚动摘要本身超额时仍保留已有剧情，但不附带普通摘要');
+  assert.deepEqual(limitSummaryRowsForPrompt([...rolling.slice(0, 3), ...plain], 4).map(row => row.id),
+    [...rolling.slice(0, 3), plain.at(-1)].map(row => row.id));
+  assert.equal(limitSummaryRowsForPrompt([...rolling, ...plain], 0).length, 10, '不限条数时仍全量保留');
+  console.log('ok - exhausted summary slots exclude plain rows without dropping rolling summaries');
+}
+
+{
+  // 触发方式默认按条数；按字数时写作/聊天/群聊摘要注入不按条数裁剪（未合并的全部发送），动态摘要仍按条数。
+  assert.deepEqual(resolveMemorySummaryCompactionThreshold({}, 'rp_summary'), { trigger: 'rows', rowLimit: 10, minLength: 1000 });
+  assert.deepEqual(resolveMemorySummaryCompactionThreshold({ memorySummaryCompactionTrigger: 'chars', memorySummaryCompactionChars: 50 }, 'chat_summary'), { trigger: 'chars', rowLimit: 20, minLength: 200 });
+  assert.equal(resolveMemorySummaryCompactionThreshold({ memorySummaryCompactionChars: 99999 }).minLength, 20000);
+  assert.equal(resolveMemorySummaryInjectionLimit({}, 'chat_summary'), 20);
+  const chars = { memorySummaryCompactionTrigger: 'chars' };
+  for (const tableId of ['rp_summary', 'chat_summary', 'group_summary']) assert.equal(resolveMemorySummaryInjectionLimit(chars, tableId), 0, tableId);
+  assert.equal(resolveMemorySummaryInjectionLimit(chars, 'moment_summary'), 10);
+  const rows = Array.from({ length: 30 }, (_, index) => ({ id: `s${index}`, table_id: 'rp_summary', sort_order: index, row_data: { summary: `摘要${index}` } }));
+  assert.equal(limitSummaryRowsForPrompt(rows, tableId => resolveMemorySummaryInjectionLimit(chars, tableId)).length, 30);
+  assert.equal(limitSummaryRowsForPrompt(rows, tableId => resolveMemorySummaryInjectionLimit({}, tableId)).length, 10);
+  console.log('ok - character-triggered compaction sends every unmerged summary row');
+}
+
+
+{
+  // 摘要模式（chatStore 摘要）注入条数跟「触发与频率」同一口径：群聊有大总结后也发到设定条数，不再只发 3 条。
+  const bridgeSource = readFileSync(new URL('../../src/scripts/ui/bridge.js', import.meta.url), 'utf8');
+  const body = bridgeSource.slice(bridgeSource.indexOf('const getSummaryModeInjectionLimits'), bridgeSource.indexOf('const getSessionSummaryItems'));
+  assert.match(body, /uiMode === 'rp' \? 'rp_summary' : \(isGroupChat \? 'group_summary' : 'chat_summary'\)/);
+  assert.match(body, /resolveMemorySummaryInjectionLimit\(appSettings\.get\(\), tableId\) \|\| Infinity/);
+  assert.match(body, /limitPlainGroup: limit, limitWithCompacted: Math\.max\(30, limit\), limitWithCompactedGroup: limit/);
+  assert.doesNotMatch(body, /limitWithCompactedGroup: 3/);
+  console.log('ok - summary-mode injection follows the configured row limit for group chats');
+}
+
+{
+  // 摘要模式私聊/写作也要注入大总结（两处拼装：historyRecallBlocks 与非 openai 顺序），否则压缩后被合并的内容会丢。
+  const bridgeSource = readFileSync(new URL('../../src/scripts/ui/bridge.js', import.meta.url), 'utf8');
+  const marker = "'memory.summary.private_history_header'";
+  const starts = [];
+  for (let at = bridgeSource.indexOf(marker); at >= 0; at = bridgeSource.indexOf(marker, at + 1)) starts.push(at);
+  assert.equal(starts.length, 2);
+  for (const at of starts) {
+    const before = bridgeSource.slice(bridgeSource.lastIndexOf('} else {', at), at);
+    assert.match(before, /if \(compactedText\) rows\.push\(formatMemoryPromptText\(\s*'memory\.summary\.long_line'/);
+    assert.match(bridgeSource.slice(at, at + 200), /\$\{rows\.join\('\\n'\)\}/);
+  }
+  console.log('ok - summary-mode private chats inject the compacted summary');
 }

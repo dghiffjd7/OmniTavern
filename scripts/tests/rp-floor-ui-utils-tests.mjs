@@ -119,3 +119,19 @@ const createFakeDocument = () => {
   assert.equal(floorCount, 1);
   console.log('ok - refreshAllFloorMarkers removes stale markers reapplies assignments and updates latest floor count');
 }
+
+{
+  // 楼层按整个存档计算：已加载范围之前已有 40 楼；画面中间折叠了一段也不影响后面的编号
+  const { resolveAbsoluteRpFloorAssignments, buildRpFloorAssignments: build } = await import('../../src/scripts/ui/chat/message-interaction-utils.js');
+  assert.deepEqual(build([{ role: 'assistant' }, { role: 'user' }], { initialFloor: 40 }).map(a => a.floor), [40, 41]);
+  const loaded = [
+    { id: 'a0', role: 'assistant' },
+    { id: 'u1', role: 'user' }, { id: 'a1', role: 'assistant' },
+    { id: 'u2', role: 'user' }, { id: 'a2', role: 'assistant' },
+    { id: 'u3', role: 'user' }, { id: 'a3', role: 'assistant' },
+  ];
+  const wrappers = [loaded[1], loaded[2], loaded[5], loaded[6], { id: 'streaming', role: 'assistant' }];
+  const result = resolveAbsoluteRpFloorAssignments({ wrapperMessages: wrappers, loadedMessages: loaded, initialFloor: 40 });
+  assert.deepEqual(result.map(a => `${a.floor}${a.marker ? '*' : ''}`), ['41*', '41', '43*', '43', '43']);
+  console.log('ok - rp floors follow the whole archive across collapsed history');
+}

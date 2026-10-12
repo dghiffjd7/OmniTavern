@@ -1241,7 +1241,7 @@ export const APP_FEATURE_DEFINITIONS = Object.freeze([
     title: '聊天记录导出说明',
     aliases: ['导出聊天记录', '导出会话', '导出聊天', '导出', '聊天记录备份', '匯出聊天記錄', 'export chat history'],
     summary: 'APP 支持导出当前聊天或历史存档，提供正文 Markdown、完整 Markdown、正文 TXT、完整 TXT 四个选项。正文使用显示正文；完整导出尽量包含已保存的处理前原文和请求推理，不保证存在未保存的内容。女仆可读取说明并指导操作；当前没有直接导出聊天文件的女仆工具，不会自动导出，需用户选择格式并完成保存。',
-    uiPath: ['联系人设置或群设置', '聊天管理', '历史存档', '当前聊天或目标存档行的 ⇩（导出聊天记录）', '选择导出格式并保存'],
+    uiPath: ['联系人设置或群设置', '聊天与存档', '当前聊天或目标存档行的 ⇩（导出聊天记录）', '选择导出格式并保存'],
     tools: ['app.read_feature_doc'],
     argsHint: 'app.read_feature_doc: featureId="chat.export.help"，只读取操作说明。导出已有存档无需先加载或切换会话。若需可迁移的数据包，设置 -> 资料迁移另有完整备份和自定义导出；联系人设置也可导出角色体验包（.aicpack）。这些数据包与 Markdown/TXT 聊天文本用途不同，保存操作由用户完成。',
     panel: '',

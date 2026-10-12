@@ -3,17 +3,16 @@ import { cloneData } from '../../utils/clone-data.js';
 import { appConfirm } from '../app-confirm.js';
 import { bindBackdropActivation } from '../backdrop-activation-utils.js';
 import { closeCustomSelectMenu, createCustomSelectWrapper, bindCustomSelectButton } from '../custom-select.js';
-import { HOPSCOTCH_HOUSE_CATALOG, HOPSCOTCH_FUSED_KINDS, validateHopscotchBoard, getHopscotchHouseDisplayStatus } from './hopscotch-board-utils.js';
+import { HOPSCOTCH_HOUSE_CATALOG, HOPSCOTCH_FUSED_KINDS, validateHopscotchBoard, getHopscotchHouseDisplayStatus, isHopscotchMaintenanceRunning } from './hopscotch-board-utils.js';
 import { listHopscotchHouseChoices, checkHopscotchHouseEnable, buildRecapAgentConfig, getHopscotchHouseType, isHopscotchHouseDraft } from './hopscotch-house-types.js';
 import { getAgentInvocationMode } from '../../agent/agent-invocation.js';
 import { RECAP_AGENT_ID } from '../../agent/recap-agent.js';
 import { createHopscotchDraftAgents } from './hopscotch-draft-agents.js';
 import { editHopscotchBoard } from './hopscotch-board-editor-utils.js';
 import { escapeHopscotchHtml as e, hopscotchHouseLabel, hopscotchFusedLabel, hopscotchStatusLabel, renderHopscotchCourt, renderHopscotchTypeTray } from './hopscotch-court-view.js';
-import { hopscotchInactiveLabel, resolveHopscotchActivation, findManualHopscotchDependencies } from './hopscotch-activation-utils.js';
+import { hopscotchInactiveBadgeLabel, hopscotchInactiveLabel, resolveHopscotchActivation, findManualHopscotchDependencies } from './hopscotch-activation-utils.js';
 import { buildHopscotchVariableCard, renderHopscotchVariableInfo } from './hopscotch-variable-card-view.js';
 import { bindHopscotchPointerDrag } from './hopscotch-pointer-drag.js';
-import { listHopscotchDropTargets } from './hopscotch-drag-utils.js';
 
 const actionIcon = action => {
   const path = {
@@ -319,16 +318,15 @@ export const createHopscotchBoardPanel = ({
     const activation = turn?.activation || resolveActivation(board);
     const active = (member ? activation.fused?.[member] : activation.houses?.[id]) || { requested: true, enabled: true };
     const variableCard = member === 'variable' || house.kind === 'variable' || house.kind === 'variable_rules';
-    const nodeId = member ? house.fusedMembers[member].id : id;
     const variableActivity = activation.variable || {};
     const variableInfo = variableCard ? renderHopscotchVariableInfo(variableActivity, active, { execution: member ? '' : house.kind === 'variable_rules' ? 'rules' : 'standalone' }) : '';
     const canToggle = editable && (member || house.kind !== 'body');
     const unavailable = active.requested && !active.enabled && active.reason !== 'manual_only';
     const flowLabel = active.invocationMode ? t('参与自动流程') : t('参与此流程');
     const flowOn = active.invocationMode ? active.requested !== false : active.enabled;
-    const toggle = canToggle ? `<div class="agent-center-setting-row is-status hop-flow-toggle-row"><span class="agent-center-setting-label has-help" data-help-mode="tap" data-help="${e(unavailable ? hopscotchInactiveLabel(active.reason) : t('保存后用于后续轮次，房子的位置与配置保留。'))}">${e(flowLabel)}</span><span class="agent-center-setting-value">${e(active.invocationMode === 'manual' ? t('手动') : active.enabled ? t('已启用') : t('已停用'))}</span><button type="button" class="agent-center-switch${flowOn ? ' is-on' : ''}" role="switch" aria-checked="${flowOn}" aria-label="${e(flowLabel)}" data-action="toggle-enabled" ${unavailable ? 'disabled' : ''}><span class="agent-center-switch-track" aria-hidden="true"><span class="agent-center-switch-thumb"></span></span></button></div>` : '';
+    const toggle = canToggle ? `<div class="agent-center-setting-row is-status hop-flow-toggle-row"><span class="agent-center-setting-label has-help" data-help-mode="tap" data-help="${e(unavailable ? hopscotchInactiveLabel(active.reason) : t('保存后用于后续轮次，房子的位置与配置保留。'))}">${e(flowLabel)}</span><span class="agent-center-setting-value">${e(active.invocationMode === 'manual' ? t('手动') : active.enabled ? t('已启用') : hopscotchInactiveBadgeLabel(active.reason))}</span><button type="button" class="agent-center-switch${flowOn ? ' is-on' : ''}" role="switch" aria-checked="${flowOn}" aria-label="${e(flowLabel)}" data-action="toggle-enabled" ${unavailable ? 'disabled' : ''}><span class="agent-center-switch-track" aria-hidden="true"><span class="agent-center-switch-thumb"></span></span></button></div>` : '';
     const hints = { body: t('融合项与正文共享一次请求。'), custom_prompt: t('每次执行通常增加 1 次文本模型请求。'), memory_table: t('独立请求更新记忆，保留频率规则。'), summary_compaction: t('未达到压缩阈值时跳过。'), format_review: t('生成待确认候选，不自动替换正文。'), image_generation: t('读取正文图片提示，等待所有图片完成。') };
-    const front = state ? `<p class="hop-card-status">${e(hopscotchStatusLabel(getHopscotchHouseDisplayStatus(state)))}${state.reason ? ` · ${e(state.enabled === false ? hopscotchInactiveLabel(state.reason) : state.reason)}` : ''}</p>
+    const front = state ? `<p class="hop-card-status">${e(hopscotchStatusLabel(getHopscotchHouseDisplayStatus(state)))}${isHopscotchMaintenanceRunning(state) ? ` · ${e(t('整理摘要中'))}` : ''}${state.reason ? ` · ${e(state.enabled === false ? hopscotchInactiveLabel(state.reason) : state.reason)}` : ''}</p>
         <p class="hop-hint">${e(state?.usage?.latencyMs != null ? `${state.usage.latencyMs} ms` : '')} · ${e(t('用量'))}: ${e(state?.usage?.providerUsage ? JSON.stringify(state.usage.providerUsage) : t('未知'))}</p>
         <pre class="hop-output" data-i18n-skip="true">${e(state?.artifact?.text || state?.error || (state?.artifact ? JSON.stringify(state.artifact, null, 2) : ''))}</pre>
         ${state?.childResults?.length ? `<pre class="hop-output" data-i18n-skip="true">${e(JSON.stringify(state.childResults, null, 2))}</pre>` : ''}`
@@ -352,26 +350,11 @@ export const createHopscotchBoardPanel = ({
       content = `<div class="agent-center-agent-settings">${HOPSCOTCH_FUSED_KINDS.map(kind => `<div class="agent-center-setting-row hop-fusion-setting"><span class="agent-center-setting-label">${e(hopscotchFusedLabel(kind))}</span><button type="button" class="agent-center-switch${house.fused.includes(kind) ? ' is-on' : ''}" role="switch" aria-checked="${house.fused.includes(kind)}" aria-label="${e(`${t('融合')} · ${hopscotchFusedLabel(kind)}`)}" data-action="fused:${kind}"><span class="agent-center-switch-track" aria-hidden="true"><span class="agent-center-switch-thumb"></span></span></button></div>`).join('')}</div>`;
     } else {
       content = `<p class="hop-hint">${e(hints[house.kind] || '')}</p>`;
-      if (house.kind === 'memory_table') content += `<div class="hop-move">${button('fused:memory_table', t('叠进正文'))}</div>`;
     }
     if (independentModel) content += `<div class="agent-center-agent-settings"><div class="agent-center-setting-row is-model"><span class="agent-center-setting-label">${e(t('模型配置'))}</span><select name="model" aria-label="${e(t('模型配置'))}">${option('', t('跟随正文'), cfg.modelMode === 'profile' ? cfg.modelProfileId : '')}${getProfiles().map(profile => option(profile.id, profile.name, cfg.modelProfileId)).join('')}</select></div><div class="agent-center-setting-row is-model"><span class="agent-center-setting-label">${e(t('模型覆盖'))}</span><input class="agent-center-agent-input" name="modelOverride" aria-label="${e(t('模型覆盖'))}" value="${e(cfg.modelOverride || '')}"></div></div>`;
     // 摘要压缩使用专用压缩提示，不能把记忆表格模板冒充其共享配置。
     const fusedAgents = { memory_table: 'memory_table_agent', image_prompt: 'image_director' };
     const agentId = house.kind === 'text_edit' ? house.config.agentId : variableCard ? '' : member ? fusedAgents[member] : ({ memory_table: 'memory_table_agent', format_review: 'reply_check', image_generation: 'image_director', image_prompt: 'image_director' })[house.kind];
-    // 手动房子是挂在某一行旁的胶囊：只提供「挂到哪一行旁」，按挂靠的行去重。
-    const manualIds = new Set(Object.entries(activation.houses || {}).filter(([, item]) => item?.invocationMode === 'manual').map(([houseId]) => houseId));
-    const anchorBefore = index => { for (let i = index - 1; i >= 0; i--) { const shown = board.rows[i].houses.filter(h => !manualIds.has(h.id)); if (shown.length) return { index: i, label: hopscotchHouseLabel(shown[0]) }; } return null; };
-    const isPill = !member && manualIds.has(id);
-    const currentAnchor = isPill ? anchorBefore(rowIndex)?.index : -1;
-    const dropChoices = !editable ? [] : listHopscotchDropTargets(board, nodeId, { capabilities: capabilities() }).filter(item => item.ok && item.changed).flatMap(item => {
-      if (!isPill) return [item];
-      if (item.type !== 'gap') return [];
-      const anchor = anchorBefore(item.beforeRowId ? board.rows.findIndex(row => row.id === item.beforeRowId) : board.rows.length);
-      return anchor && anchor.index !== currentAnchor ? [{ ...item, anchor }] : [];
-    }).filter((item, index, list) => !item.anchor || list.findIndex(other => other.anchor?.index === item.anchor.index) === index);
-    if (editable) {
-      content += `<details class="hop-move-section"><summary>${e(t('移动'))}</summary><div class="hop-move">${dropChoices.map((item, index) => button(`drop:${index}`, item.anchor ? t('挂到「{value}」旁', { value: item.anchor.label }) : item.type === 'fuse' ? t('叠进正文') : item.type === 'gap' ? t('独立到第 {value} 行', { value: item.beforeRowId ? board.rows.findIndex(row => row.id === item.beforeRowId) + 1 : board.rows.length + 1 }) : t('第 {value} 行 · {value2}', { value: board.rows.findIndex(row => row.id === item.rowId) + 1, value2: item.beforeId ? hopscotchHouseLabel(board.rows.flatMap(row => row.houses).find(h => h.id === item.beforeId)) + ' ←' : t('末尾') }), mountAgentCard ? 'class="agent-center-card-action"' : '')).join('')}</div></details>`;
-    }
     const typeChips = editable && !member && isHopscotchHouseDraft(house) ? renderHopscotchTypeTray(id, houseChoices(id)) : '';
     const fields = `<fieldset class="hop-card-fields" ${editable ? '' : 'disabled'}>${typeChips ? `<div class="hop-card-type">${typeChips}</div>` : ''}${content}</fieldset>`;
     const removeButton = editable && house.kind !== 'body' ? button('remove', t('删除房子'), `class="agent-center-icon-button hop-icon-only hop-remove" title="${e(t('删除房子'))}" aria-label="${e(t('删除房子'))}"`) : '';
@@ -384,7 +367,12 @@ export const createHopscotchBoardPanel = ({
       const boardContent = doc.createElement('div');
       boardContent.className = 'hop-board-card-controls';
       const workflowHelp = house.kind === 'body' && !member ? hints.body : t('保存后用于后续轮次，房子的位置与配置保留。');
-      boardContent.innerHTML = `${toggle}${variableInfo}${place === 'writing' ? `<div class="agent-center-agent-section"><div class="agent-center-agent-section-title has-help" data-help-mode="tap" data-help="${e(workflowHelp)}">${e(house.kind === 'body' && !member ? t('融合') : t('跳房子编排'))}</div>${fields}</div>${footer ? `<div class="agent-center-card-actions hop-card-actions">${footer}</div>` : ''}` : ''}`;
+      // 位置靠拖拽调整；只有真正可编辑的房子设置才成段显示，纯说明的房子只留一行提示。
+      const hasHouseSettings = Boolean(typeChips) || house.kind === 'custom_prompt' || (house.kind === 'body' && !member) || independentModel;
+      const settingsSection = hasHouseSettings
+        ? `<div class="agent-center-agent-section"><div class="agent-center-agent-section-title has-help" data-help-mode="tap" data-help="${e(workflowHelp)}">${e(house.kind === 'body' && !member ? t('融合') : t('房子设置'))}</div>${fields}</div>`
+        : content ? `<div class="agent-center-agent-section">${fields}</div>` : '';
+      boardContent.innerHTML = `${toggle}${variableInfo}${place === 'writing' ? `${settingsSection}${footer ? `<div class="agent-center-card-actions hop-card-actions">${footer}</div>` : ''}` : ''}`;
       bindBoardSelects(boardContent);
       const previewSessionId = sid, previewPlace = place;
       sharedConfig = mountAgentCard(detail, {
@@ -465,8 +453,7 @@ export const createHopscotchBoardPanel = ({
       } else if (action.startsWith('fused:')) {
         const kind = action.slice(6);
         operation = { type: 'fuse', kind, enabled: house.kind !== 'body' || !house.fused.includes(kind) };
-      } else if (action.startsWith('drop:')) operation = { type: 'drop', id: nodeId, target: dropChoices[Number(action.slice(5))] };
-      else if (action.startsWith('move:')) operation = { type: 'move', id, rowIndex: Number(action.slice(5)) };
+      } else if (action.startsWith('move:')) operation = { type: 'move', id, rowIndex: Number(action.slice(5)) };
       else if (action === 'new-before' || action === 'new-after') operation = { type: 'move', id, rowIndex: rowIndex + (action === 'new-after' ? 1 : 0), newRow: true };
       else if (action === 'left' || action === 'right') operation = { type: 'move', id, rowIndex, houseIndex: Math.max(0, board.rows[rowIndex].houses.indexOf(house) + (action === 'left' ? -1 : 1)) };
       else if (action === 'remove' && house.kind === 'text_edit' && house.config?.agentId === RECAP_AGENT_ID) {

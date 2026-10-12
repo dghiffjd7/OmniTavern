@@ -31,6 +31,83 @@ const formatDateTime = (value, { fallback = '' } = {}) => {
   }
 };
 
+// ── 导出标记 v1：供「导入聊天记录」可靠拆分（Markdown 阅读器中不可见；TXT 以首行与角色后缀标示）。
+// md：文件头 <!-- omnitavern-export v1 mode=rp|chat content=full|body count=N -->，
+//     每条前 <!-- omnitavern-message index= role= name= ts= -->（值经 encodeURIComponent），
+//     完整版的思考包在 <!-- omnitavern-reasoning --> … <!-- /omnitavern-reasoning --> 之间。
+// txt：首行【OmniTavern 导出 v1 · 创意写作|聊天 · 完整|正文】，每条标题「[N] 名字（我|AI|系统）· 时间」，
+//     完整版有思考时以【请求推理】…【正文】分段。
+export const CONVERSATION_EXPORT_VERSION = 1;
+export const CONVERSATION_EXPORT_MD_HEADER_PREFIX = '<!-- omnitavern-export';
+export const CONVERSATION_EXPORT_MD_MESSAGE_PREFIX = '<!-- omnitavern-message';
+export const CONVERSATION_EXPORT_MD_REASONING_OPEN = '<!-- omnitavern-reasoning -->';
+export const CONVERSATION_EXPORT_MD_REASONING_CLOSE = '<!-- /omnitavern-reasoning -->';
+export const CONVERSATION_EXPORT_TXT_HEADER_PREFIX = '【OmniTavern 导出 v';
+export const CONVERSATION_EXPORT_TXT_REASONING = '【请求推理】';
+export const CONVERSATION_EXPORT_TXT_BODY = '【正文】';
+export const CONVERSATION_EXPORT_TXT_ROLE_SUFFIX = Object.freeze({ user: '（我）', assistant: '（AI）', system: '（系统）' });
+const MODE_LABEL = { rp: '创意写作', chat: '聊天' };
+
+// ── 附加数据 v1（只在「完整」导出）：记忆表格、摘要、变量，导入时可一起绑定到新存档。都放在文件最后。
+// md：<!-- omnitavern-state v1 data=<base64(UTF-8 JSON)> -->（阅读器中不可见）；
+// txt：一行【附加数据 v1 · …】，下一行为单行 JSON。
+export const CONVERSATION_EXPORT_MD_STATE_PREFIX = '<!-- omnitavern-state';
+export const CONVERSATION_EXPORT_TXT_STATE_PREFIX = '【附加数据 v';
+const TXT_STATE_TITLE = `${CONVERSATION_EXPORT_TXT_STATE_PREFIX}${CONVERSATION_EXPORT_VERSION} · 记忆表格、摘要、变量，导入时用来还原】`;
+
+const toFiniteNumber = value => (Number.isFinite(Number(value)) ? Number(value) : 0);
+const normalizeSummaryItem = (item) => {
+  if (typeof item === 'string') return item.trim() ? { at: 0, text: item.trim() } : null;
+  const text = String(item?.text || '').trim();
+  return text ? { at: toFiniteNumber(item.at), text } : null;
+};
+
+// 整理成可写进文件的附加数据；都没有内容时返回 null。表格行不带 id（导入时重新建）。
+export const normalizeConversationTransferState = (state = null) => {
+  if (!state || typeof state !== 'object') return null;
+  const table = state.memoryTable && typeof state.memoryTable === 'object' ? state.memoryTable : null;
+  const templateId = String(table?.templateId || '').trim();
+  const rows = (Array.isArray(table?.rows) ? table.rows : [])
+    .map((row) => {
+      const tableId = String(row?.table_id || '').trim();
+      if (!tableId) return null;
+      return {
+        table_id: tableId,
+        row_data: row?.row_data && typeof row.row_data === 'object' ? JSON.parse(JSON.stringify(row.row_data)) : {},
+        is_active: row?.is_active !== false,
+        is_pinned: Boolean(row?.is_pinned),
+        priority: toFiniteNumber(row?.priority),
+        sort_order: toFiniteNumber(row?.sort_order),
+      };
+    })
+    .filter(Boolean);
+  const summaries = (Array.isArray(state.summaries) ? state.summaries : []).map(normalizeSummaryItem).filter(Boolean);
+  const compactedSummary = state.compactedSummary ? normalizeSummaryItem(state.compactedSummary) : null;
+  const rawVariables = state.variables;
+  const variables = rawVariables && typeof rawVariables === 'object' && !Array.isArray(rawVariables) && Object.keys(rawVariables).length
+    ? JSON.parse(JSON.stringify(rawVariables))
+    : null;
+  const memoryTable = templateId && rows.length ? { templateId, rows } : null;
+  if (!memoryTable && !summaries.length && !compactedSummary && !variables) return null;
+  return { memoryTable, summaries, compactedSummary, variables };
+};
+
+export const encodeConversationTransferState = state => bytesToBase64(new TextEncoder().encode(JSON.stringify(state)));
+
+export const decodeConversationTransferState = (data = '') => {
+  const binary = globalThis.atob(String(data || '').trim());
+  const bytes = Uint8Array.from(binary, char => char.charCodeAt(0));
+  return JSON.parse(new TextDecoder().decode(bytes));
+};
+
+const markerValue = value => encodeURIComponent(String(value ?? ''));
+const buildMarkdownExportHeader = ({ sessionMode, mode, count }) =>
+  `${CONVERSATION_EXPORT_MD_HEADER_PREFIX} v${CONVERSATION_EXPORT_VERSION} mode=${sessionMode === 'rp' ? 'rp' : 'chat'} content=${mode === 'full' ? 'full' : 'body'} count=${Number(count) || 0} -->`;
+const buildMarkdownMessageMarker = ({ index, role, name, timestamp }) =>
+  `${CONVERSATION_EXPORT_MD_MESSAGE_PREFIX} index=${index} role=${markerValue(role)} name=${markerValue(name)} ts=${Number(timestamp) > 0 ? Math.trunc(Number(timestamp)) : 0} -->`;
+const buildTxtExportHeader = ({ sessionMode, mode }) =>
+  `${CONVERSATION_EXPORT_TXT_HEADER_PREFIX}${CONVERSATION_EXPORT_VERSION} · ${MODE_LABEL[sessionMode === 'rp' ? 'rp' : 'chat']} · ${mode === 'full' ? '完整' : '正文'}】`;
+
 const getRoleLabel = (message = {}) => {
   if (message.role === 'user') return message.name || '用户';
   if (message.role === 'assistant') return message.name || 'AI';
@@ -103,15 +180,19 @@ export const formatConversationExport = ({
   mode = 'body',
   format = 'md',
   exportedAt = new Date(),
+  sessionMode = 'chat',
+  state = null,
 } = {}) => {
   const list = Array.isArray(messages) ? messages.filter(Boolean) : [];
   const isFull = mode === 'full';
+  const transferState = isFull ? normalizeConversationTransferState(state) : null;
   const isMarkdown = format === 'md';
   const exportedAtText = exportedAt instanceof Date ? exportedAt.toLocaleString() : String(exportedAt || '');
   const modeLabel = isFull ? '完整' : '正文';
 
   if (isMarkdown) {
     const lines = [
+      buildMarkdownExportHeader({ sessionMode, mode, count: list.length }),
       `# ${escapeMarkdown(title || '聊天记录')}`,
       '',
       `- 来源：${escapeMarkdown(sourceLabel || '当前聊天')}`,
@@ -128,16 +209,21 @@ export const formatConversationExport = ({
       const time = msg.time || formatDateTime(msg.timestamp);
       const text = getConversationMessageText(msg, { mode });
       const reasoning = isFull ? getConversationReasoningText(msg) : '';
+      lines.push(buildMarkdownMessageMarker({ index: index + 1, role: msg.role, name: role, timestamp: msg.timestamp }));
       lines.push(`## ${index + 1}. ${escapeMarkdown(role)}${time ? ` · ${escapeMarkdown(time)}` : ''}`);
       if (reasoning) {
-        lines.push('', '**请求推理**', '', reasoning);
+        lines.push('', CONVERSATION_EXPORT_MD_REASONING_OPEN, '**请求推理**', '', reasoning, CONVERSATION_EXPORT_MD_REASONING_CLOSE);
       }
       lines.push('', text || '（空）', '');
     });
+    if (transferState) {
+      lines.push('', `${CONVERSATION_EXPORT_MD_STATE_PREFIX} v${CONVERSATION_EXPORT_VERSION} data=${encodeConversationTransferState(transferState)} -->`);
+    }
     return lines.join('\n').replace(/\n{4,}/g, '\n\n\n').trimEnd() + '\n';
   }
 
   const lines = [
+    buildTxtExportHeader({ sessionMode, mode }),
     title || '聊天记录',
     `来源：${sourceLabel || '当前聊天'}`,
     `导出模式：${modeLabel}`,
@@ -152,12 +238,16 @@ export const formatConversationExport = ({
     const time = msg.time || formatDateTime(msg.timestamp);
     const text = getConversationMessageText(msg, { mode });
     const reasoning = isFull ? getConversationReasoningText(msg) : '';
-    lines.push(`[${index + 1}] ${role}${time ? ` · ${time}` : ''}`);
+    const roleSuffix = CONVERSATION_EXPORT_TXT_ROLE_SUFFIX[msg.role] || '';
+    lines.push(`[${index + 1}] ${role}${roleSuffix}${time ? ` · ${time}` : ''}`);
     if (reasoning) {
-      lines.push('', '【请求推理】', reasoning);
+      lines.push('', CONVERSATION_EXPORT_TXT_REASONING, reasoning, '', CONVERSATION_EXPORT_TXT_BODY);
+    } else {
+      lines.push('');
     }
-    lines.push('', text || '（空）', '', '-'.repeat(32), '');
+    lines.push(text || '（空）', '', '-'.repeat(32), '');
   });
+  if (transferState) lines.push(TXT_STATE_TITLE, JSON.stringify(transferState), '');
   return lines.join('\n').replace(/\n{4,}/g, '\n\n\n').trimEnd() + '\n';
 };
 

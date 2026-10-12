@@ -140,6 +140,7 @@ export const CANONICAL_RUNTIME_PROMPT_DEFAULTS = Object.freeze({
   'summary_compaction.rule_clarity': '- 使用简洁清晰的语言，避免过度修饰',
   'summary_compaction.rule_turning_points': '- 突出事件发展脉络和关键转折点',
   'summary_compaction.rule_complete': '- 不回避任何敏感内容，保证记录完全还原前文',
+  'summary_compaction.rule_length': '- 总结全文控制在 800 字以内；篇幅不够时合并次要事件，优先保留人物关系、未了结的线索和关键转折',
   'summary_compaction.xml_rule': '总结正文必须放在 <summary>...</summary> 中（只允许这一层 XML 标签；不要输出其他 XML 标签）。',
   'summary_compaction.format_rule': 'summary 内部的正文必须使用以下格式：',
   'summary_compaction.key_events': '【关键事件】',

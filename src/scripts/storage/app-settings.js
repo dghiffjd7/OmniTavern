@@ -47,6 +47,7 @@ const defaults = {
   creativeReadingSize: 'standard',
   creativeNarrativeFont: 'serif',
   creativeDialogueHighlightEnabled: true,
+  creativeScrubberEnabled: true,
   // 跳房子编排（创意写作）：默认关闭；关闭或无用户板时沿用既有固定流程
   creativeHopscotchEnabled: false,
   reasoningAutoParse: false,
@@ -116,6 +117,15 @@ const defaults = {
   memoryAutoConfirm: false,
   memoryAutoStepByStep: false,
   memoryFillEveryN: 1,
+  // 摘要表注入条数（含滚动摘要）；表格模式下满这么多条自动压缩。
+  memorySummaryRowLimit: 10,
+  memorySummaryRowLimitChat: 20,
+  memorySummaryCompactionAuto: true,
+  // 摘要压缩触发方式（两种记忆模式共用）：rows 满条数，chars 未合并摘要总字数超过 memorySummaryCompactionChars。
+  memorySummaryCompactionTrigger: 'rows',
+  memorySummaryCompactionChars: 1000,
+  // 大总结（摘要压缩）的自定义规则；空字符串 = 用内置默认。会话大总结、表格摘要压缩、动态大总结共用。
+  summaryCompactionRules: '',
   chatDefaultColorMode: 'theme',
   chatDefaultBubbleColor: '#c9c9c9',
   chatDefaultTextColor: '#1F2937',
@@ -373,6 +383,7 @@ const migrateSettings = (settings = {}) => {
     postInstructionsTokens: Math.round(clampRealtimeNumber(realtimeInput.postInstructionsTokens, 8000, 1000, 16000)),
   };
   next.creativeDialogueHighlightEnabled = next.creativeDialogueHighlightEnabled !== false;
+  next.creativeScrubberEnabled = next.creativeScrubberEnabled !== false;
   next.creativeHopscotchEnabled = next.creativeHopscotchEnabled === true;
   return next;
 };

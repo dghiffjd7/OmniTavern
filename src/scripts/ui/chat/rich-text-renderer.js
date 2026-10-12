@@ -8261,6 +8261,30 @@ const cancelLazyRichMount = (containerEl) => {
     lazyRichPendingMounts.delete(containerEl);
 };
 
+// 立即完成指定区域内尚未加载的复杂卡片（同步渲染）。跳转定位前用：先让目标附近的气泡长到最终高度，落点才不会被撑偏。
+export const flushLazyRichMounts = (rootEls = []) => {
+    let flushed = 0;
+    for (const rootEl of Array.isArray(rootEls) ? rootEls : [rootEls]) {
+        const placeholders = rootEl?.querySelectorAll?.('.chat-lazy-rich-placeholder') || [];
+        placeholders.forEach((placeholder) => {
+            const containerEl = placeholder.parentElement;
+            const pending = containerEl ? lazyRichPendingMounts.get(containerEl) : null;
+            if (!pending || pending.mounted) return;
+            pending.mounted = true;
+            pending.queued = false;
+            if (pending.observer) {
+                try { pending.observer.unobserve(containerEl); } catch {}
+            }
+            const queued = lazyRichMountQueue.indexOf(containerEl);
+            if (queued >= 0) lazyRichMountQueue.splice(queued, 1);
+            lazyRichPendingMounts.delete(containerEl);
+            renderRichText(containerEl, pending.text, { ...(pending.options || {}), lazyMount: false });
+            flushed += 1;
+        });
+    }
+    return flushed;
+};
+
 const shouldLazyMountRichText = (text) => {
     const raw = String(text || '');
     if (!raw) return false;

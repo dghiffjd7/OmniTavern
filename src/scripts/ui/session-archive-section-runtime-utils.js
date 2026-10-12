@@ -1,4 +1,4 @@
-import { renderSessionArchivesSection } from './session-archive-view-utils.js';
+import { loadSessionArchive, renderSessionArchivesSection } from './session-archive-view-utils.js';
 
 export const createSessionArchiveSectionRuntime = ({
     getContainer = () => null,
@@ -37,6 +37,7 @@ export const createSessionArchiveSectionRuntime = ({
 } = {}) => {
     const runtimeDeps = {
         renderSessionArchivesSection,
+        loadSessionArchive,
         ...deps,
     };
     let archiveSearchQuery = '';
@@ -82,6 +83,33 @@ export const createSessionArchiveSectionRuntime = ({
                 restoreWarnMessage,
                 deleteWarnMessage,
             });
+        },
+        // 直接加载指定存档（导入后的「立即加载」），不再弹确认。
+        async loadArchive(archiveId = '') {
+            const sessionId = getSessionId();
+            const id = String(archiveId || '').trim();
+            const archive = (getChatStore()?.getArchives?.(sessionId) || []).find(item => item?.id === id);
+            if (!sessionId || !archive) return false;
+            await runtimeDeps.loadSessionArchive({
+                sessionId,
+                isGroup,
+                archive,
+                getMemoryStorageMode,
+                buildMemoryTableSnapshot,
+                captureArchivePointer,
+                loadArchivedMessages,
+                getLastArchiveTransition,
+                persistArchivePointer,
+                applyMemoryTableSnapshot,
+                restoreArchivePointerForLoadedThread,
+                logger,
+                runArchiveSwitchFlow,
+                onArchiveLoaded,
+                onHide,
+                sourcePrefix,
+                restoreWarnMessage,
+            });
+            return true;
         },
     };
 };

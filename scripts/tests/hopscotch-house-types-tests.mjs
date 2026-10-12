@@ -91,7 +91,9 @@ const keys = choices => choices.map(choice => choice.key);
   assert.equal(checkHopscotchHouseEnable(linked, id, { textAgents: [ready], resolveActivation: next => resolveHopscotchActivation(next, { textAgents: [{ ...ready, triggerMode: 'manual' }] }) }).ok, true, '仅手动不算问题');
   const memory = editHopscotchBoard(board, { type: 'retype', id, kind: 'memory_table', house: {} }).board;
   assert.deepEqual(checkHopscotchHouseEnable(memory, id, { resolveActivation: next => resolveHopscotchActivation(next, { memory: { storageMode: 'summary' } }) }),
-    { ok: false, message: '记忆表格功能已关闭' }, '内建房子说明不能运作的原因');
+    { ok: false, message: '摘要模式：摘要随正文一起生成，不更新记忆表格' }, '内建房子说明不能运作的原因');
+  assert.deepEqual(checkHopscotchHouseEnable(memory, id, { resolveActivation: next => resolveHopscotchActivation(next, { memory: { storageMode: 'off' } }) }),
+    { ok: false, message: '记忆表格功能已关闭' }, '记忆关闭时仍说明功能已关闭');
   console.log('ok - enabling checks the house can run and names what is missing');
 }
 

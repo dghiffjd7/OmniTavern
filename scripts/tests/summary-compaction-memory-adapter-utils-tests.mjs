@@ -273,3 +273,112 @@ console.log('ok - legacy time-text summary rows keep coverage through compaction
   assert.deepEqual(recompactedItems[0].intervals, [{ from: 1, to: 2 }, { from: 4, to: 5 }]);
   console.log('ok - compaction product keeps interval union so coverage holes stay detectable');
 }
+
+{
+  // 按条数触发：摘要表启用中的行（含滚动摘要）满注入条数才压缩，压缩后的滚动摘要＋保留行始终在注入范围内。
+  const countRows = [
+    ...Array.from({ length: 4 }, (_, index) => ({
+      id: `c-${index + 1}`, table_id: 'rp_summary', contact_id: 'rp:test', is_active: true, sort_order: index + 1,
+      row_data: { summary: `摘要${index + 1}`, _coverage: { from: index + 1, to: index + 1 } },
+    })),
+    { id: 'c-rolling', table_id: 'rp_summary', contact_id: 'rp:test', is_active: true, sort_order: 0, row_data: { summary: '滚动', _summary_compaction: { level: 'rolling' } } },
+    { id: 'c-off', table_id: 'rp_summary', contact_id: 'rp:test', is_active: false, sort_order: 0, row_data: { summary: '已停用' } },
+  ];
+  const makeAdapter = rowLimit => createMemoryTableSummaryCompactionAdapter({
+    memoryTableStore: { getMemories: async () => countRows },
+    memoryTemplateStore: { getTemplates: async () => [{ id: 'tpl' }] },
+    sessionId: 'rp:test',
+    place: 'writing',
+    ...(rowLimit === undefined ? {} : { rowLimit }),
+  });
+  const check = async (rowLimit, force = false) => {
+    const adapter = makeAdapter(rowLimit);
+    const items = await adapter.getItems();
+    return adapter.shouldCompact({ items, force });
+  };
+  assert.equal(await check(5), true, '4 条摘要＋1 条滚动摘要＝5（停用的不算），满 5 条触发');
+  assert.equal(await check(6), false, '未满不触发（不再按字数）');
+  assert.equal(await check(undefined), false, '默认 10 条');
+  assert.equal(await check(6, true), true, '手动强制压缩不看条数');
+  const empty = createMemoryTableSummaryCompactionAdapter({ memoryTableStore: { getMemories: async () => [] }, memoryTemplateStore: { getTemplates: async () => [{ id: 'tpl' }] }, sessionId: 'rp:test', place: 'writing', rowLimit: 4 });
+  assert.equal(empty.shouldCompact({ items: await empty.getItems(), force: true }), false, '没有摘要时不压缩');
+  console.log('ok - memory table summary compaction triggers when active summary rows (including rolling) reach the row limit');
+}
+
+{
+  // 按字数触发：只算未合并的摘要（不含滚动摘要），总字数超过上限才压缩，条数不再起作用。
+  const rows = [
+    ...Array.from({ length: 3 }, (_, index) => ({
+      id: `w-${index + 1}`, table_id: 'rp_summary', contact_id: 'rp:test', is_active: true, sort_order: index + 1,
+      row_data: { summary: '字'.repeat(100), _coverage: { from: index + 1, to: index + 1 } },
+    })),
+    { id: 'w-rolling', table_id: 'rp_summary', contact_id: 'rp:test', is_active: true, sort_order: 0, row_data: { summary: '滚'.repeat(5000), _summary_compaction: { level: 'rolling' } } },
+  ];
+  const check = async (charLimit) => {
+    const adapter = createMemoryTableSummaryCompactionAdapter({
+      memoryTableStore: { getMemories: async () => rows },
+      memoryTemplateStore: { getTemplates: async () => [{ id: 'tpl' }] },
+      sessionId: 'rp:test', place: 'writing', rowLimit: 4, trigger: 'chars', charLimit,
+    });
+    return adapter.shouldCompact({ items: await adapter.getItems() });
+  };
+  assert.equal(await check(299), true, '300 字超过 299');
+  assert.equal(await check(300), false, '未超过不压缩；滚动摘要的 5000 字不计入，满 4 条也不触发');
+  console.log('ok - memory table summary compaction can trigger by unmerged summary characters');
+}
+
+{
+  // 写入顺序：先建新的滚动摘要，再停用旧行；开始写入后不理会中止，避免留下「旧行已停用、新总结没建」。
+  const makeRows = () => [
+    ...Array.from({ length: 4 }, (_, index) => ({
+      id: `w-${index + 1}`, table_id: 'rp_summary', contact_id: 'rp:test', is_active: true, sort_order: index + 3,
+      row_data: { summary: `摘要${index + 1}`, _coverage: { from: index + 3, to: index + 3 } },
+    })),
+    { id: 'w-rolling', table_id: 'rp_summary', contact_id: 'rp:test', is_active: true, sort_order: 2, row_data: { summary: '旧滚动', _coverage: { from: 1, to: 2 }, _summary_compaction: { level: 'rolling' } } },
+  ];
+  const makeStore = (rowsRef, log, controller = null) => ({
+    async getMemories() { return rowsRef; },
+    async createMemory(payload) {
+      log.push(`create`);
+      controller?.abort();
+      const created = { ...payload, id: 'w-new' };
+      rowsRef.push(created);
+      return created;
+    },
+    async updateMemory(payload) {
+      log.push(`off:${payload.id}`);
+      const row = rowsRef.find(item => item.id === payload.id);
+      if (row) row.is_active = payload.is_active;
+    },
+  });
+  const run = async (controller, abortBefore = false) => {
+    const rowsRef = makeRows();
+    const log = [];
+    const adapter = createMemoryTableSummaryCompactionAdapter({
+      memoryTableStore: makeStore(rowsRef, log, abortBefore ? null : controller),
+      memoryTemplateStore: { getTemplates: async () => [{ id: 'tpl' }] },
+      sessionId: 'rp:test',
+      place: 'writing',
+    });
+    const items = await adapter.getItems();
+    if (abortBefore) controller.abort();
+    let error = null;
+    try {
+      await adapter.persist({ text: '【关键事件】\n• 新', raw: '', items, keepItems: items.slice(-2), signal: controller.signal });
+    } catch (err) {
+      error = err;
+    }
+    return { log, error, rowsRef };
+  };
+
+  const midway = await run(new AbortController());
+  assert.equal(midway.error, null, '已开始写入时中止不应打断');
+  assert.equal(midway.log[0], 'create', '必须先建新的滚动摘要');
+  assert.deepEqual(midway.log.slice(1).sort(), ['off:w-1', 'off:w-2', 'off:w-rolling']);
+  assert.equal(midway.rowsRef.find(row => row.id === 'w-new')?.is_active, true);
+
+  const before = await run(new AbortController(), true);
+  assert.ok(before.error, '写入前中止应放弃');
+  assert.deepEqual(before.log, [], '写入前中止不得改动任何行');
+  console.log('ok - compaction persist creates the new rolling summary before archiving old rows and ignores late aborts');
+}

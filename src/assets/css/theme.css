@@ -39,6 +39,12 @@
   --app-radius-pill: 999px;
   --app-avatar-radius: 18px;
   --app-font-scale: 1;
+  /* 动画节奏：新 UI 一律引用；离场比进场快约三成 */
+  --app-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --app-ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --app-dur-quick: 140ms;
+  --app-dur-base: 220ms;
+  --app-dur-page: 280ms;
   --pull-handle-rest-opacity: 0.62;
   --chat-list-edge-marker-rest-opacity: 0.42;
   --chat-list-edge-marker-room-opacity: 0.3;
@@ -1348,7 +1354,7 @@ body[data-theme-mode='dark'] :is(
   #config-key-modal,
   #world-panel,
   #world-library-modal
-) :is(input:not([type='checkbox']):not([type='radio']), textarea, select) {
+) :is(input:not([type='checkbox']):not([type='radio']), textarea, select):not(.ssp-ctl) {
   background: rgba(var(--app-tint-neutral-rgb), 0.06) !important;
   color: var(--app-text-primary) !important;
   border-color: var(--app-border-default) !important;
@@ -2670,7 +2676,7 @@ body[data-theme-mode='dark'] :is(
   #raw-reply-panel,
   #prompt-preview-panel,
   #world-debug-locator-panel
-) :is(button, input:not([type='checkbox']):not([type='radio']), textarea, select):not(.lineage-graph-panel *) {
+) :is(button, input:not([type='checkbox']):not([type='radio']), textarea, select):not(.lineage-graph-panel *):not(.ssp-ctl):not(.memory-cards-ctl) {
   background: rgba(var(--app-tint-neutral-rgb), 0.06) !important;
   color: var(--app-text-primary) !important;
   border-color: var(--app-border-default) !important;
@@ -5122,7 +5128,7 @@ body[data-theme-mode='dark'] :is(
   input:not([type='checkbox']):not([type='radio']),
   textarea,
   select
-) {
+):not(.memory-cards-ctl) {
   background: rgba(var(--app-tint-neutral-rgb), 0.06) !important;
   color: var(--app-text-primary) !important;
   border-color: var(--app-border-default) !important;

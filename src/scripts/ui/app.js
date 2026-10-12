@@ -30,7 +30,7 @@ import {
   tableMatchesMemoryContext,
 } from '../memory/memory-context-utils.js';
 import { resolveMemoryCoverageStampInterval } from '../memory/memory-coverage-utils.js';
-import { isSummaryLimitTableId } from '../memory/memory-prompt-utils.js';
+import { isSummaryLimitTableId, resolveMemorySummaryCompactionThreshold } from '../memory/memory-prompt-utils.js';
 import {
   AGENT_FEATURE_IDS,
   createAgentFeatureSettingsStore,
@@ -307,6 +307,7 @@ import {
   isAppBackLayerVisible as isBackLayerVisible,
 } from './app-back-navigation-runtime-utils.js';
 import {
+  createTauriPluginChannel,
   requestTauriNativeExit,
   resolveTauriNativeBackButtonRegistrar,
 } from './app-native-back-button-utils.js';
@@ -384,6 +385,11 @@ import {
 import { buildCreativeSpeechSegments as buildCreativeSpeechSegmentsCore } from './chat/creative-speech-segments-utils.js';
 import { enqueueMessagesCore } from './chat/typing-flow-ui-utils.js';
 import { createAssistantStreamRuntime, isStreamCtrlConnected } from './chat/assistant-stream-runtime.js';
+import { createCreativeScrubberRuntime } from './chat/creative-scrubber-runtime.js';
+import { createCreativeThreadOutline } from './chat/creative-thread-outline.js';
+import { createCreativeHistoryWindow } from './chat/creative-history-window.js';
+import { flushLazyRichMounts } from './chat/rich-text-renderer.js';
+import { extractRenderedAgentBodyText } from './chat/agent-rendered-body.js';
 import { createDisposableStructuredPreviewRuntime } from './chat/structured-response-preview-runtime.js';
 import {
   armChatStructuredCircuitRetry,
@@ -607,14 +613,17 @@ import {
   buildRequestPromptText as buildRequestPromptTextCore,
 } from './chat/request-prompt-utils.js';
 import {
+  buildStandaloneSummaryCompactionMessages,
   buildSummaryCompactionContext,
   normalizeSummarySnapshotItems,
   parseSummaryCompactionResult,
   requestSummaryCompactionRaw,
+  resolveCustomSummaryCompactionRules,
   shouldRunSummaryCompaction,
 } from './chat/summary-compaction-utils.js';
 import { createSessionSummaryCompactionRuntime } from './chat/summary-compaction-runtime-utils.js';
-import { createMemoryTableSummaryCompactionAdapter } from './chat/summary-compaction-memory-adapter-utils.js';
+import { createArchiveTransferStateRuntime, resolveArchivePointerVariableSnapshotId } from './chat/archive-transfer-state-utils.js';
+import { createMemoryTableSummaryCompactionAdapter, resolveMemorySummaryTableId } from './chat/summary-compaction-memory-adapter-utils.js';
 import {
   activateSessionEnterView,
   activateSessionShellState,
@@ -820,6 +829,7 @@ import {
   getMessagePreviewText,
   normalizeReplyTarget,
   normalizeReactionEntries,
+  resolveAbsoluteRpFloorAssignments,
   toggleReactionActor,
 } from './chat/message-interaction-utils.js';
 import { customReactionAssets, isCustomReaction } from './chat/custom-reaction-assets.js';
@@ -9735,6 +9745,11 @@ const initApp = async () => {
     const sid = String(sessionId || '').trim();
     const mid = String(messageId || '').trim();
     if (!sid || !mid) return false;
+    // 写作的历史折叠（只渲染目标附近）下，目标可能在折叠区里：交给按窗口渲染的跳转，
+    // 不然这里只会一路往上补更早的消息而找不到夹在中间的目标。有折叠时 creativeHistoryWindow 必已建立。
+    if (ui.scrollEl?.querySelector?.(':scope > .creative-history-gap')) {
+      return Boolean(await creativeHistoryWindow?.jumpToMessage(sid, mid));
+    }
     const focusOpts = {
       keyword,
       kind: keyword ? 'search' : 'anchor',
@@ -18749,6 +18764,7 @@ const initApp = async () => {
     openRawReply: openRawReplyFromMenu,
     openPreset: () => presetPanel.show(),
     openExtensions: () => extensionsPanel.show(),
+    openSettings: () => generalSettingsPanel.show(),
     openConfig: () => configPanel.show(),
     hideMenus,
   });
@@ -22655,7 +22671,8 @@ const initApp = async () => {
         jumpTargetMessageId,
         ensureRecentMessagesLoaded: sid => ensureRecentMessagesAndWorlds(sid),
         isRequestStale: () => isChatEnterRequestStale(enterRequest),
-        getFirstUnreadMessageId: sid => chatStore.getFirstUnreadMessageId(sid),
+        // 创意写作不用未读提示：回复是用户自己发起的，进入时不插「以下为未读讯息」，照常停在底部。
+        getFirstUnreadMessageId: sid => (isRpSessionId(sid) ? '' : chatStore.getFirstUnreadMessageId(sid)),
         injectUnreadDivider,
         clearMessages: () => ui.clearMessages(),
         hideTyping: () => ui.hideTyping({ clearMessageQueue: false }),
@@ -24676,7 +24693,7 @@ const initApp = async () => {
     closeRpGreetingSheet();
     const ok = await appConfirm({
       title: '重置创意写作剧情',
-      message: '当前剧情会先存档，再开启一段从开场白开始的新剧情。正文与记忆表可在历史存档中切回；变量状态目前不会随存档恢复。',
+      message: '当前剧情会先存档，再开启一段从开场白开始的新剧情。正文、记忆表与变量可在历史存档中切回。',
       confirmText: '存档并重置',
       cancelText: '取消',
       danger: true,
@@ -25317,6 +25334,27 @@ const initApp = async () => {
     turnCheckpointHydrationJobs.set(sid, job);
     return job.promise;
   };
+  // 导出／导入聊天记录的附加数据（记忆表格、变量）与存档指针的读写，逻辑见 archive-transfer-state-utils.js。
+  const archiveTransferStateRuntime = createArchiveTransferStateRuntime({
+    isEnabled: isTurnCheckpointSessionEnabled,
+    turnCheckpointStore,
+    memorySnapshotStore,
+    variableSnapshotStore,
+    buildMemorySnapshot: async ({ sessionId, templateId, rows }) => {
+      const resolvedTemplateId = templateId || await resolveSwipeMemoryTemplateId();
+      if (!resolvedTemplateId) return null;
+      const { isGroup } = getTurnCheckpointSessionScope(sessionId);
+      return buildSwipeMemorySnapshot({
+        rows,
+        templateId: resolvedTemplateId,
+        scope: isGroup ? 'group' : 'contact',
+        scopeFields: buildScopedMemoryRowFields({ scopeKey: resolveSessionMemoryScopeKey({ isGroup }), sessionId }),
+        cloneValue: cloneSwipePlainObject,
+      });
+    },
+    listArchiveMessages: (sessionId, archiveId) => chatStore.exportThreadMessages?.(sessionId, archiveId),
+    refreshReachability: sessionId => refreshTurnCheckpointSnapshotReachability(sessionId),
+  });
   const restoreCheckpointBranchMemoryState = async (sessionId, branch, { isGroup, fallbackSnapshot = null } = {}) => {
     const sid = String(sessionId || '').trim();
     if (!sid || getMemoryStorageModeForSession(sid) !== 'table') return false;
@@ -25642,6 +25680,19 @@ const initApp = async () => {
     await refreshTurnCheckpointSnapshotReachability(sid, { prune: true });
     return true;
   };
+  // 存档指针记下切走时的变量，加载回来由 restoreVariablesFromArchivePointer 还原（变量跟着存档走）。
+  const resolveArchivePointerVariableSnapshot = (sid, { branch = null, meta = null, branches = [] } = {}) =>
+    resolveArchivePointerVariableSnapshotId({
+      sessionId: sid,
+      branch,
+      meta,
+      isActive: () => hasSessionVariableActivity(sid, branches),
+      buildSnapshot: buildSessionVariableSnapshot,
+      persistSnapshot: (id, snapshot) => variableSnapshotStore.persistSnapshot(id, snapshot),
+    }).catch(err => {
+      logger.warn('capture archive pointer variable snapshot failed', err);
+      return '';
+    });
   const buildArchivePointerFromCurrentThread = async (sessionId, { fallbackSnapshot = null, source = 'archive_capture' } = {}) => {
     const sid = String(sessionId || '').trim();
     if (!sid || !isTurnCheckpointSessionEnabled(sid)) return null;
@@ -25658,25 +25709,37 @@ const initApp = async () => {
       );
       const activeBranch = normalizedState.swipes[activeSwipeIndex] || normalizedState.swipes[0] || {};
       memorySnapshotId = String(activeBranch?.memorySnapshotId || refreshedMessage?.meta?.memorySnapshotId || '').trim();
-      if (!memorySnapshotId && activeBranch?.memoryTableSnapshot) {
-        const persisted = await memorySnapshotStore.persistSnapshot(sid, activeBranch.memoryTableSnapshot);
-        memorySnapshotId = String(persisted?.id || '').trim();
+      if (!memorySnapshotId) {
+        // 尾部消息没有记忆快照（如导入的存档）时记下此刻的表格，否则切回来时记忆与变量都不会还原。
+        const snapshot = activeBranch?.memoryTableSnapshot || fallbackSnapshot || await buildSwipeMemoryTableSnapshot(sid, { isGroup });
+        if (snapshot) {
+          const persisted = await memorySnapshotStore.persistSnapshot(sid, snapshot);
+          memorySnapshotId = String(persisted?.id || '').trim();
+        }
       }
+      const variableSnapshotId = await resolveArchivePointerVariableSnapshot(sid, {
+        branch: activeBranch,
+        meta: refreshedMessage?.meta,
+        branches: normalizedState.swipes,
+      });
       return {
         sessionId: sid,
         tailAssistantMessageId: String(refreshedMessage?.id || '').trim(),
         tailSwipeIndex: activeSwipeIndex,
         memorySnapshotId,
+        variableSnapshotId,
         restoredAt: Date.now(),
         source,
       };
     }
     const snapshot = fallbackSnapshot || await buildSwipeMemoryTableSnapshot(sid, { isGroup });
+    const variableSnapshotId = await resolveArchivePointerVariableSnapshot(sid);
     if (!snapshot) return {
       sessionId: sid,
       tailAssistantMessageId: '',
       tailSwipeIndex: 0,
       memorySnapshotId: '',
+      variableSnapshotId,
       restoredAt: Date.now(),
       source,
     };
@@ -25687,6 +25750,7 @@ const initApp = async () => {
       tailAssistantMessageId: '',
       tailSwipeIndex: 0,
       memorySnapshotId,
+      variableSnapshotId,
       restoredAt: Date.now(),
       source,
     };
@@ -25877,6 +25941,8 @@ const initApp = async () => {
     setArchivePointerForArchive,
     restoreArchivePointerForLoadedThread,
     restoreMemoryForActiveThread,
+    readArchiveTransferState: archiveTransferStateRuntime.readArchiveTransferState,
+    bindImportedArchiveState: archiveTransferStateRuntime.bindImportedArchiveState,
   });
 
   ui.onSwipeChange(async ({ msgId, message, index, previousIndex }) => {
@@ -26583,26 +26649,162 @@ const initApp = async () => {
     );
   };
   bindChatScrollLazyLoad();
+  // 创意写作刻度导航：只在写作模式的聊天室显示，阅读设置里可关闭（默认开启）。
+  const syncCreativeScrubberSetting = () => {
+    document.body.dataset.rpScrubber = appSettings.get().creativeScrubberEnabled !== false ? 'on' : 'off';
+  };
+  syncCreativeScrubberSetting();
+  const creativeScrubberToggle = document.querySelector('#rp-reading-settings-menu [data-rp-scrubber]');
+  if (creativeScrubberToggle) creativeScrubberToggle.checked = appSettings.get().creativeScrubberEnabled !== false;
+  creativeScrubberToggle?.addEventListener('change', () => {
+    appSettings.update({ creativeScrubberEnabled: creativeScrubberToggle.checked });
+    syncCreativeScrubberSetting();
+  });
+  const creativeThreadOutline = createCreativeThreadOutline({
+    chatStore,
+    getArchiveId: sid => chatStore.getCurrentArchiveId?.(sid),
+    logger,
+  });
+  // 写作楼层按整个存档编号：已加载范围之前的楼数从存档索引取，索引建好前先沿用画面计数
+  ui.setRpFloorResolver?.((wrapperMessages) => {
+    const sid = String(chatStore.getCurrent?.() || '').trim();
+    if (!isRpSessionId(sid)) return null;
+    const loaded = chatStore.getMessages?.(sid) || [];
+    let initialFloor = -1;
+    if (chatStore.hasOlderMessages?.(sid)) {
+      const before = creativeThreadOutline.usersBefore(sid, loaded[0]?.id);
+      if (before == null) {
+        void creativeThreadOutline.ensure(sid).then(() => {
+          if (creativeThreadOutline.usersBefore(sid, loaded[0]?.id) != null && chatStore.getCurrent?.() === sid) ui.refreshRpFloorMarkers?.();
+        });
+      } else if (before > 0) {
+        initialFloor = before;
+      }
+    }
+    return resolveAbsoluteRpFloorAssignments({ wrapperMessages, loadedMessages: loaded, initialFloor });
+  });
+  const creativeHistoryWindow = createCreativeHistoryWindow({
+    scrollEl: ui.scrollEl,
+    chatStore,
+    ui,
+    renderState: chatRenderState,
+    getCurrentSessionId: () => chatStore.getCurrent?.(),
+    flushLazyRich: flushLazyRichMounts,
+    prepareMessages: (list, sid) => {
+      const recovered = chatImageJobs.recover(list, sid);
+      chatStore.prefetchRawOriginalsForMessages?.(recovered, sid).catch(() => {});
+      return decorateMessagesForDisplay(recovered, { sessionId: sid });
+    },
+    logger,
+  });
+  createCreativeScrubberRuntime({
+    hostEl: document.getElementById('chat-room'),
+    scrollEl: ui.scrollEl,
+    chatStore,
+    outline: creativeThreadOutline,
+    getSessionId: () => chatStore.getCurrent?.(),
+    getBottomGuards: () => [
+      document.querySelector('#chat-room .chat-input-container'),
+      document.getElementById('rp-continue-btn'),
+    ],
+    isActive: () => (
+      uiMode === 'rp'
+      && appSettings.get().creativeScrubberEnabled !== false
+      && isRpSessionId(chatStore.getCurrent?.())
+      && !document.getElementById('chat-room')?.classList.contains('hidden')
+    ),
+    getMemoryMode: () => getMemoryStorageMode(resolveMemoryTablePlace('writing')),
+    memoryTableStore,
+    memoryTemplateStore,
+    extractBodyText: source => extractRenderedAgentBodyText(source, { documentRef: document }),
+    jumpToMessage: (sid, messageId) => creativeHistoryWindow?.jumpToMessage(sid, messageId),
+    logger,
+  });
 
+  // 摘要压缩的运行记录（Agent 中心与顶栏「运行中」）；创意写作时另在小球运行条的记忆栏加一项。
+  // managed：跳房子带 signal 调用，进度由它自己的格子显示，不再重复加运行条。
+  const startSummaryCompactionRun = async ({ sessionId, place, itemCount, managed }) => {
+    let runId = '';
+    try {
+      const run = await Promise.resolve(agentTaskRuntime?.startRun?.({
+        kind: 'summary_compaction',
+        title: 'Summary compaction',
+        sessionId,
+        surface: place === 'writing' ? 'writing' : 'chat',
+        trigger: managed ? 'hopscotch.maintenance' : 'memory.after_write',
+        source: 'summary-compaction-runtime',
+        summary: 'summary compaction started',
+        metadata: { place, itemCount },
+      }));
+      runId = String(run?.id || '').trim();
+    } catch (err) {
+      logger.debug('summary compaction agent run start skipped', err);
+    }
+    let laneTaskId = '';
+    const laneState = creativeExecutionLaneRuntime?.getState?.();
+    if (!managed && place === 'writing' && laneState?.visible && String(laneState.run?.sessionId || '').trim() === sessionId) {
+      const task = creativeExecutionLaneRuntime.appendTask?.({
+        id: `summary-compaction-${Date.now()}`,
+        laneId: 'memory',
+        label: '摘要压缩',
+        brief: '合并较早的摘要',
+        summary: '摘要压缩中',
+        status: 'running',
+        dependsOn: (laneState.tasks || []).some(task => task.id === 'memory') ? ['memory'] : [],
+      });
+      laneTaskId = String(task?.id || '');
+    }
+    return { runId, laneTaskId };
+  };
+  const finishSummaryCompactionRun = async (handle, { status = 'failed', reason = '', error = '' } = {}) => {
+    if (handle?.runId) {
+      try {
+        await Promise.resolve(agentTaskRuntime?.finishRun?.(handle.runId, {
+          status,
+          summary: reason ? `summary compaction ${status}: ${reason}` : `summary compaction ${status}`,
+          errorMessage: error,
+          metadata: { reason },
+        }));
+      } catch (err) {
+        logger.debug('summary compaction agent run finish skipped', err);
+      }
+    }
+    if (handle?.laneTaskId) {
+      if (status === 'succeeded') creativeExecutionLaneRuntime?.finishTask?.(handle.laneTaskId, 'succeeded', { summary: '摘要压缩完成' });
+      else if (status === 'failed') creativeExecutionLaneRuntime?.failTask?.(handle.laneTaskId, error || reason);
+      else creativeExecutionLaneRuntime?.finishTask?.(handle.laneTaskId, status === 'cancelled' ? 'cancelled' : 'skipped');
+      completeCreativeExecutionIfIdle();
+    }
+  };
+
+  const isSummaryCompactionGroupSession = (sessionId = '') => {
+    const contact = contactsStore?.getContact?.(sessionId) || null;
+    return Boolean(contact?.isGroup) || String(sessionId || '').startsWith('group:');
+  };
   // Summary compaction runner (used by auto-trigger and manual "↻" button in settings)
   const requestSummaryCompaction = createSessionSummaryCompactionRuntime({
     chatStore,
     getIsSummaryMemoryEnabled: isSummaryMemoryEnabled,
-    getIsCompactionEnabled: ({ place }) => {
+    getIsCompactionEnabled: ({ place, force }) => {
       const mode = getMemoryStorageMode(place);
+      // 自动压缩可在记忆 Agent 的「触发与频率」里关掉（摘要、表格模式共用）；手动压缩不受影响。
+      if (!force && appSettings.get().memorySummaryCompactionAuto === false) return false;
       return mode === 'summary' || mode === 'table';
     },
     getDefaultPlace: () => resolveMemoryTablePlace(uiMode),
     createAdapter: async ({ sessionId, place }) => {
       if (getMemoryStorageMode(place) !== 'table') return null;
-      const contact = contactsStore?.getContact?.(sessionId) || null;
-      const isGroup = Boolean(contact?.isGroup) || sessionId.startsWith('group:');
+      const isGroup = isSummaryCompactionGroupSession(sessionId);
+      const threshold = resolveMemorySummaryCompactionThreshold(appSettings.get(), resolveMemorySummaryTableId({ place, isGroup }));
       return createMemoryTableSummaryCompactionAdapter({
         memoryTableStore,
         memoryTemplateStore,
         sessionId,
         place,
         isGroup,
+        rowLimit: threshold.rowLimit,
+        trigger: threshold.trigger,
+        charLimit: threshold.minLength,
         onPersisted: async ({ tableId }) => {
           emitSharedMemoryRowsUpdated({
             target: window,
@@ -26616,27 +26818,30 @@ const initApp = async () => {
       });
     },
     getIsConfigured: () => isBridgeConfigured(window.appBridge),
-    buildMessages: (...args) => window.appBridge.buildMessages(...args),
-    backgroundChat: (...args) => window.appBridge.backgroundChat(...args),
-    buildSessionContext: (sessionId) => {
-      const contact = contactsStore?.getContact?.(sessionId) || null;
-      const isGroup = Boolean(contact?.isGroup) || sessionId.startsWith('group:');
-      const activeUser = getActiveUserProfile();
-      const charName = String(contact?.name || sessionId.replace(/^group:/, '') || sessionId) || 'assistant';
-      const groupMembers = Array.isArray(contact?.members) ? contact.members : [];
-      return buildSummaryCompactionContext({
-        activeUser,
-        sessionId,
-        characterName: charName,
-        isGroup,
-        groupMembers,
-        groupMemberNames: groupMembers.map(mid => contactsStore.getContact(mid)?.name || mid),
-      });
+    // 表格独立更新且选了专用模型时，压缩跟着用那个模型；其余情况用被压缩会话的正文模型（presetContext 由 runtime 带上）。
+    resolveRequestOptions: async ({ place }) => {
+      if (getMemoryStorageMode(place) !== 'table' || !isMemoryAutoExtractSeparate(place)) return null;
+      if (String(appSettings.get().memoryUpdateApiMode || 'chat').toLowerCase() !== 'profile') return null;
+      const config = await resolveMemoryUpdateRuntimeConfig({ appBridge: window.appBridge, appSettings, memoryUpdateConfigManager });
+      return config ? { runtimeConfigOverride: config } : null;
     },
-    requestCompactionRaw: requestSummaryCompactionRaw,
-    parseCompactionResult: parseSummaryCompactionResult,
+    onRunStart: startSummaryCompactionRun,
+    onRunFinish: finishSummaryCompactionRun,
+    // 压缩是内部维护：用独立的最小请求（同记忆表格独立更新），不套正文的预设/思维链/角色扮演提示。
+    buildMessages: buildStandaloneSummaryCompactionMessages,
+    backgroundChat: (...args) => window.appBridge.backgroundChat(...args),
+    requestCompactionRaw: options => requestSummaryCompactionRaw({ ...options, rules: appSettings.get().summaryCompactionRules }),
+    // 用户改过大总结规则时只要求 <summary> 里有正文，不再按内置版式（【关键事件】+ 列表）校验
+    parseCompactionResult: raw => parseSummaryCompactionResult(raw, {
+      strictFormat: !resolveCustomSummaryCompactionRules(appSettings.get().summaryCompactionRules),
+    }),
     normalizeItems: normalizeSummarySnapshotItems,
-    shouldCompact: shouldRunSummaryCompaction,
+    // 摘要模式：按「触发与频率」的条数或字数判断（表格模式由适配器自己判断）。
+    shouldCompact: ({ items, force, place, sessionId }) => shouldRunSummaryCompaction({
+      items,
+      force,
+      ...resolveMemorySummaryCompactionThreshold(appSettings.get(), resolveMemorySummaryTableId({ place, isGroup: isSummaryCompactionGroupSession(sessionId) })),
+    }),
     refreshChatAndContacts,
     dispatchUpdated: (sessionId) =>
       window.dispatchEvent(new CustomEvent('chatapp-summaries-updated', { detail: { sessionId } })),
@@ -26664,8 +26869,11 @@ const initApp = async () => {
     backgroundChat: (...args) => window.appBridge.backgroundChat(...args),
     getActiveUserProfile,
     buildContext: buildSummaryCompactionContext,
-    requestCompactionRaw: requestSummaryCompactionRaw,
-    parseCompactionResult: parseSummaryCompactionResult,
+    requestCompactionRaw: options => requestSummaryCompactionRaw({ ...options, rules: appSettings.get().summaryCompactionRules }),
+    // 用户改过大总结规则时只要求 <summary> 里有正文，不再按内置版式（【关键事件】+ 列表）校验
+    parseCompactionResult: raw => parseSummaryCompactionResult(raw, {
+      strictFormat: !resolveCustomSummaryCompactionRules(appSettings.get().summaryCompactionRules),
+    }),
     normalizeItems: normalizeSummarySnapshotItems,
     shouldCompact: shouldRunSummaryCompaction,
     dispatchUpdated: () => window.dispatchEvent(new CustomEvent('moment-summaries-updated')),
@@ -29603,7 +29811,7 @@ const initApp = async () => {
       if (!sid) return [];
       try {
         if (typeof chatStore.exportThreadMessages === 'function') {
-          const exported = await chatStore.exportThreadMessages(sid);
+          const exported = await chatStore.exportThreadMessages(sid, chatStore.getCurrentArchiveId?.(sid));
           if (Array.isArray(exported) && exported.length) return exported;
         }
       } catch (err) {
@@ -29850,7 +30058,7 @@ const initApp = async () => {
         let messages = [];
         try {
           if (typeof chatStore.exportThreadMessages === 'function') {
-            messages = await chatStore.exportThreadMessages(sid);
+            messages = await chatStore.exportThreadMessages(sid, chatStore.getCurrentArchiveId?.(sid));
           }
         } catch (err) {
           logger.debug('auto memory timeline repair full message export failed', err);
@@ -30698,6 +30906,7 @@ const initApp = async () => {
       bindActiveGenerationReattach,
     } = createAssistantStreamRuntime({
       generationId,
+      getGenerationId: () => generationId,
       sessionId,
       getStreamCtrl: () => streamCtrl,
       setStreamCtrl: (nextCtrl) => {
@@ -34605,9 +34814,9 @@ const initApp = async () => {
     () => sessionPanel.hide(),
     () => regexSessionPanel.hide(),
     () => extensionsPanel.hide(),
-    () => contactSettingsPanel.hide(),
+    () => void contactSettingsPanel.requestClose(),
     () => groupCreatePanel.hide(),
-    () => groupSettingsPanel.hide(),
+    () => void groupSettingsPanel.requestClose(),
     () => groupPanel.hide(),
     () => personaPanel.hide(),
     () => userPanel.hide(),
@@ -34777,7 +34986,11 @@ const initApp = async () => {
         window.toastr?.error?.(t('无法打开下载链接，请稍后再试'));
         return false;
       }),
-      installDesktopUpdate: version => safeInvoke('app_update_install', { expectedVersion: version }),
+      // 下载进度经 Channel 回报（APP 未开放 event 插件，不能用事件监听）
+      installDesktopUpdate: (version, { onProgress } = {}) => safeInvoke('app_update_install', {
+        expectedVersion: version,
+        onProgress: createTauriPluginChannel({ callback: message => onProgress?.(message), logger }),
+      }),
       isMobile: () => isLikelyAndroidDevice(),
       toast: window.toastr,
       onStateChange: view => {

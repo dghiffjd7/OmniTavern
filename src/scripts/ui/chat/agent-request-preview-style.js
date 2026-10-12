@@ -96,7 +96,13 @@ export const installAgentRequestPreviewStyle = doc => {
   .agent-memory-assembly{margin-top:16px}.agent-memory-assembly .agent-center-agent-field-grid{grid-template-columns:repeat(2,minmax(0,1fr));padding-bottom:14px}
   .agent-memory-assembly .agent-center-agent-field{margin-block:0}
   .agent-memory-save{position:sticky;bottom:0;padding:12px 0 max(12px,env(safe-area-inset-bottom,0px));background:var(--app-surface-card);border-top:1px solid var(--app-border-subtle);z-index:1}
-  .hop-request-editor>[data-memory-agent-editor]{padding-bottom:0}
+  .hop-request-editor>.agent-memory-hub{padding-bottom:0}
+  .agent-memory-guide{margin:12px 0 0;padding-left:18px;display:grid;gap:4px;font-size:12px;line-height:1.6;color:var(--app-text-secondary)}.agent-memory-data-links{margin-top:10px}
+  .agent-memory-hub [data-memory-trigger-for][hidden]{display:none}.agent-memory-hub>.agent-memory-prompt-block{margin-top:12px}.agent-memory-hub>[data-memory-agent-editor]{margin-top:16px}
+  .agent-memory-hub .agent-memory-prompt-block>p,.agent-memory-hub .agent-memory-prompt-block>.agent-center-agent-editor-note{margin:0 0 10px}
+  .agent-memory-hub .agent-memory-prompt-block>[data-summary-compaction-editor]{padding:0 0 14px}.agent-memory-hub .agent-memory-prompt-block>[data-agent-prompt-editor]{margin-bottom:14px}.agent-memory-hub [data-summary-compaction-editor] textarea{width:100%;box-sizing:border-box}
+  .agent-memory-prompt-block summary .agent-memory-badge.is-custom,.agent-memory-hub label>.agent-memory-badge.is-custom{color:var(--app-accent-primary);font-weight:600}
+  .agent-memory-hub label>.agent-memory-badge{margin-left:8px;font-size:10px;font-weight:400;color:var(--app-text-secondary)}
   .agent-center-agent-textarea[data-preview-active]{outline:2px solid var(--app-accent-primary);outline-offset:2px}
   @media(max-width:600px){.agent-center-floating-card.has-wide-request-preview{width:calc(100vw - 24px)}.hop-request-workspace{margin:0 -12px -16px}.hop-request-editor{padding-left:12px}.hop-request-head{padding-inline:14px}.hop-request-scroll{padding:16px 18px max(24px,env(safe-area-inset-bottom)) 40px}.hop-request-field-link{min-height:44px}.hop-request-field-editor textarea{max-height:32dvh}}
   @media(prefers-reduced-motion:reduce){.hop-request-workspace *{transition:none!important;animation:none!important}}

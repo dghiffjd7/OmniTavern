@@ -131,8 +131,9 @@ export const buildOutgoingReplyContexts = (messages = []) => {
 
 export const getRpFloorLabel = (floor) => (Number(floor) === 0 ? '#0 序章' : `# ${Number(floor)}`);
 
-export const buildRpFloorAssignments = (messages = []) => {
-  let currentFloor = -1;
+// initialFloor：已渲染/已加载范围之前还有多少楼（未加载的较早消息），让编号按整个存档计算。
+export const buildRpFloorAssignments = (messages = [], { initialFloor = -1 } = {}) => {
+  let currentFloor = Number.isFinite(Number(initialFloor)) ? Number(initialFloor) : -1;
   return (Array.isArray(messages) ? messages : []).map((message) => {
     const msg = message && typeof message === 'object' ? message : null;
     if (!msg || msg.role === 'system') {
@@ -156,6 +157,29 @@ export const buildRpFloorAssignments = (messages = []) => {
       floor: currentFloor,
       marker,
     };
+  });
+};
+
+// 楼层按整个存档计算：以内存中已加载的连续消息为准（不受画面只渲染一部分或中间折叠影响），
+// initialFloor 是已加载范围之前的楼数。画面上有、内存里没有的（例如正在输出的气泡）沿前一条续算。
+export const resolveAbsoluteRpFloorAssignments = ({
+  wrapperMessages = [],
+  loadedMessages = [],
+  initialFloor = -1,
+} = {}) => {
+  const byId = new Map();
+  const loaded = Array.isArray(loadedMessages) ? loadedMessages : [];
+  buildRpFloorAssignments(loaded, { initialFloor }).forEach((assignment, index) => {
+    const id = String(loaded[index]?.id || '').trim();
+    if (id) byId.set(id, assignment);
+  });
+  let lastFloor = -1;
+  return (Array.isArray(wrapperMessages) ? wrapperMessages : []).map((message) => {
+    const id = String(message?.id || '').trim();
+    let assignment = id ? byId.get(id) : null;
+    if (!assignment) [assignment] = buildRpFloorAssignments([message], { initialFloor: lastFloor });
+    if (Number.isFinite(Number(assignment?.floor))) lastFloor = Number(assignment.floor);
+    return assignment || { floor: null, marker: false };
   });
 };
 

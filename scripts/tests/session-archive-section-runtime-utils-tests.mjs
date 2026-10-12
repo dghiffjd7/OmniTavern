@@ -85,3 +85,23 @@ import { createSessionArchiveSectionRuntime } from '../../src/scripts/ui/session
   assert.equal(capturedOptions.sourcePrefix, 'group');
   console.log('ok - createSessionArchiveSectionRuntime forwards archive section dependencies for groups');
 }
+
+{
+  const loads = [];
+  const onArchiveLoaded = () => {};
+  const runtime = createSessionArchiveSectionRuntime({
+    getSessionId: () => 'rp:card',
+    getChatStore: () => ({ getArchives: () => [{ id: 'a1', name: '导入：雨夜' }] }),
+    sourcePrefix: 'contact',
+    onArchiveLoaded,
+    deps: { loadSessionArchive: async options => loads.push(options) },
+  });
+  assert.equal(await runtime.loadArchive('a1'), true);
+  assert.equal(loads.length, 1, '「立即加载」直接走存档加载流程，不再确认');
+  assert.equal(loads[0].sessionId, 'rp:card');
+  assert.equal(loads[0].archive.id, 'a1');
+  assert.equal(loads[0].onArchiveLoaded, onArchiveLoaded);
+  assert.equal(await runtime.loadArchive('missing'), false, '找不到存档时不加载');
+  assert.equal(loads.length, 1);
+  console.log('ok - createSessionArchiveSectionRuntime loads a given archive directly');
+}

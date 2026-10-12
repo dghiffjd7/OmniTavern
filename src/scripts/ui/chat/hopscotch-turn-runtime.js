@@ -6,7 +6,7 @@
 import { t, translateUiText } from '../../i18n/index.js';
 import { cloneData } from '../../utils/clone-data.js';
 import { getActiveHopscotchFused, resolveHopscotchActivation } from './hopscotch-activation-utils.js';
-import { buildDefaultHopscotchBoard, projectHopscotchVariableRules, compileBoardToLaneTasks, findBodyRowIndex, getHopscotchHouseDisplayStatus, HOPSCOTCH_CUSTOM_HOUSE_DEFAULTS } from './hopscotch-board-utils.js';
+import { buildDefaultHopscotchBoard, projectHopscotchVariableRules, compileBoardToLaneTasks, findBodyRowIndex, getHopscotchHouseDisplayStatus, isHopscotchMaintenanceRunning, HOPSCOTCH_CUSTOM_HOUSE_DEFAULTS } from './hopscotch-board-utils.js';
 import { createCreativeTurnOrchestrator } from './creative-turn-orchestrator.js';
 import { estimateTokens } from '../../memory/memory-prompt-utils.js';
 import { getAgentInvocationMode } from '../../agent/agent-invocation.js';
@@ -320,7 +320,9 @@ const laneSummaryFor = (state) => {
 export const projectHouseStateToLane = (laneRuntime, state) => {
   if (!laneRuntime || !state) return;
   const status = getHopscotchHouseDisplayStatus(state);
-  const summary = laneSummaryFor({ ...state, status });
+  const summary = isHopscotchMaintenanceRunning(state)
+    ? `${laneSummaryFor({ ...state, status })} · ${t('整理摘要中')}`
+    : laneSummaryFor({ ...state, status });
   const detail = { kind: state.kind, reason: state.reason || '', fused: state.fused, usage: state.usage || null, deliveryStatus: state.status, childResults: state.childResults || [] };
   if (status === 'running') {
     laneRuntime.activateTask?.(state.id, { summary, detail });
@@ -350,6 +352,7 @@ export const createHopscotchTurnRuntime = ({
 } = {}) => {
   const activeTurns = new Map(); // sessionId -> turn
   const latestTurns = new Map();
+  const maintainingTurns = new Set(); // 整轮已收尾、内部维护仍在后台的 turn（换作用域时一并取消）
   const listeners = new Set();
   let sequence = 0;
   const notify = sid => listeners.forEach(fn => { try { fn(sid); } catch {} });
@@ -549,9 +552,15 @@ export const createHopscotchTurnRuntime = ({
         bodyHandle.releaseWithoutStart('turn_finished');
         if (activeTurns.get(sid) === turn) activeTurns.delete(sid);
         parentSignal?.removeEventListener('abort', onParentAbort);
-        workLease?.settle?.();
         notify(sid);
+        // 发送键随整轮解锁；后台维护（摘要压缩）跑完前仍占着会话工作租约，删会话/换作用域会取消它。
+        maintainingTurns.add(turn);
+        turn.maintenancePromise.finally(() => {
+          maintainingTurns.delete(turn);
+          workLease?.settle?.();
+        });
       });
+    turn.maintenancePromise = turn.turnPromise.catch(() => {}).then(() => orchestrator.waitForMaintenance());
     return turn;
   };
 
@@ -565,7 +574,9 @@ export const createHopscotchTurnRuntime = ({
     getLatestTurn: sid => latestTurns.get(trim(sid)) || null,
     clearScope: () => {
       activeTurns.forEach(turn => turn.abort('scope_changed'));
+      maintainingTurns.forEach(turn => turn.abort('scope_changed'));
       activeTurns.clear();
+      maintainingTurns.clear();
       latestTurns.clear();
     },
     getActiveTurn: sessionId => activeTurns.get(trim(sessionId)) || null,

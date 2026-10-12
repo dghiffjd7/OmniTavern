@@ -202,9 +202,12 @@ export const projectHopscotchVariableRules = (input, activity) => {
 };
 
 // 房子的主产物可已交付，内部维护仍在运行或失败；仅用于呈现，不改写交付终态。
+// 宿主已交付、内部维护（摘要压缩）仍在后台进行：宿主照样算完成，另行标示「整理摘要中」。
+export const isHopscotchMaintenanceRunning = (state = {}) => state.status === 'succeeded'
+  && Boolean(state.childResults?.some(child => child.status === 'running' || child.status === 'queued'));
+
 export const getHopscotchHouseDisplayStatus = (state = {}) => {
   if (state.status !== 'succeeded') return state.status;
-  if (state.childResults?.some(child => child.status === 'running')) return 'running';
   if (state.childResults?.some(child => child.status === 'failed')) return 'partial';
   if (state.childResults?.some(child => child.status === 'cancelled')) return 'cancelled';
   return state.status;

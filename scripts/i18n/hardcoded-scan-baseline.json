@@ -612,12 +612,6 @@
     "reason": "Chinese stop words and downgrade heuristics are matching data; prompt-facing labels in these modules already pass through memory prompt locale helpers."
   },
   {
-    "file": "src/scripts/memory/worldbook-downgrade-suggestion-utils.js",
-    "text": "格式",
-    "category": "language_data",
-    "reason": "Chinese stop words and downgrade heuristics are matching data; prompt-facing labels in these modules already pass through memory prompt locale helpers."
-  },
-  {
     "file": "src/scripts/plugins/plugin-runtime.js",
     "text": "const listeners = new Map(); const pendingRpcs = new Map(); const subscriptions = new Set(); let rpcSeq = 1; let pluginMeta = {}; let listenerCount = 0; const v",
     "category": "developer_diagnostic",
@@ -1560,6 +1554,54 @@
     "reason": "Remaining strings are message/media sentinels, legacy Chinese parser aliases, stable role names, or embedded bridge contracts; changing them would break existing chats or imports."
   },
   {
+    "file": "src/scripts/ui/chat/conversation-export-utils.js",
+    "text": "【OmniTavern 导出 v",
+    "category": "protocol_compatibility",
+    "reason": "Conversation export v1 markers (TXT header prefix, 【请求推理】/【正文】 section labels and （我）/（AI）/（系统） role suffixes, and the 【附加数据 v1 …】 state section title) are parsed by chat-history import and must stay identical in every UI language."
+  },
+  {
+    "file": "src/scripts/ui/chat/conversation-export-utils.js",
+    "text": "【正文】",
+    "category": "protocol_compatibility",
+    "reason": "Conversation export v1 markers (TXT header prefix, 【请求推理】/【正文】 section labels and （我）/（AI）/（系统） role suffixes, and the 【附加数据 v1 …】 state section title) are parsed by chat-history import and must stay identical in every UI language."
+  },
+  {
+    "file": "src/scripts/ui/chat/conversation-export-utils.js",
+    "text": "（我）",
+    "category": "protocol_compatibility",
+    "reason": "Conversation export v1 markers (TXT header prefix, 【请求推理】/【正文】 section labels and （我）/（AI）/（系统） role suffixes, and the 【附加数据 v1 …】 state section title) are parsed by chat-history import and must stay identical in every UI language."
+  },
+  {
+    "file": "src/scripts/ui/chat/conversation-export-utils.js",
+    "text": "（系统）",
+    "category": "protocol_compatibility",
+    "reason": "Conversation export v1 markers (TXT header prefix, 【请求推理】/【正文】 section labels and （我）/（AI）/（系统） role suffixes, and the 【附加数据 v1 …】 state section title) are parsed by chat-history import and must stay identical in every UI language."
+  },
+  {
+    "file": "src/scripts/ui/chat/conversation-export-utils.js",
+    "text": "【附加数据 v",
+    "category": "protocol_compatibility",
+    "reason": "Conversation export v1 markers (TXT header prefix, 【请求推理】/【正文】 section labels and （我）/（AI）/（系统） role suffixes, and the 【附加数据 v1 …】 state section title) are parsed by chat-history import and must stay identical in every UI language."
+  },
+  {
+    "file": "src/scripts/ui/chat/conversation-export-utils.js",
+    "text": "\u0000\u0000 · 记忆表格、摘要、变量，导入时用来还原】",
+    "category": "protocol_compatibility",
+    "reason": "Conversation export v1 markers (TXT header prefix, 【请求推理】/【正文】 section labels and （我）/（AI）/（系统） role suffixes, and the 【附加数据 v1 …】 state section title) are parsed by chat-history import and must stay identical in every UI language."
+  },
+  {
+    "file": "src/scripts/ui/chat/conversation-import-utils.js",
+    "text": "- 导出模式：",
+    "category": "protocol_compatibility",
+    "reason": "Chat-history import matches the fixed labels written by conversation export (导出模式：/完整/正文/创意写作/聊天 and legacy role names); they are file-format tokens, not UI text."
+  },
+  {
+    "file": "src/scripts/ui/chat/conversation-import-utils.js",
+    "text": "导出模式：",
+    "category": "protocol_compatibility",
+    "reason": "Chat-history import matches the fixed labels written by conversation export (导出模式：/完整/正文/创意写作/聊天 and legacy role names); they are file-format tokens, not UI text."
+  },
+  {
     "file": "src/scripts/ui/chat/dialogue-stream-parser.js",
     "text": "聊天内容",
     "category": "protocol_compatibility",
@@ -1838,6 +1880,12 @@
   {
     "file": "src/scripts/ui/chat/summary-compaction-utils.js",
     "text": "- 不回避任何敏感内容，保证记录完全还原前文",
+    "category": "prompt_fallback",
+    "reason": "These literals are canonical fallbacks behind prompt-locale builders; English actual-send output is asserted by prompt-locale and memory-template tests."
+  },
+  {
+    "file": "src/scripts/ui/chat/summary-compaction-utils.js",
+    "text": "- 总结全文控制在 800 字以内；篇幅不够时合并次要事件，优先保留人物关系、未了结的线索和关键转折",
     "category": "prompt_fallback",
     "reason": "These literals are canonical fallbacks behind prompt-locale builders; English actual-send output is asserted by prompt-locale and memory-template tests."
   },

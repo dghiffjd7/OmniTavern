@@ -446,6 +446,7 @@ If this turn does not need an image, do not output an <image_prompt> tag at all.
   'summary_compaction.rule_clarity': '- Use concise, clear language without excessive embellishment',
   'summary_compaction.rule_turning_points': '- Emphasize the progression of events and major turning points',
   'summary_compaction.rule_complete': '- Do not omit sensitive content; preserve a complete record of the preceding text',
+  'summary_compaction.rule_length': '- Keep the whole summary within about 600 words; when space runs short, merge minor events and keep character relationships, unresolved threads, and key turning points',
   'summary_compaction.xml_rule': 'Place the summary body inside <summary>...</summary>. This is the only XML wrapper allowed; output no other XML tags.',
   'summary_compaction.format_rule': 'The body inside summary must use this format:',
   'summary_compaction.key_events': '[Key Events]',

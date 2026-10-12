@@ -1106,3 +1106,50 @@ import {
   }
   console.log('ok - ComfyUI image provider turns seed -1 into a random non-negative seed');
 }
+
+{
+  // 模型栏还是占位的 workflow 时，%model% 会被当成模型名发给 ComfyUI 而回 400；发送前就要提示选模型。
+  const placeholder = new ComfyUIImageProvider({ provider: 'comfyui', baseUrl: 'http://127.0.0.1:8188', model: 'workflow' });
+  assert.throws(
+    () => placeholder.buildWorkflow('cat', { workflowJson: '{"4":{"class_type":"CheckpointLoaderSimple","inputs":{"ckpt_name":"%model%"}}}' }),
+    /模型栏选择 ComfyUI 里的模型/,
+  );
+  // 工作流自己写死模型名时，占位的 workflow 不影响。
+  const fixed = placeholder.buildWorkflow('cat', { workflowJson: '{"4":{"class_type":"CheckpointLoaderSimple","inputs":{"ckpt_name":"a.safetensors"}}}' });
+  assert.equal(fixed['4'].inputs.ckpt_name, 'a.safetensors');
+  const real = new ComfyUIImageProvider({ provider: 'comfyui', baseUrl: 'http://127.0.0.1:8188', model: 'a.safetensors' });
+  assert.equal(real.buildWorkflow('cat', { workflowJson: '{"4":{"inputs":{"ckpt_name":"%model%"}}}' })['4'].inputs.ckpt_name, 'a.safetensors');
+  console.log('ok - ComfyUI image provider asks for a real model before sending %model% as the placeholder');
+}
+
+{
+  // ComfyUI 校验不通过回 400 + node_errors JSON；整理成看得懂的中文，指出哪个节点哪个参数。
+  const provider = new ComfyUIImageProvider({ provider: 'comfyui', baseUrl: 'http://127.0.0.1:8188', model: 'a.safetensors' });
+  const body = JSON.stringify({
+    error: { type: 'prompt_outputs_failed_validation', message: 'Prompt outputs failed validation', details: '' },
+    node_errors: {
+      4: { class_type: 'CheckpointLoaderSimple', errors: [{ type: 'value_not_in_list', message: 'Value not in list', details: "ckpt_name: 'workflow' not in ['a.safetensors']" }] },
+    },
+  });
+  provider.request = async () => ({ status: 400, ok: false, headers: {}, body });
+  await assert.rejects(
+    provider.generateImage('cat', { workflowJson: '{"4":{"class_type":"CheckpointLoaderSimple","inputs":{"ckpt_name":"%model%"}}}' }),
+    error => {
+      assert.match(error.message, /^ComfyUI 拒绝了工作流（HTTP 400）/);
+      assert.match(error.message, /节点 4（CheckpointLoaderSimple）：ckpt_name: 'workflow' not in \['a\.safetensors'\]/);
+      return true;
+    },
+  );
+  const missingNode = JSON.stringify({ error: { type: 'missing_node_type', message: "Node 'Foo' not found. The custom node may not be installed.", details: "Node ID '#7'" }, node_errors: {} });
+  provider.request = async () => ({ status: 400, ok: false, headers: {}, body: missingNode });
+  await assert.rejects(
+    provider.generateImage('cat', { workflowJson: '{"7":{"class_type":"Foo","inputs":{}}}' }),
+    /ComfyUI 拒绝了工作流（HTTP 400）：Node 'Foo' not found\. The custom node may not be installed\.（Node ID '#7'）/,
+  );
+  provider.request = async () => ({ status: 500, ok: false, headers: {}, body: '500 Internal Server Error' });
+  await assert.rejects(
+    provider.generateImage('cat', { workflowJson: '{"9":{"class_type":"SaveImage","inputs":{}}}' }),
+    /^Error: comfyui API Error: 500 - 500 Internal Server Error$/,
+  );
+  console.log('ok - ComfyUI image provider turns workflow validation errors into readable messages');
+}

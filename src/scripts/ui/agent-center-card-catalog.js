@@ -38,22 +38,22 @@ const AGENT_CARD_DEFINITIONS = Object.freeze([
   },
   {
     id: 'memory_table_agent',
-    title: '记忆表格 Agent',
-    summary: '管理记忆表格注入、更新和写入预览。',
+    title: '记忆 Agent',
+    summary: '选择记忆方式（摘要或表格），管理对应的提示词和注入。',
     detail: [
-      '控制记忆表格数据和 guide 在请求中的位置。',
-      '关联记忆中心、自动抽取和写入预览。',
-      '记忆表格提示词和注入策略在这里统一维护。',
+      '「摘要」：AI 每轮写一句摘要，累计多了再合并成大总结。',
+      '「表格」：AI 按写表提示词维护记忆表格，并关联记忆中心与写入预览。',
+      '翻到配置面切换模式、修改提示词。',
     ],
     category: 'memory',
     accent: 'memory',
     implemented: true,
     enabledDefault: true,
     toggleKind: 'agent_card',
-    runtimeKinds: ['memory_update'],
+    runtimeKinds: ['memory_update', 'summary_compaction'],
     promptRefs: [],
     resourceRefs: ['memory_center'],
-    settingRefs: ['记忆提示词模板', '记忆数据位置', '写表指导位置', '写入预览'],
+    settingRefs: ['记忆存储模式', '摘要提示词', '大总结提示词', '记忆提示词模板', '记忆数据位置', '写入预览'],
   },
   {
     id: 'lineage_agent',
@@ -209,13 +209,6 @@ const DIAGNOSTIC_VIEW_CARD_IDS = new Set([
   'execution_lane_agent',
 ]);
 
-const normalizeMemoryMode = (value = '') => {
-  const text = trim(value, 'table').toLowerCase();
-  if (text === 'summary') return 'summary';
-  if (text === 'off' || text === 'disabled') return 'off';
-  return 'table';
-};
-
 const classifyCatalogCard = (id = '') => {
   const value = trim(id);
   if (PROMPT_MODULE_CARD_IDS.has(value)) return 'prompt_module';
@@ -223,13 +216,8 @@ const classifyCatalogCard = (id = '') => {
   return 'agent';
 };
 
-const cardMatchesMemoryMode = (card = {}, memoryMode = 'table') => {
-  const mode = normalizeMemoryMode(memoryMode);
-  const id = trim(card.id);
-  if (id === 'memory_table_agent') return true;
-  if (id === 'summary_agent') return mode === 'summary';
-  return true;
-};
+// 摘要提示词已并入记忆卡（摘要模式），任何记忆模式都不再单独列出摘要 Agent 卡；记忆卡始终可见。
+const cardMatchesMemoryMode = (card = {}) => trim(card.id) !== 'summary_agent';
 
 const runtimeStatusPriority = Object.freeze({
   running: 4,
@@ -256,6 +244,7 @@ const pickLatestRuntimeState = (runtimeKinds = [], runs = []) => {
     status: trim(latest.status, 'idle'),
     title: trim(latest.title || latest.kind),
     summary: trim(latest.summary || latest.lastStep?.summary || latest.errorMessage),
+    reason: trim(latest.metadata?.reason),
     updatedAt: Number(latest.updatedAt || latest.createdAt || 0) || 0,
   };
 };
@@ -307,7 +296,7 @@ const buildCatalogCards = ({
     updatedAt: state.updatedAt,
     runtimeState: pickLatestRuntimeState(definition.runtimeKinds, runs),
   };
-}).filter(card => cardMatchesMemoryMode(card, memoryMode));
+}).filter(card => cardMatchesMemoryMode(card));
 
 export const buildAgentCardList = ({
   featureAgents = [],

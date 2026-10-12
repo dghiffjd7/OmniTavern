@@ -47,19 +47,21 @@ const results = await evaluateInApp(`(async () => {
         const hostId = mode === 'inline' ? 'body' : 'memory';
         const cellSelector = '[data-hop-house="' + hostId + '"]';
         check(root.querySelectorAll('[data-hop-house]').length === (mode === 'inline' ? 1 : 2), '维护不应增加可见房子');
-        check(root.querySelector(cellSelector).classList.contains('is-running'), '维护尚未结束时格子不能提前完成');
+        // 维护在后台：宿主交付即显示完成，另标「整理摘要中」，不再像正文仍在生成。
+        check(root.querySelector(cellSelector).classList.contains('is-succeeded'), '宿主交付后格子应显示完成');
         click(cellSelector);
         let detail = document.querySelector('.hop-house-detail[open]');
-        check(detail.querySelector('.hop-card-status').textContent.includes('执行中'), '原浮卡没有维护中状态');
+        check(detail.querySelector('.hop-card-status').textContent.includes('整理摘要中'), '原浮卡没有维护中状态');
         click('.agent-center-floating-face-front [data-agent-float-flip]', detail);
         check(!detail.querySelector('.agent-center-floating-face-back').inert, '原卡片翻面失效');
         check(detail.querySelector('fieldset').disabled, '运行快照背面不能编辑');
         close();
+        const result = await turn.turnPromise;
+        check(result.status === 'succeeded' && result.bodyDelivered, '整轮不等待后台维护');
         if (outcome === 'cancelled') turn.abort();
         else finish(outcome === 'skipped' ? false : { status: 'failed', reason: 'smoke_failure' });
-        const result = await turn.turnPromise; await tick();
+        await turn.maintenancePromise; await tick();
         const expected = outcome === 'failed' ? 'partial' : outcome === 'cancelled' ? 'cancelled' : 'succeeded';
-        check(result.status === expected && result.bodyDelivered, '终态/正文交付错误');
         check(root.querySelector(cellSelector).classList.contains('is-' + expected), '格子未反映内部维护终态');
         click(cellSelector); detail = document.querySelector('.hop-house-detail[open]');
         check(detail.textContent.includes('summary_compaction') && detail.textContent.includes(outcome), '原卡片详情丢失维护结果');
@@ -68,7 +70,7 @@ const results = await evaluateInApp(`(async () => {
         answers.push({ mode, status: result.status, bodyDelivered: result.bodyDelivered, requests });
       } finally {
         runtime.clearScope();
-        if (turn) await turn.turnPromise;
+        if (turn) { await turn.turnPromise; await turn.maintenancePromise; }
         ac.destroy(); board.dispose();
       }
     }

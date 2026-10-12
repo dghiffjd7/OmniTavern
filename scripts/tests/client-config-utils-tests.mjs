@@ -50,6 +50,15 @@ test('canInitClient follows the selected vertex authentication mode', () => {
   }), true);
 });
 
+test('canInitClient lets keyless local image providers run with only a URL', () => {
+  // 配置面板对这些渠道标「可不填 API Key」，生图前的检查也要一致，否则本地 ComfyUI 只能乱填 Key。
+  for (const provider of ['comfyui', 'comfy', 'automatic1111', 'a1111', 'pollinations']) {
+    assert.equal(canInitClient({ provider, baseUrl: 'http://127.0.0.1:8188', apiKey: '' }), true, provider);
+    assert.equal(canInitClient({ provider, baseUrl: '  ', apiKey: '' }), false, `${provider} without url`);
+  }
+  assert.equal(canInitClient({ provider: 'openai', baseUrl: 'https://api.openai.com/v1', apiKey: '' }), false);
+});
+
 test('canInitClient rejects empty configs', () => {
   assert.equal(canInitClient(null), false);
   assert.equal(canInitClient({}), false);

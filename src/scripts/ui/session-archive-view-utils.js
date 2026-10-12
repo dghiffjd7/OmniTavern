@@ -62,6 +62,61 @@ const createArchiveManagementControls = ({
   };
 };
 
+// 加载一份存档（点存档行确认后，或导入后点「立即加载」）：切换正文与记忆表，然后通知面板并关闭。
+export const loadSessionArchive = async ({
+  sessionId = '',
+  isGroup = false,
+  archive = null,
+  getMemoryStorageMode = () => 'summary',
+  buildMemoryTableSnapshot = async () => null,
+  captureArchivePointer = async () => null,
+  loadArchivedMessages = async () => null,
+  getLastArchiveTransition = () => null,
+  persistArchivePointer = async () => null,
+  applyMemoryTableSnapshot = async () => null,
+  restoreArchivePointerForLoadedThread = async () => null,
+  logger = console,
+  runArchiveSwitchFlow = async () => {},
+  onArchiveLoaded = () => {},
+  onHide = () => {},
+  sourcePrefix = 'contact',
+  restoreWarnMessage = 'restore checkpoint memory after archive load failed',
+} = {}) => {
+  await runArchiveSwitchFlow({
+    sessionId,
+    isGroup,
+    archive,
+    getMemoryStorageMode,
+    buildMemoryTableSnapshot: ({ sessionId, isGroup }) => buildMemoryTableSnapshot({ sessionId, isGroup }),
+    captureArchivePointer,
+    loadArchivedMessages,
+    getLastArchiveTransition,
+    persistArchivePointer,
+    applyMemoryTableSnapshot: ({ sessionId, isGroup, snapshot }) => applyMemoryTableSnapshot({ sessionId, isGroup, snapshot }),
+    restoreArchivePointerForLoadedThread,
+    logger,
+    sourcePrefix,
+    restoreWarnMessage,
+  });
+  onArchiveLoaded?.(sessionId, archive);
+  onHide?.();
+};
+
+// 导入后新存档行淡淡强调一次（1.2 秒内消退，见 settings-panel-redesign.css）。
+export const highlightSessionArchiveRow = (container, archiveId = '') => {
+  const id = String(archiveId || '');
+  const row = id
+    ? [...(container?.querySelectorAll?.('[data-archive-id]') || [])].find(item => item.getAttribute('data-archive-id') === id)
+    : null;
+  if (!row) return false;
+  row.classList.add('is-imported');
+  row.addEventListener('animationend', () => row.classList.remove('is-imported'), { once: true });
+  try {
+    row.scrollIntoView?.({ block: 'nearest' });
+  } catch {}
+  return true;
+};
+
 export const renderSessionArchivesSection = ({
   container = null,
   sessionId = '',
@@ -237,27 +292,28 @@ export const renderSessionArchivesSection = ({
         if (isCurrent) return;
         const ok = await appConfirmFn({
           title: '加载存档',
-          message: `确定要加载存档「${archive.name}」吗？\n当前聊天将被自动保存；正文与记忆表（如启用）会随存档切换。变量状态目前不会随存档恢复。`,
+          message: `确定要加载存档「${archive.name}」吗？\n当前聊天将被自动保存；正文会随存档切换，记忆表与变量（如启用记忆表）也会一起切换。`,
         });
         if (!ok) return;
-        await runArchiveSwitchFlow({
+        await loadSessionArchive({
           sessionId,
           isGroup,
           archive,
           getMemoryStorageMode,
-          buildMemoryTableSnapshot: ({ sessionId, isGroup }) => buildMemoryTableSnapshot({ sessionId, isGroup }),
+          buildMemoryTableSnapshot,
           captureArchivePointer,
           loadArchivedMessages,
           getLastArchiveTransition,
           persistArchivePointer,
-          applyMemoryTableSnapshot: ({ sessionId, isGroup, snapshot }) => applyMemoryTableSnapshot({ sessionId, isGroup, snapshot }),
+          applyMemoryTableSnapshot,
           restoreArchivePointerForLoadedThread,
           logger,
+          runArchiveSwitchFlow,
+          onArchiveLoaded,
+          onHide,
           sourcePrefix,
           restoreWarnMessage,
         });
-        onArchiveLoaded?.(sessionId, archive);
-        onHide?.();
       },
       onExport: typeof onExportArchive === 'function'
         ? async (event) => {

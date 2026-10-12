@@ -566,6 +566,18 @@ body:has(.memory-editor-panel.is-open)
   transform: scale(.96);
 }
 
+.memory-editor-button[hidden],
+.memory-editor-grabber {
+  display: none;
+}
+
+.memory-editor-button.is-danger {
+  margin-right: auto;
+  border-color: var(--app-danger-border);
+  background: var(--app-danger-soft);
+  color: var(--app-danger-text);
+}
+
 /* 旧暗色兼容层以 !important 统一按钮/输入；在新版编辑器范围内恢复其层级与焦点反馈。 */
 body[data-theme-mode='dark'] .memory-editor-panel :is(
   .memory-editor-input,
@@ -585,6 +597,12 @@ body[data-theme-mode='dark'] .memory-editor-panel :is(
   border-color: rgba(var(--app-accent-rgb), 0.42) !important;
   background: var(--app-surface-card) !important;
   box-shadow: 0 0 0 4px rgba(var(--app-accent-rgb), 0.085) !important;
+}
+
+body[data-theme-mode='dark'] .memory-editor-panel .memory-editor-button.is-danger {
+  border-color: var(--app-danger-border) !important;
+  background: var(--app-danger-soft) !important;
+  color: var(--app-danger-text) !important;
 }
 
 body[data-theme-mode='dark'] .memory-editor-panel .memory-editor-button.is-primary {
@@ -1122,6 +1140,50 @@ body[data-theme-mode='dark'] .memory-editor-panel .memory-editor-button.is-prima
   }
 }
 
+@keyframes memory-sheet-in {
+  from {
+    transform: translate3d(0, 100%, 0);
+  }
+  to {
+    transform: none;
+  }
+}
+
+/* 没有起点：从当前位置（含拖动位移）滑出 */
+@keyframes memory-sheet-out {
+  to {
+    transform: translate3d(0, 100%, 0);
+  }
+}
+
+@keyframes memory-sheet-overlay-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes memory-cards-from-right {
+  from {
+    opacity: 0;
+    transform: translate3d(12px, 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes memory-cards-from-left {
+  from {
+    opacity: 0;
+    transform: translate3d(-12px, 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 @keyframes memory-table-card-in {
   from {
     opacity: 0;
@@ -1156,14 +1218,60 @@ body[data-theme-mode='dark'] .memory-editor-panel .memory-editor-button.is-prima
 }
 
 @media (max-width: 640px) {
+  /* 手机：编辑面板改成底部面板，从下方滑入；按住把手往下拖可关闭（JS 见 memory-table-card-view.js）。 */
   .memory-editor-panel {
-    width: calc(
-      100% - 20px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)
-    );
-    max-height: calc(
-      100dvh - 20px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)
-    );
-    border-radius: 16px;
+    top: auto;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    max-width: none;
+    max-height: calc(92dvh - env(safe-area-inset-top, 0px));
+    border-bottom: 0;
+    border-radius: 22px 22px 0 0;
+    transform: none;
+    animation: memory-sheet-in var(--app-dur-page) var(--app-ease-out);
+    transition: transform var(--app-dur-base) var(--app-ease-out);
+  }
+
+  .memory-editor-panel.is-dragging {
+    animation: none;
+    transition: none;
+  }
+
+  .memory-editor-panel.is-closing {
+    pointer-events: none;
+    animation: memory-sheet-out 220ms var(--app-ease-in) forwards;
+  }
+
+  .memory-editor-overlay.is-closing {
+    animation: memory-sheet-overlay-out 220ms ease-in forwards;
+  }
+
+  .memory-editor-grabber {
+    display: block;
+    flex: 0 0 auto;
+    width: 40px;
+    height: 4px;
+    margin: 8px auto 0;
+    border-radius: 999px;
+    background: var(--app-border-strong);
+    touch-action: none;
+  }
+
+  .memory-editor-header {
+    touch-action: none;
+  }
+
+  .memory-editor-button {
+    min-height: 46px;
+    border-radius: 12px;
+    font-size: 14px;
+  }
+
+  .memory-editor-button.is-danger {
+    flex: 0 0 auto;
+    margin-right: 0;
   }
 
   .memory-editor-header {
@@ -1244,6 +1352,23 @@ body[data-theme-mode='dark'] .memory-editor-panel .memory-editor-button.is-prima
     width: 100%;
   }
 
+  /* 卡片版：搜索与批量放同一行，少占一行 */
+  .is-card-layout .memory-table-toolbar-row {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .is-card-layout .memory-table-search {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+  }
+
+  .is-card-layout .memory-table-toolbar-row > .memory-table-action-btn {
+    flex: 0 0 auto;
+    width: auto;
+  }
+
   .memory-table-block-header {
     padding: 12px;
   }
@@ -1285,7 +1410,303 @@ body[data-theme-mode='dark'] .memory-editor-panel .memory-editor-button.is-prima
   }
 }
 
+/* ── 手机版卡片视图（memory-table-card-view.js）：表格用标签切换，每行一张卡片 ── */
+
+.memory-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.memory-cards-tabs {
+  display: flex;
+  gap: 6px;
+  margin: 0 -2px;
+  padding: 2px 2px 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.memory-cards-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.memory-cards-tab {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--app-border-default);
+  border-radius: 999px;
+  background: var(--app-surface-card);
+  color: var(--app-text-secondary);
+  font: inherit;
+  font-size: 13.5px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--app-dur-quick) ease,
+    border-color var(--app-dur-quick) ease,
+    color var(--app-dur-quick) ease;
+}
+
+.memory-cards-tab.is-active {
+  border-color: var(--app-accent-primary);
+  background: var(--app-accent-primary);
+  color: var(--app-text-inverse);
+  font-weight: 600;
+}
+
+.memory-cards-tab-count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 14%, transparent);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.memory-cards-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.memory-cards-panel.is-from-right {
+  animation: memory-cards-from-right 180ms var(--app-ease-out) both;
+}
+
+.memory-cards-panel.is-from-left {
+  animation: memory-cards-from-left 180ms var(--app-ease-out) both;
+}
+
+.memory-cards-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.memory-cards-meta-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--app-text-secondary);
+  font-size: 13px;
+}
+
+.memory-cards-icon-btn {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--app-border-default);
+  border-radius: 12px;
+  background: var(--app-surface-card);
+  color: var(--app-text-secondary);
+  cursor: pointer;
+}
+
+.memory-cards-icon-btn svg,
+.memory-cards-add svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.memory-cards-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.memory-row-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 13px 14px 12px 16px;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 14px;
+  background: var(--app-surface-card);
+  cursor: pointer;
+  outline: none;
+  animation: memory-table-card-in 240ms var(--app-ease-out) both;
+  animation-delay: calc(var(--memory-card-index, 0) * 30ms);
+  transition:
+    border-color var(--app-dur-quick) ease,
+    box-shadow var(--app-dur-quick) ease,
+    opacity var(--app-dur-quick) ease;
+}
+
+.memory-row-card:focus-visible {
+  box-shadow: 0 0 0 2px var(--app-accent-primary);
+}
+
+.memory-row-card.is-inactive {
+  opacity: 0.62;
+}
+
+.memory-row-card.is-selected {
+  border-color: var(--app-accent-primary);
+  background: color-mix(in srgb, var(--app-accent-primary) 6%, var(--app-surface-card));
+}
+
+.memory-row-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+}
+
+.memory-row-card-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--app-text-primary);
+  font-size: 16px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-row-card-badge {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--app-surface-hover);
+  color: var(--app-text-muted);
+  font-size: 11.5px;
+}
+
+.memory-row-card-badge.is-pinned {
+  background: var(--app-accent-soft);
+  color: var(--app-accent-strong);
+}
+
+.memory-row-card-head .memory-cards-icon-btn {
+  width: 36px;
+  height: 36px;
+  margin: -6px -6px -6px 0;
+  border: 0;
+  background: transparent;
+  color: var(--app-text-muted);
+}
+
+.memory-row-card-check {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  margin: 0;
+  accent-color: var(--app-accent-primary);
+}
+
+.memory-row-card-fields {
+  display: grid;
+  grid-template-columns: minmax(56px, max-content) minmax(0, 1fr);
+  gap: 6px 12px;
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.memory-row-card-fields dt {
+  max-width: 7.5em;
+  color: var(--app-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.memory-row-card-fields dd {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--app-text-primary);
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.memory-row-card.is-expanded .memory-row-card-fields dd {
+  display: block;
+  overflow: visible;
+  -webkit-line-clamp: unset;
+}
+
+.memory-row-card-tag {
+  display: inline-block;
+  margin: 0 4px 4px 0;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--app-surface-hover);
+  font-size: 12.5px;
+}
+
+.memory-row-card-more {
+  align-self: flex-start;
+  min-height: 32px;
+  margin: -4px 0 -4px -10px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--app-accent-primary);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.memory-row-card-more[hidden] {
+  display: none;
+}
+
+.memory-cards-empty {
+  padding: 28px 12px;
+  border: 1px dashed var(--app-border-default);
+  border-radius: 14px;
+  color: var(--app-text-muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.memory-cards-add {
+  position: sticky;
+  bottom: 8px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 48px;
+  border: 1px solid var(--app-accent-primary);
+  border-radius: 14px;
+  background: var(--app-surface-card);
+  color: var(--app-accent-primary);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: var(--app-shadow-sm);
+}
+
+.memory-cards-add:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.memory-cards :is(.memory-cards-tab, .memory-cards-icon-btn, .memory-row-card-more, .memory-cards-add):focus-visible {
+  outline: 2px solid var(--app-accent-primary);
+  outline-offset: 2px;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .memory-cards-panel,
+  .memory-row-card,
   .memory-editor-overlay,
   .memory-editor-panel,
   .memory-table-prompt-wrap *,
@@ -1298,6 +1719,8 @@ body[data-theme-mode='dark'] .memory-editor-panel .memory-editor-button.is-prima
   }
 }
 
+body[data-reduced-motion='on'] .memory-cards-panel,
+body[data-reduced-motion='on'] .memory-row-card,
 body[data-reduced-motion='on'] .memory-editor-overlay,
 body[data-reduced-motion='on'] .memory-editor-panel,
 body[data-reduced-motion='on'] .memory-table-prompt-wrap *,

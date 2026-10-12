@@ -66,3 +66,24 @@ assert.equal(turn.memoryInline, true, 'shared feature changes also apply to the 
 await turn.waitForBodyStart(); turn.resolveBody({ status: 'succeeded' }); await turn.turnPromise;
 assert.deepEqual(runtime.resolveExecutionPlan('rp:test').fused, [], 'later turns use the saved pause');
 console.log('ok - persistent pause, fused members, dependency skip, original geometry and per-turn snapshot');
+
+{
+  // 摘要模式：记忆表格（叠进正文或独立房子）照样不运行，但格子标「摘要模式」而不是「已停用」；关闭记忆仍是「已停用」。
+  const board = normalizeHopscotchBoard({ rows: [
+    { id: 'body-row', houses: [{ id: 'body', kind: 'body', fused: ['memory_table'] }] },
+    { id: 'after', houses: [{ id: 'table', kind: 'memory_table' }] },
+  ] });
+  const summary = resolveHopscotchActivation(board, { memory: { storageMode: 'summary' } });
+  assert.equal(summary.fused.memory_table.enabled, false);
+  assert.equal(summary.fused.memory_table.reason, 'memory_summary_mode');
+  assert.equal(summary.houses.table.enabled, false);
+  assert.equal(summary.houses.table.reason, 'memory_summary_mode');
+  assert.deepEqual(getActiveHopscotchFused(board, summary), []);
+  const summaryHtml = renderHopscotchCourt(board, { activation: summary });
+  assert.equal((summaryHtml.match(/<span aria-hidden="true">Ⅱ<\/span>摘要模式<\/span>/g) || []).length, 2);
+  assert.doesNotMatch(summaryHtml, /Ⅱ<\/span>已停用/);
+  const off = resolveHopscotchActivation(board, { memory: { storageMode: 'off' } });
+  assert.equal(off.fused.memory_table.reason, 'memory_disabled');
+  assert.match(renderHopscotchCourt(board, { activation: off }), /Ⅱ<\/span>已停用/);
+  console.log('ok - summary memory mode labels memory houses as summary mode instead of disabled');
+}

@@ -3012,11 +3012,28 @@ export class PresetPanel {
             .join(' / ');
     }
 
+    // 推理格式详情页以「创意写作使用」为编辑目标；读取、草稿和管理动作必须共用此目标。
+    getEditorPresetId(storeType) {
+        if (storeType === 'reasoning') {
+            const boundId = this.store.getModeBindingId?.(storeType, 'rp');
+            if (boundId) return boundId;
+        }
+        return this.store.getActiveId(storeType);
+    }
+
+    getEditorPreset(storeType) {
+        const presetId = this.getEditorPresetId(storeType);
+        if (presetId === this.store.getActiveId(storeType)) return this.store.getActive(storeType) || {};
+        // getPreset 带索引用的 id；编辑数据保持与 getActive 相同的形状。
+        const { id, ...preset } = this.store.getPreset(storeType, presetId) || {};
+        return preset;
+    }
+
     getActivePresetSnapshot(storeType) {
-        const presetId = this.store.getActiveId(storeType);
+        const presetId = this.getEditorPresetId(storeType);
         const key = this.getDraftKey(storeType, presetId);
         if (key && this.drafts.has(key)) return deepClone(this.drafts.get(key));
-        return this.store.getActive(storeType) || {};
+        return this.getEditorPreset(storeType);
     }
 
     isEnabledToggleReadonly(storeType) {
@@ -3210,7 +3227,7 @@ export class PresetPanel {
         const st = String(storeType || '').trim();
         const section = SECTIONS.find((item) => item.storeType === st) || this.getCurrentContextSection();
         if (!section) return;
-        const nextPresetId = String(presetId || this.store.getActiveId(st) || '').trim();
+        const nextPresetId = String(presetId || this.getEditorPresetId(st) || '').trim();
         this.captureCurrentDetailDraft();
         this.currentSectionId = section.id;
         this.currentPage = 'bindings';
@@ -3271,7 +3288,7 @@ export class PresetPanel {
     renderBindingSection(sec) {
         if (!this.bindingEditorEl || !this.bindingTitleEl || !this.bindingSubtitleEl) return;
         const storeType = this.bindingStoreType || sec.storeType;
-        const fallbackPresetId = String(this.store.getActiveId(storeType) || '').trim();
+        const fallbackPresetId = String(this.getEditorPresetId(storeType) || '').trim();
         const requestedPresetId = String(this.bindingPresetId || fallbackPresetId || '').trim();
         const preset = requestedPresetId
             ? (this.store.list(storeType).find((item) => String(item.id || '') === requestedPresetId) || null)
@@ -3304,15 +3321,15 @@ export class PresetPanel {
         if (!sec) return;
         try {
             const storeType = sec.storeType;
-            const presetId = this.store.getActiveId(storeType);
+            const presetId = this.getEditorPresetId(storeType);
             const key = this.getDraftKey(storeType, presetId);
             if (!key) return;
             const base = this.drafts.has(key)
                 ? this.drafts.get(key)
-                : deepClone(this.store.getActive(storeType) || {});
+                : deepClone(this.getEditorPreset(storeType));
             const next = this.collectSectionData(sec.id, this.detailEditorEl, base);
             // 与已保存基线一致的草稿直接丢弃：避免「未保存更改」误报，也减少无谓写盘
-            const baseline = this.store.getActive(storeType) || {};
+            const baseline = this.getEditorPreset(storeType);
             if (isSamePresetData(next, baseline)) this.drafts.delete(key);
             else this.drafts.set(key, next);
         } catch (err) {
@@ -3325,9 +3342,12 @@ export class PresetPanel {
        ════════════════════════════════════════ */
     renderSectionEditor(sec, root) {
         const storeType = sec.storeType;
-        const presetId = this.store.getActiveId(storeType);
+        const presetId = this.getEditorPresetId(storeType);
         const key = this.getDraftKey(storeType, presetId);
-        const p = (key && this.drafts.has(key)) ? this.drafts.get(key) : (this.store.getActive(storeType) || {});
+        const p = (key && this.drafts.has(key)) ? this.drafts.get(key) : this.getEditorPreset(storeType);
+
+        // 详情页会隐藏顶部「预设方案」卡，推理格式在本页自带切换与保存
+        if (sec.id === 'reasoning') root.appendChild(this.renderReasoningSwitcher());
 
         if (sec.id !== 'taskprompts') {
             const scopeCard = document.createElement('div');
@@ -4190,6 +4210,143 @@ export class PresetPanel {
     }
 
     /* ── Reasoning ── */
+    // 创意写作用全局「当前预设」（有创意写作模式绑定时改绑定）；聊天模式只在用户明确选择时才绑定。
+    renderReasoningSwitcher() {
+        const storeType = 'reasoning';
+        const presets = this.store.list(storeType);
+        const activeId = String(this.getEditorPresetId(storeType) || '');
+        const rpBoundId = String(this.store.getModeBindingId(storeType, 'rp') || '');
+        const creativeId = rpBoundId || activeId;
+        const chatBoundId = String(this.store.getModeBindingId(storeType, 'chat') || '');
+        const builtinId = String(this.store.getSelectionState()?.builtinActive?.[storeType] || '');
+        const builtinName = this.getPresetNameById(storeType, builtinId) || builtinId;
+
+        const card = document.createElement('div');
+        card.className = 'pp-manager-card pp-reasoning-switcher';
+        card.innerHTML = `
+            <div class="pp-manager-title">推理格式方案</div>
+            <div class="pp-manager-sub">切换只影响创意写作；聊天模式需单独选择才会改变。</div>
+            <div class="pp-manager-select-row">
+                <div class="pp-manager-select-wrap">
+                    <label class="pp-manager-label" for="reasoning-creative-select">创意写作使用</label>
+                    <select class="pp-input" id="reasoning-creative-select"></select>
+                </div>
+                <div class="pp-manager-select-wrap">
+                    <label class="pp-manager-label" for="reasoning-chat-select">聊天模式使用</label>
+                    <select class="pp-input" id="reasoning-chat-select"></select>
+                </div>
+            </div>
+            <div class="pp-manager-actions">
+                <button type="button" class="pp-manager-btn" data-reasoning-action="new">新建</button>
+                <button type="button" class="pp-manager-btn" data-reasoning-action="rename">重命名</button>
+                <button type="button" class="pp-manager-btn" data-reasoning-action="reset">恢复默认</button>
+                <button type="button" class="pp-manager-btn" data-reasoning-action="save">保存推理格式</button>
+                <button type="button" class="pp-manager-btn pp-danger" data-reasoning-action="delete">删除</button>
+            </div>
+        `;
+
+        const addOption = (select, value, label, disabled = false) => {
+            const opt = document.createElement('option');
+            opt.value = value;
+            opt.textContent = label;
+            opt.disabled = disabled;
+            select.appendChild(opt);
+        };
+        const creativeSelect = card.querySelector('#reasoning-creative-select');
+        const chatSelect = card.querySelector('#reasoning-chat-select');
+        addOption(chatSelect, '', `${translateUiText('内置默认')}（${builtinName}）`);
+        presets.forEach((preset) => {
+            const name = preset.name || preset.id;
+            const creativeOk = isPresetEligibleForMode(preset, 'rp');
+            const chatOk = isPresetEligibleForMode(preset, 'chat');
+            addOption(creativeSelect, preset.id, creativeOk ? name : `${name}（${translateUiText('仅聊天模式')}）`, !creativeOk);
+            addOption(chatSelect, preset.id, chatOk ? name : `${name}（${translateUiText('仅创意写作')}）`, !chatOk);
+        });
+        creativeSelect.value = creativeId;
+        chatSelect.value = chatBoundId;
+
+        const run = task => this.enqueuePresetMutation(task, { rejectIfBusy: true });
+        creativeSelect.onchange = () => run(async () => {
+            const nextId = creativeSelect.value;
+            if (!nextId || nextId === creativeId) return;
+            this.captureCurrentDetailDraft();
+            await this.store.setActive(storeType, nextId);
+            if (rpBoundId) await this.store.setModeBinding(storeType, 'rp', nextId);
+            this.renderAllSections();
+            window.dispatchEvent(new CustomEvent('preset-changed'));
+        });
+        chatSelect.onchange = () => run(async () => {
+            const nextId = chatSelect.value;
+            if (nextId === chatBoundId) return;
+            this.captureCurrentDetailDraft();
+            if (nextId) await this.store.setModeBinding(storeType, 'chat', nextId);
+            else await this.store.clearModeBinding(storeType, 'chat');
+            this.renderAllSections();
+            this.showStatus('已更新聊天模式推理格式', 'success');
+            window.dispatchEvent(new CustomEvent('preset-changed'));
+        });
+
+        const resetBtn = card.querySelector('[data-reasoning-action="reset"]');
+        resetBtn.disabled = true;
+        resetBtn.title = translateUiText('仅内置推理格式可恢复默认');
+        // 内置格式以 st-defaults.json 的名称为 id；自建格式没有可恢复的原值
+        this.store.loadBundledDefaults().then((defaults) => {
+            if (!defaults?.[storeType]?.[activeId]) return;
+            resetBtn.disabled = false;
+            resetBtn.title = '';
+        });
+        card.querySelector('[data-reasoning-action="new"]').onclick = () => run(() => this.onNewForStoreType(storeType));
+        card.querySelector('[data-reasoning-action="rename"]').onclick = () => run(() => this.onRenameForStoreType(storeType));
+        card.querySelector('[data-reasoning-action="delete"]').onclick = () => run(() => this.onDeleteForStoreType(storeType));
+        card.querySelector('[data-reasoning-action="save"]').onclick = () => run(() => this.saveStoreTypeDrafts(storeType));
+        resetBtn.onclick = async () => {
+            const defaults = await this.store.loadBundledDefaults();
+            const preset = defaults?.[storeType]?.[activeId];
+            if (!preset) return;
+            const fields = { prefix: '#reasoning-prefix', suffix: '#reasoning-suffix', separator: '#reasoning-separator' };
+            for (const [field, selector] of Object.entries(fields)) {
+                const ta = this.detailEditorEl?.querySelector(selector);
+                if (!ta) continue;
+                ta.value = String(preset[field] ?? '');
+                ta.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+            this.captureCurrentDetailDraft();
+            this.updateUnsavedIndicator();
+            this.showStatus('已填入内置默认值，保存后生效', 'info');
+        };
+        return card;
+    }
+
+    // 只保存某一类预设的草稿（推理格式分页用），不碰自定义提示词等其他分类。
+    async saveStoreTypeDrafts(storeType) {
+        await this.store.ready;
+        this.captureCurrentDetailDraft();
+        const toSave = [];
+        for (const [key, data] of this.drafts.entries()) {
+            const [type, presetId] = String(key).split(':');
+            if (type !== storeType || !presetId) continue;
+            const name = String(data?.name || '').trim() || presetId;
+            toSave.push({ storeType: type, presetId, name, data: { ...(data || {}), name } });
+        }
+        if (!toSave.length) {
+            this.showStatus('没有需要保存的更改', 'info');
+            return true;
+        }
+        try {
+            await this.store.upsertMany(toSave);
+            toSave.forEach(item => this.drafts.delete(this.getDraftKey(item.storeType, item.presetId)));
+            this.renderAllSections();
+            this.updateUnsavedIndicator();
+            this.showStatus('保存成功', 'success');
+            window.dispatchEvent(new CustomEvent('preset-changed'));
+            return true;
+        } catch (err) {
+            logger.error('保存预设失败', err);
+            this.showStatus(err?.message || '保存失败', 'error');
+            return false;
+        }
+    }
+
     renderReasoningEditor(p) {
         const wrap = document.createElement('div');
         const settings = appSettings.get();
@@ -7498,11 +7655,11 @@ export class PresetPanel {
                 }
 
                 for (const st of ['sysprompt', 'context', 'instruct', 'openai', 'reasoning']) {
-                    const activeId = this.store.getActiveId(st);
+                    const activeId = this.getEditorPresetId(st);
                     if (!activeId) continue;
                     const key = this.getDraftKey(st, activeId);
                     if (key && this.drafts.has(key)) continue;
-                    const data = deepClone(this.store.getActive(st) || {});
+                    const data = deepClone(this.getEditorPreset(st));
                     const name = String(data?.name || '').trim() || activeId || '未命名';
                     toSave.push({ storeType: st, presetId: activeId, name, data: { ...(data || {}), name } });
                 }
@@ -7541,6 +7698,9 @@ export class PresetPanel {
         const data = { ...deepClone(base), name };
         const id = await this.store.upsert(storeType, { name, data, appScope: 'creative' });
         await this.store.setActive(storeType, id);
+        if (storeType === 'reasoning' && this.store.getModeBindingId(storeType, 'rp')) {
+            await this.store.setModeBinding(storeType, 'rp', id);
+        }
         for (const k of Array.from(this.drafts.keys())) {
             if (String(k).startsWith(`${storeType}:`)) this.drafts.delete(k);
         }
@@ -7551,7 +7711,7 @@ export class PresetPanel {
 
     async onRenameForStoreType(storeType) {
         await this.store.ready;
-        const id = this.store.getActiveId(storeType);
+        const id = this.getEditorPresetId(storeType);
         const current = this.getActivePresetSnapshot(storeType);
         if (!id || !current) return;
         this.captureDraftsFromDOM();
@@ -7571,7 +7731,7 @@ export class PresetPanel {
 
     async onDeleteForStoreType(storeType) {
         await this.store.ready;
-        const id = this.store.getActiveId(storeType);
+        const id = this.getEditorPresetId(storeType);
         if (!id) return;
         const ok = await appConfirm({ title: '删除预设', message: '删除该预设？此操作不可恢复。', danger: true });
         if (!ok) return;

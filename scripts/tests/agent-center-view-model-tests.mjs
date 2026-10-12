@@ -139,16 +139,17 @@ import {
   const view = buildAgentCenterView({
     memoryMode: 'summary',
   });
-  assert.equal(view.agents.find(agent => agent.id === 'memory_table_agent').title, '记忆表格 Agent');
-  assert.equal(view.agents.find(agent => agent.id === 'summary_agent').title, '摘要 Agent');
-  assert.equal(view.tabs.find(tab => tab.id === 'agents').count, 8);
+  assert.equal(view.agents.find(agent => agent.id === 'memory_table_agent').title, '记忆 Agent');
+  // 摘要提示词并入记忆卡，摘要模式也不再单独列出摘要 Agent 卡。
+  assert.equal(view.agents.find(agent => agent.id === 'summary_agent'), undefined);
+  assert.equal(view.tabs.find(tab => tab.id === 'agents').count, 7);
   assert.equal(view.meta.memoryMode, 'summary');
-  console.log('ok - agent center keeps the memory mode hub reachable while showing summary agent in summary mode');
+  console.log('ok - agent center keeps summary editing inside the memory card in summary mode');
 }
 
 {
   const view = buildAgentCenterView({ memoryMode: 'off' });
-  assert.equal(view.agents.find(agent => agent.id === 'memory_table_agent').title, '记忆表格 Agent');
+  assert.equal(view.agents.find(agent => agent.id === 'memory_table_agent').title, '记忆 Agent');
   assert.equal(view.agents.find(agent => agent.id === 'summary_agent'), undefined);
   assert.equal(view.tabs.find(tab => tab.id === 'agents').count, 7);
   console.log('ok - agent center keeps the memory mode hub reachable while memory is off');

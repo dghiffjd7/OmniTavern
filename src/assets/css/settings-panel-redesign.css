@@ -1,0 +1,1243 @@
+/* 会话设置面板改版（私聊 / 创意写作 / 群聊共用，ssp- 前缀）
+   只用主题变量；动画只动 transform / opacity，跟随「减少动态效果」。
+   结构见 contact-settings-panel.js / group-chat-panels.js，外框行为见 session-settings-chrome-utils.js。 */
+
+/* ── 外框与开合 ─────────────────────────────────────────────────────── */
+
+.ssp-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20000;
+  background: var(--app-surface-overlay);
+  opacity: 0;
+  transition: opacity var(--app-dur-base) var(--app-ease-out);
+}
+
+.ssp-overlay.is-open {
+  opacity: 1;
+}
+
+.ssp-overlay.is-closing {
+  opacity: 0;
+  pointer-events: none;
+  transition-duration: var(--app-dur-quick);
+  transition-timing-function: var(--app-ease-in);
+}
+
+.ssp-panel {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 21000;
+  width: min(1080px, calc(100vw - 48px));
+  height: min(920px, calc(100dvh - 48px));
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--app-border-default);
+  border-radius: 20px;
+  /* 面板色叠在页面底色上，避免半透明 token 透出遮罩 */
+  background: linear-gradient(var(--app-surface-panel), var(--app-surface-panel)), var(--app-surface-page);
+  color: var(--app-text-primary);
+  box-shadow: var(--app-shadow-md);
+  outline: none;
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.98);
+  transition:
+    opacity var(--app-dur-base) var(--app-ease-out),
+    transform var(--app-dur-base) var(--app-ease-out);
+}
+
+.ssp-panel.is-open {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+.ssp-panel.is-closing {
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -50%) scale(0.985);
+  transition-duration: 160ms;
+  transition-timing-function: var(--app-ease-in);
+}
+
+.ssp-panel svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ── 标题栏 ─────────────────────────────────────────────────────────── */
+
+.ssp-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 20px 14px 28px;
+  border-bottom: 1px solid var(--app-border-subtle);
+}
+
+.ssp-heading {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.ssp-title {
+  margin: 0;
+  color: var(--app-text-primary);
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.ssp-subtitle {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--app-text-secondary);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ssp-close .ssp-close-back {
+  display: none;
+}
+
+.ssp-close svg {
+  transition: transform var(--app-dur-base) var(--app-ease-out);
+}
+
+.ssp-close:hover .ssp-close-x svg {
+  transform: rotate(90deg);
+}
+
+/* ── 左侧分区目录 ───────────────────────────────────────────────────── */
+
+.ssp-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+
+.ssp-nav {
+  position: relative;
+  flex: 0 0 196px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 12px;
+  overflow-y: auto;
+  border-right: 1px solid var(--app-border-subtle);
+  background: var(--app-surface-subtle);
+}
+
+.ssp-nav-indicator {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: 10px;
+  background: var(--app-accent-soft);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--app-dur-base) var(--app-ease-out),
+    width var(--app-dur-base) var(--app-ease-out),
+    height var(--app-dur-base) var(--app-ease-out),
+    opacity var(--app-dur-quick) ease;
+}
+
+.ssp-nav-indicator.is-instant {
+  transition: none;
+}
+
+.ssp-nav-item {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--app-text-secondary);
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--app-dur-quick) ease, background-color var(--app-dur-quick) ease;
+}
+
+.ssp-nav-item[hidden] {
+  display: none;
+}
+
+.ssp-nav-item:hover {
+  background: var(--app-surface-hover);
+  color: var(--app-text-primary);
+}
+
+.ssp-nav-item.is-active {
+  color: var(--app-accent-primary);
+  font-weight: 600;
+}
+
+.ssp-nav-item.is-active:hover {
+  background: transparent;
+}
+
+.ssp-nav-item svg {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+}
+
+/* ── 内容区与卡片 ───────────────────────────────────────────────────── */
+
+.ssp-scroll {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 22px 28px 32px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.ssp-card {
+  padding: 18px 22px;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 16px;
+  background: var(--app-surface-card);
+}
+
+.ssp-scroll > .ssp-card + .ssp-card {
+  margin-top: 18px;
+}
+
+.ssp-card > * + * {
+  margin-top: 14px;
+}
+
+.ssp-card > .ssp-subhead {
+  margin-top: 22px;
+}
+
+.ssp-panel.is-open .ssp-scroll > .ssp-card {
+  animation: ssp-card-in var(--app-dur-page) var(--app-ease-out) both;
+}
+
+.ssp-panel.is-open .ssp-scroll > .ssp-card:nth-child(2) { animation-delay: 30ms; }
+.ssp-panel.is-open .ssp-scroll > .ssp-card:nth-child(3) { animation-delay: 60ms; }
+.ssp-panel.is-open .ssp-scroll > .ssp-card:nth-child(4) { animation-delay: 90ms; }
+.ssp-panel.is-open .ssp-scroll > .ssp-card:nth-child(n + 5) { animation-delay: 120ms; }
+
+@keyframes ssp-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.ssp-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ssp-card-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ssp-card-title {
+  margin: 0;
+  color: var(--app-text-primary);
+  font-size: 16.5px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
+.ssp-subtitle-title {
+  margin: 0;
+  color: var(--app-text-primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.ssp-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.ssp-row.is-wrap {
+  flex-wrap: wrap;
+  gap: 12px 26px;
+}
+
+.ssp-muted {
+  color: var(--app-text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.ssp-share-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* ── 基本资料 ───────────────────────────────────────────────────────── */
+
+.ssp-basic {
+  align-items: flex-start;
+  gap: 22px;
+}
+
+.ssp-avatar-col {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.ssp-avatar {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  padding: 0;
+  border: 1px solid var(--app-border-default);
+  border-radius: 22px;
+  background: var(--app-surface-hover);
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow var(--app-dur-quick) ease;
+}
+
+.ssp-avatar:hover {
+  box-shadow: 0 0 0 4px var(--app-accent-soft);
+}
+
+.ssp-avatar:active {
+  transform: scale(0.97);
+}
+
+.ssp-avatar > img,
+.ssp-avatar > .group-settings-avatar-preview {
+  width: 100%;
+  height: 100%;
+  display: block;
+  overflow: hidden;
+  border-radius: 21px;
+  object-fit: cover;
+}
+
+.ssp-avatar-badge {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--app-border-default);
+  border-radius: 50%;
+  background: var(--app-surface-card);
+  color: var(--app-text-secondary);
+  box-shadow: var(--app-shadow-sm);
+  transition: transform var(--app-dur-quick) var(--app-ease-out), color var(--app-dur-quick) ease;
+}
+
+.ssp-avatar:hover .ssp-avatar-badge {
+  color: var(--app-accent-primary);
+  transform: scale(1.08);
+}
+
+.ssp-avatar-badge svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ssp-link-btn {
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--app-text-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: color var(--app-dur-quick) ease, background-color var(--app-dur-quick) ease;
+}
+
+.ssp-link-btn:hover {
+  background: var(--app-danger-soft);
+  color: var(--app-danger-text);
+}
+
+.ssp-basic-fields {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 16px;
+  align-items: end;
+}
+
+.ssp-basic-fields.is-single {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 420px;
+}
+
+.ssp-pack-btn {
+  justify-self: start;
+  min-height: 40px;
+}
+
+.ssp-field {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ssp-label {
+  align-self: flex-start;
+  color: var(--app-text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ssp-input {
+  width: 100%;
+  height: 40px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  border: 1px solid var(--app-border-default);
+  border-radius: 11px;
+  background: var(--app-surface-input);
+  color: var(--app-text-primary);
+  font: inherit;
+  font-size: 14px;
+  transition: border-color var(--app-dur-quick) ease, box-shadow var(--app-dur-quick) ease;
+}
+
+.ssp-input:focus,
+.ssp-tags-box:focus-within {
+  outline: none;
+  border-color: var(--app-accent-primary);
+  box-shadow: 0 0 0 3px var(--app-accent-soft);
+}
+
+.ssp-input.is-compact {
+  width: 88px;
+  height: 32px;
+  text-align: right;
+}
+
+.ssp-tags-box {
+  min-height: 40px;
+  box-sizing: border-box;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 1px solid var(--app-border-default);
+  border-radius: 11px;
+  background: var(--app-surface-input);
+  cursor: text;
+  transition: border-color var(--app-dur-quick) ease, box-shadow var(--app-dur-quick) ease;
+}
+
+.ssp-tags {
+  display: contents;
+}
+
+.ssp-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 3px 2px 10px;
+  border-radius: 999px;
+  background: var(--app-accent-soft);
+  color: var(--app-accent-strong);
+  font-size: 12.5px;
+  line-height: 1.5;
+  animation: ssp-pop-in var(--app-dur-quick) var(--app-ease-out);
+}
+
+.ssp-tag-remove {
+  width: 18px;
+  height: 18px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  line-height: 1;
+  opacity: 0.65;
+  cursor: pointer;
+}
+
+.ssp-tag-remove:hover {
+  opacity: 1;
+  background: color-mix(in srgb, currentColor 14%, transparent);
+}
+
+.ssp-tags-entry {
+  flex: 1 1 80px;
+  min-width: 80px;
+  height: 28px;
+  padding: 0 4px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--app-text-primary);
+  font: inherit;
+  font-size: 13px;
+}
+
+@keyframes ssp-pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.86);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ── 开关 ───────────────────────────────────────────────────────────── */
+
+.ssp-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  color: var(--app-text-primary);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.ssp-switch-input {
+  position: relative;
+  flex: 0 0 auto;
+  width: 38px;
+  height: 22px;
+  margin: 0;
+  border-radius: 999px;
+  background: var(--app-border-strong);
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  transition: background-color var(--app-dur-quick) var(--app-ease-out);
+}
+
+.ssp-switch-input::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--app-text-on-accent);
+  box-shadow: 0 1px 2px var(--app-shadow-color);
+  transition: transform var(--app-dur-quick) var(--app-ease-out);
+}
+
+.ssp-switch-input:checked {
+  background: var(--app-accent-primary);
+}
+
+.ssp-switch-input:checked::after {
+  transform: translateX(16px);
+}
+
+.ssp-switch-input:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ssp-inline-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--app-text-secondary);
+  font-size: 12px;
+}
+
+/* ── 按钮 ───────────────────────────────────────────────────────────── */
+
+.ssp-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--app-border-default);
+  border-radius: 10px;
+  background: var(--app-surface-panel);
+  color: var(--app-text-primary);
+  font: inherit;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--app-dur-quick) ease,
+    border-color var(--app-dur-quick) ease,
+    color var(--app-dur-quick) ease,
+    box-shadow var(--app-dur-base) ease,
+    transform 120ms ease;
+}
+
+.ssp-btn:hover {
+  background: var(--app-surface-hover);
+}
+
+.ssp-btn:active {
+  transform: scale(0.97);
+}
+
+.ssp-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+  transform: none;
+}
+
+.ssp-btn svg {
+  width: 15px;
+  height: 15px;
+  stroke-width: 2;
+}
+
+.ssp-btn.is-large {
+  min-height: 42px;
+  padding: 0 22px;
+  border-radius: 12px;
+  font-size: 14px;
+}
+
+.ssp-btn.is-primary {
+  border-color: var(--app-accent-primary);
+  background: var(--app-accent-primary);
+  /* inverse：浅色主题为白、深色主题为深字，深色下的浅蓝底才看得清（同 preset 面板） */
+  color: var(--app-text-inverse);
+  font-weight: 600;
+}
+
+.ssp-btn.is-primary.is-large {
+  padding: 0 30px;
+}
+
+.ssp-btn.is-primary:hover {
+  border-color: var(--app-accent-strong);
+  background: var(--app-accent-strong);
+}
+
+.ssp-panel.is-dirty .ssp-btn.is-primary {
+  box-shadow: 0 0 0 4px var(--app-accent-soft);
+}
+
+.ssp-btn.is-accent-outline {
+  border-color: var(--app-accent-primary);
+  background: transparent;
+  color: var(--app-accent-primary);
+  font-weight: 600;
+}
+
+.ssp-btn.is-accent-outline:hover {
+  background: var(--app-accent-soft);
+}
+
+.ssp-btn.is-danger-soft {
+  border-color: var(--app-danger-border);
+  background: var(--app-danger-soft);
+  color: var(--app-danger-text);
+}
+
+.ssp-btn.is-danger-soft:hover {
+  background: color-mix(in srgb, var(--app-danger-text) 14%, transparent);
+}
+
+.ssp-icon-btn {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--app-text-secondary);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color var(--app-dur-quick) ease, color var(--app-dur-quick) ease, transform 120ms ease;
+}
+
+.ssp-icon-btn:hover {
+  background: var(--app-surface-hover);
+  color: var(--app-text-primary);
+}
+
+.ssp-icon-btn:active {
+  transform: scale(0.94);
+}
+
+.ssp-icon-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.ssp-icon-btn.is-bordered {
+  width: 34px;
+  height: 32px;
+  border: 1px solid var(--app-border-default);
+  border-radius: 10px;
+  background: var(--app-surface-panel);
+  font-size: 15px;
+}
+
+.ssp-icon-btn.is-danger {
+  color: var(--app-danger-text);
+}
+
+.ssp-panel :is(.ssp-btn, .ssp-icon-btn, .ssp-nav-item, .ssp-avatar, .ssp-link-btn, .ssp-tag-remove, .ssp-switch-input):focus-visible {
+  outline: 2px solid var(--app-accent-primary);
+  outline-offset: 2px;
+}
+
+/* ── 列表区（存档、摘要；行仍由各自 runtime 渲染） ───────────────────── */
+
+.ssp-list {
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 12px;
+  background: var(--app-surface-subtle);
+}
+
+.ssp-batchbar {
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.ssp-members {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ssp-table-host {
+  min-width: 0;
+}
+
+/* ── 底栏与未保存提示 ───────────────────────────────────────────────── */
+
+.ssp-footer {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 24px calc(14px + env(safe-area-inset-bottom, 0px)) 28px;
+  border-top: 1px solid var(--app-border-subtle);
+  background: var(--app-surface-panel);
+}
+
+.ssp-footer-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 10px;
+}
+
+.ssp-dirty {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--app-warning-text);
+  font-size: 13px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(6px);
+  transition:
+    opacity var(--app-dur-base) var(--app-ease-out),
+    transform var(--app-dur-base) var(--app-ease-out);
+}
+
+.ssp-dirty.is-visible {
+  opacity: 1;
+  transform: none;
+}
+
+.ssp-dirty i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgb(var(--app-warning-rgb));
+}
+
+/* ── 手机二级页（记忆表格）：子页从右推入，设置页左移 30% 并稍暗 ─────── */
+
+.ssp-table-summary,
+.ssp-subpage-scrim {
+  display: none;
+}
+
+.ssp-subpage[hidden] {
+  display: none;
+}
+
+/* ── 手机：整页从右推入，顶部分区标签，底栏固定 ─────────────────────── */
+
+@media (max-width: 640px) {
+  .ssp-panel {
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    height: 100dvh;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    opacity: 1;
+    transform: translateX(100%);
+    transition: transform var(--app-dur-page) var(--app-ease-out);
+  }
+
+  .ssp-panel.is-open {
+    transform: none;
+  }
+
+  .ssp-panel.is-closing {
+    opacity: 1;
+    transform: translateX(100%);
+    transition-duration: 200ms;
+    transition-timing-function: var(--app-ease-in);
+  }
+
+  .ssp-header {
+    gap: 4px;
+    padding: calc(10px + env(safe-area-inset-top, 0px)) 14px 6px 6px;
+    border-bottom: 0;
+  }
+
+  .ssp-heading {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+  }
+
+  .ssp-title {
+    font-size: 19px;
+  }
+
+  .ssp-subtitle {
+    max-width: 100%;
+    font-size: 12px;
+  }
+
+  .ssp-close {
+    order: -1;
+    width: 44px;
+    height: 44px;
+    color: var(--app-text-primary);
+  }
+
+  .ssp-close .ssp-close-x {
+    display: none;
+  }
+
+  .ssp-close .ssp-close-back {
+    display: contents;
+  }
+
+  .ssp-close svg {
+    width: 20px;
+    height: 20px;
+    stroke-width: 2;
+  }
+
+  .ssp-main {
+    flex-direction: column;
+  }
+
+  .ssp-nav {
+    flex: 0 0 auto;
+    flex-direction: row;
+    gap: 6px;
+    padding: 6px 14px 12px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-right: 0;
+    border-bottom: 1px solid var(--app-border-subtle);
+    background: var(--app-surface-panel);
+    scrollbar-width: none;
+  }
+
+  .ssp-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .ssp-nav-indicator {
+    border-radius: 999px;
+    background: var(--app-accent-primary);
+  }
+
+  .ssp-nav-item {
+    flex: 0 0 auto;
+    min-height: 36px;
+    padding: 0 14px;
+    border: 1px solid var(--app-border-default);
+    border-radius: 999px;
+    font-size: 13.5px;
+    white-space: nowrap;
+  }
+
+  .ssp-nav-item svg {
+    display: none;
+  }
+
+  .ssp-nav-item:hover {
+    background: transparent;
+  }
+
+  .ssp-nav-item.is-active {
+    border-color: var(--app-accent-primary);
+    color: var(--app-text-inverse);
+  }
+
+  .ssp-scroll {
+    padding: 14px 14px 28px;
+    background: var(--app-surface-page);
+  }
+
+  .ssp-card {
+    padding: 16px;
+  }
+
+  .ssp-scroll > .ssp-card + .ssp-card {
+    margin-top: 12px;
+  }
+
+  .ssp-card-title {
+    font-size: 16px;
+  }
+
+  .ssp-basic {
+    display: grid;
+    grid-template-columns: 64px minmax(0, 1fr);
+    gap: 14px;
+    align-items: center;
+  }
+
+  .ssp-basic-fields {
+    display: contents;
+  }
+
+  .ssp-basic-fields > * {
+    grid-column: 1 / -1;
+  }
+
+  .ssp-basic-fields > :first-child {
+    grid-column: 2;
+  }
+
+  .ssp-avatar {
+    width: 64px;
+    height: 64px;
+    border-radius: 18px;
+  }
+
+  .ssp-avatar > img,
+  .ssp-avatar > .group-settings-avatar-preview {
+    border-radius: 17px;
+  }
+
+  .ssp-avatar-badge {
+    width: 26px;
+    height: 26px;
+  }
+
+  .ssp-pack-btn {
+    justify-self: stretch;
+  }
+
+  .ssp-input,
+  .ssp-tags-box {
+    min-height: 44px;
+    border-radius: 12px;
+    font-size: 15px;
+  }
+
+  .ssp-input {
+    height: 44px;
+  }
+
+  .ssp-row.is-wrap {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+  }
+
+  .ssp-row.is-wrap > .ssp-card-title {
+    margin-bottom: 4px;
+  }
+
+  .ssp-row.is-wrap > .ssp-switch {
+    justify-content: space-between;
+    min-height: 48px;
+    border-bottom: 1px solid var(--app-border-subtle);
+    font-size: 15px;
+  }
+
+  .ssp-switch-input {
+    width: 44px;
+    height: 26px;
+  }
+
+  .ssp-switch-input::after {
+    width: 20px;
+    height: 20px;
+  }
+
+  .ssp-switch-input:checked::after {
+    transform: translateX(18px);
+  }
+
+  .ssp-share-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 2px 12px;
+  }
+
+  .ssp-share-row > .ssp-card-title {
+    justify-self: start;
+  }
+
+  .ssp-share-row > .ssp-share-summary {
+    grid-column: 1;
+    font-size: 12.5px;
+  }
+
+  .ssp-share-row > .ssp-btn {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+
+  .ssp-row.is-wrap > .ssp-card-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin: 12px 0 0;
+  }
+
+  .ssp-btn {
+    min-height: 44px;
+    border-radius: 12px;
+    font-size: 14px;
+  }
+
+  .ssp-icon-btn.is-bordered {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+  }
+
+  .ssp-footer {
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .ssp-footer-actions {
+    flex: 1 1 auto;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  }
+
+  .ssp-btn.is-large {
+    min-height: 50px;
+    border-radius: 14px;
+    font-size: 15px;
+  }
+
+  .ssp-card > .ssp-table-host {
+    display: none;
+  }
+
+  .ssp-table-summary {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .ssp-table-summary > .ssp-muted {
+    flex: 1 1 auto;
+  }
+
+  .ssp-panel > :is(.ssp-header, .ssp-main, .ssp-footer) {
+    transition: transform var(--app-dur-page) var(--app-ease-out);
+  }
+
+  .ssp-panel.has-subpage > :is(.ssp-header, .ssp-main, .ssp-footer) {
+    transform: translate3d(-30%, 0, 0);
+    transition-timing-function: var(--app-ease-out);
+  }
+
+  .ssp-subpage-scrim {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    background: var(--app-surface-overlay);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--app-dur-page) var(--app-ease-out);
+  }
+
+  .ssp-panel.has-subpage > .ssp-subpage-scrim {
+    opacity: 0.45;
+  }
+
+  .ssp-subpage {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    display: flex;
+    flex-direction: column;
+    background: linear-gradient(var(--app-surface-panel), var(--app-surface-panel)), var(--app-surface-page);
+    box-shadow: var(--app-shadow-md);
+    transform: translate3d(100%, 0, 0);
+    transition: transform var(--app-dur-page) var(--app-ease-out);
+  }
+
+  .ssp-panel.has-subpage > .ssp-subpage {
+    transform: none;
+  }
+
+  .ssp-subpage-header {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: calc(10px + env(safe-area-inset-top, 0px)) 14px 8px 6px;
+    border-bottom: 1px solid var(--app-border-subtle);
+  }
+
+  .ssp-subpage-back {
+    width: 44px;
+    height: 44px;
+    color: var(--app-text-primary);
+  }
+
+  .ssp-subpage-back svg {
+    width: 20px;
+    height: 20px;
+    stroke-width: 2;
+  }
+
+  .ssp-subpage-title {
+    margin: 0;
+    color: var(--app-text-primary);
+    font-size: 19px;
+    font-weight: 650;
+  }
+
+  .ssp-subpage-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 12px 14px calc(16px + env(safe-area-inset-bottom, 0px));
+    background: var(--app-surface-page);
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* 手机底栏放不下文字提示：改成浮在底栏上方的小胶囊 */
+  .ssp-dirty {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 50%;
+    padding: 5px 12px;
+    border: 1px solid color-mix(in srgb, rgb(var(--app-warning-rgb)) 30%, transparent);
+    border-radius: 999px;
+    background: var(--app-surface-card);
+    box-shadow: var(--app-shadow-sm);
+    font-size: 12.5px;
+    transform: translate(-50%, 6px);
+  }
+
+  .ssp-dirty.is-visible {
+    transform: translate(-50%, 0);
+  }
+}
+
+/* ── 导入聊天记录：拖放区域与新存档行 ───────────────────────────────── */
+
+.ssp-panel .ssp-card[data-settings-section='archives'] {
+  transition: border-color var(--app-dur-quick) ease, box-shadow var(--app-dur-quick) ease;
+}
+
+.ssp-panel .ssp-card[data-settings-section='archives'].is-drop-target {
+  border-color: var(--app-accent-primary);
+  box-shadow: 0 0 0 3px var(--app-accent-soft);
+}
+
+.ssp-panel .session-archive-row.is-imported {
+  animation: ssp-archive-imported 1.2s var(--app-ease-out);
+}
+
+@keyframes ssp-archive-imported {
+  0% {
+    opacity: 0;
+    transform: translateY(-8px);
+    background-color: var(--app-accent-soft);
+  }
+
+  20% {
+    opacity: 1;
+    transform: none;
+    background-color: var(--app-accent-soft);
+  }
+}
+
+/* ── 减少动态效果 ───────────────────────────────────────────────────── */
+
+body[data-reduced-motion='on'] :is(.ssp-overlay, .ssp-panel, .ssp-nav-indicator, .ssp-dirty, .ssp-switch-input, .ssp-switch-input::after, .ssp-avatar-badge, .ssp-close svg, .ssp-subpage, .ssp-subpage-scrim),
+body[data-reduced-motion='on'] .ssp-panel > :is(.ssp-header, .ssp-main, .ssp-footer),
+body[data-reduced-motion='on'] .ssp-panel :is(.ssp-card, .ssp-tag, .session-archive-row) {
+  animation: none !important;
+  transition-duration: 0.01ms !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :is(.ssp-overlay, .ssp-panel, .ssp-nav-indicator, .ssp-dirty, .ssp-switch-input, .ssp-switch-input::after, .ssp-avatar-badge, .ssp-close svg, .ssp-subpage, .ssp-subpage-scrim),
+  .ssp-panel > :is(.ssp-header, .ssp-main, .ssp-footer),
+  .ssp-panel :is(.ssp-card, .ssp-tag, .session-archive-row) {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+  }
+}

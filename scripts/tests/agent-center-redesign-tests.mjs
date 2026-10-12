@@ -53,7 +53,7 @@ const makePanel = cards => {
 {
   // 记忆 / 变量房子里的“修改前先预览”与原功能是同一开关
   const panel = makePanel([
-    { id: 'memory_table_agent', title: '记忆表格 Agent', implemented: true, enabled: true, category: 'memory' },
+    { id: 'memory_table_agent', title: '记忆 Agent', implemented: true, enabled: true, category: 'memory' },
     { id: 'write_preview', title: '预览记忆和变量变更', implemented: true, enabled: false, summary: 'AI 请求修改记忆、变量或世界书时，先显示可撤销预览。' },
   ]);
   const host = { isConnected: true, innerHTML: '', ownerDocument: { activeElement: null }, querySelector: () => null, querySelectorAll: () => [] };

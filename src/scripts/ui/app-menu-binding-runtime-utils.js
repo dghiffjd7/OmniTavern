@@ -119,6 +119,7 @@ export const bindChatroomMenuActions = ({
   openRawReply = () => {},
   openPreset = () => {},
   openExtensions = () => {},
+  openSettings = () => {},
   openConfig = () => {},
   hideMenus = () => {},
 } = {}) => {
@@ -140,6 +141,7 @@ export const bindChatroomMenuActions = ({
       if (action === 'raw-reply') openRawReply();
       if (action === 'preset') openPreset();
       if (action === 'extensions') openExtensions();
+      if (action === 'settings') openSettings();
       if (action === 'config') openConfig();
       hideMenus();
     });

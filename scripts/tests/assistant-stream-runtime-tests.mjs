@@ -134,6 +134,43 @@ test('assistant stream runtime creates controllers, pushes payloads, and support
   assert.deepEqual(created[1].updates, [{ content: '第一段', raw: 'first-raw' }]);
 });
 
+test('assistant stream runtime reads the generation id assigned after creation', () => {
+  // app.js 在分配 generationId 之前就创建 runtime：按创建时的 0 比对会永远对不上当前生成，
+  // 终止时 generation 上既没有 streamCtrl 也没有 streamText，已输出的部分回复不会保存。
+  let generationId = 0;
+  let streamCtrl = null;
+  const activeGeneration = { id: 27, sessionId: 'rp:session', streamCtrl: null, streamMeta: null, streamPayload: null, streamText: '' };
+  const runtime = createAssistantStreamRuntime({
+    generationId,
+    getGenerationId: () => generationId,
+    sessionId: 'rp:session',
+    getStreamCtrl: () => streamCtrl,
+    setStreamCtrl: (nextCtrl) => {
+      streamCtrl = nextCtrl;
+      return streamCtrl;
+    },
+    getActiveGeneration: () => activeGeneration,
+    isGenerationInterrupted: id => id !== activeGeneration.id,
+    isSessionActive: () => true,
+    createAssistantStreamCtrl: () => createCtrl(),
+  });
+  generationId = 27;
+  runtime.bindActiveGenerationReattach();
+  const ctrl = runtime.pushAssistantStreamText('已输出的正文');
+
+  assert.ok(ctrl);
+  assert.equal(activeGeneration.streamCtrl, ctrl);
+  assert.equal(activeGeneration.streamText, '已输出的正文');
+  assert.equal(typeof activeGeneration.reattachStream, 'function');
+});
+
+test('app send flow passes a live generation id getter to the stream runtime', async () => {
+  const { readFileSync } = await import('node:fs');
+  const source = readFileSync(new URL('../../src/scripts/ui/app.js', import.meta.url), 'utf8');
+  const call = source.slice(source.indexOf('} = createAssistantStreamRuntime({'), source.indexOf('} = createAssistantStreamRuntime({') + 200);
+  assert.match(call, /getGenerationId: \(\) => generationId,/);
+});
+
 let failed = 0;
 for (const t of tests) {
   try {

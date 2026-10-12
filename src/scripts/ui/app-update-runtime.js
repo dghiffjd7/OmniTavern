@@ -8,6 +8,7 @@ import {
   resolveLaunchChangelog,
   shouldCheckForAppUpdate,
 } from '../utils/app-update-utils.js';
+import { createAppUpdateProgressCard } from './app-update-progress-card.js';
 
 export const APP_UPDATE_RELEASES_URL = 'https://api.github.com/repos/dghiffjd7/OmniTavern/releases?per_page=15';
 export const APP_UPDATE_RELEASES_PAGE = 'https://github.com/dghiffjd7/OmniTavern/releases/latest';
@@ -44,6 +45,8 @@ export const createAppUpdateRuntime = ({
   let currentVersion = '';
   let checking = null;
   let installing = null;
+  // 桌面安装进度：{ version, stage: preparing | downloading | installing, downloaded, total, percent }
+  let progress = null;
 
   const readState = () => {
     const state = getSettings()?.appUpdate;
@@ -59,6 +62,7 @@ export const createAppUpdateRuntime = ({
       latest,
       checking: Boolean(checking),
       installing: Boolean(installing),
+      progress: progress ? { ...progress } : null,
       lastCheckedAt: Number(state.lastCheckedAt || 0) || 0,
       ...resolveAppUpdateState({ currentVersion, latest, state }),
     };
@@ -77,15 +81,31 @@ export const createAppUpdateRuntime = ({
         // Android 不支持应用内安装：交给系统浏览器下载 APK，用户点开安装
         return openExternal(trim(latest.apkUrl) || fallbackUrl);
       }
-      toast?.info?.(t('正在下载更新，安装完成后会自动重启。'));
+      progress = { version: latest.version, stage: 'preparing', downloaded: 0, total: null, percent: null };
+      notify();
+      // 原生端按百分比变化回报下载进度，下载完成后回报 installing，随后安装器接手、APP 自动退出
+      const onProgress = (message = {}) => {
+        if (!progress) return;
+        if (message?.stage === 'installing') {
+          progress = { ...progress, stage: 'installing', percent: 100 };
+        } else {
+          const downloaded = Math.max(0, Number(message?.downloaded) || 0);
+          const total = Number(message?.total) > 0 ? Number(message.total) : null;
+          const percent = total ? Math.min(100, Math.floor((downloaded / total) * 100)) : null;
+          progress = { ...progress, stage: 'downloading', downloaded, total, percent };
+        }
+        notify();
+      };
       try {
-        const result = await installDesktopUpdate(latest.version);
+        const result = await installDesktopUpdate(latest.version, { onProgress });
         if (result?.status === 'up_to_date' || result?.status === 'version_mismatch') {
+          progress = null;
           return openExternal(trim(latest.windowsUrl) || fallbackUrl);
         }
         // 原生端已有安装任务时不另开手动安装器。
         return true;
       } catch (error) {
+        progress = null;
         logger?.warn?.('app update install failed', error);
         toast?.error?.(t('自动更新失败，已为你打开下载页面。'));
         return openExternal(trim(latest.windowsUrl) || fallbackUrl);
@@ -194,7 +214,12 @@ export const renderAppUpdateUi = ({ documentRef = globalThis.document, view = {}
   card.classList.toggle('has-update', Boolean(view.hasUpdate));
   if (versionEl) versionEl.textContent = view.currentVersion ? `v${view.currentVersion}` : '—';
   if (statusEl) {
-    statusEl.textContent = view.installing
+    const progress = view.progress;
+    statusEl.textContent = progress?.stage === 'installing'
+      ? t('下载完成，正在启动安装…')
+      : progress?.stage === 'downloading' && progress.percent != null
+      ? t('正在下载更新 {percent}%', { percent: progress.percent })
+      : view.installing
       ? t('正在下载更新，安装完成后会自动重启。')
       : view.hasUpdate
       ? t('新版本 v{version} 可以更新', { version: view.latestVersion })
@@ -207,6 +232,7 @@ export const renderAppUpdateUi = ({ documentRef = globalThis.document, view = {}
 };
 
 export const bindAppUpdateUi = ({ documentRef = globalThis.document, runtime = null } = {}) => {
+  const renderProgressCard = createAppUpdateProgressCard({ documentRef });
   const actionEl = documentRef?.querySelector?.('[data-app-update-action]');
   actionEl?.addEventListener?.('click', () => {
     const view = runtime?.getView?.() || {};
@@ -214,5 +240,8 @@ export const bindAppUpdateUi = ({ documentRef = globalThis.document, runtime = n
     if (view.hasUpdate) void runtime.runUpdate();
     else void runtime?.checkNow?.({ prompt: true, manual: true });
   });
-  return view => renderAppUpdateUi({ documentRef, view });
+  return (view) => {
+    renderAppUpdateUi({ documentRef, view });
+    renderProgressCard(view?.progress || null);
+  };
 };

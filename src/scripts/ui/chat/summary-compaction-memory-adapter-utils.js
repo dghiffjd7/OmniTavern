@@ -1,4 +1,5 @@
 import { resolveMemoryRowOrderKey } from '../../memory/memory-row-order.js';
+import { MEMORY_SUMMARY_ROW_LIMIT_DEFAULT } from '../../memory/memory-prompt-utils.js';
 import {
   mergeMemoryCoverageIntervals,
   readMemoryCoverageIntervals,
@@ -72,6 +73,9 @@ export const createMemoryTableSummaryCompactionAdapter = ({
   sessionId = '',
   place = 'chat',
   isGroup = false,
+  rowLimit = MEMORY_SUMMARY_ROW_LIMIT_DEFAULT,
+  trigger = 'rows',
+  charLimit = 1000,
   onPersisted = null,
 } = {}) => {
   const sid = String(sessionId || '').trim();
@@ -114,6 +118,16 @@ export const createMemoryTableSummaryCompactionAdapter = ({
     async getItems() {
       return normalizeMemorySummaryRows(await loadRows(), tableId);
     },
+    // 按条数触发：摘要表启用中的行（含滚动摘要，与注入条数同口径）满 rowLimit 条才压缩。
+    // 压缩后只剩滚动摘要＋最新 2 条，之后再满才压，注入时始终装得下全部摘要。
+    // 按字数触发：只算未合并的摘要（items 不含滚动摘要），总字数超过 charLimit 才压缩；此时注入不按条数裁剪。
+    shouldCompact({ items = [], force = false } = {}) {
+      const count = Array.isArray(items) ? items.length : 0;
+      if (!count) return false;
+      if (force) return true;
+      if (trigger === 'chars') return items.reduce((sum, item) => sum + String(item?.text || '').length, 0) > charLimit;
+      return count + (findCompactedRow() ? 1 : 0) >= rowLimit;
+    },
     async getCompactedText() {
       const row = findCompactedRow(await loadRows());
       return getSummaryText(row);
@@ -130,7 +144,6 @@ export const createMemoryTableSummaryCompactionAdapter = ({
       // 停用时打系统标记：召回准入只认带标记的 inactive 行（区分用户手动禁用）。
       // update_memory 对 row_data 是整体替换，必须携带原数据合并；拿不到原数据就只停用不打标。
       const deactivateAsCompactionArchive = async (rowId, rowData) => {
-        signal?.throwIfAborted();
         const payload = { id: rowId, is_active: false };
         if (rowData && typeof rowData === 'object') {
           payload.row_data = { ...rowData, _archived_by: 'compaction' };
@@ -138,15 +151,8 @@ export const createMemoryTableSummaryCompactionAdapter = ({
         await memoryTableStore.updateMemory(payload);
       };
       const sourceItems = Array.isArray(items) ? items : [];
-      for (const item of sourceItems) {
-        const rowId = String(item?.id || '').trim();
-        if (!rowId || keepIds.has(rowId)) continue;
-        await deactivateAsCompactionArchive(rowId, item?.row?.row_data);
-      }
+      // 新建前先记下旧的滚动摘要，建完后再找会拿到新的那条。
       const previousCompacted = findCompactedRow(await loadRows());
-      if (previousCompacted?.id) {
-        await deactivateAsCompactionArchive(String(previousCompacted.id), previousCompacted?.row_data);
-      }
       // 并集而非 min/max 跨度：源行之间的真实空洞（中间行被停用/删除）必须保留在
       // _coverage.intervals 里，否则覆盖线不再报洞、强留原文护栏失效。
       const coveredIntervals = mergeMemoryCoverageIntervals(
@@ -161,6 +167,8 @@ export const createMemoryTableSummaryCompactionAdapter = ({
         ? coveredIntervals[coveredIntervals.length - 1].to
         : null;
       const scopeFields = resolveScopeFields({ sessionId: sid, place, isGroup });
+      // 中止只在写入前生效：先建新的滚动摘要再停用旧行，中途被打断（或关掉 APP）也不会留下
+      // 「旧行已停用、新总结没建」的缺口，最坏只是新旧内容暂时并存。
       signal?.throwIfAborted();
       const created = await memoryTableStore.createMemory({
         template_id: tid,
@@ -188,6 +196,14 @@ export const createMemoryTableSummaryCompactionAdapter = ({
         is_active: true,
         sort_order: coveredIntervals.length ? coveredTo : Date.now(),
       });
+      for (const item of sourceItems) {
+        const rowId = String(item?.id || '').trim();
+        if (!rowId || keepIds.has(rowId)) continue;
+        await deactivateAsCompactionArchive(rowId, item?.row?.row_data);
+      }
+      if (previousCompacted?.id) {
+        await deactivateAsCompactionArchive(String(previousCompacted.id), previousCompacted?.row_data);
+      }
       await onPersisted?.({
         sessionId: sid,
         place,

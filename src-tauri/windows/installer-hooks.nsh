@@ -3,6 +3,34 @@
 ; “删除应用数据”勾选页，默认保留数据，因此该迁移不会触碰任何用户资料。
 ; 若未检测到旧安装项则完全跳过，对全新用户零影响。
 
+; 自动更新（/UPDATE）时，旧版 APP 由更新插件启动安装器后自行退出，但带 WebView2 的进程完全退出、
+; 系统释放 exe 可能超过安装器 CheckIfAppIsRunning 里的 0.5 秒等待，直接覆盖会报
+; 「Error opening file for writing」。先等到 omnitavern.exe 可写（每 0.25 秒试一次，最多约 15 秒），
+; 超时就交回原流程（仍会结束残留进程并照常安装）。手动安装不受影响。
+!macro OMNITAVERN_WAIT_EXE_UNLOCKED
+  ${If} $UpdateMode = 1
+    Push $R8
+    Push $R9
+    StrCpy $R9 0
+  update_wait_exe_unlocked:
+    IfFileExists "$INSTDIR\${MAINBINARYNAME}.exe" 0 update_exe_unlocked
+    ClearErrors
+    FileOpen $R8 "$INSTDIR\${MAINBINARYNAME}.exe" a
+    IfErrors update_exe_still_locked
+    FileClose $R8
+    Goto update_exe_unlocked
+  update_exe_still_locked:
+    IntOp $R9 $R9 + 1
+    IntCmp $R9 60 update_exe_unlocked 0 update_exe_unlocked
+    Sleep 250
+    Goto update_wait_exe_unlocked
+  update_exe_unlocked:
+    ClearErrors
+    Pop $R9
+    Pop $R8
+  ${EndIf}
+!macroend
+
 !macro NSIS_HOOK_PREINSTALL
   ClearErrors
   ReadRegStr $R0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ChatApp" "UninstallString"
@@ -44,6 +72,7 @@ legacy_chatapp_cleanup_reg:
   RMDir /r "$SMPROGRAMS\ChatApp"
 legacy_chatapp_done:
   ClearErrors
+  !insertmacro OMNITAVERN_WAIT_EXE_UNLOCKED
 !macroend
 
 ; The protocol handler is registered when reply notifications are enabled.

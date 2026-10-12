@@ -131,6 +131,7 @@ import {
   addMessageCore,
   preloadHistoryCore,
   prependHistoryCore,
+  insertHistoryCore,
   refreshAvatarsCore,
   removeMessageCore,
   updateMessageCore,
@@ -416,11 +417,16 @@ export class ChatUI {
       applyCreativeBubbleState: (wrapper, message) => this.applyCreativeBubbleState(wrapper, message),
       resolveRpAssistantName: message => this.resolveRpAssistantDisplayName(message),
     });
+    // 楼层编号可由外部按整个存档计算（见 setRpFloorResolver）；未设置时按画面上的消息从头数。
+    this._rpFloorResolver = null;
     this.rpFloorUiRuntime = createRpFloorUiRuntime({
       documentLike: document,
       getUiMode: () => document.body?.dataset?.uiMode || '',
       getRpFloorLabel,
-      buildRpFloorAssignments,
+      buildRpFloorAssignments: (messages) => {
+        const resolved = this._rpFloorResolver?.(messages);
+        return Array.isArray(resolved) ? resolved : buildRpFloorAssignments(messages);
+      },
     });
     this.messageClipboardRuntime = createMessageClipboardUiRuntime({
       documentLike: document,
@@ -1572,6 +1578,14 @@ export class ChatUI {
     });
   }
 
+  setRpFloorResolver(resolver) {
+    this._rpFloorResolver = typeof resolver === 'function' ? resolver : null;
+  }
+
+  refreshRpFloorMarkers() {
+    this._refreshAllRpFloorMarkers();
+  }
+
   _refreshAllRpFloorMarkers() {
     this.rpFloorUiRuntime.refreshAllFloorMarkers(this.scrollEl, {
       setFloorCount: value => {
@@ -1675,8 +1689,11 @@ export class ChatUI {
         this._programmaticStreamFollowScroll = value;
       },
       scheduleScrollBottomButtonRefresh: options => this.scheduleScrollBottomButtonRefresh(options),
+      smooth: options?.smooth === true && !globalThis.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches,
+      teleport: (move, direction) => this.runJumpTeleport(move, direction),
     });
     if (!targetEl) return false;
+    if (options?.focus === false) return true;
     const autoClearMs = Number.isFinite(Number(options?.autoClearMs))
       ? Number(options.autoClearMs)
       : 2900;
@@ -1687,6 +1704,26 @@ export class ChatUI {
       autoClearMs,
     });
     return true;
+  }
+
+  // 远距离平滑跳转：画面先朝跳转方向淡出，移到目标附近后再淡入并滑完最后一屏
+  runJumpTeleport(move, direction = 'down') {
+    const el = this.scrollEl;
+    if (!el?.classList) {
+      move();
+      return;
+    }
+    clearTimeout(this._jumpTeleportTimer);
+    el.classList.remove('is-jump-in');
+    el.dataset.jumpDirection = direction === 'up' ? 'up' : 'down';
+    el.classList.add('is-jump-out');
+    this._jumpTeleportTimer = setTimeout(() => {
+      move();
+      el.classList.remove('is-jump-out');
+      void el.offsetWidth;
+      el.classList.add('is-jump-in');
+      this._jumpTeleportTimer = setTimeout(() => el.classList.remove('is-jump-in'), 380);
+    }, 150);
   }
 
   /**
@@ -2746,6 +2783,23 @@ export class ChatUI {
           details: diagnostics,
         });
       },
+    });
+    // 首屏楼层是按画面上的第一条从头数的；有外部楼层计算时改成按整个存档编号。
+    if (this._rpFloorResolver && document.body?.dataset?.uiMode === 'rp') this._refreshAllRpFloorMarkers();
+  }
+
+  insertHistoryBefore(beforeNode, messages = [], { keepViewport = false } = {}) {
+    return insertHistoryCore({
+      messages,
+      scrollEl: this.scrollEl,
+      documentLike: document,
+      beforeNode,
+      keepViewport,
+      isRp: document.body?.dataset?.uiMode === 'rp',
+      buildMessageElement: message => this.buildMessageElement(message),
+      refreshRpFloorMarkers: () => this._refreshAllRpFloorMarkers(),
+      refreshScrollDateBadge: () => this.refreshScrollDateBadge(),
+      scheduleScrollBottomButtonRefresh: options => this.scheduleScrollBottomButtonRefresh(options),
     });
   }
 

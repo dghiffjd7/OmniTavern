@@ -55,8 +55,9 @@ const createMenu = (buttons = []) => ({
   const rpMenuMarkup = html.match(/<div id="rp-chatroom-menu"[\s\S]*?<\/div>\s*<!-- Chat title menu/)?.[0] || '';
   assert.match(rpMenuMarkup, /data-action="preset"[^>]*>🎛 预设<\/button>/);
   assert.match(rpMenuMarkup, /data-action="extensions"[^>]*>🧩 扩展<\/button>/);
+  assert.match(rpMenuMarkup, /data-action="settings"[^>]*>⚙ 设定<\/button>/);
   assert.match(rpMenuMarkup, /data-action="config"[^>]*>🔌 API设定<\/button>/);
-  console.log('ok - creative writing room menu exposes preset extensions and API settings entries');
+  console.log('ok - creative writing room menu exposes preset extensions general and API settings entries');
 }
 
 {
@@ -287,6 +288,7 @@ const createMenu = (buttons = []) => ({
     createButton('raw-reply'),
     createButton('preset'),
     createButton('extensions'),
+    createButton('settings'),
     createButton('config'),
   ]);
   bindChatroomMenuActions({
@@ -301,6 +303,7 @@ const createMenu = (buttons = []) => ({
     openRawReply: () => calls.push('raw-reply'),
     openPreset: () => calls.push('preset'),
     openExtensions: () => calls.push('extensions'),
+    openSettings: () => calls.push('settings'),
     openConfig: () => calls.push('config'),
     hideMenus: () => calls.push('hide'),
   });
@@ -316,6 +319,7 @@ const createMenu = (buttons = []) => ({
     'raw-reply', 'hide',
     'preset', 'hide',
     'extensions', 'hide',
+    'settings', 'hide',
     'config', 'hide',
   ]);
   console.log('ok - bindChatroomMenuActions dispatches chatroom menu actions then hides menus');

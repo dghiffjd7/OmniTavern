@@ -34,12 +34,21 @@ export const runContactSettingsPopulateFlow = ({
 
   contactsStore?.upsertContact?.(contact);
 
+  const savedName = String(contact?.name || '').trim();
+  const displayName = isRpSession
+    ? (savedName && !savedName.startsWith('rp:') ? savedName : (rpDisplayName || savedName || sessionId))
+    : (savedName || sessionId);
+
   const title = panel?.querySelector?.('#contact-settings-title');
-  if (title) title.textContent = isRpSession ? '设置' : '好友设置';
+  if (title) {
+    title.textContent = isRpSession ? '设置' : '好友设置';
+    title.setAttribute?.('data-help', String(sessionId || ''));
+  }
   const sub = panel?.querySelector?.('#contact-settings-sub');
   if (sub) {
     sub.setAttribute?.('data-i18n-skip', '');
-    sub.textContent = translateUiText(`会话：${sessionId}`);
+    const modeLabel = isRpSession ? '创意写作' : (isGroupSession ? '群聊' : '私聊');
+    sub.textContent = `${displayName} · ${translateUiText(modeLabel)}`;
   }
 
   const currentAvatar = contact.avatar || '';
@@ -63,12 +72,7 @@ export const runContactSettingsPopulateFlow = ({
     });
   }
 
-  if (nameInput) {
-    const savedName = String(contact?.name || '').trim();
-    nameInput.value = isRpSession
-      ? (savedName && !savedName.startsWith('rp:') ? savedName : (rpDisplayName || savedName || sessionId))
-      : (savedName || sessionId);
-  }
+  if (nameInput) nameInput.value = displayName;
 
   if (labelsInput) {
     const labels = Array.isArray(contact?.labels) ? contact.labels : [];
@@ -89,8 +93,6 @@ export const runContactSettingsPopulateFlow = ({
       : (globalSettings.scriptEnabled === true);
   }
 
-  const bridgeBlockTitle = panel?.querySelector?.('#contact-bridge-block-title');
-  if (bridgeBlockTitle) bridgeBlockTitle.style.display = isRpSession ? 'none' : 'block';
   if (rpBridgeSection) rpBridgeSection.style.display = 'none';
   if (memoryShareSection) memoryShareSection.style.display = 'block';
 

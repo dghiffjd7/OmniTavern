@@ -3240,6 +3240,65 @@ export class ChatStore {
     return archiveId;
   }
 
+  // 「导入聊天记录」：把整理好的消息存成本会话的一份新存档，不切换当前聊天。
+  // 摘要与大总结用文件带来的（没有则为空）；memoryTableSnapshot 由调用方给（文件里的表格或空表），
+  // 加载时不会沿用当前的记忆行。
+  async importMessagesAsArchive(id = this.currentId, {
+    name = '',
+    messages = [],
+    memoryTableSnapshot = null,
+    summaries = [],
+    compactedSummary = null,
+  } = {}) {
+    const sid = String(id || '').trim();
+    const session = sid ? this.state.sessions[sid] : null;
+    const source = Array.isArray(messages) ? messages.filter(msg => msg && typeof msg === 'object') : [];
+    if (!session || !source.length) return null;
+    const now = Date.now();
+    const usedIds = new Set();
+    const list = source.map((message, index) => {
+      const msg = { ...message };
+      let msgId = '';
+      do {
+        msgId = `${now}-${index.toString(36)}${Math.random().toString(16).slice(2, 8)}`;
+      } while (usedIds.has(msgId));
+      usedIds.add(msgId);
+      msg.id = msgId;
+      ensureId(msg);
+      this._persistRawOriginal(msg, sid);
+      return msg;
+    });
+
+    if (!Array.isArray(session.archives)) session.archives = [];
+    const archiveId = `${now}-${Math.random().toString(16).slice(2, 6)}`;
+    const suffix = ` (${this._tsSuffix()})`;
+    const archive = {
+      id: archiveId,
+      name: String(name || '').trim() || `存档${suffix}`,
+      timestamp: now,
+      messageCount: list.length,
+      summaries: (Array.isArray(summaries) ? summaries : [])
+        .map(item => ({ at: Number(item?.at || 0) || 0, text: String(item?.text || '').trim() }))
+        .filter(item => item.text),
+      compactedSummary: String(compactedSummary?.text || '').trim()
+        ? { at: Number(compactedSummary.at || 0) || 0, text: String(compactedSummary.text).trim() }
+        : null,
+    };
+    if (memoryTableSnapshot) archive.memoryTableSnapshot = memoryTableSnapshot;
+    if (!this._useV2) archive.messages = list;
+    session.archives.push(archive);
+    if (this._useV2) {
+      const v2 = this._v2;
+      const snapshot = list.map(msg => ({ ...msg }));
+      await v2.enqueue(async () => {
+        await v2.replaceThreadMessages(sid, archiveId, snapshot);
+      });
+    }
+    this._persist();
+    this._emitArchiveEvent({ type: 'created', sessionId: sid, archiveId, automaticName: false });
+    return archiveId;
+  }
+
   startNewChat(id = this.currentId, archiveName = '', options = {}) {
     const sid = String(id || '').trim();
     if (!sid) return null;

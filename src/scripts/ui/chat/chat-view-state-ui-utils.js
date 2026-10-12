@@ -198,6 +198,9 @@ export const scrollToMessageCore = ({
   scrollEl,
   setProgrammaticStreamFollowScroll,
   scheduleScrollBottomButtonRefresh,
+  smooth = false,
+  // 远距离时盖住「先移到目标附近」那一下：teleport(move, direction) 负责淡出→执行 move→淡入
+  teleport = null,
 } = {}) => {
   const id = String(msgId || '').trim();
   if (!id || !scrollEl) return false;
@@ -206,7 +209,27 @@ export const scrollToMessageCore = ({
   if (!element) return false;
   const top = element.offsetTop - 12;
   setProgrammaticStreamFollowScroll?.(true);
-  scrollEl.scrollTop = Math.max(0, top);
+  if (smooth && typeof scrollEl.scrollTo === 'function') {
+    // 落点在真正移动时再读：过场淡出期间版面仍可能变化
+    // 平滑滑过去；距离很远时先移到目标前一小段（约 240px）再滑，避免一路飞过整段长文、也不让大片内容快速扫过
+    const target = Math.max(0, top);
+    const viewport = Number(scrollEl.clientHeight) || 0;
+    const distance = target - (Number(scrollEl.scrollTop) || 0);
+    const targetNow = () => Math.max(0, (Number(element.offsetTop) || 0) - 12);
+    const slide = () => scrollEl.scrollTo({ top: targetNow(), behavior: 'smooth' });
+    if (viewport > 0 && Math.abs(distance) > viewport * 1.5) {
+      const move = () => {
+        scrollEl.scrollTop = Math.max(0, targetNow() - Math.sign(distance) * Math.min(viewport * 0.3, 240));
+        slide();
+      };
+      if (typeof teleport === 'function') teleport(move, distance > 0 ? 'down' : 'up');
+      else move();
+    } else {
+      slide();
+    }
+  } else {
+    scrollEl.scrollTop = Math.max(0, top);
+  }
   scheduleScrollBottomButtonRefresh?.({ immediate: true });
   return element;
 };

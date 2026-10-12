@@ -53,10 +53,56 @@ export const isSummaryLimitTableId = (tableId) => {
   return SUMMARY_LIMIT_TABLE_IDS.has(id);
 };
 
-export const limitSummaryRowsForPrompt = (rows = [], limit = 10) => {
+// 摘要表注入条数（含滚动摘要）；表格模式的摘要压缩也在满这么多条时触发。
+export const MEMORY_SUMMARY_ROW_LIMIT_DEFAULT = 10;
+// 聊天一轮很短、摘要也短，条数放宽，免得几分钟就压缩一次。
+export const MEMORY_SUMMARY_ROW_LIMIT_CHAT_DEFAULT = 20;
+export const MEMORY_SUMMARY_ROW_LIMIT_MIN = 4;
+export const MEMORY_SUMMARY_ROW_LIMIT_MAX = 50;
+const CHAT_SUMMARY_TABLE_IDS = new Set(['chat_summary', 'group_summary']);
+
+// tableId 为聊天／群聊摘要表时用聊天条数，其余（写作、动态）用 memorySummaryRowLimit。
+export const resolveMemorySummaryRowLimit = (settings = {}, tableId = '') => {
+  const isChat = CHAT_SUMMARY_TABLE_IDS.has(String(tableId || '').trim());
+  const fallback = isChat ? MEMORY_SUMMARY_ROW_LIMIT_CHAT_DEFAULT : MEMORY_SUMMARY_ROW_LIMIT_DEFAULT;
+  const raw = Math.trunc(Number(isChat ? settings?.memorySummaryRowLimitChat : settings?.memorySummaryRowLimit));
+  if (!Number.isFinite(raw) || raw <= 0) return fallback;
+  return Math.min(MEMORY_SUMMARY_ROW_LIMIT_MAX, Math.max(MEMORY_SUMMARY_ROW_LIMIT_MIN, raw));
+};
+
+// 摘要压缩触发（摘要、表格两种记忆模式共用）：按条数（默认，写作/聊天各自条数）或按未合并摘要的总字数。
+export const MEMORY_SUMMARY_COMPACTION_CHARS_DEFAULT = 1000;
+export const MEMORY_SUMMARY_COMPACTION_CHARS_MIN = 200;
+export const MEMORY_SUMMARY_COMPACTION_CHARS_MAX = 20000;
+
+export const resolveMemorySummaryCompactionTrigger = (settings = {}) => (
+  String(settings?.memorySummaryCompactionTrigger || '').trim() === 'chars' ? 'chars' : 'rows'
+);
+
+export const resolveMemorySummaryCompactionChars = (settings = {}) => {
+  const raw = Math.trunc(Number(settings?.memorySummaryCompactionChars));
+  if (!Number.isFinite(raw) || raw <= 0) return MEMORY_SUMMARY_COMPACTION_CHARS_DEFAULT;
+  return Math.min(MEMORY_SUMMARY_COMPACTION_CHARS_MAX, Math.max(MEMORY_SUMMARY_COMPACTION_CHARS_MIN, raw));
+};
+
+// 压缩判断参数：rows 时满 rowLimit 条压缩，chars 时未合并摘要总字数超过 minLength 压缩。
+export const resolveMemorySummaryCompactionThreshold = (settings = {}, tableId = '') => ({
+  trigger: resolveMemorySummaryCompactionTrigger(settings),
+  rowLimit: resolveMemorySummaryRowLimit(settings, tableId),
+  minLength: resolveMemorySummaryCompactionChars(settings),
+});
+
+// 发给 AI 的摘要条数：按字数触发时写作/聊天/群聊摘要不按条数裁剪，未合并的摘要全部发送，避免压缩前“失忆”；动态摘要仍按条数。
+export const resolveMemorySummaryInjectionLimit = (settings = {}, tableId = '') => (
+  resolveMemorySummaryCompactionTrigger(settings) === 'chars' && String(tableId || '').trim() !== 'moment_summary'
+    ? 0
+    : resolveMemorySummaryRowLimit(settings, tableId)
+);
+
+// limit 可为数字，或按摘要表 id 返回条数的函数。
+export const limitSummaryRowsForPrompt = (rows = [], limit = MEMORY_SUMMARY_ROW_LIMIT_DEFAULT) => {
   const list = Array.isArray(rows) ? rows : [];
-  const safeLimit = Math.max(0, Math.trunc(Number(limit)) || 0);
-  if (safeLimit <= 0) return [...list];
+  const resolveLimit = tableId => Math.max(0, Math.trunc(Number(typeof limit === 'function' ? limit(tableId) : limit)) || 0);
   const grouped = new Map();
   const kept = [];
   list.forEach((row, index) => {
@@ -75,7 +121,17 @@ export const limitSummaryRowsForPrompt = (rows = [], limit = 10) => {
       if (ak !== bk) return ak - bk;
       return a.index - b.index;
     });
-    items.slice(-safeLimit).forEach(item => kept.push(item.row));
+    const safeLimit = resolveLimit(tableId);
+    if (safeLimit <= 0) {
+      items.forEach(item => kept.push(item.row));
+      return;
+    }
+    // 滚动大总结（压缩产物）排最前，超量时先裁它会丢掉最早那段剧情；固定保留，只裁最旧的普通摘要。
+    const isRolling = item => item.row?.row_data?._summary_compaction?.level === 'rolling';
+    const plain = items.filter(item => !isRolling(item));
+    const plainSlots = Math.max(0, safeLimit - (items.length - plain.length));
+    const plainKept = new Set(plainSlots > 0 ? plain.slice(-plainSlots) : []);
+    items.filter(item => isRolling(item) || plainKept.has(item)).forEach(item => kept.push(item.row));
   });
   return kept;
 };

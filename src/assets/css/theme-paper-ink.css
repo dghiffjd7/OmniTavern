@@ -29,7 +29,9 @@ body[data-theme-preset='paper-ink']::after {
 body[data-theme-preset='paper-ink'] .chat-room-title,
 body[data-theme-preset='paper-ink'] .moments-title,
 body[data-theme-preset='paper-ink'] .general-settings-title,
-body[data-theme-preset='paper-ink'] .desktop-rail-brand {
+body[data-theme-preset='paper-ink'] .desktop-rail-brand,
+body[data-theme-preset='paper-ink'] .ssp-title,
+body[data-theme-preset='paper-ink'] .ssp-card-title {
   font-family: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', 'STSong', 'SimSun', serif;
   letter-spacing: 0.02em;
 }

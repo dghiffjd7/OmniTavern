@@ -101,8 +101,11 @@
     <link rel="stylesheet" href="./assets/css/format-repair-banner.css" />
     <link rel="stylesheet" href="./assets/css/prompt-preview-redesign.css" />
     <link rel="stylesheet" href="./assets/css/creative-writing-redesign.css" />
+    <link rel="stylesheet" href="./assets/css/creative-scrubber.css" />
     <link rel="stylesheet" href="./assets/css/hopscotch-board.css" />
     <link rel="stylesheet" href="./assets/css/group-creation-redesign.css" />
+    <link rel="stylesheet" href="./assets/css/settings-panel-redesign.css" />
+    <link rel="stylesheet" href="./assets/css/conversation-transfer-dialog.css" />
     <link rel="stylesheet" href="./assets/css/developer-profile.css" />
     <link rel="stylesheet" href="./assets/css/theme-paper-ink.css" />
     <link rel="stylesheet" href="./assets/css/i18n.css" />
@@ -721,6 +724,7 @@
         <div class="sheet-section-label">全局工具</div>
         <button data-action="preset">🎛 预设</button>
         <button data-action="extensions">🧩 扩展</button>
+        <button data-action="settings">⚙ 设定</button>
         <button data-action="config">🔌 API设定</button>
         <button data-action="about-aria" data-open-developer-profile>✦ 关于 Aria</button>
       </div>
@@ -752,6 +756,16 @@
           </span>
           <span class="rp-reading-switch">
             <input type="checkbox" data-rp-dialogue-highlight checked>
+            <span aria-hidden="true"></span>
+          </span>
+        </label>
+        <label class="rp-dialogue-highlight-row">
+          <span class="rp-reading-setting-copy">
+            <strong>刻度导航</strong>
+            <small>右侧刻度条代替滚动条，按住省略号展开、预览后跳转</small>
+          </span>
+          <span class="rp-reading-switch">
+            <input type="checkbox" data-rp-scrubber checked>
             <span aria-hidden="true"></span>
           </span>
         </label>

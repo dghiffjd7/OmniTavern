@@ -1344,3 +1344,11 @@ import {
   assert.deepEqual(calls, [['refresh'], ['reattach']]);
   console.log('ok - finalizeSessionEnterUiState reattaches reasoning-only active streams');
 }
+
+{
+  // 创意写作会话不插未读分隔线；聊天会话照旧。
+  const { readFileSync } = await import('node:fs');
+  const appSource = readFileSync(new URL('../../src/scripts/ui/app.js', import.meta.url), 'utf8');
+  assert.match(appSource, /getFirstUnreadMessageId: sid => \(isRpSessionId\(sid\) \? '' : chatStore\.getFirstUnreadMessageId\(sid\)\)/);
+  console.log('ok - creative writing sessions skip the unread divider on enter');
+}

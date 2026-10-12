@@ -1,0 +1,207 @@
+/* 创意写作刻度导航：只在写作模式且开关开启时显示，取代原生滚动条。颜色一律走主题 token。 */
+body[data-ui-mode='rp'][data-rp-scrubber='on'] #chat-scroll {
+  scrollbar-width: none;
+}
+body[data-ui-mode='rp'][data-rp-scrubber='on'] #chat-scroll::-webkit-scrollbar {
+  display: none;
+}
+/* 给刻度条留出位置；首尾刻度已固定指向开头和最新，回顶/回底按钮不再需要 */
+body[data-ui-mode='rp'][data-rp-scrubber='on'] #chat-scroll {
+  padding-right: 44px;
+}
+body[data-ui-mode='rp'][data-rp-scrubber='on'] #chat-room .chat-scroll-top-btn,
+body[data-ui-mode='rp'][data-rp-scrubber='on'] #chat-room .chat-scroll-bottom-btn {
+  display: none !important;
+}
+@media (pointer: coarse) {
+  body[data-ui-mode='rp'][data-rp-scrubber='on'] #chat-scroll { padding-right: 26px; }
+  .creative-scrubber { width: 30px; }
+}
+
+.creative-scrubber {
+  position: absolute;
+  z-index: 30;
+  width: 40px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: stretch;
+  padding: 6px 2px;
+  border-radius: 12px;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: opacity 0.25s ease;
+}
+.creative-scrubber[hidden] { display: none; }
+.creative-scrubber.is-idle { opacity: 0; pointer-events: none; }
+
+.creative-scrubber-tick,
+.creative-scrubber-gap {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  border: 0;
+  margin: 0;
+  padding: 0 4px 0 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.creative-scrubber-tick { max-height: 28px; }
+.creative-scrubber-tick i {
+  display: block;
+  height: 2px;
+  width: 9px;
+  border-radius: 2px;
+  background: var(--app-border-strong, #d7d2c6);
+  transition: width 0.15s ease, background-color 0.15s ease;
+}
+.creative-scrubber-tick.is-ai i { width: 17px; background: var(--app-text-muted, #746c5e); }
+.creative-scrubber-tick.is-unknown i { width: 13px; }
+.creative-scrubber-tick.is-current i { height: 3px; width: 13px; background: var(--app-accent-primary, #bc4a26); }
+.creative-scrubber-tick.is-ai.is-current i { width: 23px; }
+.creative-scrubber-tick.is-hot i { width: 15px; background: var(--app-text-primary, #26221c); }
+.creative-scrubber-tick.is-ai.is-hot i { width: 25px; }
+.creative-scrubber-tick.is-hot.is-current i { background: var(--app-accent-strong, #a03c1c); }
+
+.creative-scrubber-gap {
+  max-height: 20px;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-end;
+  gap: 2px;
+  padding-right: 7px;
+}
+.creative-scrubber-gap b {
+  display: block;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--app-border-strong, #d7d2c6);
+  transition: background-color 0.15s ease, transform 0.15s ease;
+}
+.creative-scrubber-gap.is-hot b { background: var(--app-accent-primary, #bc4a26); }
+.creative-scrubber-gap.is-arming b { background: var(--app-accent-primary, #bc4a26); transform: scale(1.5); }
+
+.creative-scrubber-tick:focus-visible,
+.creative-scrubber-gap:focus-visible {
+  outline: 2px solid var(--app-accent-primary, #bc4a26);
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+
+/* 展开：新刻度从小点处依次长出 */
+.creative-scrubber.is-animated .creative-scrubber-tick.is-entering i {
+  animation: creative-scrubber-tick-in 0.2s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+  animation-delay: var(--scrubber-enter-delay, 0ms);
+}
+.creative-scrubber.is-animated .creative-scrubber-gap.is-entering b {
+  animation: creative-scrubber-dot-in 0.24s ease-out both;
+  animation-delay: 60ms;
+}
+@keyframes creative-scrubber-tick-in { from { width: 0; opacity: 0; } }
+@keyframes creative-scrubber-dot-in { from { opacity: 0; transform: scale(0.2); } }
+
+.creative-scrubber-preview {
+  position: absolute;
+  z-index: 31;
+  width: 260px;
+  max-width: calc(100% - 72px);
+  padding: 10px 14px 12px;
+  border: 1px solid var(--app-border-default, #e7e1d7);
+  border-radius: 14px;
+  background: var(--app-surface-card, #ffffff);
+  color: var(--app-text-primary, #26221c);
+  box-shadow: var(--app-shadow-md, 0 16px 40px -12px rgba(38, 34, 28, 0.22));
+  pointer-events: none;
+}
+.creative-scrubber-preview[hidden] { display: none; }
+.creative-scrubber-preview.is-hint {
+  width: auto;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--app-text-secondary, #6e665b);
+}
+.creative-scrubber-preview-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--app-text-muted, #746c5e);
+  font-variant-numeric: tabular-nums;
+}
+.creative-scrubber-preview-chip {
+  display: inline-block;
+  margin: 6px 0 4px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--app-accent-strong, #a03c1c);
+  background: var(--app-accent-soft, rgba(188, 74, 38, 0.12));
+}
+.creative-scrubber-preview-chip.is-body {
+  color: var(--app-text-secondary, #6e665b);
+  background: var(--app-surface-subtle, #faf8f4);
+}
+.creative-scrubber-preview-text {
+  font-size: 14px;
+  line-height: 1.6;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+body[data-rp-narrative-font='serif'] .creative-scrubber-preview-text {
+  font-family: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', 'STSong', 'SimSun', serif;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .creative-scrubber,
+  .creative-scrubber-tick i,
+  .creative-scrubber-gap b { transition: none; }
+}
+
+/* 跳转只渲染目标附近：中间折叠的占位 */
+.creative-history-gap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 18px 8px;
+  min-height: 40px;
+  color: var(--app-text-muted, #746c5e);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+.creative-history-gap::before,
+.creative-history-gap::after {
+  content: '';
+  flex: 1;
+  height: 0;
+  border-top: 1px dashed var(--app-border-strong, #d7d2c6);
+}
+.creative-history-gap-label { white-space: nowrap; }
+
+/* 远距离跳转的淡出→淡入：盖住「先移到目标附近」那一帧。不淡到全白（保留轮廓），淡入用前后都平缓的曲线，避免闪一下 */
+body[data-ui-mode='rp'] #chat-scroll.is-jump-out {
+  opacity: 0.2;
+  transform: translateY(-8px);
+  transition: opacity 0.15s ease-in, transform 0.15s ease-in;
+}
+body[data-ui-mode='rp'] #chat-scroll.is-jump-out[data-jump-direction='up'] {
+  transform: translateY(8px);
+}
+body[data-ui-mode='rp'] #chat-scroll.is-jump-in {
+  animation: rp-jump-in-down 0.34s cubic-bezier(0.25, 0.1, 0.25, 1) both;
+}
+body[data-ui-mode='rp'] #chat-scroll.is-jump-in[data-jump-direction='up'] {
+  animation-name: rp-jump-in-up;
+}
+@keyframes rp-jump-in-down { from { opacity: 0.2; transform: translateY(14px); } }
+@keyframes rp-jump-in-up { from { opacity: 0.2; transform: translateY(-14px); } }

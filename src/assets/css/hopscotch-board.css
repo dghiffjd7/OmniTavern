@@ -271,11 +271,6 @@ body[data-theme-mode='dark'] :is(.hop-dialog, .hop-board-card-controls) { --app-
 .hop-dialog .hop-menu button:hover:not(:disabled) { background: var(--app-surface-hover); }
 .hop-dialog button[data-action='run-mode'][aria-pressed='true'], .hop-dialog button[data-action='edit-mode'][aria-pressed='true'] { color: var(--app-accent-primary); background: var(--app-accent-soft); }
 .hop-output { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.8; max-height: 320px; overflow: auto; user-select: text; }
-.hop-move { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
-.hop-move-section { border-top: 1px solid var(--app-border-subtle); padding-top: 12px; }
-.hop-move-section:first-child { border-top: 0; padding-top: 0; }
-.hop-move-section > summary { color: var(--app-text-secondary); font-size: 12px; font-weight: 700; line-height: 1.5; cursor: pointer; }
-.hop-move-section > summary::marker { color: var(--app-text-muted); }
 @media (max-width: 600px) {
   .hop-dialog, .hop-dialog.hop-detail { width: 100%; max-width: 100%; margin: auto 0 0; max-height: 92dvh; border-radius: 20px 20px 0 0; padding-bottom: env(safe-area-inset-bottom); }
   .hop-header, .hop-footer, .hop-content { padding-inline: 18px; }

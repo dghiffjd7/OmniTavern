@@ -9,7 +9,7 @@ import { avatarDataUrlFromFile } from '../utils/image.js';
 import { FEATHER_DEFAULT, resolveLineAvatar } from '../utils/line-avatar.js';
 import { appSettings } from '../storage/app-settings.js';
 import { MemoryTableEditor } from './memory-table-editor.js';
-import { appChoice, appConfirm } from './app-confirm.js';
+import { appConfirm } from './app-confirm.js';
 import { createGroupCreateRuntime } from './group-create-runtime-utils.js';
 import { createContactAvatarElement } from './group-avatar-view-utils.js';
 import { createGroupPanelMotionRuntime } from './group-panel-motion-runtime-utils.js';
@@ -18,32 +18,23 @@ import { createGroupMemoryShareRuntime } from './group-memory-share-runtime-util
 import { createGroupMemberManagementRuntime } from './group-member-management-runtime-utils.js';
 import { runGroupSettingsSaveFlow } from './group-settings-save-runtime-utils.js';
 import { getMemoryTableStore, getMemoryTemplateStore } from './memory-store-runtime-utils.js';
-import { createSessionPanelShell } from './session-panel-shell-utils.js';
 import {
     applySessionPanelMemoryMode,
     runSessionPanelShowFlow,
 } from './session-panel-display-runtime-utils.js';
 import {
-    buildSessionAvatarButtonStyle,
-    buildSessionBlockButtonStyle,
     buildSessionCheckboxInputStyle,
-    buildSessionColumnStackStyle,
-    buildSessionCoverImageStyle,
-    buildSessionFlexRowStyle,
-    buildSessionFooterStyle,
-    buildSessionFieldLabelStyle,
-    buildSessionHelperTextStyle,
-    buildSessionIconButtonStyle,
-    buildSessionListContainerStyle,
-    buildSessionSurfaceBoxStyle,
-    buildSessionSectionStyle,
     buildSessionSummaryRowStyle,
-    buildSessionTextInputStyle,
-    buildSessionTextActionButtonStyle,
-    buildSessionUtilityButtonStyle,
-    buildSessionWideActionButtonStyle,
-    SESSION_PANEL_STYLES,
 } from './session-panel-style-utils.js';
+import {
+    buildSessionSettingsCloseInnerHtml,
+    buildSessionSettingsNavHtml,
+    createSessionSettingsChrome,
+    isSettingsReducedMotion,
+    SESSION_SETTINGS_ICONS,
+    SETTINGS_DISCARD_CONFIRM,
+} from './session-settings-chrome-utils.js';
+import { t, translateUiText } from '../i18n/index.js';
 import {
     bindSessionMemoryShareButton,
     bindSessionPanelSharedWindowEvents,
@@ -68,7 +59,15 @@ import {
 } from './session-summary-utils.js';
 import { emitMemoryRowsUpdated as emitSharedMemoryRowsUpdated } from './session-memory-event-utils.js';
 import { createSessionSummarySectionRuntime } from './session-summary-section-runtime-utils.js';
-import { runSessionConversationExportFlow } from './session-conversation-export-utils.js';
+import { loadConversationExportState, runSessionConversationExportFlow } from './session-conversation-export-utils.js';
+import { openConversationExportDialog } from './conversation-export-dialog.js';
+import {
+    bindConversationImportDropZone,
+    pickConversationImportFile,
+    runSessionConversationImportFlow,
+} from './session-conversation-import-utils.js';
+import { openConversationImportDialog } from './conversation-import-dialog.js';
+import { highlightSessionArchiveRow } from './session-archive-view-utils.js';
 import {
     createSessionArchiveEmptyState,
     createSessionArchiveManagerModal,
@@ -673,7 +672,7 @@ export class GroupSettingsPanel {
     show(groupId) {
         const id = normalize(groupId);
         if (!id) return;
-        return runSessionPanelShowFlow({
+        const shown = runSessionPanelShowFlow({
             ensureUi: () => {
                 if (!this.panel) this.createUI();
             },
@@ -687,163 +686,170 @@ export class GroupSettingsPanel {
             renderCompactedSummary: () => this.renderCompactedSummary(),
             getMemoryMode: getMemoryStorageMode,
             renderMemoryTable: () => this.memoryTableEditor?.render?.(),
-            getOverlayEl: () => this.overlay,
-            getPanelEl: () => this.panel,
+            // 显示与动画交给 settingsChrome，避免在基线记录前就露出面板。
+            getOverlayEl: () => null,
+            getPanelEl: () => null,
         });
+        if (shown) this.settingsChrome?.show();
+        return shown;
     }
 
     hide() {
         this.hideArchiveManager();
-        if (this.overlay) this.overlay.style.display = 'none';
-        if (this.panel) this.panel.style.display = 'none';
+        this.settingsChrome?.hide();
+    }
+
+    requestClose() {
+        return this.settingsChrome ? this.settingsChrome.requestClose() : Promise.resolve(true);
     }
 
     applyMemoryMode() {
-        return applySessionPanelMemoryMode({
+        const result = applySessionPanelMemoryMode({
             memoryMode: getMemoryStorageMode(),
             memoryFeaturesSection: this.memoryFeaturesSection,
             summarySection: this.summarySection,
             memoryTableSection: this.memoryTableSection,
             renderMemoryTable: () => this.memoryTableEditor?.render?.(),
         });
+        this.settingsChrome?.syncSections();
+        return result;
     }
 
     createUI() {
-        const shell = createSessionPanelShell({
-            documentRef: document,
-            overlayId: 'group-settings-overlay',
-            panelId: 'group-settings-panel',
-            subtitleId: 'group-settings-sub',
-            closeId: 'group-settings-close',
-            title: '群聊设置',
-            overlayOpacity: 0.45,
-            overlayZIndex: 20000,
-            panelZIndex: 21000,
-            inset: 10,
-            radius: 14,
-        });
-        this.overlay = shell.overlay;
-        this.panel = shell.panel;
-        this.overlay.addEventListener('click', () => this.hide());
-        const sectionStyle = buildSessionSectionStyle({ marginTop: 18, paddingTop: 14 });
-        const newChatButtonStyle = buildSessionWideActionButtonStyle({ accent: true, marginBottom: 10 });
-        const archiveListStyle = buildSessionListContainerStyle({ maxHeight: 160, radius: 8, background: 'var(--app-surface-subtle)' });
-        const toolbarIconButtonStyle = buildSessionIconButtonStyle();
-        const batchEditButtonStyle = buildSessionIconButtonStyle({ width: 34, height: 30, fontSize: 16 });
-        const batchDeleteButtonStyle = buildSessionIconButtonStyle({ danger: true, width: 34, height: 30, fontSize: 16 });
-        const batchCancelButtonStyle = buildSessionIconButtonStyle({ width: 34, height: 30, fontSize: 18 });
-        const compactedDangerButtonStyle = buildSessionIconButtonStyle({ danger: true });
-        const clearTextButtonStyle = buildSessionTextActionButtonStyle({ danger: true });
-        const addButtonStyle = buildSessionUtilityButtonStyle({ padding: '6px 10px', fontSize: 14 });
-        const summariesListStyle = buildSessionListContainerStyle({ maxHeight: 180, radius: 10 });
-        const compactedListStyle = buildSessionListContainerStyle({ maxHeight: 220, radius: 10 });
-        const footerStyle = buildSessionFooterStyle();
-        const avatarButtonStyle = buildSessionAvatarButtonStyle();
-        const coverImageStyle = buildSessionCoverImageStyle();
-        const topRowStyle = buildSessionFlexRowStyle({ gap: 14, wrap: true });
-        const headerRowStyle = buildSessionFlexRowStyle({ justify: 'space-between', gap: 10, margin: '0 0 6px' });
-        const actionsRowStyle = buildSessionFlexRowStyle({ gap: 8 });
-        const memberHeaderRowStyle = buildSessionFlexRowStyle({ justify: 'space-between', gap: 10 });
-        const memberListStyle = buildSessionColumnStackStyle({ gap: 8, margin: '10px 0 0' });
-        const batchBarStyle = buildSessionFlexRowStyle({ display: 'none', justify: 'flex-end', gap: 8, margin: '-2px 0 10px' });
-        const summaryHelperStyle = buildSessionHelperTextStyle({ marginBottom: 8 });
-        const memoryTableBoxStyle = buildSessionSurfaceBoxStyle({
-            display: 'none',
-            margin: '18px 0 0',
-            padding: 12,
-            borderStyle: 'dashed',
-            background: 'var(--app-surface-subtle)',
-        });
-        const fieldLabelStyle = buildSessionFieldLabelStyle({ weight: 800 });
-        const nameInputStyle = buildSessionTextInputStyle();
-        const helperTextStyle = buildSessionHelperTextStyle({ marginTop: 6 });
-        const helperCaptionStyle = buildSessionHelperTextStyle({ marginBottom: 6 });
-        const memoryShareButtonStyle = buildSessionBlockButtonStyle();
-        const memoryShareSummaryStyle = buildSessionHelperTextStyle({ marginTop: 8 });
-        shell.body.innerHTML = `
-                <div style="${topRowStyle}">
-                    <button id="group-settings-avatar-btn" type="button" style="${avatarButtonStyle}">
-                        <span id="group-settings-avatar-preview" class="group-settings-avatar-preview" style="${coverImageStyle}"></span>
-                    </button>
-                    <div style="flex:1; min-width:220px;">
-                        <div class="has-help" data-help="修改名称不会改变聊天室 ID。" style="${fieldLabelStyle}">群组名称</div>
-                        <input id="group-settings-name" style="${nameInputStyle}">
-                    </div>
+        this.overlay = document.createElement('div');
+        this.overlay.id = 'group-settings-overlay';
+        this.overlay.className = 'app-themed-overlay ssp-overlay';
+        this.overlay.style.display = 'none';
+        this.overlay.addEventListener('click', () => void this.requestClose());
+
+        this.panel = document.createElement('div');
+        this.panel.id = 'group-settings-panel';
+        this.panel.className = 'app-themed-panel ssp-panel';
+        this.panel.style.display = 'none';
+        this.panel.tabIndex = -1;
+        this.panel.setAttribute('role', 'dialog');
+        this.panel.setAttribute('aria-modal', 'true');
+        this.panel.setAttribute('aria-labelledby', 'group-settings-title');
+        this.panel.addEventListener('click', (event) => event.stopPropagation());
+        this.panel.innerHTML = `
+            <header class="ssp-header">
+                <div class="ssp-heading">
+                    <h2 id="group-settings-title" class="ssp-title has-help" data-help-title="会话 ID" data-help="">群聊设置</h2>
+                    <span id="group-settings-sub" class="ssp-subtitle"></span>
                 </div>
-
-	                <div style="margin-top:14px;">
-	                    <div style="${memberHeaderRowStyle}">
-	                        <div style="${fieldLabelStyle}">成员</div>
-	                        <button id="group-settings-add" style="${addButtonStyle}">＋ 添加</button>
-	                    </div>
-	                    <div id="group-settings-members" style="${memberListStyle}"></div>
-	                </div>
-
-                    <div style="${sectionStyle}">
-                        <div style="${fieldLabelStyle}; margin-bottom:8px;">聊天管理</div>
-                        <button id="group-new-chat" style="${newChatButtonStyle}">
-                            <span>✨</span> 开启新聊天（存档当前）
-                        </button>
-                        <div style="${headerRowStyle}">
-                            <div style="${helperCaptionStyle}; margin-bottom:0;">历史存档（点击加载）</div>
-                            <button id="group-archives-manage" type="button" style="${addButtonStyle}">管理</button>
-                        </div>
-                        <div id="group-archives-list" style="${archiveListStyle}"></div>
-                    </div>
-
-                    <div id="group-memory-features-section" style="${sectionStyle}">
-                        <div style="${fieldLabelStyle}; margin-bottom:10px;">聊天 / 创意写作桥接（当前会话）</div>
-                        <div id="group-rp-bridge-section" style="display:none;"></div>
-                        <div id="group-memory-share-section">
-                            <button id="group-memory-share-manage" type="button" style="${memoryShareButtonStyle}">
-                                记忆共享
-                            </button>
-                            <div id="group-memory-share-summary" style="${memoryShareSummaryStyle}; line-height:1.5;"></div>
-                        </div>
-                    </div>
-
-                    <div id="group-summary-section" style="${sectionStyle}">
-                        <div style="${headerRowStyle}">
-                            <div class="has-help" data-help="该群聊每次互动保存一条摘要（与聊天存档绑定）" style="${fieldLabelStyle}; margin-bottom:0;">摘要</div>
-                            <div style="${actionsRowStyle}">
-                                <button id="group-summaries-batch" type="button" title="批量操作" style="${toolbarIconButtonStyle}">☰</button>
-                                <button id="group-summaries-clear" type="button" style="${clearTextButtonStyle}">清空</button>
+                <button id="group-settings-close" type="button" class="ssp-icon-btn ssp-close ssp-ctl" aria-label="关闭设置">${buildSessionSettingsCloseInnerHtml()}</button>
+            </header>
+            <div class="ssp-main">
+                <nav class="ssp-nav" aria-label="设置分区">
+                    <span class="ssp-nav-indicator" aria-hidden="true"></span>
+                    ${buildSessionSettingsNavHtml([
+                        { id: 'basic', label: '基本资料', icon: 'members' },
+                        { id: 'memory-share', label: '记忆共享', icon: 'memory' },
+                        { id: 'archives', label: '聊天与存档', icon: 'archive' },
+                        { id: 'summary', label: '摘要', icon: 'summary' },
+                        { id: 'memory-table', label: '记忆表格', icon: 'table' },
+                    ])}
+                </nav>
+                <div class="ssp-scroll">
+                    <section class="ssp-card" data-settings-section="basic">
+                        <div class="ssp-row ssp-basic">
+                            <div class="ssp-avatar-col">
+                                <button id="group-settings-avatar-btn" type="button" class="ssp-avatar ssp-ctl" aria-label="更换头像" title="点击更换头像">
+                                    <span id="group-settings-avatar-preview" class="group-settings-avatar-preview"></span>
+                                    <span class="ssp-avatar-badge" aria-hidden="true">${SESSION_SETTINGS_ICONS.edit}</span>
+                                </button>
+                            </div>
+                            <div class="ssp-basic-fields is-single">
+                                <label class="ssp-field">
+                                    <span class="ssp-label has-help" data-help="修改名称不会改变聊天室 ID。">群组名称</span>
+                                    <input id="group-settings-name" class="ssp-input" autocomplete="off">
+                                </label>
                             </div>
                         </div>
-                        <div id="group-summaries-batchbar" style="${batchBarStyle}">
-                            <button id="group-summaries-batch-edit" type="button" title="批量编辑" style="${batchEditButtonStyle}">✎</button>
-                            <button id="group-summaries-batch-delete" type="button" title="批量删除" style="${batchDeleteButtonStyle}">🗑</button>
-                            <button id="group-summaries-batch-cancel" type="button" title="退出批量" style="${batchCancelButtonStyle}">×</button>
+                        <div class="ssp-card-head ssp-subhead">
+                            <h4 class="ssp-subtitle-title">成员</h4>
+                            <div class="ssp-card-actions">
+                                <button id="group-settings-add" type="button" class="ssp-btn ssp-ctl">${SESSION_SETTINGS_ICONS.plus}<span>添加</span></button>
+                            </div>
                         </div>
-                        <div id="group-summaries-list" style="${summariesListStyle}"></div>
+                        <div id="group-settings-members" class="ssp-members"></div>
+                    </section>
 
-	                    <div style="margin-top:14px;">
-	                        <div style="${headerRowStyle}">
-	                            <div class="has-help" data-help="摘要总字数超过阈值会自动生成大总结（与聊天存档绑定）" style="${fieldLabelStyle}; margin-bottom:0;">大总结</div>
-	                            <div style="${actionsRowStyle}">
-	                                <button id="group-compacted-raw" type="button" title="查看原始回复" style="${toolbarIconButtonStyle}">📄</button>
-	                                <button id="group-compacted-edit" type="button" title="编辑" style="${toolbarIconButtonStyle}">✎</button>
-	                                <button id="group-compacted-run" type="button" title="手动生成/刷新" style="${toolbarIconButtonStyle}">↻</button>
-	                                <button id="group-compacted-clear" type="button" title="删除" style="${compactedDangerButtonStyle}">🗑</button>
-	                            </div>
-	                        </div>
-	                        <div id="group-compacted-summary" style="${compactedListStyle}"></div>
-	                    </div>
-                    </div>
+                    <section id="group-memory-features-section" class="ssp-card" data-settings-section="memory-share">
+                        <div id="group-memory-share-section">
+                            <div class="ssp-row ssp-share-row">
+                                <h3 class="ssp-card-title has-help" data-help="哪些记忆表格在聊天与创意写作之间共享。">记忆共享</h3>
+                                <div id="group-memory-share-summary" class="ssp-muted ssp-share-summary"></div>
+                                <button id="group-memory-share-manage" type="button" class="ssp-btn ssp-ctl">调整</button>
+                            </div>
+                        </div>
+                        <div id="group-rp-bridge-section" style="display:none;"></div>
+                    </section>
 
-                    <div id="group-memory-table-section" style="${memoryTableBoxStyle}">
-                        <div style="${fieldLabelStyle}">记忆表格</div>
-                        <div id="group-memory-table-content"></div>
-                    </div>
-	            </div>
+                    <section class="ssp-card" data-settings-section="archives">
+                        <div class="ssp-card-head">
+                            <h3 class="ssp-card-title has-help" data-help="点存档可加载；当前聊天会先自动存档。">聊天与存档</h3>
+                            <div class="ssp-card-actions">
+                                <button id="group-archives-import" type="button" class="ssp-btn ssp-ctl" data-help="导入本 APP 导出的 md／txt 聊天记录，存成新存档；电脑上也可以把文件拖到这里。" data-help-mode="press">导入</button>
+                                <button id="group-archives-manage" type="button" class="ssp-btn ssp-ctl">管理</button>
+                                <button id="group-new-chat" type="button" class="ssp-btn is-accent-outline ssp-ctl" data-help="把当前聊天存档后，开始新的聊天。" data-help-mode="press">${SESSION_SETTINGS_ICONS.plus}<span>新聊天</span></button>
+                            </div>
+                        </div>
+                        <div id="group-archives-list" class="ssp-list"></div>
+                    </section>
+
+                    <section id="group-summary-section" class="ssp-card" data-settings-section="summary">
+                        <div class="ssp-card-head">
+                            <h3 class="ssp-card-title has-help" data-help="该群聊每次互动保存一条摘要（与聊天存档绑定）。">摘要</h3>
+                            <div class="ssp-card-actions">
+                                <button id="group-summaries-batch" type="button" title="批量操作" aria-label="批量操作" class="ssp-icon-btn is-bordered ssp-ctl">☰</button>
+                                <button id="group-summaries-clear" type="button" class="ssp-btn is-danger-soft ssp-ctl">清空</button>
+                            </div>
+                        </div>
+                        <div id="group-summaries-batchbar" class="ssp-batchbar" style="display:none;">
+                            <button id="group-summaries-batch-edit" type="button" title="批量编辑" aria-label="批量编辑" class="ssp-icon-btn is-bordered ssp-ctl">✎</button>
+                            <button id="group-summaries-batch-delete" type="button" title="批量删除" aria-label="批量删除" class="ssp-icon-btn is-bordered is-danger ssp-ctl">🗑</button>
+                            <button id="group-summaries-batch-cancel" type="button" title="退出批量" aria-label="退出批量" class="ssp-icon-btn is-bordered ssp-ctl">×</button>
+                        </div>
+                        <div id="group-summaries-list" class="ssp-list"></div>
+                        <div class="ssp-card-head ssp-subhead">
+                            <h4 class="ssp-subtitle-title has-help" data-help="摘要满记忆 Agent「触发与频率」设定的条数或字数时，会自动生成大总结（与聊天存档绑定）。">大总结</h4>
+                            <div class="ssp-card-actions">
+                                <button id="group-compacted-raw" type="button" title="查看原始回复" aria-label="查看原始回复" class="ssp-icon-btn is-bordered ssp-ctl">📄</button>
+                                <button id="group-compacted-edit" type="button" title="编辑" aria-label="编辑" class="ssp-icon-btn is-bordered ssp-ctl">✎</button>
+                                <button id="group-compacted-run" type="button" title="手动生成/刷新" aria-label="手动生成/刷新" class="ssp-icon-btn is-bordered ssp-ctl">↻</button>
+                                <button id="group-compacted-clear" type="button" title="删除" aria-label="删除" class="ssp-icon-btn is-bordered is-danger ssp-ctl">🗑</button>
+                            </div>
+                        </div>
+                        <div id="group-compacted-summary" class="ssp-list"></div>
+                    </section>
+
+                    <section id="group-memory-table-section" class="ssp-card" data-settings-section="memory-table" style="display:none;">
+                        <h3 class="ssp-card-title has-help" data-help="AI 在对话中自动维护的记忆，跟随聊天存档切换。">记忆表格</h3>
+                        <div class="ssp-table-summary">
+                            <span class="ssp-muted" data-role="table-overview">…</span>
+                            <button type="button" class="ssp-btn is-accent-outline ssp-ctl" data-action="open-tables">打开</button>
+                        </div>
+                        <div id="group-memory-table-content" class="ssp-table-host"></div>
+                    </section>
+                </div>
+            </div>
+            <footer class="ssp-footer">
+                <span class="ssp-dirty" aria-live="polite"><i aria-hidden="true"></i>有未保存的更改</span>
+                <div class="ssp-footer-actions">
+                    <button id="group-settings-cancel" type="button" class="ssp-btn is-large ssp-ctl">取消</button>
+                    <button id="group-settings-save" type="button" class="ssp-btn is-large is-primary ssp-ctl" title="保存（Ctrl+S）">保存</button>
+                </div>
+            </footer>
+            <div class="ssp-subpage-scrim" aria-hidden="true"></div>
+            <section class="ssp-subpage" hidden aria-hidden="true">
+                <header class="ssp-subpage-header">
+                    <button type="button" class="ssp-icon-btn ssp-subpage-back ssp-ctl" aria-label="返回设置">${SESSION_SETTINGS_ICONS.back}</button>
+                    <h2 class="ssp-subpage-title has-help"></h2>
+                </header>
+                <div class="ssp-subpage-body"></div>
+            </section>
         `;
-        const footer = document.createElement('div');
-        footer.style.cssText = footerStyle;
-        footer.innerHTML = `
-            <button id="group-settings-cancel" style="${SESSION_PANEL_STYLES.secondaryActionButton}">取消</button>
-            <button id="group-settings-save" style="${SESSION_PANEL_STYLES.primaryActionButton}">保存</button>
-        `;
-        this.panel.appendChild(footer);
 
         this.fileInput = document.createElement('input');
         this.fileInput.type = 'file';
@@ -855,6 +861,7 @@ export class GroupSettingsPanel {
             try {
                 this.avatar = await avatarDataUrlFromFile(file, { maxDim: 256, quality: 0.84, maxBytes: 520_000 });
                 this.updateAvatarPreview();
+                this.settingsChrome?.refreshDirty();
             } catch (err) {
                 logger.warn('读取/压缩群组头像失败', err);
                 window.toastr?.error?.('读取头像失败');
@@ -880,6 +887,28 @@ export class GroupSettingsPanel {
         this.memoryShareSection = this.panel.querySelector('#group-memory-share-section');
         this.memoryShareButton = this.panel.querySelector('#group-memory-share-manage');
         this.memoryShareSummary = this.panel.querySelector('#group-memory-share-summary');
+        this.settingsChrome = createSessionSettingsChrome({
+            overlayEl: this.overlay,
+            panelEl: this.panel,
+            scrollEl: this.panel.querySelector('.ssp-scroll'),
+            navEl: this.panel.querySelector('.ssp-nav'),
+            dirtyEl: this.panel.querySelector('.ssp-dirty'),
+            getSessionId: () => this.groupId,
+            readSnapshot: () => this.readSettingsSnapshot(),
+            confirmDiscard: () => appConfirm(SETTINGS_DISCARD_CONFIRM),
+            onSave: () => this.save(),
+            onCloseConfirmed: () => this.hide(),
+            isReducedMotion: isSettingsReducedMotion,
+            subpageEl: this.panel.querySelector('.ssp-subpage'),
+        });
+        this.tableOverview = this.panel.querySelector('[data-role="table-overview"]');
+        this.panel.querySelector('[data-action="open-tables"]')?.addEventListener('click', () => {
+            this.settingsChrome.openSubpage({
+                title: translateUiText('记忆表格'),
+                help: translateUiText('AI 在对话中自动维护的记忆，跟随聊天存档切换。'),
+                contentEl: this.memoryTableContent,
+            });
+        });
         const summariesClearButton = this.panel.querySelector('#group-summaries-clear');
         const summariesBatchButton = this.panel.querySelector('#group-summaries-batch');
         const summariesBatchCancelButton = this.panel.querySelector('#group-summaries-batch-cancel');
@@ -890,8 +919,8 @@ export class GroupSettingsPanel {
         const compactedRunButton = this.panel.querySelector('#group-compacted-run');
         const compactedClearButton = this.panel.querySelector('#group-compacted-clear');
 
-        this.panel.querySelector('#group-settings-close').onclick = () => this.hide();
-        this.panel.querySelector('#group-settings-cancel').onclick = () => this.hide();
+        this.panel.querySelector('#group-settings-close').onclick = () => void this.requestClose();
+        this.panel.querySelector('#group-settings-cancel').onclick = () => void this.requestClose();
         this.panel.querySelector('#group-settings-avatar-btn').onclick = () => {
             this.fileInput.value = '';
             this.fileInput.click();
@@ -908,6 +937,13 @@ export class GroupSettingsPanel {
         });
         this.panel.querySelector('#group-new-chat').onclick = () => this.startNewChat();
         this.archiveManageButton?.addEventListener('click', () => this.openArchiveManager());
+        this.panel.querySelector('#group-archives-import')?.addEventListener('click', () => {
+            pickConversationImportFile({ onFile: file => this.importConversationFile(file) });
+        });
+        bindConversationImportDropZone({
+            zoneEl: this.panel.querySelector('[data-settings-section=archives]'),
+            onFile: file => this.importConversationFile(file),
+        });
         bindSessionSummarySectionControls({
             clearButtonEl: summariesClearButton,
             batchButtonEl: summariesBatchButton,
@@ -947,6 +983,9 @@ export class GroupSettingsPanel {
                 contactsStore: this.contactsStore,
                 chatStore: this.chatStore,
                 includeGlobal: true,
+                onRendered: ({ tableCount, rowCount }) => {
+                    if (this.tableOverview) this.tableOverview.textContent = t('{tables} 张表 · {rows} 行', { tables: tableCount, rows: rowCount });
+                },
             });
         }
 
@@ -958,6 +997,14 @@ export class GroupSettingsPanel {
             renderSummaries: () => this.renderSummaries(),
             renderCompactedSummary: () => this.renderCompactedSummary(),
         });
+    }
+
+    readSettingsSnapshot() {
+        return {
+            avatar: String(this.avatar || ''),
+            name: String(this.panel?.querySelector?.('#group-settings-name')?.value || ''),
+            members: Array.isArray(this.members) ? [...this.members] : [],
+        };
     }
 
     ensureSummaryRuntime() {
@@ -1024,8 +1071,12 @@ export class GroupSettingsPanel {
     populate() {
         const g = this.contactsStore?.getContact?.(this.groupId);
         if (!g) return;
+        this.panel.querySelector('#group-settings-title')?.setAttribute('data-help', this.groupId);
         const sub = this.panel.querySelector('#group-settings-sub');
-        if (sub) sub.textContent = `会话：${this.groupId}`;
+        if (sub) {
+            sub.setAttribute('data-i18n-skip', '');
+            sub.textContent = `${g.name || this.groupId} · ${translateUiText('群聊')}`;
+        }
         this.avatar = g.avatar || '';
         this.members = Array.isArray(g.members) ? g.members.map(normalize).filter(Boolean) : [];
         const nameEl = this.panel.querySelector('#group-settings-name');
@@ -1202,8 +1253,38 @@ export class GroupSettingsPanel {
             current,
             title: current ? '当前群聊' : (archive?.name || '未命名存档'),
             sourceLabel: current ? '当前群聊' : `群聊存档：${archive?.name || archive?.id || '未命名存档'}`,
-            appChoiceFn: appChoice,
+            openExportDialog: options => openConversationExportDialog({ ...options, isReducedMotion: isSettingsReducedMotion }),
+            loadState: () => loadConversationExportState({
+                chatStore: this.chatStore,
+                sessionId,
+                archive,
+                current,
+                buildMemoryTableSnapshot: ({ sessionId: sid }) => (getMemoryStorageMode() === 'table'
+                    ? this.buildMemoryTableSnapshot({ sessionId: sid, isGroup: true })
+                    : null),
+                readArchiveState: (sid, aid) => window.appBridge?.readArchiveTransferState?.(sid, aid),
+            }),
             toastSuccess: text => window.toastr?.success?.(text),
+            toastWarning: text => window.toastr?.warning?.(text),
+            toastError: text => window.toastr?.error?.(text),
+            logger,
+        });
+    }
+
+    importConversationFile(file) {
+        return runSessionConversationImportFlow({
+            file,
+            chatStore: this.chatStore,
+            sessionId: String(this.groupId || '').trim(),
+            resolveMemoryTemplateId: () => this.resolveDefaultMemoryTemplateId(),
+            getMemoryStorageMode,
+            bindImportedState: (sid, aid, payload) => window.appBridge?.bindImportedArchiveState?.(sid, aid, payload),
+            openImportDialog: options => openConversationImportDialog({ ...options, isReducedMotion: isSettingsReducedMotion }),
+            onImported: ({ archiveId }) => {
+                this.renderArchives();
+                highlightSessionArchiveRow(this.archivesList, archiveId);
+            },
+            loadArchive: archiveId => this.ensureArchiveRuntime().loadArchive(archiveId),
             toastWarning: text => window.toastr?.warning?.(text),
             toastError: text => window.toastr?.error?.(text),
             logger,
@@ -1312,6 +1393,7 @@ export class GroupSettingsPanel {
             setMembers: (nextMembers) => {
                 this.members = Array.isArray(nextMembers) ? nextMembers : [];
                 this.updateAvatarPreview();
+                this.settingsChrome?.refreshDirty();
             },
             getContactsStore: () => this.contactsStore,
             getAddOverlay: () => this.addOverlay,

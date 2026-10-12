@@ -20,6 +20,8 @@ export const isStreamCtrlConnected = (ctrl) => {
 
 export const createAssistantStreamRuntime = ({
   generationId = 0,
+  // 发送链在分配 generationId 之前就创建 runtime，需按调用时读取当前值。
+  getGenerationId = () => generationId,
   sessionId = '',
   getStreamCtrl = () => null,
   setStreamCtrl = () => null,
@@ -32,7 +34,7 @@ export const createAssistantStreamRuntime = ({
 } = {}) => {
   const withMatchingGeneration = (handler) => {
     const generation = getActiveGeneration();
-    if (!generation || generation.id !== generationId || generation.sessionId !== sessionId) return null;
+    if (!generation || generation.id !== getGenerationId() || generation.sessionId !== sessionId) return null;
     handler(generation);
     return generation;
   };
@@ -47,6 +49,7 @@ export const createAssistantStreamRuntime = ({
   };
 
   const ensureAssistantStreamCtrl = (meta = {}) => {
+    const generationId = getGenerationId();
     if (isGenerationInterrupted(generationId)) return null;
 
     let streamCtrl = getStreamCtrl();
@@ -96,7 +99,7 @@ export const createAssistantStreamRuntime = ({
   const bindActiveGenerationReattach = () => {
     withMatchingGeneration((generation) => {
       generation.reattachStream = () => {
-        if (isGenerationInterrupted(generationId)) return false;
+        if (isGenerationInterrupted(getGenerationId())) return false;
         const meta =
           generation.streamMeta && typeof generation.streamMeta === 'object'
             ? generation.streamMeta

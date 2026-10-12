@@ -48,7 +48,7 @@ const getZIndex = (block, label) => {
   const runtimeEnd = contactSettingsSource.indexOf('buildMemoryTableSnapshot:', runtimeStart);
   assert.ok(runtimeStart >= 0 && runtimeEnd > runtimeStart, 'missing contact new-chat runtime');
   const runtimeSource = contactSettingsSource.slice(runtimeStart, runtimeEnd);
-  assert.match(contactSettingsSource, /import\s*\{\s*appChoice,\s*appConfirm,\s*appPromptText\s*\}/);
+  assert.match(contactSettingsSource, /import\s*\{\s*appConfirm,\s*appPromptText\s*\}/);
   assert.match(runtimeSource, /promptForArchiveName:\s*\(\)\s*=>\s*appPromptText\(\{/);
   assert.match(runtimeSource, /title:\s*'为当前聊天存档'/);
   assert.match(runtimeSource, /message:\s*'留空会自动命名；取消则不会开启新聊天。'/);

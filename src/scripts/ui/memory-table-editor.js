@@ -26,6 +26,16 @@ import { bindCustomSelectButton, createCustomSelectWrapper, refreshCustomSelectB
 import { buildMemoryImpactText, formatMemoryImpactScopeLabel } from './memory-impact-utils.js';
 import { emitMemoryRowsUpdated as emitSharedMemoryRowsUpdated } from './session-memory-event-utils.js';
 import { getCurrentWorldId, getGlobalWorldId, setCurrentWorld } from './world-session-runtime-utils.js';
+import { bindSheetDragToDismiss } from './bottom-sheet-drag-utils.js';
+import {
+  MEMORY_TABLE_CARD_QUERY,
+  renderMemoryTableCardView,
+  resolveActiveMemoryTableId,
+  revealOverflowingMemoryCards,
+} from './memory-table-card-view.js';
+
+const isReducedMotion = () => globalThis.document?.body?.dataset?.reducedMotion === 'on'
+  || globalThis.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches === true;
 
 const scopeLabelMap = {
   global: '全局',
@@ -278,6 +288,7 @@ export class MemoryTableEditor {
     chatStore = null,
     getMessages = null,
     includeGlobal = true,
+    onRendered = null,
   } = {}) {
     this.container = container || null;
     this.getContext = typeof getContext === 'function' ? getContext : () => null;
@@ -287,6 +298,18 @@ export class MemoryTableEditor {
     this.chatStore = chatStore || null;
     this.getMessages = typeof getMessages === 'function' ? getMessages : null;
     this.includeGlobal = includeGlobal !== false;
+    // 每次列表重画后回报「几张表、几行」，供设置页手机版的摘要行使用。
+    this.onRendered = typeof onRendered === 'function' ? onRendered : null;
+    this.lastOverview = { tableCount: 0, rowCount: 0 };
+    // 手机宽度改用标签 + 卡片；记住当前标签，切换方向决定横移动画。
+    this.activeTableId = '';
+    this.tabDirection = 0;
+    this.cardQuery = typeof window !== 'undefined' ? window.matchMedia?.(MEMORY_TABLE_CARD_QUERY) || null : null;
+    this.onLayoutChange = () => {
+      if (!this.container || this.container.style.display === 'none' || !this.currentContext) return;
+      this.renderTableList(this.currentContext);
+    };
+    this.cardQuery?.addEventListener?.('change', this.onLayoutChange);
     this.template = null;
     this.memories = [];
     this.timelineRepairPlan = null;
@@ -362,7 +385,21 @@ export class MemoryTableEditor {
     window.addEventListener('memory-rows-updated', this.onMemoriesUpdated);
   }
 
+  isCardLayout() {
+    return this.cardQuery?.matches === true;
+  }
+
+  reportOverview(overview = { tableCount: 0, rowCount: 0 }) {
+    this.lastOverview = overview;
+    try {
+      this.onRendered?.(overview);
+    } catch (err) {
+      logger.debug?.('memory table overview callback failed', err);
+    }
+  }
+
   destroy() {
+    this.cardQuery?.removeEventListener?.('change', this.onLayoutChange);
     window.removeEventListener('memory-templates-updated', this.onTemplatesUpdated);
     window.removeEventListener('memory-rows-updated', this.onMemoriesUpdated);
   }
@@ -384,6 +421,7 @@ export class MemoryTableEditor {
       this.batchMode = false;
       this.selectedIds.clear();
       this.searchTerm = '';
+      this.activeTableId = '';
       this.timelineRepairCheckToken += 1;
       this.timelineRepairPendingKey = '';
     }
@@ -518,8 +556,10 @@ export class MemoryTableEditor {
     if (!template || !Array.isArray(template.tables)) {
       this.cancelTimelineRepairCheck();
       this.listWrap.innerHTML = '<div style="color:var(--app-text-muted); font-size:12px;">未找到可用模板。</div>';
+      this.reportOverview({ tableCount: 0, rowCount: 0 });
       return;
     }
+    const tabsScrollLeft = this.listWrap.querySelector('.memory-cards-tabs')?.scrollLeft || 0;
     this.listWrap.innerHTML = '';
     this.visibleIds = new Set();
     const includeGlobal = this.includeGlobal;
@@ -543,13 +583,84 @@ export class MemoryTableEditor {
     if (!tables.length) {
       this.cancelTimelineRepairCheck();
       this.listWrap.innerHTML = '<div style="color:var(--app-text-muted); font-size:12px;">当前模板没有匹配的表格。</div>';
+      this.reportOverview({ tableCount: 0, rowCount: 0 });
       return;
     }
     this.scheduleTimelineRepairCheck(ctx, tables);
-    for (const table of tables) {
-      this.listWrap.appendChild(this.renderTableBlock(table, ctx));
+    const cardLayout = this.isCardLayout();
+    this.container.classList.toggle('is-card-layout', cardLayout);
+    if (cardLayout) {
+      this.listWrap.appendChild(this.renderCardLayout(tables, ctx, { tabsScrollLeft }));
+    } else {
+      for (const table of tables) {
+        this.listWrap.appendChild(this.renderTableBlock(table, ctx));
+      }
     }
     this.renderToolbar();
+    this.reportOverview({
+      tableCount: tables.length,
+      rowCount: tables.reduce((sum, table) => sum + this.getScopedTableRows(table, ctx).length, 0),
+    });
+  }
+
+  getScopedTableRows(table, ctx) {
+    const rows = this.memories.filter(row => String(row.table_id || '') === String(table?.id || ''));
+    return filterRowsByScope(rows, table, ctx);
+  }
+
+  // 手机版：一次只显示一张表，用标签切换；每行一张卡片。读写仍走编辑器原有方法。
+  renderCardLayout(tables, ctx, { tabsScrollLeft = 0 } = {}) {
+    const activeId = resolveActiveMemoryTableId(tables, this.activeTableId, item => this.getScopedTableRows(item, ctx).length);
+    const order = tables.map(table => String(table.id || ''));
+    const direction = this.tabDirection;
+    this.tabDirection = 0;
+    this.activeTableId = activeId;
+    const table = tables.find(item => String(item.id || '') === activeId) || null;
+    const scopedRows = table ? this.getScopedTableRows(table, ctx) : [];
+    const rows = table ? sortMemoryRows(this.filterRows(scopedRows), { tableId: table.id }) : [];
+    rows.forEach((row) => { if (row?.id) this.visibleIds.add(row.id); });
+    const view = renderMemoryTableCardView({
+      documentRef: document,
+      tables,
+      activeTableId: activeId,
+      direction,
+      getRowCount: item => this.getScopedTableRows(item, ctx).length,
+      activeRows: rows,
+      getCellViews: row => buildMemoryTableCellViews(row?.row_data || {}, table?.columns || [], { tableId: table?.id }),
+      scopeLabel: table ? getRuntimeScopeLabel(table, ctx) : '',
+      maxRows: Number(table?.maxRows) || 0,
+      totalRows: scopedRows.length,
+      batchMode: this.batchMode,
+      selectedIds: this.selectedIds,
+      searchTerm: this.searchTerm,
+      onSelectTable: (id) => {
+        this.tabDirection = order.indexOf(id) > order.indexOf(activeId) ? 1 : -1;
+        this.activeTableId = id;
+        this.renderTableList(this.currentContext);
+      },
+      onAdd: () => this.openEditor({ table, ctx, row: null }),
+      onEdit: row => this.openEditor({ table, ctx, row }),
+      onToggleSelect: (id, selected) => {
+        if (selected) this.selectedIds.add(id);
+        else this.selectedIds.delete(id);
+        this.renderTableList(this.currentContext);
+      },
+      onPush: () => this.pushTableToChat(table, scopedRows, ctx),
+      onExport: () => this.exportTableToWorldbook(table, scopedRows, ctx),
+    });
+    const settle = () => {
+      revealOverflowingMemoryCards(view);
+      const tabs = view.querySelector('.memory-cards-tabs');
+      const activeTab = tabs?.querySelector('.memory-cards-tab.is-active');
+      if (!tabs || !activeTab) return;
+      tabs.scrollLeft = tabsScrollLeft;
+      const left = activeTab.offsetLeft - tabs.offsetLeft;
+      if (left < tabs.scrollLeft || left + activeTab.offsetWidth > tabs.scrollLeft + tabs.clientWidth) {
+        tabs.scrollTo?.({ left: Math.max(0, left - 16), behavior: isReducedMotion() ? 'auto' : 'smooth' });
+      }
+    };
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(settle);
+    return view;
   }
 
   ensureLayout() {
@@ -940,7 +1051,7 @@ export class MemoryTableEditor {
     if (!sessionId) return [];
     try {
       if (typeof this.chatStore?.exportThreadMessages === 'function') {
-        const exported = await this.chatStore.exportThreadMessages(sessionId);
+        const exported = await this.chatStore.exportThreadMessages(sessionId, this.chatStore.getCurrentArchiveId?.(sessionId));
         if (Array.isArray(exported) && exported.length) return exported;
       }
     } catch (err) {
@@ -1774,6 +1885,7 @@ export class MemoryTableEditor {
     this.modalPanel.setAttribute('aria-labelledby', 'memory-editor-dialog-title');
     this.modalPanel.addEventListener('click', (e) => e.stopPropagation());
     this.modalPanel.innerHTML = `
+      <span class="memory-editor-grabber" aria-hidden="true"></span>
       <div class="memory-editor-header">
         <span class="memory-editor-mark" aria-hidden="true"></span>
         <div class="memory-editor-heading">
@@ -1789,6 +1901,7 @@ export class MemoryTableEditor {
       <div class="memory-editor-footer">
         <span class="memory-editor-footer-note">保存后，发送预览将实时更新</span>
         <div class="memory-editor-footer-actions">
+          <button type="button" data-role="delete" class="memory-editor-button is-danger" hidden>删除</button>
           <button type="button" data-role="cancel" class="memory-editor-button">取消</button>
           <button type="button" data-role="save" class="memory-editor-button is-primary">保存</button>
         </div>
@@ -1802,14 +1915,48 @@ export class MemoryTableEditor {
     this.modalForm = this.modalPanel.querySelector('[data-role="form"]');
     this.modalSave = this.modalPanel.querySelector('[data-role="save"]');
     this.modalCancel = this.modalPanel.querySelector('[data-role="cancel"]');
+    this.modalDelete = this.modalPanel.querySelector('[data-role="delete"]');
     this.modalPanel.querySelector('[data-role="close"]').onclick = () => this.closeEditor();
     this.modalCancel.onclick = () => this.closeEditor();
+    // 手机上是底部面板：按住把手或标题区往下拖可关闭。
+    for (const handle of [this.modalPanel.querySelector('.memory-editor-grabber'), this.modalPanel.querySelector('.memory-editor-header')]) {
+      bindSheetDragToDismiss({
+        handleEl: handle,
+        panelEl: this.modalPanel,
+        isEnabled: () => this.isCardLayout(),
+        onDismiss: () => this.closeEditor(),
+      });
+    }
   }
 
   openEditor({ table, ctx, row }) {
     this.ensureEditorModal();
     if (!this.modalForm || !this.modalHeader) return;
     const isNew = !row;
+    clearTimeout(this.__closeTimer);
+    this.modalPanel.classList.remove('is-closing');
+    this.modalOverlay?.classList.remove('is-closing');
+    this.modalPanel.style.transform = '';
+    if (this.modalDelete) {
+      this.modalDelete.hidden = isNew;
+      this.modalDelete.onclick = isNew ? null : async () => {
+        const ok = await appConfirm({
+          title: '删除记忆',
+          message: `确定要删除该记忆条目吗？删除后无法恢复。\n\n${this.buildImpactText('delete', ctx, table)}`,
+          danger: true,
+        });
+        if (!ok) return;
+        try {
+          await this.memoryStore.deleteMemory(row.id);
+          await this.syncManualMemoryMutation(ctx, { source: 'manual_memory_delete' });
+          this.closeEditor();
+        } catch (err) {
+          logger.warn('delete memory failed', err);
+          window.toastr?.error?.('删除失败');
+        }
+        this.renderPreservingScroll().catch(() => {});
+      };
+    }
     const tableRows = this.memories.filter(item => String(item?.table_id || '') === String(table?.id || ''));
     const scopedRowsForHeader = filterRowsByScope(tableRows, table, ctx);
     this.modalPanel.dataset.mode = isNew ? 'add' : 'edit';
@@ -2029,11 +2176,29 @@ export class MemoryTableEditor {
   }
 
   closeEditor() {
-    if (this.modalOverlay) this.modalOverlay.style.display = 'none';
-    if (this.modalPanel) {
-      this.modalPanel.classList.remove('is-open');
-      this.modalPanel.style.display = 'none';
-    }
     this.__onSave = null;
+    const finish = () => {
+      clearTimeout(this.__closeTimer);
+      if (this.modalOverlay) {
+        this.modalOverlay.style.display = 'none';
+        this.modalOverlay.classList.remove('is-closing');
+      }
+      if (this.modalPanel) {
+        this.modalPanel.classList.remove('is-open');
+        this.modalPanel.classList.remove('is-closing');
+        this.modalPanel.style.display = 'none';
+        this.modalPanel.style.transform = '';
+      }
+    };
+    // 手机底部面板往下滑出后再隐藏；拖动关闭时从手指放开处接着滑。
+    if (this.modalPanel && this.modalPanel.style.display !== 'none' && this.isCardLayout() && !isReducedMotion()) {
+      // 不清位移：收起动画的关键帧没有起点，会从当前（含拖动）位置接着滑出。
+      this.modalPanel.classList.add('is-closing');
+      this.modalOverlay?.classList.add('is-closing');
+      clearTimeout(this.__closeTimer);
+      this.__closeTimer = setTimeout(finish, 220);
+      return;
+    }
+    finish();
   }
 }

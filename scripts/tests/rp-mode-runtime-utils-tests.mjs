@@ -578,7 +578,7 @@ const createStorage = () => {
   );
   assert.match(appSource, /resetRpHistory\(getRpSessionId\(activePersonaId\), \{ withArchive: true \}\)/);
   assert.match(appSource, /当前剧情会先存档/);
-  assert.match(appSource, /正文与记忆表可在历史存档中切回；变量状态目前不会随存档恢复/);
+  assert.match(appSource, /正文、记忆表与变量可在历史存档中切回/);
   const greetingEditorStart = appSource.indexOf('const promptRpGreetingEditor =');
   const greetingEditorEnd = appSource.indexOf('const promptRpGreetingCreate =', greetingEditorStart);
   assert.ok(greetingEditorStart >= 0 && greetingEditorEnd > greetingEditorStart);

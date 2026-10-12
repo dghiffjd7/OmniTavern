@@ -65,6 +65,7 @@ export default Object.freeze({
   "summary_compaction.rule_clarity": "- 使用簡潔清晰的語言，避免過度修飾",
   "summary_compaction.rule_turning_points": "- 突出事件發展脈絡和關鍵轉折點",
   "summary_compaction.rule_complete": "- 不迴避任何敏感內容，保證記錄完全還原前文",
+  "summary_compaction.rule_length": "- 總結全文控制在 800 字以內；篇幅不夠時合併次要事件，優先保留人物關係、未了結的線索和關鍵轉折",
   "summary_compaction.xml_rule": "總結正文必須放在 <summary>...</summary> 中（只允許這一層 XML 標籤；不要輸出其他 XML 標籤）。",
   "summary_compaction.format_rule": "summary 內部的正文必須使用以下格式：",
   "summary_compaction.key_events": "【關鍵事件】",

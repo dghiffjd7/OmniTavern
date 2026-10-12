@@ -7,8 +7,19 @@ import { findAgentCenterResource } from './agent-center-resource-contract.js';
 import { WRITE_PREVIEW_PROVIDER_MODEL_CONTEXT_TOOLS } from '../agent/provider-tool-request-schema.js';
 import { PROVIDER_TOOL_PERMISSION_ACTIONS } from '../agent/provider-tool-permission-actions.js';
 import { appSettings } from '../storage/app-settings.js';
+import {
+    MEMORY_SUMMARY_COMPACTION_CHARS_MAX,
+    MEMORY_SUMMARY_COMPACTION_CHARS_MIN,
+    MEMORY_SUMMARY_ROW_LIMIT_MAX,
+    MEMORY_SUMMARY_ROW_LIMIT_MIN,
+    resolveMemorySummaryCompactionChars,
+    resolveMemorySummaryCompactionTrigger,
+    resolveMemorySummaryRowLimit,
+} from '../memory/memory-prompt-utils.js';
 import { getCurrentLocale, t, translateUiText } from '../i18n/index.js';
 import { getLocalizedPromptText } from '../i18n/prompt-locale.js';
+import { DEFAULT_MEMORY_TEMPLATE } from '../memory/default-template.js';
+import { getDefaultSummaryCompactionRules, resolveCustomSummaryCompactionRules } from './chat/summary-compaction-utils.js';
 import { appChoice, appConfirm, appPromptText } from './app-confirm.js';
 import { bindBackdropActivation } from './backdrop-activation-utils.js';
 import { captureAgentEditorDrafts, restoreAgentEditorDrafts } from './agent-editor-draft-utils.js';
@@ -1756,7 +1767,9 @@ const PANEL_CSS = `
 }
 .agent-center-agent-editor-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr);
+    grid-auto-flow: column;
+    grid-auto-columns: auto;
     gap: 8px;
     align-items: center;
 }
@@ -2889,6 +2902,26 @@ const displayRunStatusLabel = run => {
 const displayRiskLabel = risk => RISK_LABELS[trim(risk).toLowerCase()] || trim(risk, '风险未知');
 const displayPermissionLabel = permission => PERMISSION_LABELS[trim(permission)] || trim(permission);
 const displayAgentKind = kind => AGENT_KIND_LABELS[trim(kind)] || trim(kind);
+// 「最近运行」只显示中文：运行记录里的英文内部摘要不直接显示，有原因时改显示原因（原文在活动页）。
+const RUNTIME_REASON_LABELS = Object.freeze({
+    empty_response: '模型没有返回内容',
+    missing_summary_tag: '回复里没有摘要',
+    format: '回复格式不对',
+    compaction_error: '请求出错',
+    aborted: '已中止',
+    offline: '网络离线',
+    'empty-history': '没有可整理的对话',
+    'config-invalid': '模型未设定',
+    'stale-checkpoint': '对话已变更',
+    exception: '执行出错',
+    cadence: '未到填表轮次',
+});
+const displayRuntimeSummary = (state = {}) => {
+    const reason = RUNTIME_REASON_LABELS[trim(state.reason)];
+    if (reason) return translateUiText(reason);
+    const summary = trim(state.summary);
+    return /[\u3400-\u9fff]/.test(summary) ? summary : '';
+};
 const displayAgentFeature = id => AGENT_FEATURE_LABELS[trim(id)] || trim(id, 'Agent');
 const displayCardCategory = category => ({
     creative: '创作执行',
@@ -2958,6 +2991,27 @@ const PROMPT_ROLE_OPTIONS = Object.freeze([
     { value: 1, label: 'USER' },
     { value: 2, label: 'ASSISTANT' },
 ]);
+
+// 摘要提示词并入记忆卡（摘要模式）后的编辑入口；数据仍存在摘要 Agent 的提示词配置里。
+const SUMMARY_AGENT_PROMPT_REF = Object.freeze({ id: 'summary', label: '摘要提示词', profileType: 'sysprompt', agentId: 'summary_agent' });
+
+// 记忆卡顶部导览：现在会发生什么 / AI 收到什么 / 去哪里改或看。
+const MEMORY_MODE_GUIDES = Object.freeze({
+    off: [
+        '记忆已关闭：不生成摘要、不维护表格，请求里也不会加入记忆。',
+        '选「摘要」：每轮一句话摘要，轻量；选「表格」：按表记录人物、任务、大纲等，更完整。',
+    ],
+    summary: [
+        '现在：AI 每轮回复末尾写一句摘要；摘要满「触发与频率」设定的条数或字数时，再单独请求一次合并成大总结。',
+        'AI 会收到：摘要和大总结，作为前情记忆随正文请求一起发送。',
+        '想改写法：修改下方「摘要提示词」「大总结提示词」；想看已生成的内容：点「查看摘要与大总结」。',
+    ],
+    table: [
+        '现在：记忆表格的内容会随正文请求发给 AI；AI 更新表格时遵循下方「写表提示词」。',
+        '想改何时写表、何时压缩：看「触发与频率」；想改 AI 怎么写表：展开对应的表；想改记忆在请求里的位置：展开「进阶」。',
+        '想看或手动修改表格内容：点「打开记忆中心」。',
+    ],
+});
 
 const PROMPT_REFS_WITH_PLACEMENT = new Set([
     'dialogue',
@@ -3466,6 +3520,12 @@ export class AgentCenterPanel {
         });
         view.memoryAgentPromptConfig = memoryAgentPromptConfig;
         view.agentFormatGuide = agentFormatGuide;
+        // 摘要 Agent 卡已并入记忆卡，旧设置里关掉的卡片开关仍会停用摘要提示词，需要在记忆卡里提示。
+        view.summaryAgentCardEnabled = agentCenterSettings?.cards?.summary_agent?.enabled !== false;
+        // 动态导入：preset-store 静态引入会在无 localStorage 的环境（单元测试）里报错。
+        view.summaryRulesDefault = await import('../storage/preset-store.js')
+            .then(module => getLocalizedPromptText('summary_rules', module.DEFAULT_SUMMARY_RULES))
+            .catch(() => '');
         return view;
     }
 
@@ -3844,7 +3904,7 @@ export class AgentCenterPanel {
                 <div class="agent-center-card-sub">${escapeHtml(formatMeta([
                     displayAgentKind(state.kind),
                     displayStatusLabel(state.status),
-                    state.summary,
+                    displayRuntimeSummary(state),
                 ]))}</div>
             </div>
         `;
@@ -3894,6 +3954,7 @@ export class AgentCenterPanel {
                         <input type="checkbox" data-agent-prompt-enabled ${prompt.enabled !== false ? 'checked' : ''}>
                         <span>${escapeHtml(ref.label || promptId)}</span>
                     </label>
+                    ${promptId === 'summary' ? '<button type="button" class="agent-center-card-action" data-agent-prompt-reset="summary">恢复默认</button>' : ''}
                     <button type="button" class="agent-center-card-action is-primary" data-agent-prompt-save="${escapeHtml(promptId)}">保存</button>
                 </div>
                 ${hasPlacement ? `
@@ -3958,21 +4019,46 @@ export class AgentCenterPanel {
         };
     }
 
+    memoryPromptBadge(isCustom = null) {
+        if (isCustom === null) return '<span data-memory-badge></span>';
+        return `<span data-memory-badge class="agent-memory-badge${isCustom ? ' is-custom' : ''}">${escapeHtml(t(isCustom ? '已自定义' : '默认'))}</span>`;
+    }
+
+    // 默认/已自定义标记：与内置默认逐项比较（只看当前输入框内容，恢复默认后立即变回「默认」）。
+    isMemoryPromptBlockCustom(block) {
+        const kind = block?.dataset?.memoryBadgeKind;
+        const same = (value, fallback) => String(value ?? '').trim() === String(fallback ?? '').trim();
+        if (kind === 'group') {
+            const defaults = new Map(this.getMemoryAgentPromptConfig().fields.map(field => [field.id, field.defaultValue]));
+            return [...block.querySelectorAll('[data-memory-prompt-field]')].some(field => defaults.has(field.dataset.memoryPromptField) && !same(field.value, defaults.get(field.dataset.memoryPromptField)));
+        }
+        if (kind === 'summary') {
+            const fallback = this.view?.summaryRulesDefault;
+            return fallback ? !same(block.querySelector('[data-agent-prompt-rules]')?.value, fallback) : null;
+        }
+        if (kind === 'compaction') return Boolean(resolveCustomSummaryCompactionRules(block.querySelector('[data-summary-compaction-rules]')?.value));
+        return null;
+    }
+
+    syncMemoryPromptBadges(root) {
+        root?.querySelectorAll?.('[data-memory-badge-kind]').forEach((block) => {
+            const badge = block.querySelector('[data-memory-badge]');
+            if (badge) badge.outerHTML = this.memoryPromptBadge(this.isMemoryPromptBlockCustom(block));
+        });
+    }
+
     renderMemoryAgentEditor(agent = {}) {
         if (agent.id !== 'memory_table_agent') return '';
-        const profileView = this.view?.agentProfileView?.openai || {};
-        const settings = this.getMemoryAgentSettings();
-        const prompt = this.getMemoryAgentPromptConfig();
         const memoryMode = deriveMemoryStorageMode(appSettings.get());
+        const guide = MEMORY_MODE_GUIDES[memoryMode] || MEMORY_MODE_GUIDES.table;
+        const dataLink = memoryMode === 'summary'
+            ? `<button type="button" class="agent-center-card-action" data-memory-open-session-settings>${escapeHtml(t('查看摘要与大总结'))}</button>`
+            : memoryMode === 'table'
+                ? `<button type="button" class="agent-center-card-action" data-agent-resource-open="memory_center">${escapeHtml(t('打开记忆中心'))}</button>`
+                : '';
         return `
-            <div
-                class="agent-center-agent-section agent-center-agent-editor"
-                data-memory-agent-editor="memory_table_agent"
-                data-memory-agent-preset-id="${escapeHtml(profileView.presetId || '')}"
-                data-memory-agent-template-id="${escapeHtml(prompt.templateId || '')}"
-            >
-                <div class="agent-center-agent-section-title has-help" data-help="模板使用 {{tableData}} 插入表格内容">记忆提示词与注入</div>
-                <div class="agent-center-card-sub">${escapeHtml(prompt.templateName)}</div>
+            <div class="agent-center-agent-section agent-center-agent-editor agent-memory-hub" data-memory-hub-mode="${escapeHtml(memoryMode)}">
+                <div class="agent-center-agent-section-title">${escapeHtml(t('记忆设置'))}</div>
                 <div class="agent-center-memory-mode-setting">
                     <span class="agent-center-setting-label">记忆存储模式</span>
                     <div class="agent-center-memory-mode-control" role="group" aria-label="记忆存储模式">
@@ -3989,9 +4075,138 @@ export class AgentCenterPanel {
                             >${label}</button>
                         `).join('')}
                     </div>
+                    <ul class="agent-memory-guide">${guide.map(line => `<li>${escapeHtml(t(line))}</li>`).join('')}</ul>
+                    ${dataLink ? `<div class="agent-center-card-actions agent-memory-data-links">${dataLink}</div>` : ''}
                 </div>
-                <details class="agent-memory-prompt-block agent-memory-assembly"><summary>${escapeHtml(t('上下文与模板'))}<span>${escapeHtml(t('注入位置'))}</span></summary>
+                ${memoryMode !== 'off' ? this.renderMemoryTriggerSettings(memoryMode) : ''}
+                ${memoryMode === 'summary' ? this.renderMemorySummaryPromptEditor() : ''}
+                ${memoryMode === 'table' ? this.renderMemoryTableEditor() : ''}
+                ${memoryMode === 'summary' ? this.renderSummaryCompactionEditor() : ''}
+            </div>
+        `;
+    }
+
+    // 触发与频率：修改后立即写入（与通用设置读写同一份设置）；不属于需「保存」的提示词草稿。
+    renderMemoryTriggerSettings(memoryMode = 'table') {
+        const settings = appSettings.get();
+        const isTable = memoryMode === 'table';
+        const trigger = resolveMemorySummaryCompactionTrigger(settings);
+        const fillEveryN = Math.max(1, Math.trunc(Number(settings.memoryFillEveryN)) || 1);
+        const autoMode = String(settings.memoryAutoExtractMode || 'inline').toLowerCase() === 'separate' ? 'separate' : 'inline';
+        const number = (key, value, min, max) => `<input class="agent-center-agent-input" type="number" min="${min}"${max ? ` max="${max}"` : ''} inputmode="numeric" data-memory-setting="${key}" value="${escapeHtml(value)}">`;
+        const forTrigger = (kind, html, extra = '') => `<div class="agent-center-agent-field${extra}" data-memory-trigger-for="${kind}"${trigger === kind ? '' : ' hidden'}>${html}</div>`;
+        return `
+            <details class="agent-memory-prompt-block agent-memory-assembly" data-memory-trigger-settings open><summary>${escapeHtml(t('触发与频率'))}<span>${escapeHtml(t('修改后立即生效'))}</span></summary>
                 <div class="agent-center-agent-field-grid">
+                    ${isTable ? `
+                        <div class="agent-center-agent-field is-wide">
+                            <label class="agent-center-agent-check"><input type="checkbox" data-memory-setting="memoryAutoExtract" ${settings.memoryAutoExtract === true ? 'checked' : ''}><span>${escapeHtml(t('AI 自动写入记忆表格'))}</span></label>
+                        </div>
+                        <div class="agent-center-agent-field">
+                            <label>${escapeHtml(t('写表方式'))}</label>
+                            <select class="agent-center-agent-input" data-memory-setting="memoryAutoExtractMode">${this.renderSelectOptions([{ value: 'inline', label: t('随聊天回复一起（同一请求）') }, { value: 'separate', label: t('聊天后独立请求') }], autoMode)}</select>
+                        </div>
+                        <div class="agent-center-agent-field">
+                            <label>${escapeHtml(t('每 N 轮填表一次'))}</label>
+                            ${number('memoryFillEveryN', fillEveryN, 1)}
+                        </div>
+                    ` : ''}
+                    <div class="agent-center-agent-field is-wide">
+                        <label class="agent-center-agent-check"><input type="checkbox" data-memory-setting="memorySummaryCompactionAuto" ${settings.memorySummaryCompactionAuto !== false ? 'checked' : ''}><span>${escapeHtml(t(isTable ? '满足条件时自动压缩摘要' : '满足条件时自动生成大总结'))}</span></label>
+                    </div>
+                    <div class="agent-center-agent-field is-wide">
+                        <label>${escapeHtml(t('压缩触发方式'))}</label>
+                        <select class="agent-center-agent-input" data-memory-setting="memorySummaryCompactionTrigger">${this.renderSelectOptions([{ value: 'rows', label: t('按条数') }, { value: 'chars', label: t('按字数') }], trigger)}</select>
+                    </div>
+                    ${forTrigger('chars', `<label>${escapeHtml(t('未合并摘要字数'))}</label>${number('memorySummaryCompactionChars', resolveMemorySummaryCompactionChars(settings), MEMORY_SUMMARY_COMPACTION_CHARS_MIN, MEMORY_SUMMARY_COMPACTION_CHARS_MAX)}`)}
+                    ${forTrigger('rows', `<label>${escapeHtml(t('写作摘要条数'))}</label>${number('memorySummaryRowLimit', resolveMemorySummaryRowLimit(settings, 'rp_summary'), MEMORY_SUMMARY_ROW_LIMIT_MIN, MEMORY_SUMMARY_ROW_LIMIT_MAX)}`)}
+                    ${forTrigger('rows', `<label>${escapeHtml(t('聊天摘要条数'))}</label>${number('memorySummaryRowLimitChat', resolveMemorySummaryRowLimit(settings, 'chat_summary'), MEMORY_SUMMARY_ROW_LIMIT_MIN, MEMORY_SUMMARY_ROW_LIMIT_MAX)}`)}
+                    ${forTrigger('rows', escapeHtml(t(isTable
+                        ? '摘要（含滚动摘要）满这个条数时，把较早的摘要合并成一条，保留最新 2 条；这也是发给 AI 的摘要条数上限。'
+                        : '摘要满这个条数时，把较早的摘要合并进大总结，保留最新 2 条。')), ' is-wide agent-center-card-sub')}
+                    ${forTrigger('chars', escapeHtml(t(isTable
+                        ? '未合并的摘要总字数超过这个值时，把较早的摘要合并成一条，保留最新 2 条；压缩前未合并的摘要全部发给 AI。'
+                        : '未合并的摘要总字数超过这个值时，把较早的摘要合并进大总结，保留最新 2 条；压缩前未合并的摘要全部发给 AI。')), ' is-wide agent-center-card-sub')}
+                </div>
+            </details>
+        `;
+    }
+
+    renderMemorySummaryPromptEditor() {
+        const agent = { id: 'summary_agent' };
+        const prompt = this.getAgentPromptConfig(agent, SUMMARY_AGENT_PROMPT_REF) || {};
+        const fallback = this.view?.summaryRulesDefault;
+        const isCustom = fallback ? String(prompt.rules || '').trim() !== String(fallback).trim() : null;
+        return `
+            <details class="agent-memory-prompt-block" data-memory-badge-kind="summary" open><summary>${escapeHtml(t('摘要提示词'))}${this.memoryPromptBadge(isCustom)}</summary>
+                <p class="agent-center-card-sub">${escapeHtml(t('随每轮正文请求发送，要求 AI 在回复末尾用一句话写摘要。注入位置与深度一般不用改。'))}</p>
+                ${this.view?.summaryAgentCardEnabled === false ? `
+                    <div class="agent-center-agent-editor-note">
+                        <span>${escapeHtml(t('摘要提示词目前已停用，AI 不会写摘要。'))}</span>
+                        <button type="button" class="agent-center-card-action" data-memory-summary-enable>${escapeHtml(t('启用'))}</button>
+                    </div>
+                ` : ''}
+                ${this.renderAgentPromptEditor(agent, SUMMARY_AGENT_PROMPT_REF)}
+            </details>
+        `;
+    }
+
+    renderSummaryCompactionEditor() {
+        const saved = resolveCustomSummaryCompactionRules(appSettings.get().summaryCompactionRules);
+        return `
+            <details class="agent-memory-prompt-block" data-memory-badge-kind="compaction" open><summary>${escapeHtml(t('大总结提示词'))}${this.memoryPromptBadge(Boolean(saved))}</summary>
+                <div class="agent-center-agent-editor" data-summary-compaction-editor="global">
+                    <p class="agent-center-card-sub">${escapeHtml(t('满足「触发与频率」的条件时，单独请求一次，把较早的摘要合并成大总结。'))}</p>
+                    <textarea class="agent-center-agent-textarea" data-summary-compaction-rules data-i18n-skip="true" aria-label="${escapeHtml(t('大总结提示词'))}" spellcheck="false" maxlength="20000">${escapeHtml(saved || getDefaultSummaryCompactionRules())}</textarea>
+                    <p class="agent-center-card-sub">${escapeHtml(t('开头的任务说明、<summary> 标签要求和要合并的摘要由程序自动附加，不用写在这里；标题、列表或段落可以自由改。动态的大总结也使用这份提示词。'))}</p>
+                    <div class="agent-center-card-actions">
+                        <button type="button" class="agent-center-card-action" data-summary-compaction-reset>${escapeHtml(t('恢复默认'))}</button>
+                        <button type="button" class="agent-center-card-action is-primary" data-summary-compaction-save>${escapeHtml(t('保存'))}</button>
+                    </div>
+                </div>
+            </details>
+        `;
+    }
+
+    renderMemoryTableEditor() {
+        const profileView = this.view?.agentProfileView?.openai || {};
+        const settings = this.getMemoryAgentSettings();
+        const prompt = this.getMemoryAgentPromptConfig();
+        const globalSettings = appSettings.get();
+        const compactionUsesTableModel = globalSettings.memoryAutoExtractMode === 'separate'
+            && String(globalSettings.memoryUpdateApiMode || 'chat').toLowerCase() === 'profile';
+        const savedCompactionRules = resolveCustomSummaryCompactionRules(globalSettings.summaryCompactionRules);
+        const defaults = new Map(prompt.fields.map(field => [field.id, field.defaultValue]));
+        const groupCustom = group => prompt.fields.filter(field => field.group === group && defaults.has(field.id))
+            .some(field => String(field.value ?? '').trim() !== String(field.defaultValue ?? '').trim());
+        return `
+            <div
+                data-memory-agent-editor="memory_table_agent"
+                data-memory-agent-preset-id="${escapeHtml(profileView.presetId || '')}"
+                data-memory-agent-template-id="${escapeHtml(prompt.templateId || '')}"
+            >
+                <div class="agent-center-agent-section-title">${escapeHtml(t('写表提示词'))}</div>
+                <div class="agent-center-card-sub">${escapeHtml(t('每张表一个区块，告诉 AI 这张表记什么、怎么写。展开即可修改。'))} · ${escapeHtml(prompt.templateName)}</div>
+                <div class="agent-memory-prompt-blocks">
+                    ${[...new Set(prompt.fields.map(field => field.group))].map(group => `
+                        <details class="agent-memory-prompt-block" data-memory-badge-kind="group"><summary>${escapeHtml(group)}${this.memoryPromptBadge(groupCustom(group))}</summary>
+                        ${prompt.fields.filter(field => field.group === group).map(field => `<label class="agent-center-agent-field"><span>${escapeHtml(field.label)}</span><textarea class="agent-center-agent-textarea is-compact" name="memory-prompt-${escapeHtml(field.id)}" data-memory-prompt-field="${escapeHtml(field.id)}" data-i18n-skip="true" aria-label="${escapeHtml(group + ' · ' + field.label)}" spellcheck="false" maxlength="20000">${escapeHtml(field.value)}</textarea></label>`).join('')}
+                        </details>`).join('')}
+                </div>
+                <details class="agent-memory-prompt-block agent-memory-assembly" data-memory-summary-compaction><summary>${escapeHtml(t('摘要压缩'))}<span>${escapeHtml(t('提示词'))}</span></summary>
+                <div class="agent-center-agent-field-grid">
+                    <div class="agent-center-agent-field is-wide agent-center-card-sub">${escapeHtml(t('何时压缩在上方「触发与频率」设置。'))}</div>
+                    <div class="agent-center-agent-field is-wide agent-center-card-sub">${escapeHtml(compactionUsesTableModel ? t('压缩使用表格独立更新所选的模型。') : t('压缩使用该会话的正文模型。'))}</div>
+                    <div class="agent-center-agent-field is-wide" data-memory-badge-kind="compaction">
+                        <label>${escapeHtml(t('摘要压缩提示词'))}${this.memoryPromptBadge(Boolean(savedCompactionRules))}</label>
+                        <textarea class="agent-center-agent-textarea is-compact" data-summary-compaction-rules data-i18n-skip="true" aria-label="${escapeHtml(t('摘要压缩提示词'))}" spellcheck="false" maxlength="20000">${escapeHtml(savedCompactionRules || getDefaultSummaryCompactionRules())}</textarea>
+                        <span class="agent-center-card-sub">${escapeHtml(t('合并较早摘要时使用；任务说明、<summary> 标签要求和摘要内容由程序自动附加，标题、列表或段落可以自由改。与摘要模式的「大总结提示词」共用同一份。'))}</span>
+                    </div>
+                </div>
+                </details>
+                <details class="agent-memory-prompt-block agent-memory-assembly"><summary>${escapeHtml(t('进阶：注入位置与模板'))}<span>${escapeHtml(t('一般不用改'))}</span></summary>
+                <div class="agent-center-agent-field-grid">
+                    <div class="agent-center-agent-field is-wide agent-center-card-sub">${escapeHtml(t('表格内容模板用 {{tableData}} 插入表格内容。'))}</div>
                     <div class="agent-center-agent-field">
                         <label>记忆数据提示词位置</label>
                         <select class="agent-center-agent-input" data-memory-data-position>
@@ -4028,13 +4243,8 @@ export class AgentCenterPanel {
                     </div>
                 </div>
                 </details>
-                <div class="agent-memory-prompt-blocks">
-                    ${[...new Set(prompt.fields.map(field => field.group))].map(group => `
-                        <details class="agent-memory-prompt-block"><summary>${escapeHtml(group)}<span>${escapeHtml(t('提示词区块'))}</span></summary>
-                        ${prompt.fields.filter(field => field.group === group).map(field => `<label class="agent-center-agent-field"><span>${escapeHtml(field.label)}</span><textarea class="agent-center-agent-textarea is-compact" name="memory-prompt-${escapeHtml(field.id)}" data-memory-prompt-field="${escapeHtml(field.id)}" data-i18n-skip="true" aria-label="${escapeHtml(group + ' · ' + field.label)}" spellcheck="false" maxlength="20000">${escapeHtml(field.value)}</textarea></label>`).join('')}
-                        </details>`).join('')}
-                </div>
                 <div class="agent-center-card-actions agent-memory-save">
+                    <button type="button" class="agent-center-card-action" data-memory-agent-reset="memory_table_agent">恢复默认提示词</button>
                     <button type="button" class="agent-center-card-action is-primary" data-memory-agent-save="memory_table_agent">保存记忆设置</button>
                 </div>
             </div>
@@ -4121,7 +4331,8 @@ export class AgentCenterPanel {
         return JSON.stringify([agentId, this.view?.agentFormatGuide?.sessionId, this.view?.agentFormatGuide?.scopeId,
             this.view?.agentProfileView?.sysprompt?.presetId, this.view?.agentProfileView?.openai?.presetId,
             this.view?.memoryAgentPromptConfig?.templateId, this.view?.memoryAgentPromptConfig?.sessionId,
-            this.view?.memoryAgentPromptConfig?.scopeId, this.floatingAgentConfigScope]);
+            this.view?.memoryAgentPromptConfig?.scopeId, this.floatingAgentConfigScope,
+            agentId === 'memory_table_agent' ? deriveMemoryStorageMode(appSettings.get()) : '']);
     }
 
     mountCatalogPromptWorkspace(host, agentId, options = {}) {
@@ -5033,6 +5244,40 @@ export class AgentCenterPanel {
         } finally {if(workspace)delete workspace.dataset.promptMutation;}
     }
 
+    // 恢复默认只回填输入框，仍需点保存才写入。
+    fillAgentPromptDefaults(fields = []) {
+        fields.forEach(([field, value]) => {
+            if (!field) return;
+            field.value = value;
+            field.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        this.notifySuccess?.(t('已填入默认内容，保存后生效'));
+    }
+
+    async handleAgentPromptReset(button = null) {
+        const editor = button?.closest?.('[data-agent-prompt-editor]');
+        if (!editor) return;
+        // 按需加载：preset-store 顶层依赖 localStorage，静态导入会让面板在 node 测试里无法加载
+        const { DEFAULT_SUMMARY_RULES } = await import('../storage/preset-store.js');
+        this.fillAgentPromptDefaults([
+            [editor.querySelector('[data-agent-prompt-rules]'), getLocalizedPromptText('summary_rules', DEFAULT_SUMMARY_RULES)],
+        ]);
+    }
+
+    handleMemoryAgentPromptReset(button = null) {
+        const editor = button?.closest?.('[data-memory-agent-editor]');
+        if (!editor) return;
+        const defaults = new Map(this.getMemoryAgentPromptConfig().fields.map(field => [field.id, field.defaultValue]));
+        this.fillAgentPromptDefaults([
+            [editor.querySelector('[data-memory-prompt-template]'), DEFAULT_MEMORY_TEMPLATE.injection.template],
+            [editor.querySelector('[data-memory-prompt-wrapper]'), DEFAULT_MEMORY_TEMPLATE.injection.wrapper],
+            [editor.querySelector('[data-summary-compaction-rules]'), getDefaultSummaryCompactionRules()],
+            ...[...editor.querySelectorAll('[data-memory-prompt-field]')]
+                .filter(field => defaults.has(field.dataset.memoryPromptField))
+                .map(field => [field, defaults.get(field.dataset.memoryPromptField)]),
+        ]);
+    }
+
     async handleMemoryAgentSave(button = null) {
         const editor = button?.closest?.('[data-memory-agent-editor]');
         if (!editor) return;
@@ -5059,7 +5304,7 @@ export class AgentCenterPanel {
                 config,
             }, null);
             if (!result) {
-                this.lastError = '当前环境不能保存记忆表格 Agent 设置';
+                this.lastError = '当前环境不能保存记忆 Agent 设置';
                 this.render();
                 return;
             }
@@ -5072,18 +5317,94 @@ export class AgentCenterPanel {
                 this.render();
                 return;
             }
+            const rulesField = editor.querySelector('[data-summary-compaction-rules]');
+            if (rulesField) {
+                // 与摘要模式的大总结提示词共用；与默认相同或清空时存空串。
+                const rules = resolveCustomSummaryCompactionRules(rulesField.value);
+                if (!rules) {
+                    rulesField.value = getDefaultSummaryCompactionRules();
+                    const entry = snapshot.find(item => item.field === rulesField);
+                    if (entry) entry.value = rulesField.value;
+                }
+                appSettings.update({ summaryCompactionRules: rules });
+                window.dispatchEvent(new CustomEvent('app-settings-changed', { detail: { key: 'summaryCompactionRules', value: rules } }));
+            }
             markAgentPromptDraftSaved(editor,snapshot);
             this.notifySuccess?.(t('已保存'));
             await this.refresh();
         } finally {if(workspace)delete workspace.dataset.promptMutation;}
     }
 
-    handleMemoryStorageMode(mode = 'table') {
+    // 切换后记忆卡按新模式重绘，旧模式的编辑区会消失，未保存的修改先确认。
+    async handleMemoryStorageMode(mode = 'table', button = null) {
+        if (mode === deriveMemoryStorageMode(appSettings.get())) return false;
+        const hub = button?.closest?.('.agent-memory-hub');
+        if (hub && captureAgentEditorDrafts(hub).editors.length) {
+            const ok = await this.confirm({
+                title: '切换记忆模式',
+                message: '当前有未保存的修改，切换后会丢失。确定切换吗？',
+                danger: true,
+                confirmText: '切换',
+            });
+            if (!ok) return false;
+        }
         return applyMemoryStorageMode({
             mode,
             appSettings,
             dispatchEvent: event => globalThis.window?.dispatchEvent?.(event),
         });
+    }
+
+    // 触发与频率：改动立即写入与通用设置相同的键，数值按各自范围收敛后回填。
+    handleMemorySettingChange(field = null) {
+        const key = field?.dataset?.memorySetting;
+        const normalize = {
+            memoryAutoExtract: () => field.checked === true,
+            memorySummaryCompactionAuto: () => field.checked === true,
+            memoryAutoExtractMode: () => (field.value === 'separate' ? 'separate' : 'inline'),
+            memoryFillEveryN: () => Math.max(1, Math.trunc(Number(field.value)) || 1),
+            memorySummaryCompactionTrigger: () => (field.value === 'chars' ? 'chars' : 'rows'),
+            memorySummaryCompactionChars: () => resolveMemorySummaryCompactionChars({ memorySummaryCompactionChars: field.value }),
+            memorySummaryRowLimit: () => resolveMemorySummaryRowLimit({ memorySummaryRowLimit: field.value }, 'rp_summary'),
+            memorySummaryRowLimitChat: () => resolveMemorySummaryRowLimit({ memorySummaryRowLimitChat: field.value }, 'chat_summary'),
+        }[key];
+        if (!normalize) return;
+        const value = normalize();
+        if (field.type !== 'checkbox') field.value = String(value);
+        appSettings.update({ [key]: value });
+        globalThis.window?.dispatchEvent?.(new CustomEvent('app-settings-changed', { detail: { key, value } }));
+        if (key === 'memorySummaryCompactionTrigger') {
+            field.closest('[data-memory-trigger-settings]')?.querySelectorAll('[data-memory-trigger-for]')
+                .forEach(node => { node.hidden = node.dataset.memoryTriggerFor !== value; });
+        }
+    }
+
+    // 大总结提示词全局一份：与默认相同或留空时存空串（= 跟随内置默认，含语言切换）。
+    handleSummaryCompactionSave(button = null) {
+        const editor = button?.closest?.('[data-summary-compaction-editor]');
+        const field = editor?.querySelector('[data-summary-compaction-rules]');
+        if (!field) return;
+        const rules = resolveCustomSummaryCompactionRules(field.value);
+        if (!rules) field.value = getDefaultSummaryCompactionRules();
+        appSettings.update({ summaryCompactionRules: rules });
+        window.dispatchEvent(new CustomEvent('app-settings-changed', { detail: { key: 'summaryCompactionRules', value: rules } }));
+        markAgentPromptDraftSaved(editor);
+        this.syncMemoryPromptBadges(editor.closest('.agent-memory-hub'));
+        this.notifySuccess?.(t('已保存'));
+    }
+
+    handleSummaryCompactionReset(button = null) {
+        const editor = button?.closest?.('[data-summary-compaction-editor]');
+        this.fillAgentPromptDefaults([[editor?.querySelector('[data-summary-compaction-rules]'), getDefaultSummaryCompactionRules()]]);
+    }
+
+    async handleMemorySummaryEnable() {
+        const result = await this.callAction('setAgentCardEnabled', { id: 'summary_agent', enabled: true, reason: 'memory card summary prompt enable' }, null);
+        if (result === null || result === false || result?.ok === false) {
+            this.notifyError?.(t('当前环境不能启用摘要提示词'));
+            return;
+        }
+        await this.refresh();
     }
 
     handleReplyCheckPreviewTargetChange(value = 'auto') {
@@ -6984,11 +7305,35 @@ export class AgentCenterPanel {
         controls('[data-memory-agent-save]').forEach((button) => {
             button.addEventListener('click', () => this.handleMemoryAgentSave(button));
         });
+        controls('[data-agent-prompt-reset]').forEach((button) => {
+            button.addEventListener('click', () => this.handleAgentPromptReset(button));
+        });
+        controls('[data-memory-agent-reset]').forEach((button) => {
+            button.addEventListener('click', () => this.handleMemoryAgentPromptReset(button));
+        });
         controls('[data-agent-format-guide-save]').forEach(button => {
             button.addEventListener('click', () => this.handleFormatGuideSave(button));
         });
         controls('[data-memory-storage-mode]').forEach((button) => {
-            button.addEventListener('click', () => this.handleMemoryStorageMode(button.dataset.memoryStorageMode || 'table'));
+            button.addEventListener('click', () => this.handleMemoryStorageMode(button.dataset.memoryStorageMode || 'table', button));
+        });
+        controls('[data-memory-setting]').forEach((field) => {
+            field.addEventListener('change', () => this.handleMemorySettingChange(field));
+        });
+        controls('[data-summary-compaction-save]').forEach((button) => {
+            button.addEventListener('click', () => this.handleSummaryCompactionSave(button));
+        });
+        controls('[data-summary-compaction-reset]').forEach((button) => {
+            button.addEventListener('click', () => this.handleSummaryCompactionReset(button));
+        });
+        controls('[data-memory-open-session-settings]').forEach((button) => {
+            button.addEventListener('click', () => this.getActions?.()?.openAgentPromptSessionSettings?.());
+        });
+        controls('[data-memory-summary-enable]').forEach((button) => {
+            button.addEventListener('click', () => this.handleMemorySummaryEnable());
+        });
+        controls('.agent-memory-hub').forEach((hub) => {
+            hub.addEventListener('input', () => this.syncMemoryPromptBadges(hub));
         });
         controls('[data-agent-prompt-preview]').forEach((button) => {
             button.addEventListener('click', () => onPromptPreview(button.dataset.agentPromptPreview || ''));

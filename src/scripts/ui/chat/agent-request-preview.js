@@ -59,8 +59,8 @@ export const mountAgentRequestPreview = ({ host, buildRequest, savedState = null
   const contextPanel = doc.createElement('section');
   contextPanel.className = 'agent-prompt-context';
   contextPanel.dataset.agentAssembledContext = '';
-  const memoryEditor = editor.querySelector('[data-memory-agent-editor]');
-  if (memoryEditor) memoryEditor.querySelector('.agent-center-memory-mode-setting')?.after(contextPanel);
+  const memoryModeSetting = editor.querySelector('.agent-center-memory-mode-setting');
+  if (memoryModeSetting) memoryModeSetting.after(contextPanel);
   else if (editor.querySelector('.ac-footer')) editor.querySelector('.ac-footer').before(contextPanel);
   else editor.append(contextPanel);
   workspace.append(editor);

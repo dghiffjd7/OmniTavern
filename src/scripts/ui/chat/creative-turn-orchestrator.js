@@ -5,6 +5,8 @@
 // - 正文失败/取消 → 其后所有行 skipped；普通房子失败按 onHouseFailure 决定是否继续。
 // - 取消：未启动 → cancelled(未启动)，进行中 → 透传 signal 并封住迟到结果。
 // - 房子不另设时限：每次模型请求的时长由所用模型配置的请求超时决定，卡住时由用户停止整轮。
+// - 宿主房子的内部维护（表格摘要压缩）在宿主成功后于后台执行：不挡后续行，也不挡整轮收尾，
+//   与非跳房子流程的压缩一致；整轮被停止时一并取消。等待维护结束用 waitForMaintenance()。
 // - 执行器必须返回真实终态；resolve 的 status 只接受 succeeded/failed/cancelled/skipped。
 
 import { t } from '../../i18n/index.js';
@@ -103,6 +105,7 @@ export const createCreativeTurnOrchestrator = ({
   const policy = normalized.policy;
   const houses = new Map();
   const artifacts = {};
+  const pendingMaintenance = new Set();
   let bodyRowIndex = -1;
   normalized.rows.forEach((row, rowIndex) => {
     row.houses.forEach((house) => {
@@ -169,7 +172,7 @@ export const createCreativeTurnOrchestrator = ({
       Object.assign(state, patch);
       if (parentState) {
         emit(parentState, { childResults: [...parentState.childResults.filter(child => child.id !== state.id), { ...state }] });
-      } else if (!(patch.status === HOUSE_STATUS.succeeded && executors[houseDef.kind]?.maintenance)) {
+      } else {
         emit(state);
       }
     };
@@ -237,7 +240,12 @@ export const createCreativeTurnOrchestrator = ({
       controller.dispose?.();
     }
     if (!parentState && state.status === HOUSE_STATUS.succeeded && executor.maintenance) {
-      await runHouse({ kind: executor.maintenance.kind }, rowInput, turnContext, state);
+      // 先登记为执行中，宿主一完成界面就能显示「整理摘要中」，再交给后台。
+      emit(state, { childResults: [...state.childResults, { id: executor.maintenance.kind, kind: executor.maintenance.kind, status: HOUSE_STATUS.queued }] });
+      const work = runHouse({ kind: executor.maintenance.kind }, rowInput, turnContext, state)
+        .catch(err => logger?.warn?.('hopscotch maintenance failed', houseDef.id, err))
+        .finally(() => pendingMaintenance.delete(work));
+      pendingMaintenance.add(work);
     }
     return state;
   };
@@ -305,6 +313,7 @@ export const createCreativeTurnOrchestrator = ({
   return {
     board: normalized,
     runTurn: context => (turnPromise ||= runTurn(context)),
+    waitForMaintenance: () => Promise.allSettled([...pendingMaintenance]).then(() => undefined),
     getHouseState: id => (houses.has(id) ? { ...houses.get(id) } : null),
     listHouseStates: () => Array.from(houses.values()).map(s => ({ ...s })),
   };

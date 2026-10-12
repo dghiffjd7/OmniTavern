@@ -397,3 +397,135 @@ const makePanel = () => {
   assert.equal(newlyRenderedDisabled.disabled, true, '解锁不得误启用队列期间新渲染且本就禁用的控件');
   console.log('ok - 预设写入解锁保留新旧控件的原始禁用状态');
 }
+
+{
+  // 推理格式分页的保存只写推理格式草稿，自定义提示词等其他分类的草稿留到底部保存。
+  const panel = makePanel();
+  const upserted = [];
+  panel.store.upsertMany = async items => upserted.push(...items);
+  panel.captureCurrentDetailDraft = () => {};
+  panel.renderAllSections = () => {};
+  panel.updateUnsavedIndicator = () => {};
+  panel.showStatus = () => {};
+  panel.drafts.set('reasoning:DeepSeek', { name: 'DeepSeek', prefix: '<thinking>' });
+  panel.drafts.set('reasoning:Mine', { name: '', prefix: '<t>' });
+  panel.drafts.set('openai:preset-a', { name: 'saved', prompts: [{ id: 'x' }] });
+
+  assert.equal(await panel.saveStoreTypeDrafts('reasoning'), true);
+  assert.deepEqual(upserted.map(item => `${item.storeType}:${item.presetId}`), ['reasoning:DeepSeek', 'reasoning:Mine']);
+  assert.equal(upserted[1].name, 'Mine', '无名草稿用预设 id 作名称');
+  assert.deepEqual([...panel.drafts.keys()], ['openai:preset-a'], '其他分类草稿必须保留');
+  console.log('ok - 推理格式单独保存不碰其他分类草稿');
+}
+
+// 只模拟编辑器所需的 DOM；选择、草稿收集、保存均调用真实 PresetPanel 方法。
+const makeReasoningFixture = ({ rpBinding = '' } = {}) => {
+  class Element {
+    children = [];
+    fields = new Map();
+    dataset = {};
+    value = '';
+    set innerHTML(value) {
+      this.children = [];
+      this.fields.clear();
+      for (const match of value.matchAll(/<(?:select|button|input)\b([^>]*)>/g)) {
+        const id = match[1].match(/\bid="([^"]+)"/)?.[1];
+        const action = match[1].match(/\bdata-reasoning-action="([^"]+)"/)?.[1];
+        if (id) this.fields.set(`#${id}`, new Element());
+        if (action) this.fields.set(`[data-reasoning-action="${action}"]`, new Element());
+        if (/\bdata-app-scope\b/.test(match[1])) this.fields.set('[data-app-scope]', new Element());
+      }
+    }
+    appendChild(child) { this.children.push(child); return child; }
+    querySelector(selector) {
+      return this.fields.get(selector) || this.children.map(child => child.querySelector(selector)).find(Boolean) || null;
+    }
+    querySelectorAll() { return []; }
+    addEventListener() {}
+    dispatchEvent() {}
+  }
+  globalThis.document = { createElement: () => new Element() };
+  const presets = new Map(['a', 'b'].map(id => [id, {
+    name: id, prefix: `<${id}>`, suffix: `</${id}>`, separator: '\n', app_scope: 'both',
+  }]));
+  let activeId = 'a';
+  const bindings = { rp: rpBinding, chat: '' };
+  const panel = makePanel();
+  panel.currentSectionId = 'reasoning';
+  panel.element = new Element();
+  panel.store = {
+    ready: Promise.resolve(),
+    list: () => [...presets].map(([id, value]) => ({ id, ...value })),
+    getActiveId: () => activeId,
+    getActive: () => ({ ...presets.get(activeId) }),
+    getPreset: (_type, id) => ({ id, ...presets.get(id) }),
+    getModeBindingId: (_type, mode) => bindings[mode],
+    getSelectionState: () => ({ builtinActive: { reasoning: 'a' } }),
+    loadBundledDefaults: async () => ({ reasoning: { a: { prefix: '<default-a>' }, b: { prefix: '<default-b>' } } }),
+    setActive: async (_type, id) => { activeId = id; },
+    setModeBinding: async (_type, mode, id) => { bindings[mode] = id; },
+    clearModeBinding: async (_type, mode) => { bindings[mode] = ''; },
+    upsert: async (_type, { id = 'new', data, name }) => { presets.set(id, { ...data, name }); return id; },
+    upsertMany: async items => items.forEach(({ presetId, data }) => presets.set(presetId, { ...data })),
+  };
+  panel.renderReasoningEditor = preset => {
+    const editor = new Element();
+    for (const key of ['prefix', 'suffix', 'separator']) {
+      const field = new Element();
+      field.value = preset[key] || '';
+      editor.fields.set(`#reasoning-${key}`, field);
+    }
+    return editor;
+  };
+  panel.renderAllSections = () => {
+    panel.detailEditorEl = new Element();
+    panel.renderSectionEditor(panel.getSectionById('reasoning'), panel.detailEditorEl);
+  };
+  panel.updateUnsavedIndicator = () => {};
+  panel.showStatus = () => {};
+  panel.renderAllSections();
+  return { panel, presets, bindings, field: selector => panel.detailEditorEl.querySelector(selector) };
+};
+
+{
+  const previousDocument = globalThis.document;
+  const previousPrompt = globalThis.prompt;
+  try {
+    const { panel, presets, field } = makeReasoningFixture();
+    field('#reasoning-prefix').value = '<unsaved>';
+    field('#reasoning-chat-select').value = 'b';
+    await field('#reasoning-chat-select').onchange();
+    assert.equal(field('#reasoning-prefix').value, '<unsaved>', '切换聊天绑定必须保留当前编辑');
+    assert.equal(panel.drafts.get('reasoning:a')?.prefix, '<unsaved>');
+    assert.equal(presets.get('a').prefix, '<a>', '切换使用位置不应自动保存正文草稿');
+    console.log('ok - 切换聊天推理格式保留未保存草稿');
+
+    const bound = makeReasoningFixture({ rpBinding: 'b' });
+    assert.equal(bound.field('#reasoning-creative-select').value, 'b');
+    assert.equal(bound.field('#reasoning-prefix').value, '<b>', '编辑器必须显示选择器中的模式绑定方案');
+    bound.field('#reasoning-prefix').value = '<edited-b>';
+    await bound.panel.saveStoreTypeDrafts('reasoning');
+    assert.equal(bound.presets.get('b').prefix, '<edited-b>');
+    assert.equal(bound.presets.get('a').prefix, '<a>', '保存不得写到另一份全局预设');
+    await bound.field('[data-reasoning-action="reset"]').onclick();
+    assert.equal(bound.field('#reasoning-prefix').value, '<default-b>', '恢复默认也必须针对显示的方案');
+    globalThis.prompt = () => 'renamed-b';
+    await bound.panel.onRenameForStoreType('reasoning');
+    assert.equal(bound.presets.get('b').name, 'renamed-b');
+    assert.equal(bound.presets.get('a').name, 'a');
+    console.log('ok - 推理格式显示、保存、恢复默认和重命名使用同一方案');
+
+    globalThis.prompt = () => 'new-reasoning';
+    await bound.panel.onNewForStoreType('reasoning');
+    assert.equal(bound.bindings.rp, 'new', '已有写作绑定时新建方案也应切换到新方案');
+    assert.equal(bound.field('#reasoning-creative-select').value, 'new');
+    assert.equal(bound.panel.store.getActiveId('reasoning'), 'new');
+    assert.equal(bound.field('#reasoning-prefix').value, '<default-b>');
+    console.log('ok - 新建推理格式保持写作选择与编辑目标一致');
+  } finally {
+    if (previousDocument === undefined) delete globalThis.document;
+    else globalThis.document = previousDocument;
+    if (previousPrompt === undefined) delete globalThis.prompt;
+    else globalThis.prompt = previousPrompt;
+  }
+}

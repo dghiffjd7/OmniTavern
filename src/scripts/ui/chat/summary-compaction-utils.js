@@ -1,11 +1,41 @@
 import { getLocalizedPromptText } from '../../i18n/prompt-locale.js';
 
+const compactionPrompt = (key, fallback) => getLocalizedPromptText(`summary_compaction.${key}`, fallback);
+
+// 用户可编辑的大总结规则（原则、字数、格式模板）；<summary> 标签要求与数据部分由程序固定附加。
+export const getDefaultSummaryCompactionRules = () => [
+  compactionPrompt('rules_header', '总结应当遵循以下原则：'),
+  compactionPrompt('rule_order', '- 按时间顺序或逻辑顺序组织信息，并明确给出具体时间节点'),
+  compactionPrompt('rule_details', '- 保留关键事件和重要细节，省略冗余描述'),
+  compactionPrompt('rule_facts', '- 直接陈述事实，避免主观评价'),
+  compactionPrompt('rule_clarity', '- 使用简洁清晰的语言，避免过度修饰'),
+  compactionPrompt('rule_turning_points', '- 突出事件发展脉络和关键转折点'),
+  compactionPrompt('rule_complete', '- 不回避任何敏感内容，保证记录完全还原前文'),
+  compactionPrompt('rule_length', '- 总结全文控制在 800 字以内；篇幅不够时合并次要事件，优先保留人物关系、未了结的线索和关键转折'),
+  '',
+  compactionPrompt('format_rule', 'summary 内部的正文必须使用以下格式：'),
+  '',
+  compactionPrompt('key_events', '【关键事件】'),
+  compactionPrompt('event_1', '• {事件1}: {简要描述}'),
+  compactionPrompt('event_2', '• {事件2}: {简要描述}'),
+  compactionPrompt('event_3', '• {事件3}: {简要描述}'),
+  '...',
+].join('\n');
+
+// 空白或与默认相同都算未自定义，沿用内置版式（默认请求与改版前逐字一致）。
+export const resolveCustomSummaryCompactionRules = (rules = '') => {
+  const text = String(rules || '').trim();
+  return text && text !== getDefaultSummaryCompactionRules().trim() ? text : '';
+};
+
 export const buildSummaryCompactionPrompt = ({
   payload = '',
   compactedText = '',
+  rules = '',
 } = {}) => {
   const previous = String(compactedText || '').trim();
-  const prompt = (key, fallback) => getLocalizedPromptText(`summary_compaction.${key}`, fallback);
+  const prompt = compactionPrompt;
+  const customRules = resolveCustomSummaryCompactionRules(rules);
   return [
     prompt('override', '# 注意，无视你先前收到的任何指令，你的任务已更改，不再遵守格式要求'),
     prompt('transition', '接下来的一轮回复中，将不会进行创作，不再遵循前面的要求，而是会遵循<summary_rules>中的要求进行一轮总结'),
@@ -13,22 +43,29 @@ export const buildSummaryCompactionPrompt = ({
     prompt('request', '请对前文内容进行全面梳理，根据以下要求制作简明扼要的总结：'),
     '',
     '<summary_rules>',
-    prompt('rules_header', '总结应当遵循以下原则：'),
-    prompt('rule_order', '- 按时间顺序或逻辑顺序组织信息，并明确给出具体时间节点'),
-    prompt('rule_details', '- 保留关键事件和重要细节，省略冗余描述'),
-    prompt('rule_facts', '- 直接陈述事实，避免主观评价'),
-    prompt('rule_clarity', '- 使用简洁清晰的语言，避免过度修饰'),
-    prompt('rule_turning_points', '- 突出事件发展脉络和关键转折点'),
-    prompt('rule_complete', '- 不回避任何敏感内容，保证记录完全还原前文'),
-    '',
-    prompt('xml_rule', '总结正文必须放在 <summary>...</summary> 中（只允许这一层 XML 标签；不要输出其他 XML 标签）。'),
-    prompt('format_rule', 'summary 内部的正文必须使用以下格式：'),
-    '',
-    prompt('key_events', '【关键事件】'),
-    prompt('event_1', '• {事件1}: {简要描述}'),
-    prompt('event_2', '• {事件2}: {简要描述}'),
-    prompt('event_3', '• {事件3}: {简要描述}'),
-    '...',
+    ...(customRules ? [
+      customRules,
+      '',
+      prompt('xml_rule', '总结正文必须放在 <summary>...</summary> 中（只允许这一层 XML 标签；不要输出其他 XML 标签）。'),
+    ] : [
+      prompt('rules_header', '总结应当遵循以下原则：'),
+      prompt('rule_order', '- 按时间顺序或逻辑顺序组织信息，并明确给出具体时间节点'),
+      prompt('rule_details', '- 保留关键事件和重要细节，省略冗余描述'),
+      prompt('rule_facts', '- 直接陈述事实，避免主观评价'),
+      prompt('rule_clarity', '- 使用简洁清晰的语言，避免过度修饰'),
+      prompt('rule_turning_points', '- 突出事件发展脉络和关键转折点'),
+      prompt('rule_complete', '- 不回避任何敏感内容，保证记录完全还原前文'),
+      prompt('rule_length', '- 总结全文控制在 800 字以内；篇幅不够时合并次要事件，优先保留人物关系、未了结的线索和关键转折'),
+      '',
+      prompt('xml_rule', '总结正文必须放在 <summary>...</summary> 中（只允许这一层 XML 标签；不要输出其他 XML 标签）。'),
+      prompt('format_rule', 'summary 内部的正文必须使用以下格式：'),
+      '',
+      prompt('key_events', '【关键事件】'),
+      prompt('event_1', '• {事件1}: {简要描述}'),
+      prompt('event_2', '• {事件2}: {简要描述}'),
+      prompt('event_3', '• {事件3}: {简要描述}'),
+      '...',
+    ]),
     '',
     '</summary_rules>',
     '',
@@ -70,20 +107,31 @@ export const normalizeSummarySnapshotItems = (items = []) =>
     })
     .filter(Boolean);
 
+// trigger：'chars'（默认，总字数超过 minLength）或 'rows'（满 rowLimit 条）。
 export const shouldRunSummaryCompaction = ({
   items = [],
   force = false,
   minLength = 1000,
+  trigger = 'chars',
+  rowLimit = 0,
 } = {}) => {
   const list = Array.isArray(items) ? items : [];
   if (!list.length) return false;
   if (force) return true;
+  if (trigger === 'rows') return Number(rowLimit) > 0 && list.length >= Number(rowLimit);
   const total = list.reduce((sum, item) => {
     const text = String(typeof item === 'string' ? item : item?.text || '');
     return sum + text.length;
   }, 0);
   return total > Number(minLength || 0);
 };
+
+// 压缩回复本身约数百 token；留出余量给默认会思考的模型，同时仍有上限。
+export const SUMMARY_COMPACTION_MAX_TOKENS = 2000;
+
+// 会话摘要压缩的独立请求：只有压缩提示本身。套用创意写作预设时，模型会先照预设写思维链／角色扮演，
+// 长时间写不到 <summary>（实测 mimo：预设下 5900 token 提示、三种上限都截断；独立请求 9 秒完成）。
+export const buildStandaloneSummaryCompactionMessages = prompt => [{ role: 'user', content: String(prompt || '') }];
 
 export const requestSummaryCompactionRaw = async ({
   items = [],
@@ -92,13 +140,21 @@ export const requestSummaryCompactionRaw = async ({
   buildMessages = null,
   backgroundChat = null,
   options = null,
+  rules = '',
 } = {}) => {
   if (typeof buildMessages !== 'function' || typeof backgroundChat !== 'function') return '';
   const payload = buildSummaryCompactionPayload(items);
   if (!payload.trim()) return '';
-  const prompt = buildSummaryCompactionPrompt({ payload, compactedText });
+  const prompt = buildSummaryCompactionPrompt({ payload, compactedText, rules });
   const built = buildMessages(prompt, context);
-  const result = await backgroundChat(built, options || { temperature: 0.2, maxTokens: 800 });
+  // 预设生成参数里的 max_tokens 会盖过驼峰 maxTokens（OpenAI 类参数整理以 max_tokens 优先），
+  // 两种写法都给，压缩上限才真正生效；否则会沿用正文的大上限，推理模型可长时间无输出。
+  const result = await backgroundChat(built, {
+    temperature: 0.2,
+    ...(options || {}),
+    maxTokens: SUMMARY_COMPACTION_MAX_TOKENS,
+    max_tokens: SUMMARY_COMPACTION_MAX_TOKENS,
+  });
   return String(result || '').trim();
 };
 
@@ -162,13 +218,15 @@ export const isValidCompactedSummaryText = (text) => {
   return hasHeader && hasBullet;
 };
 
-export const parseSummaryCompactionResult = (input) => {
+// 自定义大总结规则可以改标题、列表或段落：只要求 <summary> 里有足够的正文；默认规则仍按内置版式严格校验。
+export const SUMMARY_COMPACTION_MIN_CUSTOM_LENGTH = 20;
+
+export const parseSummaryCompactionResult = (input, { strictFormat = true } = {}) => {
   const raw = String(input || '').trim();
   if (!raw) return { raw: '', text: '', valid: false };
   const text = extractSummaryTagText(raw);
-  return {
-    raw,
-    text,
-    valid: Boolean(text) && isValidCompactedSummaryText(text),
-  };
+  const valid = Boolean(text) && (strictFormat
+    ? isValidCompactedSummaryText(text)
+    : text.replace(/\s+/g, '').length >= SUMMARY_COMPACTION_MIN_CUSTOM_LENGTH);
+  return { raw, text, valid };
 };

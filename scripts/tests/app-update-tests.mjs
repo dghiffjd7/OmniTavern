@@ -14,6 +14,9 @@ import {
   markdownToPlainText,
   renderAppUpdateUi,
 } from '../../src/scripts/ui/app-update-runtime.js';
+import { resolveAppUpdateProgressDisplay } from '../../src/scripts/ui/app-update-progress-card.js';
+
+const pick = item => ({ title: item.title, percent: item.percent, indeterminate: item.indeterminate });
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
@@ -95,9 +98,9 @@ const makeRuntime = (overrides = {}) => {
     updateSettings: patch => { settings = { ...settings, ...patch }; },
     choose: async options => { calls.choose.push(options); return overrides.choice ?? 'later'; },
     openExternal: async url => { calls.open.push(url); return true; },
-    installDesktopUpdate: async version => {
+    installDesktopUpdate: async (version, options) => {
       calls.install.push(version);
-      return overrides.install ? overrides.install(version) : (overrides.installResult ?? { status: 'installing' });
+      return overrides.install ? overrides.install(version, options) : (overrides.installResult ?? { status: 'installing' });
     },
     isMobile: () => overrides.mobile === true,
     onStateChange: view => calls.views.push(view),
@@ -179,6 +182,49 @@ test('runtime shows the bundled changelog once after an upgrade and ignores prer
   await preview.runtime.start();
   assert.equal(preview.calls.choose.length, 0);
   assert.equal(preview.runtime.getView().hasUpdate, false);
+});
+
+test('desktop install reports download progress, then the install stage; a skipped install clears it', async () => {
+  const seen = [];
+  let report = null;
+  let finish = null;
+  const { runtime } = makeRuntime({
+    install: (version, options) => {
+      report = options?.onProgress;
+      return new Promise(resolve => { finish = resolve; });
+    },
+  });
+  await runtime.start();
+  const pending = runtime.runUpdate();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(runtime.getView().progress?.stage, 'preparing', '点更新后先显示准备中');
+  assert.equal(typeof report, 'function', '把进度回调交给原生安装');
+  report({ stage: 'downloading', downloaded: 5 * 1048576, total: 20 * 1048576 });
+  seen.push(runtime.getView().progress);
+  report({ stage: 'downloading', downloaded: 9 * 1048576, total: null });
+  seen.push(runtime.getView().progress);
+  report({ stage: 'installing' });
+  seen.push(runtime.getView().progress);
+  assert.deepEqual(seen.map(item => [item.stage, item.percent]), [['downloading', 25], ['downloading', null], ['installing', 100]]);
+  assert.equal(seen[0].version, '0.7.4');
+  finish({ status: 'version_mismatch', version: '0.7.5' });
+  await pending;
+  assert.equal(runtime.getView().progress, null, '没有真正安装时收起进度');
+});
+
+test('progress display texts follow the stage and fall back when the size is unknown', () => {
+  const view = progress => resolveAppUpdateProgressDisplay({ version: '0.7.5', ...progress });
+  assert.deepEqual(pick(view({ stage: 'preparing' })), { title: '正在准备更新 v0.7.5', percent: null, indeterminate: true });
+  const downloading = view({ stage: 'downloading', percent: 36, downloaded: 12.34 * 1048576, total: 34.2 * 1048576 });
+  assert.deepEqual(pick(downloading), { title: '正在下载 v0.7.5', percent: 36, indeterminate: false });
+  assert.equal(downloading.meta, '12.3 MB / 34.2 MB');
+  const unknown = view({ stage: 'downloading', percent: null, downloaded: 3 * 1048576, total: null });
+  assert.equal(unknown.indeterminate, true);
+  assert.equal(unknown.meta, '已下载 3.0 MB');
+  const installing = view({ stage: 'installing', percent: 100 });
+  assert.equal(installing.title, '下载完成，正在启动安装');
+  assert.match(installing.meta, /自动关闭/);
+  assert.equal(resolveAppUpdateProgressDisplay(null), null);
 });
 
 test('ui projection toggles the badge class and fills the about card', () => {

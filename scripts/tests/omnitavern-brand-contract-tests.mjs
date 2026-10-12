@@ -58,20 +58,20 @@ const tauriDevConfig = JSON.parse(tauriDevConfigText);
 
 {
   assert.equal(packageJson.name, 'omnitavern');
-  assert.equal(packageJson.version, '0.7.4');
+  assert.equal(packageJson.version, '0.7.5');
   assert.equal(packageLock.name, 'omnitavern');
-  assert.equal(packageLock.version, '0.7.4');
+  assert.equal(packageLock.version, '0.7.5');
   assert.equal(packageLock.packages?.['']?.name, 'omnitavern');
-  assert.equal(packageLock.packages?.['']?.version, '0.7.4');
+  assert.equal(packageLock.packages?.['']?.version, '0.7.5');
   assert.equal(tauriConfig.productName, 'OmniTavern');
-  assert.equal(tauriConfig.version, '0.7.4');
-  assert.equal(tauriConfig.bundle?.android?.versionCode, 7012);
+  assert.equal(tauriConfig.version, '0.7.5');
+  assert.equal(tauriConfig.bundle?.android?.versionCode, 7013);
   assert.equal(tauriConfig.app?.windows?.[0]?.title, 'OmniTavern');
   assert.match(cargoToml, /^name = "omnitavern"$/m);
-  assert.match(cargoToml, /^version = "0\.7\.4"$/m);
+  assert.match(cargoToml, /^version = "0\.7\.5"$/m);
   assert.match(cargoToml, /^name = "omnitavern_lib"$/m);
   assert.match(rustMain, /omnitavern_lib::run\(\)/);
-  assert.match(cargoLock, /name = "omnitavern"\s+version = "0\.7\.4"/);
+  assert.match(cargoLock, /name = "omnitavern"\s+version = "0\.7\.5"/);
   console.log('ok - OmniTavern product package crate binary and release version stay synchronized');
 }
 
@@ -108,6 +108,6 @@ const tauriDevConfig = JSON.parse(tauriDevConfigText);
   assert.match(docsIndex, /<h1>OmniTavern<\/h1>/);
   assert.match(openRouter, /const DEFAULT_APP_TITLE = 'OmniTavern'/);
   assert.doesNotMatch(openRouter, /https:\/\/tauri-chat-app\.local/);
-  assert.match(webSearchTools, /OmniTavern-Maid-Assistant\/0\.7\.4/);
+  assert.match(webSearchTools, /OmniTavern-Maid-Assistant\/0\.7\.5/);
   console.log('ok - desktop Android docs provider attribution and visible shell use OmniTavern');
 }

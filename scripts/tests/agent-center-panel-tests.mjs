@@ -5,6 +5,8 @@ import {
   AgentCenterPanel,
   formatAgentCenterExportText,
 } from '../../src/scripts/ui/agent-center-panel.js';
+import { appSettings } from '../../src/scripts/storage/app-settings.js';
+import { getDefaultSummaryCompactionRules } from '../../src/scripts/ui/chat/summary-compaction-utils.js';
 
 const agentCenterPanelSource = await readFile(
   new URL('../../src/scripts/ui/agent-center-panel.js', import.meta.url),
@@ -580,7 +582,7 @@ const agentCenterPanelSource = await readFile(
   panel.view = {
     agents: [{
       id: 'memory_table_agent',
-      title: '记忆表格 Agent',
+      title: '记忆 Agent',
       summary: '管理记忆表格注入、更新和写入预览。',
       detail: ['控制记忆表格数据和 guide 在请求中的位置。'],
       enabled: true,
@@ -623,7 +625,13 @@ const agentCenterPanelSource = await readFile(
   panel.openFloatingAgentCard('memory_table_agent');
   panel.floatingAgentFlipped = true;
   const floatingHtml = panel.renderFloatingAgentCard();
-  assert.match(floatingHtml, /记忆提示词与注入/);
+  assert.match(floatingHtml, /记忆设置/);
+  assert.match(floatingHtml, /写表提示词/);
+  // 表格模式没有「大总结」：同一份提示词放在「摘要压缩」里，叫摘要压缩提示词，随「保存记忆设置」保存。
+  assert.match(floatingHtml, /摘要压缩提示词/);
+  assert.match(floatingHtml, /data-summary-compaction-rules/);
+  assert.doesNotMatch(floatingHtml, /大总结提示词<span data-memory-badge|data-summary-compaction-editor/);
+  assert.doesNotMatch(floatingHtml, /data-agent-prompt-editor="summary"/);
   assert.match(floatingHtml, /记忆数据提示词位置/);
   assert.match(floatingHtml, /写表指导提示词位置/);
   assert.match(floatingHtml, /表格内容模板/);
@@ -637,6 +645,204 @@ const agentCenterPanelSource = await readFile(
   assert.match(floatingHtml, /记忆存储模式/);
   assert.match(floatingHtml, /data-agent-resource-open="memory_center"/);
   console.log('ok - memory table agent back renders editable prompt template settings');
+}
+
+{
+  // 记忆卡按模式显示：摘要模式只有摘要/大总结提示词，关闭时没有编辑区；表格内容不混入。
+  const before = appSettings.get();
+  const panel = new AgentCenterPanel();
+  panel.view = {
+    agents: [{ id: 'memory_table_agent', title: '记忆 Agent', enabled: true, implemented: true, category: 'memory', accent: 'memory' }],
+    memoryAgentPromptConfig: { templateId: 'default-v1', fields: [{ id: 'guide', group: '通用写表指导', label: '指导', value: '改过的', defaultValue: '默认的' }] },
+    summaryRulesDefault: '默认摘要规则',
+    summaryAgentCardEnabled: false,
+    agentProfileView: { sysprompt: { presetId: 'sys-a', profile: { agents: { summary_agent: { prompts: { summary: { enabled: true, rules: '默认摘要规则' } } } } } } },
+  };
+  const render = (mode) => {
+    appSettings.update(mode === 'off' ? { memoryEnabled: false } : { memoryEnabled: true, memoryStorageMode: mode });
+    return panel.renderMemoryAgentEditor({ id: 'memory_table_agent' });
+  };
+  try {
+    const summaryHtml = render('summary');
+    assert.match(summaryHtml, /data-memory-hub-mode="summary"/);
+    assert.match(summaryHtml, /data-agent-prompt-editor="summary"/);
+    assert.match(summaryHtml, /data-agent-id="summary_agent"/);
+    assert.match(summaryHtml, /data-summary-compaction-editor/);
+    assert.match(summaryHtml, /data-memory-summary-enable/);
+    assert.match(summaryHtml, /data-memory-open-session-settings/);
+    assert.doesNotMatch(summaryHtml, /data-memory-agent-editor|data-memory-prompt-field|data-memory-agent-save/);
+    assert.match(summaryHtml, /摘要提示词<span data-memory-badge class="agent-memory-badge">默认/);
+    assert.match(summaryHtml, /大总结提示词<span data-memory-badge class="agent-memory-badge">默认/);
+
+    const tableHtml = render('table');
+    assert.match(tableHtml, /data-memory-agent-editor="memory_table_agent"/);
+    assert.match(tableHtml, /通用写表指导<span data-memory-badge class="agent-memory-badge is-custom">已自定义/);
+    assert.doesNotMatch(tableHtml, /data-summary-compaction-editor/);
+    assert.match(tableHtml, /data-memory-summary-compaction>[\s\S]*data-memory-badge-kind="compaction"[\s\S]*data-summary-compaction-rules[\s\S]*data-memory-agent-save/);
+    assert.doesNotMatch(tableHtml, /data-agent-prompt-editor="summary"/);
+
+    const offHtml = render('off');
+    assert.match(offHtml, /记忆已关闭/);
+    assert.doesNotMatch(offHtml, /data-memory-agent-editor|data-agent-prompt-editor|data-summary-compaction-editor/);
+  } finally {
+    appSettings.update({ memoryEnabled: before.memoryEnabled, memoryStorageMode: before.memoryStorageMode });
+  }
+  console.log('ok - memory card shows only the editors of the current memory mode');
+}
+
+{
+  // 大总结提示词：自定义存全局；与默认相同或清空存空串（跟随内置默认）。
+  const before = appSettings.get().summaryCompactionRules;
+  const panel = new AgentCenterPanel();
+  panel.view = {};
+  const makeEditor = (value) => {
+    const field = { value, defaultValue: value };
+    const editor = {
+      dataset: {},
+      querySelector: selector => (selector === '[data-summary-compaction-rules]' ? field : null),
+      querySelectorAll: () => [field],
+      closest: () => null,
+      contains: () => true,
+      dispatchEvent: () => {},
+      ownerDocument: { defaultView: { Event: class { constructor(type) { this.type = type; } } } },
+    };
+    return { field, button: { closest: () => editor } };
+  };
+  const events = [];
+  const previousWindow = globalThis.window;
+  globalThis.window = { dispatchEvent: event => events.push(event.detail) };
+  try {
+    const custom = makeEditor('只保留人物关系');
+    panel.handleSummaryCompactionSave(custom.button);
+    assert.equal(appSettings.get().summaryCompactionRules, '只保留人物关系');
+    assert.deepEqual(events.at(-1), { key: 'summaryCompactionRules', value: '只保留人物关系' });
+    const same = makeEditor(`${getDefaultSummaryCompactionRules()}\n`);
+    panel.handleSummaryCompactionSave(same.button);
+    assert.equal(appSettings.get().summaryCompactionRules, '');
+    const blank = makeEditor('   ');
+    panel.handleSummaryCompactionSave(blank.button);
+    assert.equal(appSettings.get().summaryCompactionRules, '');
+    assert.equal(blank.field.value, getDefaultSummaryCompactionRules());
+  } finally {
+    globalThis.window = previousWindow;
+    appSettings.update({ summaryCompactionRules: before });
+  }
+  console.log('ok - summary compaction rules save globally and fall back to the built-in default');
+}
+
+{
+  // 表格模式：摘要压缩提示词随「保存记忆设置」写入同一份全局设置；清空则回到默认。
+  const before = appSettings.get();
+  const calls = [];
+  const panel = new AgentCenterPanel({ getActions: () => ({
+    setMemoryAgentSettings: payload => { calls.push(['settings', payload]); return { ok: true }; },
+    setMemoryAgentPromptConfig: payload => { calls.push(['prompt', payload]); return { ok: true }; },
+  }) });
+  panel.refresh = async () => {};
+  const field = (value, extra = {}) => ({ value, defaultValue: value, checked: true, defaultChecked: true, type: 'text', tagName: 'TEXTAREA', ...extra });
+  const makeEditor = (rules) => {
+    const fields = {
+      '[data-summary-compaction-rules]': field(rules),
+    };
+    const editor = {
+      dataset: { memoryAgentPresetId: 'openai-a', memoryAgentTemplateId: 'default-v1' },
+      querySelector: selector => fields[selector] || null,
+      querySelectorAll: selector => (selector === 'input, textarea, select' ? Object.values(fields) : []),
+      closest: () => null,
+      contains: () => true,
+      dispatchEvent: () => {},
+      ownerDocument: { defaultView: { Event: class { constructor(type) { this.type = type; } } } },
+    };
+    return { editor, rules: fields['[data-summary-compaction-rules]'], button: { closest: () => editor } };
+  };
+  const previousWindow = globalThis.window;
+  globalThis.window = { dispatchEvent: () => {} };
+  try {
+    const custom = makeEditor('只合并人物关系');
+    await panel.handleMemoryAgentSave(custom.button);
+    assert.equal(appSettings.get().summaryCompactionRules, '只合并人物关系');
+    const blank = makeEditor('  ');
+    await panel.handleMemoryAgentSave(blank.button);
+    assert.equal(appSettings.get().summaryCompactionRules, '');
+    assert.equal(blank.rules.value, getDefaultSummaryCompactionRules());
+    assert.equal(blank.rules.defaultValue, getDefaultSummaryCompactionRules(), 'saved baseline follows the restored default');
+    assert.equal(calls.filter(([kind]) => kind === 'prompt').length, 2);
+  } finally {
+    globalThis.window = previousWindow;
+    appSettings.update({ summaryCompactionRules: before.summaryCompactionRules });
+  }
+  console.log('ok - table mode saves the compaction prompt together with memory settings');
+}
+
+{
+  // 触发与频率：两种模式都有（表格模式另含写表开关、方式、频率），修改后立即写入与通用设置相同的键。
+  const keys = ['memoryEnabled', 'memoryStorageMode', 'memoryAutoExtract', 'memoryAutoExtractMode', 'memoryFillEveryN', 'memorySummaryCompactionAuto', 'memorySummaryCompactionTrigger', 'memorySummaryCompactionChars', 'memorySummaryRowLimit', 'memorySummaryRowLimitChat'];
+  const before = Object.fromEntries(keys.map(key => [key, appSettings.get()[key]]));
+  const panel = new AgentCenterPanel();
+  panel.view = { memoryAgentPromptConfig: { fields: [] }, agentProfileView: {} };
+  const events = [];
+  const previousWindow = globalThis.window;
+  globalThis.window = { dispatchEvent: event => events.push(event.detail) };
+  try {
+    appSettings.update({ memoryEnabled: true, memoryStorageMode: 'summary', memorySummaryCompactionTrigger: 'rows' });
+    const summaryHtml = panel.renderMemoryAgentEditor({ id: 'memory_table_agent' });
+    assert.match(summaryHtml, /data-memory-trigger-settings/);
+    assert.match(summaryHtml, /data-memory-setting="memorySummaryCompactionTrigger"/);
+    assert.match(summaryHtml, /data-memory-trigger-for="chars" hidden/);
+    assert.doesNotMatch(summaryHtml, /data-memory-trigger-for="rows" hidden/);
+    assert.doesNotMatch(summaryHtml, /data-memory-setting="memoryAutoExtract"/);
+    appSettings.update({ memoryStorageMode: 'table' });
+    const tableHtml = panel.renderMemoryAgentEditor({ id: 'memory_table_agent' });
+    for (const key of ['memoryAutoExtract', 'memoryAutoExtractMode', 'memoryFillEveryN', 'memorySummaryRowLimit', 'memorySummaryRowLimitChat', 'memorySummaryCompactionChars']) assert.match(tableHtml, new RegExp(`data-memory-setting="${key}"`), key);
+    assert.doesNotMatch(tableHtml, /data-memory-summary-row-limit/);
+
+    const hints = [{ dataset: { memoryTriggerFor: 'rows' }, hidden: false }, { dataset: { memoryTriggerFor: 'chars' }, hidden: true }];
+    const make = (key, value, extra = {}) => ({ dataset: { memorySetting: key }, value, type: 'text', closest: () => ({ querySelectorAll: () => hints }), ...extra });
+    panel.handleMemorySettingChange(make('memorySummaryCompactionTrigger', 'chars'));
+    assert.equal(appSettings.get().memorySummaryCompactionTrigger, 'chars');
+    assert.deepEqual(hints.map(node => node.hidden), [true, false]);
+    const chars = make('memorySummaryCompactionChars', '50');
+    panel.handleMemorySettingChange(chars);
+    assert.equal(appSettings.get().memorySummaryCompactionChars, 200);
+    assert.equal(chars.value, '200');
+    panel.handleMemorySettingChange(make('memorySummaryRowLimitChat', '999'));
+    assert.equal(appSettings.get().memorySummaryRowLimitChat, 50);
+    panel.handleMemorySettingChange(make('memoryFillEveryN', '0'));
+    assert.equal(appSettings.get().memoryFillEveryN, 1);
+    panel.handleMemorySettingChange(make('memorySummaryCompactionAuto', '', { type: 'checkbox', checked: false }));
+    assert.equal(appSettings.get().memorySummaryCompactionAuto, false);
+    panel.handleMemorySettingChange(make('memoryAutoExtractMode', 'separate'));
+    assert.equal(appSettings.get().memoryAutoExtractMode, 'separate');
+    panel.handleMemorySettingChange(make('notAllowed', 'x'));
+    assert.equal(appSettings.get().notAllowed, undefined);
+    assert.deepEqual(events.map(item => item.key), ['memorySummaryCompactionTrigger', 'memorySummaryCompactionChars', 'memorySummaryRowLimitChat', 'memoryFillEveryN', 'memorySummaryCompactionAuto', 'memoryAutoExtractMode']);
+  } finally {
+    globalThis.window = previousWindow;
+    appSettings.update(before);
+  }
+  console.log('ok - memory trigger settings render per mode and apply shared settings immediately');
+}
+
+{
+  // 切换记忆模式：有未保存修改先确认，取消则不切换；同一模式不重复写入。
+  const before = appSettings.get();
+  appSettings.update({ memoryEnabled: true, memoryStorageMode: 'table' });
+  const confirms = [];
+  const panel = new AgentCenterPanel({ confirm: async (options) => { confirms.push(options); return false; } });
+  const dirtyField = { type: 'text', tagName: 'TEXTAREA', value: '新内容', defaultValue: '旧内容', dataset: {}, name: '' };
+  const editor = { dataset: { memoryAgentEditor: 'memory_table_agent' }, querySelectorAll: () => [dirtyField] };
+  const hub = { querySelectorAll: () => [editor], ownerDocument: { activeElement: null } };
+  const button = { closest: () => hub };
+  try {
+    assert.equal(await panel.handleMemoryStorageMode('table', button), false);
+    assert.equal(confirms.length, 0);
+    assert.equal(await panel.handleMemoryStorageMode('summary', button), false);
+    assert.equal(confirms.length, 1);
+    assert.equal(appSettings.get().memoryStorageMode, 'table');
+  } finally {
+    appSettings.update({ memoryEnabled: before.memoryEnabled, memoryStorageMode: before.memoryStorageMode });
+  }
+  console.log('ok - switching memory mode asks before dropping unsaved edits');
 }
 
 {

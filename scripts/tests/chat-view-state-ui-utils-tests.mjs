@@ -251,3 +251,38 @@ const createClassList = () => {
   assert.match(chatUiSource, /setRevealingState\(isRevealing\)/);
   console.log('ok - skip-animation send button is wired through delivery runtime, composer, and themed svg');
 }
+
+{
+  // 平滑跳转：远距离先移到目标前一小段（约 240px），再平滑滑到目标；近距离直接滑
+  const calls = [];
+  const makeScrollEl = (scrollTop) => ({
+    scrollTop,
+    clientHeight: 800,
+    querySelector: () => ({ offsetTop: 10_012 }),
+    scrollTo(options) { calls.push({ from: this.scrollTop, ...options }); },
+  });
+  const far = makeScrollEl(50_000);
+  scrollToMessageCore({ msgId: 'm', scrollEl: far, smooth: true });
+  assert.deepEqual(calls.pop(), { from: 10_240, top: 10_000, behavior: 'smooth' });
+  const near = makeScrollEl(10_500);
+  scrollToMessageCore({ msgId: 'm', scrollEl: near, smooth: true });
+  assert.deepEqual(calls.pop(), { from: 10_500, top: 10_000, behavior: 'smooth' });
+  const instant = makeScrollEl(50_000);
+  scrollToMessageCore({ msgId: 'm', scrollEl: instant });
+  assert.equal(instant.scrollTop, 10_000);
+  assert.equal(calls.length, 0);
+  console.log('ok - scrollToMessageCore slides to far targets from a short distance');
+}
+
+{
+  // 远距离时把「移到目标附近」交给 teleport（淡出→移动→淡入），近距离不经过它
+  const seen = [];
+  const el = { scrollTop: 50_000, clientHeight: 800, querySelector: () => ({ offsetTop: 10_012 }), scrollTo(o) { seen.push(['slide', this.scrollTop, o.top]); } };
+  scrollToMessageCore({ msgId: 'm', scrollEl: el, smooth: true, teleport: (move, direction) => { seen.push(['teleport', direction, el.scrollTop]); move(); } });
+  assert.deepEqual(seen, [['teleport', 'up', 50_000], ['slide', 10_240, 10_000]]);
+  seen.length = 0;
+  el.scrollTop = 10_400;
+  scrollToMessageCore({ msgId: 'm', scrollEl: el, smooth: true, teleport: () => seen.push(['teleport']) });
+  assert.deepEqual(seen, [['slide', 10_400, 10_000]]);
+  console.log('ok - scrollToMessageCore hands far jumps to the fade-through teleport');
+}
