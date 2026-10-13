@@ -1,3 +1,5 @@
+import { t } from '../../i18n/index.js';
+
 const RP_ACTION_ICON_PATHS = Object.freeze({
   'chevron-left': '<path d="m15 18-6-6 6-6"/>',
   'chevron-right': '<path d="m9 18 6-6-6-6"/>',
@@ -7,6 +9,7 @@ const RP_ACTION_ICON_PATHS = Object.freeze({
   edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
   copy: '<rect width="14" height="14" x="8" y="8" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
   check: '<path d="m5 12.5 5 5 9-11"/>',
+  'quick-delete': '<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
 });
 
 export const createRpMessageIconMarkup = (iconName, { size = 15 } = {}) => {
@@ -52,6 +55,8 @@ export const createRpMessageActionsElement = ({
     buttons.appendChild?.(createActionButton(documentLike, 'speak', '朗读'));
     buttons.appendChild?.(createActionButton(documentLike, 'view-code', '编辑原回复'));
     buttons.appendChild?.(createActionButton(documentLike, 'copy', '复制'));
+    // 快捷删除：只在对话最后一条 AI 回复上显示（见 markLatestAssistantReply 与样式）
+    buttons.appendChild?.(createActionButton(documentLike, 'quick-delete', '删除'));
   }
   actions.appendChild?.(buttons);
   return actions;
@@ -73,6 +78,28 @@ export const dispatchRpMessageQuickAction = async ({
   await actionHandler(actionKey, message, { wrapper });
   return true;
 };
+
+// 只有对话的最后一条是 AI 回复（有操作栏、不在生成中）时给它加 is-latest-reply，快捷删除只在它上面显示。
+export const markLatestAssistantReply = ({ scrollEl, disabled = false } = {}) => {
+  if (!scrollEl?.querySelectorAll) return null;
+  const wrappers = scrollEl.querySelectorAll('.QQ_chat_mymsg[data-msg-id], .QQ_chat_charmsg[data-msg-id]');
+  const last = wrappers[wrappers.length - 1] || null;
+  const target = !disabled
+    && last?.classList?.contains?.('has-rp-message-actions')
+    && !last.classList.contains('message-pending')
+    && last.__chatappMessage?.role === 'assistant'
+    ? last
+    : null;
+  for (const el of scrollEl.querySelectorAll('.is-latest-reply')) {
+    if (el !== target) el.classList?.remove?.('is-latest-reply');
+  }
+  target?.classList?.add?.('is-latest-reply');
+  return target;
+};
+
+// 快捷删除要点两下：第一下变红，这么久之后的第二下才算；变红后这么久没点就恢复
+const QUICK_DELETE_GUARD_MS = 350;
+const QUICK_DELETE_ARMED_MS = 3000;
 
 const INTERACTIVE_TAP_SELECTOR = 'a, button, input, textarea, select, audio, video, [contenteditable="true"]';
 const RP_MESSAGE_ACTIONS_WRAPPER_SELECTOR = '.has-rp-message-actions';
@@ -96,9 +123,12 @@ export const createRpMessageActionsUiRuntime = ({
   clearSchedule = timerId => clearTimeout(timerId),
   isTouchLike = defaultIsTouchLike,
   revealDuration = 5000,
+  now = () => Date.now(),
 } = {}) => {
   let visibleWrapper = null;
   let hideTimer = null;
+  // 已变红的快捷删除：{ button, label, armedAt, timer }
+  let armed = null;
 
   const clearHideTimer = () => {
     if (hideTimer == null) return;
@@ -129,6 +159,24 @@ export const createRpMessageActionsUiRuntime = ({
     return true;
   };
 
+  const disarm = () => {
+    if (!armed) return;
+    clearSchedule(armed.timer);
+    armed.button.classList?.remove?.('is-armed');
+    armed.button.setAttribute?.('aria-label', armed.label);
+    armed = null;
+  };
+
+  const arm = (button, wrapper, event) => {
+    disarm();
+    const label = button.attributes?.get?.('aria-label') ?? button.getAttribute?.('aria-label') ?? '删除';
+    button.classList?.add?.('is-armed');
+    button.setAttribute?.('aria-label', t('再点一次删除'));
+    armed = { button, label, armedAt: now(), timer: schedule(() => disarm(), QUICK_DELETE_ARMED_MS) };
+    // 手机上操作栏是点气泡才出现的，变红期间保持显示
+    if (isTouchLike(event)) reveal(wrapper);
+  };
+
   const bind = ({
     scrollEl,
     onAction = null,
@@ -145,6 +193,14 @@ export const createRpMessageActionsUiRuntime = ({
         const message = wrapper?.__chatappMessage;
         const action = String(actionButton.dataset?.rpMessageAction || '').trim();
         if (!wrapper || !message || !action) return;
+        if (action === 'quick-delete') {
+          if (armed?.button !== actionButton) {
+            arm(actionButton, wrapper, event);
+            return;
+          }
+          if (now() - armed.armedAt < QUICK_DELETE_GUARD_MS) return;
+        }
+        disarm();
         try {
           const result = onAction?.(action, { wrapper, message, event });
           result?.catch?.(error => onError?.(error));
@@ -154,6 +210,7 @@ export const createRpMessageActionsUiRuntime = ({
         return;
       }
 
+      disarm();
       if (!isTouchLike(event)) return;
       if (target.closest?.(INTERACTIVE_TAP_SELECTOR)) return;
       const bubble = target.closest?.('.QQ_chat_msgdiv');
@@ -162,11 +219,14 @@ export const createRpMessageActionsUiRuntime = ({
     };
 
     scrollEl.addEventListener('click', handleClick);
+    scrollEl.addEventListener('scroll', disarm, { passive: true });
     let active = true;
     return () => {
       if (!active) return;
       active = false;
       scrollEl.removeEventListener?.('click', handleClick);
+      scrollEl.removeEventListener?.('scroll', disarm);
+      disarm();
       hide();
     };
   };

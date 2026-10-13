@@ -9381,5 +9381,10 @@
   "停一下展开 · {count} 条": "Pause to expand · {count} messages",
   "右侧刻度条代替滚动条，按住省略号展开、预览后跳转": "A tick rail replaces the scrollbar. Hold the dots to expand, then release on a preview to jump.",
   "正文（这一轮还没有摘要）": "Reply text (no summary for this turn yet)",
-  "已折叠 {count} 条 · 继续滚动载入": "{count} messages collapsed \u00b7 keep scrolling to load"
+  "已折叠 {count} 条 · 继续滚动载入": "{count} messages collapsed \u00b7 keep scrolling to load",
+  "回到底部": "Back to bottom",
+  "松开回到底部": "Release to go to the bottom",
+  "再点一次删除": "Tap again to delete",
+  "正在生成，结束后再删除": "Still generating. Delete it after it finishes.",
+  "已删除最后一条回复": "Last reply deleted"
 }

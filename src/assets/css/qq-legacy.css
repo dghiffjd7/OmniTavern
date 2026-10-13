@@ -1320,6 +1320,22 @@ body[data-ui-mode='rp'] .rp-swipe-indicator {
   pointer-events: none;
 }
 
+/* 快捷删除：只在对话最后一条 AI 回复上出现，和其他按钮隔开；点第一下变红，再点才删除 */
+.rp-message-action-quick-delete {
+  display: none;
+  margin-left: 6px;
+}
+
+.is-latest-reply .rp-message-action-quick-delete {
+  display: inline-flex;
+}
+
+.rp-message-action-quick-delete.is-armed,
+.rp-message-action-quick-delete.is-armed:hover {
+  color: var(--app-danger-text);
+  background: var(--app-danger-soft);
+}
+
 .has-rp-message-actions.is-rp-actions-visible .rp-message-actions {
   opacity: 1;
   pointer-events: auto;

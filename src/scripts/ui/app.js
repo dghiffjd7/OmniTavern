@@ -26718,6 +26718,7 @@ const initApp = async () => {
     memoryTemplateStore,
     extractBodyText: source => extractRenderedAgentBodyText(source, { documentRef: document }),
     jumpToMessage: (sid, messageId) => creativeHistoryWindow?.jumpToMessage(sid, messageId),
+    scrollToBottom: () => ui.scrollToBottom(),
     logger,
   });
 
@@ -32377,7 +32378,7 @@ const initApp = async () => {
   });
   ui.onMessageAction(async (action, message, payload) => {
     const sessionId = chatStore.getCurrent();
-    if (['regenerate', 'delete', 'delete-selected', 'delete-current-swipe', 'retract', 'edit-assistant-raw', 'edit-confirm'].includes(action)) {
+    if (['regenerate', 'delete', 'quick-delete', 'delete-selected', 'delete-current-swipe', 'retract', 'edit-assistant-raw', 'edit-confirm'].includes(action)) {
       const turn = hopscotchTurnRuntime?.getActiveTurn(sessionId);
       if (turn) {
         turn.abort('message_changed');
@@ -32895,6 +32896,18 @@ const initApp = async () => {
       });
       refreshChatAndContacts();
       return;
+    }
+    // 气泡下的快捷删除（只给对话最后一条 AI 回复）：有多个版本只删当前版本，否则删整条；全部版本一起删仍走长按菜单
+    if (action === 'quick-delete' && message.role === 'assistant') {
+      if (ui.isSending || activeGeneration?.sessionId === sessionId) {
+        window.toastr?.warning?.('正在生成，结束后再删除');
+        return true;
+      }
+      const current = chatStore.findMessage(message.id, sessionId) || message;
+      if (canDeleteCurrentSwipe(current)) return deleteCurrentSwipeFromMessage(current);
+      const deleted = await deleteWholeMessage(current);
+      if (deleted) window.toastr?.success?.('已删除最后一条回复');
+      return deleted;
     }
     if (action === 'delete') {
       if (

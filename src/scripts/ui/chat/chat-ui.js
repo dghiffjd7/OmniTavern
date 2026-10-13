@@ -90,6 +90,7 @@ import { createSwipeUiRuntime } from './swipe-runtime-utils.js';
 import {
   createRpMessageActionsUiRuntime,
   dispatchRpMessageQuickAction,
+  markLatestAssistantReply,
 } from './rp-message-actions-ui-utils.js';
 import {
   applyJumpFocusState,
@@ -548,7 +549,7 @@ export class ChatUI {
 
   _bindRpMessageActions() {
     this._unbindRpMessageActions?.();
-    this._unbindRpMessageActions = this.rpMessageActionsRuntime.bind({
+    const unbindActions = this.rpMessageActionsRuntime.bind({
       scrollEl: this.scrollEl,
       onAction: (action, { wrapper, message }) => {
         return dispatchRpMessageQuickAction({
@@ -561,6 +562,26 @@ export class ChatUI {
       },
       onError: error => logger.warn('rp message action failed', error),
     });
+    // 快捷删除只给对话最后一条 AI 回复：消息增删、开始/结束生成时重新标记
+    const observer = typeof MutationObserver === 'function' && this.scrollEl
+      ? new MutationObserver(() => this.scheduleLatestReplyMark())
+      : null;
+    observer?.observe(this.scrollEl, { childList: true });
+    this.scheduleLatestReplyMark();
+    this._unbindRpMessageActions = () => {
+      observer?.disconnect();
+      unbindActions?.();
+    };
+  }
+
+  scheduleLatestReplyMark() {
+    if (this._latestReplyMarkFrame) return;
+    const run = () => {
+      this._latestReplyMarkFrame = 0;
+      markLatestAssistantReply({ scrollEl: this.scrollEl, disabled: this.isSending });
+    };
+    if (typeof requestAnimationFrame === 'function') this._latestReplyMarkFrame = requestAnimationFrame(run);
+    else run();
   }
 
   _bindSwipeEvents() {
@@ -1621,6 +1642,7 @@ export class ChatUI {
   setSendingState(isSending) {
     this.isSending = Boolean(isSending);
     this.updateSendButtonState();
+    this.scheduleLatestReplyMark();
   }
 
   setStreamingState(isStreaming) {

@@ -232,7 +232,8 @@ if (-not $SkipRelease) {
     Invoke-ExternalCommand "上传资产失败" { gh release upload $tag @releaseAssets --clobber @repoArg }
   } else {
     # 预览版标记为 prerelease，APP 只提示正式版，releases/latest 也始终指向正式版
-    $channelArg = if ($isPrerelease) { @("--prerelease") } else { @("--latest") }
+    # 必须保持为数组：单元素的 if 结果会被 PowerShell 展开成字符串，@ 展开字符串会逐字拆开（变成 - - l a t e s t）
+    $channelArg = @(if ($isPrerelease) { "--prerelease" } else { "--latest" })
     Invoke-ExternalCommand "创建 Release 失败" { gh release create $tag @releaseAssets --title $tag --notes-file $notesFile @channelArg @repoArg }
   }
 }

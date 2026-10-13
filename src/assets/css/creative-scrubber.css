@@ -5,80 +5,92 @@ body[data-ui-mode='rp'][data-rp-scrubber='on'] #chat-scroll {
 body[data-ui-mode='rp'][data-rp-scrubber='on'] #chat-scroll::-webkit-scrollbar {
   display: none;
 }
-/* 给刻度条留出位置；首尾刻度已固定指向开头和最新，回顶/回底按钮不再需要 */
-body[data-ui-mode='rp'][data-rp-scrubber='on'] #chat-scroll {
-  padding-right: 44px;
+/* 电脑给刻度条留出位置；手机上刻度停下后缩成贴边细线，不占气泡右边距。
+   首尾刻度指向开头和最新，不在底部时另有回底箭头，回顶/回底按钮不再需要 */
+@media (pointer: fine), (pointer: none) {
+  body[data-ui-mode='rp'][data-rp-scrubber='on'] #chat-scroll {
+    padding-right: 44px;
+  }
 }
 body[data-ui-mode='rp'][data-rp-scrubber='on'] #chat-room .chat-scroll-top-btn,
 body[data-ui-mode='rp'][data-rp-scrubber='on'] #chat-room .chat-scroll-bottom-btn {
   display: none !important;
 }
-@media (pointer: coarse) {
-  body[data-ui-mode='rp'][data-rp-scrubber='on'] #chat-scroll { padding-right: 26px; }
-  .creative-scrubber { width: 30px; }
-}
 
+/* 刻度条整层不接收指针，只有 .creative-scrubber-hit 接收；每一项的位置、长度、倾斜由脚本逐帧设置 */
 .creative-scrubber {
   position: absolute;
   z-index: 30;
-  width: 40px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  align-items: stretch;
-  padding: 6px 2px;
-  border-radius: 12px;
-  touch-action: none;
+  pointer-events: none;
   user-select: none;
   -webkit-user-select: none;
-  transition: opacity 0.25s ease;
 }
 .creative-scrubber[hidden] { display: none; }
-.creative-scrubber.is-idle { opacity: 0; pointer-events: none; }
-
-.creative-scrubber-tick,
-.creative-scrubber-gap {
-  position: relative;
-  flex: 1 1 0;
-  min-height: 0;
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  border: 0;
-  margin: 0;
-  padding: 0 4px 0 0;
-  background: transparent;
-  color: inherit;
+.creative-scrubber-items {
+  position: absolute;
+  inset: 0;
+}
+.creative-scrubber-hit {
+  position: absolute;
+  pointer-events: auto;
+  touch-action: none;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
-.creative-scrubber-tick { max-height: 28px; }
+/* 按住时弧形背后的光晕：压住正文，让鼓出来的刻度看得清 */
+.creative-scrubber-glow {
+  position: absolute;
+  left: 0;
+  top: 0;
+  border-radius: 50%;
+  opacity: 0;
+  background:
+    radial-gradient(circle closest-side, var(--app-accent-soft, rgba(188, 74, 38, 0.12)) 0%, transparent 70%),
+    radial-gradient(circle closest-side, var(--app-surface-card, #ffffff) 0%, var(--app-surface-card, #ffffff) 52%, transparent 100%);
+}
+
+.creative-scrubber-tick,
+.creative-scrubber-gap,
+.creative-scrubber-end {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 18px;
+  margin: -9px 0 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  pointer-events: none;
+}
 .creative-scrubber-tick i {
-  display: block;
+  position: absolute;
+  right: 4px;
+  top: 50%;
   height: 2px;
-  width: 9px;
+  margin-top: -1px;
   border-radius: 2px;
   background: var(--app-border-strong, #d7d2c6);
-  transition: width 0.15s ease, background-color 0.15s ease;
+  transform-origin: 100% 50%;
+  transition: background-color 0.15s ease;
 }
-.creative-scrubber-tick.is-ai i { width: 17px; background: var(--app-text-muted, #746c5e); }
-.creative-scrubber-tick.is-unknown i { width: 13px; }
-.creative-scrubber-tick.is-current i { height: 3px; width: 13px; background: var(--app-accent-primary, #bc4a26); }
-.creative-scrubber-tick.is-ai.is-current i { width: 23px; }
-.creative-scrubber-tick.is-hot i { width: 15px; background: var(--app-text-primary, #26221c); }
-.creative-scrubber-tick.is-ai.is-hot i { width: 25px; }
+.creative-scrubber-tick.is-ai i { background: var(--app-text-muted, #746c5e); }
+.creative-scrubber-tick.is-current i { height: 3px; margin-top: -1.5px; background: var(--app-accent-primary, #bc4a26); }
+.creative-scrubber-tick.is-hot i { background: var(--app-text-primary, #26221c); }
 .creative-scrubber-tick.is-hot.is-current i { background: var(--app-accent-strong, #a03c1c); }
 
-.creative-scrubber-gap {
-  max-height: 20px;
+.creative-scrubber-dots {
+  position: absolute;
+  right: 7px;
+  top: 50%;
+  margin-top: -6.5px;
+  display: flex;
   flex-direction: column;
-  justify-content: center;
-  align-items: flex-end;
   gap: 2px;
-  padding-right: 7px;
+  transform-origin: 100% 50%;
 }
-.creative-scrubber-gap b {
+.creative-scrubber-dots b {
   display: block;
   width: 3px;
   height: 3px;
@@ -89,24 +101,35 @@ body[data-ui-mode='rp'][data-rp-scrubber='on'] #chat-room .chat-scroll-bottom-bt
 .creative-scrubber-gap.is-hot b { background: var(--app-accent-primary, #bc4a26); }
 .creative-scrubber-gap.is-arming b { background: var(--app-accent-primary, #bc4a26); transform: scale(1.5); }
 
+/* 回底箭头：不在底部时才出现在最后一道刻度下面 */
+.creative-scrubber-chevron {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  margin-top: -6px;
+  transform-origin: 100% 50%;
+}
+.creative-scrubber-chevron::before {
+  content: '';
+  display: block;
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid var(--app-text-muted, #746c5e);
+  border-bottom: 2px solid var(--app-text-muted, #746c5e);
+  transform: rotate(45deg);
+  transition: border-color 0.15s ease;
+}
+.creative-scrubber-end.is-hot .creative-scrubber-chevron::before { border-color: var(--app-accent-primary, #bc4a26); }
+
 .creative-scrubber-tick:focus-visible,
-.creative-scrubber-gap:focus-visible {
+.creative-scrubber-gap:focus-visible,
+.creative-scrubber-end:focus-visible {
   outline: 2px solid var(--app-accent-primary, #bc4a26);
   outline-offset: 1px;
   border-radius: 4px;
 }
-
-/* 展开：新刻度从小点处依次长出 */
-.creative-scrubber.is-animated .creative-scrubber-tick.is-entering i {
-  animation: creative-scrubber-tick-in 0.2s cubic-bezier(0.2, 0.7, 0.3, 1) both;
-  animation-delay: var(--scrubber-enter-delay, 0ms);
-}
-.creative-scrubber.is-animated .creative-scrubber-gap.is-entering b {
-  animation: creative-scrubber-dot-in 0.24s ease-out both;
-  animation-delay: 60ms;
-}
-@keyframes creative-scrubber-tick-in { from { width: 0; opacity: 0; } }
-@keyframes creative-scrubber-dot-in { from { opacity: 0; transform: scale(0.2); } }
 
 .creative-scrubber-preview {
   position: absolute;
@@ -163,9 +186,9 @@ body[data-rp-narrative-font='serif'] .creative-scrubber-preview-text {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .creative-scrubber,
   .creative-scrubber-tick i,
-  .creative-scrubber-gap b { transition: none; }
+  .creative-scrubber-dots b,
+  .creative-scrubber-chevron::before { transition: none; }
 }
 
 /* 跳转只渲染目标附近：中间折叠的占位 */

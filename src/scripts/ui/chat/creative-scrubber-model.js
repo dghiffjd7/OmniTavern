@@ -82,3 +82,72 @@ export const clipScrubberPreview = (value, maxLength = 46) => {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
   return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
 };
+
+// ---- 刻度条几何：坐标以刻度条左上角为原点 ----
+
+export const SCRUBBER_PITCH = 18;
+
+// 紧凑排列：固定间距，整条以 height × centerRatio 处为中心（电脑居中、手机略低），放不下才压缩间距；
+// 末项是回底箭头时与最后一道刻度多隔开 endGap。
+export const layoutScrubberItems = (items, height, { pitch = SCRUBBER_PITCH, centerRatio = 0.5, endGap = 6 } = {}) => {
+  const n = Array.isArray(items) ? items.length : 0;
+  if (!n) return { pitch, ys: [] };
+  const H = Math.max(0, Number(height) || 0);
+  const extra = items[n - 1]?.t === 'end' ? endGap : 0;
+  const P = n > 1 ? Math.max(0, Math.min(pitch, (H - extra) / (n - 1))) : pitch;
+  const span = (n - 1) * P + extra;
+  const top = Math.max(0, Math.min(H - span, H * centerRatio - span / 2));
+  return { pitch: P, ys: items.map((item, k) => top + k * P + (item.t === 'end' ? extra : 0)) };
+};
+
+// 按住时的凸起：手指附近间距放大（spread、magnify），刻度沿高斯曲线向左鼓出 bulge px（宽度 width），
+// 并按曲线法线方向倾斜，像钟面刻度。手指处不动、先后顺序不变。strength 0–1 用于渐入渐出。
+export const SCRUBBER_ARC = Object.freeze({ spread: 32, magnify: 0.6, bulge: 20, width: 50 });
+
+// 手指按住时的弧要拉出到手指外面，否则整段刻度都在手指底下：
+// 按下处离刻度条右缘的距离 + 手指接触面长边（触控事件的 width/height，CSS px）+ 10，限制在 48–110。
+// 读不到接触面时（≤2px：部分浏览器只给 0 或 1）用 64。实测 Pixel 10 平常按约 13 + 40 + 10 = 63。
+export const SCRUBBER_TOUCH_BULGE_DEFAULT = 64;
+export const touchArcForContact = ({ contact = 0, edge = 0 } = {}) => {
+  const size = Number(contact) || 0;
+  const bulge = size > 2
+    ? Math.round(Math.min(110, Math.max(48, (Number(edge) || 0) + size + 10)))
+    : SCRUBBER_TOUCH_BULGE_DEFAULT;
+  return {
+    magnify: 0.9,
+    bulge,
+    width: Math.round(bulge * 1.12),
+    spread: Math.round(Math.min(52, Math.max(32, bulge * 0.62))),
+  };
+};
+export const scrubberLens = (y, focus, strength = 1, arc = SCRUBBER_ARC) => {
+  const s = Math.max(0, Math.min(1, Number(strength) || 0));
+  const u = y - focus;
+  const yy = focus + u + arc.magnify * arc.spread * Math.tanh(u / arc.spread) * s;
+  const v = yy - focus;
+  const w = Math.exp(-((v / arc.width) ** 2));
+  const dx = arc.bulge * s * w;
+  const slope = v ? dx * (-2 * v / (arc.width * arc.width)) : 0;
+  return { y: yy, dx, rot: Math.atan(slope), lenF: 1 + 0.55 * s * w };
+};
+
+// 指针对应的项目：凸起不改变先后顺序，取排列位置最近的一项。
+// 鼠标严格在条内（extraLeft：凸起时往左鼓出的部分）；手指按住（lenient）在凸起之外再往左容忍 60px、往右 24px，上下拖过头停在首尾。
+export const pickScrubberItem = (entries, { x, y, width = 0, pitch = SCRUBBER_PITCH, lenient = false, extraLeft = 0 } = {}) => {
+  if (!Array.isArray(entries) || !entries.length) return null;
+  const left = -Math.max(0, extraLeft) - (lenient ? 60 : 0);
+  const right = width + (lenient ? 24 : 0);
+  if (!(x >= left && x <= right)) return null;
+  const first = entries[0].y, last = entries[entries.length - 1].y;
+  let probe = y;
+  if (lenient) probe = Math.max(first, Math.min(last, y));
+  else {
+    const slack = Math.max(pitch / 2 + 4, 10);
+    if (!(y >= first - slack && y <= last + slack)) return null;
+  }
+  let best = null;
+  for (const entry of entries) {
+    if (!best || Math.abs(entry.y - probe) < Math.abs(best.y - probe)) best = entry;
+  }
+  return best;
+};

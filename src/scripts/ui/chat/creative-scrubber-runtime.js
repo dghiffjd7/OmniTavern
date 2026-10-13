@@ -3,6 +3,7 @@
 import { t } from '../../i18n/index.js';
 import { readMemoryCoverageIntervals } from '../../memory/memory-coverage-utils.js';
 import { createCreativeScrubber } from './creative-scrubber.js';
+import { getScrollDistanceFromBottom, resolveScrollBottomButtonThresholds } from './scroll-bottom-button-ui-utils.js';
 
 const SUMMARY_MATCH_BEFORE_MS = 5_000;
 const SUMMARY_MATCH_AFTER_MS = 180_000;
@@ -57,6 +58,7 @@ export const createCreativeScrubberRuntime = ({
   memoryTemplateStore = null,
   extractBodyText = null,
   jumpToMessage = async () => false,
+  scrollToBottom = () => {},
   logger = null,
 } = {}) => {
   if (!hostEl || !scrollEl || !chatStore || !outline) return null;
@@ -78,11 +80,14 @@ export const createCreativeScrubberRuntime = ({
     if (next && sessionId() === sid) index = next;
   };
 
+  // 写作历史折叠时最新部分仍接在底部，所以滚到底就是看到了最新一条的结尾
+  const isAtBottom = () => scrollEl.scrollTop + scrollEl.clientHeight >= scrollEl.scrollHeight - 4;
+
   // 阅读位置：滚动区里第一条明显露出来的消息；滚到底就是最后一条。
   const readCurrentIndex = () => {
     const total = index.entries.length;
     if (!total) return 0;
-    if (scrollEl.scrollTop + scrollEl.clientHeight >= scrollEl.scrollHeight - 4) return total;
+    if (isAtBottom()) return total;
     const wrappers = scrollEl.querySelectorAll('.QQ_chat_mymsg[data-msg-id], .QQ_chat_charmsg[data-msg-id]');
     // 顶端只露出一小截（上一条的尾巴）不算正在读的那条：至少露出约 120px（或四分之一屏）
     const top = scrollEl.getBoundingClientRect().top + Math.min(120, scrollEl.clientHeight * 0.25);
@@ -164,6 +169,8 @@ export const createCreativeScrubberRuntime = ({
     getTotal: () => index.entries.length,
     getCurrent: () => currentIndex || index.entries.length,
     getRole: i => entryAt(i)?.role || '',
+    // 回底箭头沿用原回底按钮的收起距离：最后一条底下只差操作栏那一截时不出现
+    isAtBottom: () => getScrollDistanceFromBottom(scrollEl) <= resolveScrollBottomButtonThresholds(scrollEl).hide,
     resolvePreview,
     onJump: (i) => {
       const entry = entryAt(i);
@@ -174,6 +181,13 @@ export const createCreativeScrubberRuntime = ({
       jumpLock = { index: i, startedAt, lastScrollAt: startedAt, timer: setInterval(checkJumpLock, 60) };
       scrubber.refresh();
       Promise.resolve(jumpToMessage(sessionId(), entry.id)).catch(() => {});
+    },
+    onJumpToBottom: () => {
+      clearInterval(jumpLock?.timer);
+      jumpLock = null;
+      currentIndex = index.entries.length;
+      try { scrollToBottom(); } catch (err) { logger?.debug?.('creative scrubber scroll to bottom failed', err); }
+      sync();
     },
   });
   if (!scrubber) return null;

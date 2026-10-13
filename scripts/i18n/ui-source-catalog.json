@@ -18396,6 +18396,12 @@
     ]
   },
   {
+    "source": "回到底部",
+    "references": [
+      "src/scripts/ui/chat/creative-scrubber.js#ui-call"
+    ]
+  },
+  {
     "source": "回到最早消息",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -37213,6 +37219,12 @@
     ]
   },
   {
+    "source": "松开回到底部",
+    "references": [
+      "src/scripts/ui/chat/creative-scrubber.js#ui-call"
+    ]
+  },
+  {
     "source": "宋体 · 小说感",
     "references": [
       "src/index.html#html-text"
@@ -46738,6 +46750,12 @@
     ]
   },
   {
+    "source": "已删除最后一条回复",
+    "references": [
+      "src/scripts/ui/app.js#ui-call"
+    ]
+  },
+  {
     "source": "已舍弃全部未保存修改",
     "references": [
       "src/scripts/ui/preset-panel.js#ui-call"
@@ -50147,6 +50165,12 @@
     ]
   },
   {
+    "source": "再点一次删除",
+    "references": [
+      "src/scripts/ui/chat/rp-message-actions-ui-utils.js#ui-call"
+    ]
+  },
+  {
     "source": "再确认这份设置档里的模型。模型可以改选或手动填写；若当前值就是主人要的，直接保存即可。",
     "references": [
       "src/scripts/ui/maid-onboarding-flows.js#ui-definition"
@@ -52901,6 +52925,12 @@
     "source": "正在上传参考音频…",
     "references": [
       "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
+    ]
+  },
+  {
+    "source": "正在生成，结束后再删除",
+    "references": [
+      "src/scripts/ui/app.js#ui-call"
     ]
   },
   {
