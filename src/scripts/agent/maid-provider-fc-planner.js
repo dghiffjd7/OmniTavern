@@ -189,6 +189,15 @@ const buildToolDescription = (feature = {}, toolName = '') => truncate([
   `APP capability: ${trim(feature?.id)}; internal tool: ${toolName}`,
 ].filter(Boolean).join('。'), 480);
 
+// 多个功能共用同一个面板工具（app.open_panel）时，按这次调用要打开的 panel 归到对应功能；
+// 对不上或有多个同 panel 的功能时沿用默认归属（首次引导、能力记录都跟着这个归属走）
+const resolvePanelCallOwner = (mapping = {}, args = {}) => {
+  const panel = trim(args?.panel);
+  const owners = Array.isArray(mapping.panelOwners) ? mapping.panelOwners : [];
+  const matched = panel ? owners.filter(owner => owner.panel === panel) : [];
+  return matched.length === 1 ? matched[0] : { featureId: mapping.featureId, title: mapping.title };
+};
+
 const selectOfferedToolOwner = (owners = [], toolName = '') => (
   findExplicitReadToolOwner(toolName, owners)
   || owners.find(feature => trim(feature.id) === toolName)
@@ -241,6 +250,11 @@ export const buildMaidProviderFcToolPlan = ({
           : buildToolDescription(feature, internalName),
         schema: clone(schemas[internalName], { type: 'object' }),
         control: false,
+        ...(owners.length > 1 && !auxiliaryRead ? {
+          panelOwners: owners
+            .filter(owner => trim(owner?.panel))
+            .map(owner => ({ featureId: trim(owner.id), title: trim(owner.title, owner.id), panel: trim(owner.panel) })),
+        } : {}),
       });
   });
 
@@ -413,6 +427,7 @@ export const normalizeMaidProviderFcCompletedCalls = ({
       },
     };
   }
+  const owner = resolvePanelCallOwner(mapping, validation.args);
   return {
     ok: true,
     kind: 'tool',
@@ -420,9 +435,9 @@ export const normalizeMaidProviderFcCompletedCalls = ({
     selection: {
       toolName: mapping.internalName,
       args: clone(validation.args, {}),
-      featureId: mapping.featureId,
-      title: mapping.title,
-      response: `我来处理「${mapping.title}」。`,
+      featureId: owner.featureId,
+      title: owner.title,
+      response: `我来处理「${owner.title}」。`,
       phase: trim(phase, 'planner'),
       providerToolName: mapping.providerName,
     },

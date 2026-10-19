@@ -282,6 +282,8 @@ const agentCenterPanelSource = await readFile(
   );
   const floatingCardBaseRule = agentCenterPanelSource.match(/\.agent-center-floating-card\s*\{[^}]*\}/s)?.[0] || '';
   assert.doesNotMatch(floatingCardBaseRule, /animation:/);
+  // 手机实测：进场动画结束时卡片图层被拆掉会闪一帧（原样 9/12 次），常驻图层后 0/6
+  assert.match(floatingCardBaseRule, /will-change:\s*transform/, '浮卡需常驻图层，避免动画结束闪一帧');
   assert.doesNotMatch(agentCenterPanelSource, /agent-center-floating-refresh|is-refreshing/);
   console.log('ok - floating agent refresh does not replay the entry animation');
 }

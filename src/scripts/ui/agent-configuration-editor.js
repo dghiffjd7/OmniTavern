@@ -16,6 +16,7 @@ import { getAgentPromptFields } from './chat/agent-prompt-fields.js';
 import { readConfiguredPromptField, patchConfiguredPromptField } from './agent-prompt-field-save.js';
 import { normalizePresetBlockText } from './preset-preview-utils.js';
 import { AGENT_ICONS, agentIconMarkup, getAgentIconName } from '../agent/agent-icons.js';
+import { bindAgentPresetSourceControls, readAgentPresetSource, renderAgentPresetSourceControl } from './agent-preset-source-control.js';
 
 const e = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -67,6 +68,9 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
   const doc = documentRef; installStyle(doc);
   if (id === 'archive_naming') return createUtilityAgentEditor({ actions, id, scope, context, documentRef: doc });
   const node = doc.createElement('div'); node.className = 'agent-config-editor'; node.dataset.agentCommonEditor = id;
+  // 「提示词 | 套用预设」：任务要求与自定义区块在套用预设时收起（控件在 data-agent-preset-area 里找它们）
+  node.dataset.agentPresetArea = '';
+  const presetServices = actions.getAgentPresetServices?.() || null;
   let saved = actions.getAgentConfiguration({ id, scope, context, ...(repairProfileId ? { repairProfileId } : {}) }), config = clone(saved.config), bodyRule = clone(saved.bodyRule);
   repairProfileId = config.repairProfileId || '';
   context = saved.context; scope = saved.scope;
@@ -89,6 +93,17 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
   const label = (title, help = '') => `<span class="ac-label${help ? ' has-help' : ''}"${help ? ` data-help-mode="tap" data-help="${e(t(help, { tag: '<tableEdit>' }))}" tabindex="0"` : ''}>${e(t(title))}</span>`;
   const select = (name, title, choices, value, help = '', boundary = '') => `<label>${boundary ? `<span class="ac-field-heading">${label(title, help)}<span class="ac-field-boundary">${e(t(boundary))}</span></span>` : label(title, help)}<select name="${name}">${choices.map(([v, l]) => `<option value="${e(v)}" ${v === value ? 'selected' : ''}>${e(t(l))}</option>`).join('')}</select></label>`;
   const text = (name, title, value, help = '', textarea = false) => `<label>${label(title, help)}${textarea ? `<textarea name="${name}" rows="4">${e(value)}</textarea>` : `<input name="${name}" value="${e(value)}">`}</label>`;
+  const presetKind = () => id === 'reply_check' ? 'format_repair' : id === 'text_completion' ? 'input_suggestion'
+    : isInputAgent(config) ? ({ rewrite: 'input_rewrite', suggestion: 'input_suggestion' })[config.inputOutput] || 'input_note'
+      : config.outputMode === 'note' ? 'agent_note' : 'text_edit';
+  const presetSource = () => {
+    if (!presetServices) return { html: '', hide: '' };
+    const view = config.presetId ? presetServices.describePreset(config.presetId) : null;
+    return {
+      html: renderAgentPresetSourceControl({ scope: `agent-${id}`, kind: presetKind(), mode: config.promptSource, presetId: config.presetId, view, limitValue: String(config.maxTokens), showActions: false }),
+      hide: config.promptSource === 'preset' && view?.ok ? 'hidden' : '',
+    };
+  };
   const builtinInputs = () => {
     if (!builtin) return '';
     const items = id === 'text_completion' ? [
@@ -143,11 +158,13 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
     const currentModel = saved.currentModelLabel ? `${t('跟随当前模型')} · ${saved.currentModelLabel}` : t('跟随当前模型');
     const enableSwitch = `<div class="ac-switch">${label('启用', '暂停或启用此 Agent，保留调用方式与配置。')}<button type="button" class="agent-center-switch${config.enabled ? ' is-on' : ''}" data-ac="toggle-enabled" role="switch" aria-label="${e(t('启用'))}" aria-checked="${config.enabled}"><span class="agent-center-switch-track"><span class="agent-center-switch-thumb"></span></span></button></div>`;
     const repairItems = config.repairProfiles?.items || [];
+    const source = presetSource();
     const repairLibrary = format ? `<section class="ac-repair-library"><div class="ac-row">${select('repairProfilePicker', '修复方案', [...repairItems.map(item => [item.id, item.name]), ...(!repairItems.some(item => item.id === repairProfileId) ? [[repairProfileId, '新方案']] : [])], repairProfileId)}${button('repair-new', '新建')}</div>${text('repairProfileName', '方案名称', config.repairProfileName || '')}<div class="ac-repair-actions">${button('repair-copy', '另存为')}${repairItems.some(item => item.id === repairProfileId) ? button('repair-delete', '删除方案') : ''}${scope !== 'global' && saved.repairProfileSources?.[repairProfileId] === 'local' && saved.repairGlobalProfileIds?.includes(repairProfileId) ? button('repair-restore', '恢复全局方案') : ''}</div>${config.repairCheckType === 'tableEdit' ? `<span class="ac-source">${e(t('检查所选回复中的 tableEdit，其他内容保持不变。'))}</span>` : ''}</section>` : '';
     node.innerHTML = `<div>${select('scope', '配置范围', [['local', localLabel], ['global', globalLabel]], scope)}<span class="ac-source">${e(t(saved.inherited ? (saved.source === 'legacy' ? '继承旧版设置' : '跟随全局配置') : scope === 'global' ? globalLabel : '当前范围的独立配置'))}</span></div>${repairLibrary}
       ${!builtinInput && !format ? `<div class="ac-identity">${text('title', '名称', config.title)}${enableSwitch}</div>` : enableSwitch}
       ${!builtin ? `<div class="ac-field">${label('快捷图标', '用于 Agent Center 与聊天工具箱。')}<div class="ac-icons" role="group" aria-label="${e(t('快捷图标'))}">${Object.entries(AGENT_ICONS).map(([name, data]) => `<button type="button" data-ac="icon:${name}" aria-label="${e(t(data.label))}" title="${e(t(data.label))}" aria-pressed="${getAgentIconName(config) === name}">${agentIconMarkup(name)}</button>`).join('')}</div></div>` : ''}
-      <div class="ac-task"><div class="ac-task-meta">${label('任务要求', builtin ? '这里显示实际使用的任务提示词，可直接修改；恢复默认后再保存即可使用内建任务。' : input ? '描述需要完成的输入辅助任务，以及语气、长度和保留的内容。' : config.outputMode === 'note' ? '描述希望检查、查找或分析的内容，以及结果的呈现方式。' : '描述要改进的内容与保留的事实。模型只提交修改建议。')}<div class="ac-task-tools">${builtin ? `<span class="ac-task-origin" data-ac-task-origin>${e(t(usesDefaultTask() ? '内建默认' : '已自定义'))}</span><button type="button" class="agent-center-icon-button" data-ac="task-default" aria-label="${e(t('恢复默认任务'))}" title="${e(t('恢复默认任务'))}" ${usesDefaultTask() ? 'disabled' : ''}><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M3 10a9 9 0 1 1 2 8M3 4v6h6"/></svg></button>` : `<span class="ac-task-count" data-ac-prompt-count aria-hidden="true">${e(t('{count} 字', { count: Array.from(config.prompt).length }))}</span>`}</div></div><textarea name="prompt" aria-label="${e(t('任务要求'))}" rows="7" data-i18n-skip="true" placeholder="${e(t(input ? '希望这个 Agent 如何帮助你输入？' : format ? '希望如何检查和修复回复格式？' : '希望这个 Agent 怎样处理正文？'))}">${e(taskValue())}</textarea></div>
+      ${source.html}
+      <div class="ac-task" data-agent-preset-prompt-part ${source.hide}><div class="ac-task-meta">${label('任务要求', builtin ? '这里显示实际使用的任务提示词，可直接修改；恢复默认后再保存即可使用内建任务。' : input ? '描述需要完成的输入辅助任务，以及语气、长度和保留的内容。' : config.outputMode === 'note' ? '描述希望检查、查找或分析的内容，以及结果的呈现方式。' : '描述要改进的内容与保留的事实。模型只提交修改建议。')}<div class="ac-task-tools">${builtin ? `<span class="ac-task-origin" data-ac-task-origin>${e(t(usesDefaultTask() ? '内建默认' : '已自定义'))}</span><button type="button" class="agent-center-icon-button" data-ac="task-default" aria-label="${e(t('恢复默认任务'))}" title="${e(t('恢复默认任务'))}" ${usesDefaultTask() ? 'disabled' : ''}><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M3 10a9 9 0 1 1 2 8M3 4v6h6"/></svg></button>` : `<span class="ac-task-count" data-ac-prompt-count aria-hidden="true">${e(t('{count} 字', { count: Array.from(config.prompt).length }))}</span>`}</div></div><textarea name="prompt" aria-label="${e(t('任务要求'))}" rows="7" data-i18n-skip="true" placeholder="${e(t(input ? '希望这个 Agent 如何帮助你输入？' : format ? '希望如何检查和修复回复格式？' : '希望这个 Agent 怎样处理正文？'))}">${e(taskValue())}</textarea></div>
       ${format ? text('formatGuide', '格式要求', config.formatGuide, '写明必要的标签、字段和结构，例如 {tag} 的使用格式。创意写作启用前需填写。', true) : ''}
       ${builtinInputs()}
       ${input && !builtinInput ? select('inputOutput', '结果形式', [['suggestion','续写建议'],['rewrite','修改草稿'],['note','资料与建议']], config.inputOutput, '续写插入光标处；修改通过差异预览确认；资料与建议在工具箱查看。') : ''}
@@ -159,7 +176,7 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
       ${format && getAgentInvocationMode(config) !== 'manual' ? select('repairAutomatic', '自动执行方案', [['', '暂停自动执行'], ...repairItems.filter(item => item.config.repairCheckType !== 'tableEdit').map(item => [item.id, item.name])], config.repairProfiles.automaticId || '', '自动检查使用这里绑定的回复格式方案；表格指令方案从工具箱选取后执行。') : ''}
       <div data-ac-reference-editor></div>
       ${!builtinInput && !format ? '<div data-ac-tool-editor></div>' : ''}
-      <details data-ac-section="blocks"><summary>${e(t('自定义提示词区块'))}${config.blocks.length ? ` <span class="ac-source">${config.blocks.length}</span>` : ''}</summary>${config.blocks.map((b, i) => `<div class="ac-block"><div class="ac-block-heading"><input name="blocks.${i}.name" aria-label="${e(t('区块名称'))}" value="${e(b.name)}"><label class="ac-block-enabled" title="${e(t('启用'))}"><input name="blocks.${i}.enabled" type="checkbox" aria-label="${e(t('启用'))}" ${b.enabled ? 'checked' : ''}></label></div>${select(`blocks.${i}.role`, '角色', [['system', 'System'], ['user', 'User']], b.role)}<textarea name="blocks.${i}.text" aria-label="${e(t('区块内容'))}">${e(b.text)}</textarea><div class="ac-block-actions">${['up', 'down', 'copy', 'remove'].map(action => `<button class="agent-center-icon-button" type="button" data-ac="block-${action}" data-index="${i}" title="${e(t(({up:'上移',down:'下移',copy:'复制',remove:'移除'})[action]))}" aria-label="${e(t(({up:'上移',down:'下移',copy:'复制',remove:'移除'})[action]))}">${icon(action)}</button>`).join('')}</div></div>`).join('')}${button('block-add', '添加区块')}</details>
+      <details data-ac-section="blocks" data-agent-preset-prompt-part ${source.hide}><summary>${e(t('自定义提示词区块'))}${config.blocks.length ? ` <span class="ac-source">${config.blocks.length}</span>` : ''}</summary>${config.blocks.map((b, i) => `<div class="ac-block"><div class="ac-block-heading"><input name="blocks.${i}.name" aria-label="${e(t('区块名称'))}" value="${e(b.name)}"><label class="ac-block-enabled" title="${e(t('启用'))}"><input name="blocks.${i}.enabled" type="checkbox" aria-label="${e(t('启用'))}" ${b.enabled ? 'checked' : ''}></label></div>${select(`blocks.${i}.role`, '角色', [['system', 'System'], ['user', 'User']], b.role)}<textarea name="blocks.${i}.text" aria-label="${e(t('区块内容'))}">${e(b.text)}</textarea><div class="ac-block-actions">${['up', 'down', 'copy', 'remove'].map(action => `<button class="agent-center-icon-button" type="button" data-ac="block-${action}" data-index="${i}" title="${e(t(({up:'上移',down:'下移',copy:'复制',remove:'移除'})[action]))}" aria-label="${e(t(({up:'上移',down:'下移',copy:'复制',remove:'移除'})[action]))}">${icon(action)}</button>`).join('')}</div></div>`).join('')}${button('block-add', '添加区块')}</details>
       <details class="ac-more" data-ac-section="more"><summary>${e(t('更多操作'))}</summary><div class="ac-actions">${scope === 'local' ? button('reset', '跟随全局配置') : button('reset', '恢复默认')}${button('copy', '复制到另一模式')}${!builtinInput && !format ? button('delete', '删除 Agent') : ''}</div></details>
       <div data-ac-runs></div><div class="ac-footer"><div class="ac-status" role="status">${e(status)}</div><div class="ac-actions"><span class="ac-quick-result" data-ac-quick-result></span>${(!input && !format ? config.enabled : allowsAgentInvocation(config, 'manual')) ? button('run', runLabel()) : ''}${button('save', '保存')}</div></div>`;
     if (assembledContext) node.querySelector('.ac-footer').before(assembledContext);
@@ -186,6 +203,7 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
     toolsEditor = toolHost ? createAgentToolCapabilitiesEditor({ host: toolHost, value: config.tools, actions, getOptions: options, state: toolState, onStatus: setStatus,
       onChange: value => { config.tools = value; updateMarker(); } }) : null;
     runCards = createAgentRunCards({ host: node.querySelector('[data-ac-runs]'), button, onStatus: setStatus, state: runState });
+    bindAgentPresetSourceControls(node, { services: presetServices });
     renderRuns();
     void refreshCurrentModel().catch(() => {});
     preview?.invalidate();
@@ -284,6 +302,14 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
     void showTarget().catch(error => { if (alive) setStatus(t(error.message || '操作失败')); });
   }, true);
   node.addEventListener('input', event => {
+    const presetControl = event.target.closest?.('[data-agent-preset-source]');
+    if (presetControl) {
+      // 控件的 radio 也带 name，不能按字段名写进 config
+      const { mode, presetId } = readAgentPresetSource(presetControl);
+      config.promptSource = mode; config.presetId = presetId;
+      updateMarker(); preview?.invalidate();
+      return;
+    }
     const field = event.target, name = field.name;
     if (!name || ['scope','model','invocationMode','inputOutput','outputMode','agent-config-draft','raw-selection','repairProfilePicker','repairAutomatic'].includes(name)) return;
     const parts = name.split('.'); let obj = parts[0] === 'body' ? bodyRule : config;

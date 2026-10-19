@@ -116,7 +116,7 @@
     },
     {
       "scope": "source",
-      "paths": ["src/scripts/import/attachment-file-inspector.js", "src/scripts/utils/character-card-assets.js"],
+      "paths": ["src/scripts/import/attachment-file-inspector.js", "src/scripts/utils/character-card-assets.js", "src/scripts/import/attachment-content.js", "src/scripts/import/office-text-extractor.js", "src/scripts/utils/zip-archive.js"],
       "category": "agent_semantic_source",
       "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
     },

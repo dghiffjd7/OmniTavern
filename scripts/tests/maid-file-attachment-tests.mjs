@@ -93,6 +93,80 @@ const card = {
   console.log('ok - attachment inspector recognises cards, worldbooks, regex and scripts by content');
 }
 
+// 通用文件：文本、压缩包、Office 按内容识别并保留原文件；PDF 与二进制明确提示
+{
+  const { buildZip } = await import('../../src/scripts/utils/zip-archive.js');
+  const enc = value => new TextEncoder().encode(value);
+  const makeFile = (name, type, bytes) => ({ name, type, size: bytes.byteLength, arrayBuffer: async () => bytes.slice().buffer });
+  const zip = await buildZip([{ path: '资料/笔记.md', bytes: enc('# 笔记') }]);
+  const docx = await buildZip([
+    { path: '[Content_Types].xml', bytes: enc('<Types/>') },
+    { path: 'word/document.xml', bytes: enc('<w:p><w:t>报告正文</w:t></w:p>') },
+  ]);
+  const warnings = [];
+  let seq = 0;
+  const registry = createMaidFileAttachmentRegistry();
+  const attachments = await createMaidAttachmentsFromFiles([
+    makeFile('日志.log', '', enc('第一行\n第二行')),
+    // Android 常把未知文件报成 octet-stream：按内容识别
+    makeFile('资料包', 'application/octet-stream', zip),
+    makeFile('报告.docx', '', docx),
+    makeFile('论文.pdf', 'application/pdf', enc('%PDF-1.7\n')),
+  ], { registry, createId: () => `gen-${(seq += 1)}`, notify: message => warnings.push(message) });
+  assert.deepEqual(attachments.map(item => [item.name, item.file.format, item.mime]), [
+    ['日志.log', 'text', 'text/plain'],
+    ['资料包', 'archive', 'application/octet-stream'],
+    ['报告.docx', 'document', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+  ]);
+  assert.deepEqual(Array.from(registry.get('gen-2').bytes), Array.from(zip), 'the original archive is kept for later reading');
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /PDF/);
+  console.log('ok - maid attachments accept text, archives and Office files by content and report PDFs');
+}
+
+// 附件名额：先分类再占名额（不支持的文件不占位），超出的文件不读取并明确提示
+{
+  const reads = [];
+  const makeJson = name => {
+    const bytes = encodeJson({ entries: [{ key: ['a'], content: name }] });
+    return { name, type: 'application/json', size: bytes.byteLength, arrayBuffer: async () => { reads.push(name); return bytes.slice().buffer; } };
+  };
+  const warnings = [];
+  let seq = 0;
+  const attachments = await createMaidAttachmentsFromFiles([
+    makeJson('a.json'),
+    { name: 'notes.exe', type: 'application/x-msdownload', size: 1, arrayBuffer: async () => new ArrayBuffer(1) },
+    makeJson('b.json'),
+    makeJson('c.json'),
+    makeJson('d.json'),
+  ], { registry: createMaidFileAttachmentRegistry(), createId: () => `slot-${(seq += 1)}`, notify: message => warnings.push(message), maxCount: 2 });
+  assert.deepEqual(attachments.map(item => item.name), ['a.json', 'b.json'], 'an unsupported file does not use up a slot');
+  assert.deepEqual(reads, ['a.json', 'b.json'], 'files beyond the remaining slots are not read');
+  assert.equal(warnings.length, 2);
+  assert.match(warnings[0], /notes\.exe/);
+  assert.match(warnings[1], /c\.json/);
+  assert.match(warnings[1], /d\.json/);
+  const none = [];
+  assert.deepEqual(await createMaidAttachmentsFromFiles([makeJson('e.json')], { notify: message => none.push(message), maxCount: 0 }), []);
+  assert.match(none[0], /e\.json/, 'a full attachment bar still tells the user which file was left out');
+  console.log('ok - maid attachments classify before taking slots and report files left out');
+}
+
+// 最近文件只算发送过的；没发送就移除的文件立即释放
+{
+  const registry = createMaidFileAttachmentRegistry();
+  const bytes = new Uint8Array([1, 2, 3]);
+  registry.register('sent', { bytes, hash: 'h1', name: 'sent.json', mime: 'application/json', size: 3, inspection: { format: 'worldbook' } });
+  registry.register('draft', { bytes, hash: 'h2', name: 'draft.json', mime: 'application/json', size: 3, inspection: { format: 'worldbook' } });
+  registry.markSubmitted('sent', { roleCardId: 'p', sessionId: 's' });
+  assert.deepEqual(registry.listRecent().map(item => item.id), ['sent'], 'a file the model never saw is not offered as a recent file');
+  assert.equal(registry.discardUnsubmitted('sent'), false, 'a sent file stays available for follow-up turns');
+  assert.equal(registry.discardUnsubmitted('draft'), true);
+  assert.equal(registry.get('draft'), null);
+  assert.equal(registry.discardUnsubmitted('unknown'), false);
+  console.log('ok - maid file registry lists only sent files as recent and frees removed drafts');
+}
+
 // 附件构建：图片照旧压缩；角色卡 PNG 与 JSON 保留原文件，其他类型和超大文件提示不支持
 {
   const makeFile = (name, type, bytes) => ({ name, type, size: bytes.byteLength, arrayBuffer: async () => bytes.slice().buffer });
@@ -105,7 +179,7 @@ const card = {
     makeFile('card.png', 'image/png', pngBytes),
     makeFile('photo.jpg', 'image/jpeg', new Uint8Array([1, 2, 3])),
     makeFile('星港.json', '', jsonBytes),
-    makeFile('notes.txt', 'text/plain', new Uint8Array([1])),
+    makeFile('tool.exe', 'application/x-msdownload', new Uint8Array([0x4d, 0x5a, 0, 0])),
     { name: 'huge.json', type: 'application/json', size: MAX_MAID_FILE_ATTACHMENT_BYTES + 1, arrayBuffer: async () => { throw new Error('must not read'); } },
   ], {
     registry,
@@ -127,7 +201,7 @@ const card = {
   assert.equal(registry.get('att-2'), null, 'plain photos are not retained');
   assert.deepEqual([attachments[2].mime, registry.get('att-3').hash], ['application/json', attachments[2].hash]);
   assert.equal(warnings.length, 2);
-  assert.match(warnings[0], /notes\.txt/);
+  assert.match(warnings[0], /tool\.exe/);
   assert.match(warnings[1], /20MB/);
 
   const small = createMaidFileAttachmentRegistry({ maxBytes: 10 });
@@ -311,7 +385,9 @@ const card = {
       getSession: () => null, setSession: async () => {},
     },
   });
+  const { extractArchiveEntryToLibrary } = await import('../../src/scripts/agent/tools/attachment-file-tools.js');
   const [inspectTool, importTool] = createAttachmentImportAgentTools({
+    extractArchiveEntry: extractArchiveEntryToLibrary,
     getAttachmentRegistry: () => registry,
     getImportService: () => service,
     personaStore: { get: id => personas.find(item => item.id === id) || null, getAll: () => personas },
@@ -366,7 +442,21 @@ const card = {
 
   const inspected = await inspectTool.execute({ attachmentId: 're' });
   assert.deepEqual([inspected.attachments[0].format, inspected.attachments[0].ruleNames], ['regex', ['r']]);
-  assert.deepEqual((await inspectTool.execute({})).attachments.map(item => item.attachmentId), ['card'], 'only files that are not imported yet are listed');
+  registry.markSubmitted('card', { roleCardId: 'p-test', sessionId: 'rp:p-test' });
+  assert.deepEqual((await inspectTool.execute({})).attachments.map(item => item.attachmentId), ['card'], 'only sent files that are not imported yet are listed');
+
+  // 压缩包里的世界书：带 entry 直接导入（先取出成单独文件，同一路径只取一次）
+  const { buildZip } = await import('../../src/scripts/utils/zip-archive.js');
+  const zipBytes = await buildZip([{ path: '书/灯塔.json', bytes: encodeJson({ name: '灯塔', entries: [{ key: ['灯'], content: '灯塔' }] }) }]);
+  registry.register('pack', { bytes: zipBytes, hash: 'a'.repeat(64), name: '书.zip', mime: 'application/zip', inspection: { format: 'archive' } });
+  registry.markSubmitted('pack', { roleCardId: 'p-test', sessionId: 'rp:p-test' });
+  const fromZip = await run({ attachmentId: 'pack', entry: '书/灯塔.json', target: 'role_card', roleCard: 'current' });
+  assert.deepEqual([fromZip.result.ok, fromZip.result.worldbookId], [true, '灯塔']);
+  assert.deepEqual(binds.at(-1), ['role_card', 'p-test', '灯塔'], '"current" follows the archive the entry came from');
+  const derived = registry.list().filter(item => item.parentId === 'pack');
+  assert.deepEqual(derived.map(item => [item.entryPath, item.origin]), [['书/灯塔.json', 'archive']]);
+  assert.equal((await run({ attachmentId: 'pack', entry: '书/灯塔.json', target: 'role_card', roleCard: 'current' })).result.alreadyImported, true);
+  assert.equal((await run({ attachmentId: 'pack', entry: '没有.json', target: 'global' })).result.reason, 'entry_not_found');
   console.log('ok - attachment tools import worldbooks and regex with confirmations only where content is replaced or rewritten');
 }
 

@@ -31,6 +31,14 @@ assert.deepEqual(classifyMvuSchemaOnlyScript(runtimeBootstrap), {
   schemaOnly: true,
   reason: 'mvu_runtime',
 });
+// 网址带版本或分支（@beta、@1.2.3）的 MVU 本体也要认出来，不然会被当成普通脚本再跑一份
+for (const ref of ['@beta', '@1.2.3', '@main']) {
+  assert.deepEqual(classifyMvuSchemaOnlyScript({
+    name: 'var_update',
+    content: `import 'https://testingcf.jsdelivr.net/gh/MagicalAstrogy/MagVarUpdate${ref}/artifact/bundle.js'`,
+  }), { schemaOnly: true, reason: 'mvu_runtime' });
+}
+assert.equal(classifyMvuSchemaOnlyScript({ content: "import 'https://cdn.example/gh/x/MagVarUpdateX/artifact/bundle.js'" }).schemaOnly, false);
 assert.equal(classifyMvuSchemaOnlyScript(eventScript).schemaOnly, false);
 assert.equal(classifyMvuSchemaOnlyScript(helperLoader).schemaOnly, false);
 

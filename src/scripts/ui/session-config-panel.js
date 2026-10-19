@@ -179,9 +179,11 @@ const SC_PANEL_CSS = `
 `;
 
 export class SessionConfigPanel {
-    constructor({ store = null } = {}) {
+    constructor({ store = null, getPresetServices = null } = {}) {
         const bridge = typeof window !== 'undefined' ? window.appBridge : null;
         this.store = store || getPresetStore(bridge) || new PresetStore();
+        // 预设分类选单（agent-preset-services）；面板比服务先创建，所以用取值函数
+        this.getPresetServices = getPresetServices;
         this.overlay = null;
         this.panel = null;
         this.scrollEl = null;
@@ -465,7 +467,7 @@ export class SessionConfigPanel {
         presetBtn.className = `pp-binding-btn ${boundPresetId ? 'is-muted' : 'is-primary'}`;
         presetBtn.textContent = boundPresetId ? (isLegacyBinding ? '更改或清除' : '更改预设') : '绑定预设';
         presetBtn.addEventListener('click', () => {
-            this.openSelectMenu(presetBtn, presetOptions, boundPresetId, (val) => {
+            this.openPresetMenu(presetBtn, presetOptions, boundPresetId, (val) => {
                 this.runTask(() => val
                     ? this.store.setModeBinding('openai', mode, val)
                     : this.store.clearModeBinding('openai', mode));
@@ -585,7 +587,7 @@ export class SessionConfigPanel {
         presetBtn.className = `pp-binding-btn ${boundPresetId ? 'is-muted' : 'is-primary'}`;
         presetBtn.textContent = boundPresetId ? '更改预设' : '绑定预设';
         presetBtn.addEventListener('click', () => {
-            this.openSelectMenu(presetBtn, presetOptions, boundPresetId, (val) => {
+            this.openPresetMenu(presetBtn, presetOptions, boundPresetId, (val) => {
                 this.runTask(() => val
                     ? this.store.setSessionBinding('openai', entry.id, val)
                     : this.store.clearSessionBinding('openai', entry.id), {
@@ -825,6 +827,22 @@ export class SessionConfigPanel {
 
     closeCustomSelectMenu() {
         closeSharedCustomSelectMenu();
+    }
+
+    // 自定义提示词预设：有预设服务时用按分类、可搜索的选单（第一项「跟随…默认」置顶）；否则用普通菜单
+    openPresetMenu(anchorEl, options, currentValue, onSelect) {
+        const services = this.getPresetServices?.();
+        if (!services?.openPicker) {
+            this.openSelectMenu(anchorEl, options, currentValue, onSelect);
+            return;
+        }
+        services.openPicker({
+            anchorEl,
+            currentId: currentValue,
+            presets: options.filter(option => option.value).map(option => ({ id: option.value })),
+            leadingOptions: options.filter(option => !option.value),
+            onSelect,
+        });
     }
 
     openSelectMenu(anchorEl, options, currentValue, onSelect) {

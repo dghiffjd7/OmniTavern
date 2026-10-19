@@ -5,6 +5,7 @@ import {
   decodeImportBase64Text,
   normalizeImportZipEntryName,
   readImportManifestFromEntries,
+  isDataBundleDescriptor,
   resolveImportKindFromZipEntries,
 } from '../../src/scripts/ui/import-package-kind-utils.js';
 
@@ -51,9 +52,16 @@ const encodeBase64 = value => Buffer.from(String(value), 'utf8').toString('base6
 }
 
 {
-  assert.equal(resolveImportKindFromZipEntries([{ name: 'nested/manifest.json', text: '{}' }]).kind, 'bundle');
-  assert.equal(resolveImportKindFromZipEntries([{ name: 'manifest.json', text: '{broken' }]).kind, 'bundle');
-  assert.equal(resolveImportKindFromZipEntries([{ name: 'manifest.json', text: '{"format":"unknown"}' }]).kind, 'bundle');
-  assert.equal(resolveImportKindFromZipEntries(null).kind, 'bundle');
-  console.log('ok - resolveImportKindFromZipEntries falls back to full bundle on missing invalid or unknown manifest');
+  // 完整资料包导入会先清空全部资料：只有带 bundle.json（tauri-chat-app-backup-v1）的才算，其余一律「无法识别」
+  const backup = { name: 'bundle.json', text: '{"format":"tauri-chat-app-backup-v1","appVersion":"0.7.6"}' };
+  assert.equal(resolveImportKindFromZipEntries([backup, { name: 'chat_store_v1.json', text: '{}' }]).kind, IMPORT_PACKAGE_KINDS.BUNDLE);
+  assert.equal(resolveImportKindFromZipEntries([{ name: 'nested/manifest.json', text: '{}' }]).kind, IMPORT_PACKAGE_KINDS.UNKNOWN);
+  assert.equal(resolveImportKindFromZipEntries([{ name: 'manifest.json', text: '{broken' }]).kind, IMPORT_PACKAGE_KINDS.UNKNOWN);
+  assert.equal(resolveImportKindFromZipEntries([{ name: 'manifest.json', text: '{"format":"unknown"}' }]).kind, IMPORT_PACKAGE_KINDS.UNKNOWN);
+  assert.equal(resolveImportKindFromZipEntries([{ name: 'bundle.json', text: '{"format":"something-else"}' }]).kind, IMPORT_PACKAGE_KINDS.UNKNOWN);
+  assert.equal(resolveImportKindFromZipEntries([{ name: 'photos/a.png', text: '' }]).kind, IMPORT_PACKAGE_KINDS.UNKNOWN, 'an ordinary zip is never treated as a backup');
+  assert.equal(resolveImportKindFromZipEntries(null).kind, IMPORT_PACKAGE_KINDS.UNKNOWN);
+  assert.equal(isDataBundleDescriptor({ format: 'tauri-chat-app-backup-v1' }), true);
+  assert.equal(isDataBundleDescriptor(null), false);
+  console.log('ok - only zips identified as backups route to the full-bundle import; others are unknown');
 }

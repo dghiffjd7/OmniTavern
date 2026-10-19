@@ -151,6 +151,7 @@ export const buildExperiencePackManifest = ({
   memoryData = null,
   variableState = null,
   chat = null,
+  agentWorkflow = null,
   options = {},
   exportedAt = new Date().toISOString(),
   exportedBy = 'OmniTavern',
@@ -173,6 +174,7 @@ export const buildExperiencePackManifest = ({
     memory_data: Boolean(memoryData),
     variable_state: Boolean(variableState),
     chat_history: Boolean(chat),
+    agents: Boolean(agentWorkflow),
   },
   options: {
     hideServiceAddresses: options.hideServiceAddresses === true,
@@ -205,6 +207,7 @@ export const buildExperiencePackJsonEntryPayloads = ({
   room = null,
   memoryData = null,
   chat = null,
+  agentWorkflow = null,
   archiveEntryNameForId = archiveId => `chat/archives/${String(archiveId || 'archive')}.json`,
 } = {}) => {
   const entries = [
@@ -242,6 +245,10 @@ export const buildExperiencePackJsonEntryPayloads = ({
     if (room.memoryTemplate) {
       entries.push({ name: 'memory/template.json', value: room.memoryTemplate });
     }
+  }
+  // 这个联系人的聊天 Agent 配置（AC 工作流格式，只含 Agent 与用到的预设）
+  if (agentWorkflow) {
+    entries.push({ name: 'agents/workflow.json', value: agentWorkflow });
   }
   if (memoryData) {
     entries.push({ name: 'memory/data.json', value: memoryData });

@@ -71,7 +71,8 @@ assert.match(boardPanel, /class="hop-menu hop-secondary-actions" role="menu" hid
 assert.match(boardPanel, /iconBtn\('run-mode', t\('上一轮'\)/, '回看上一轮为图标按钮');
 assert.match(boardPanel, /iconBtn\('library', t\('全部 Agent'\)\)/, '目录入口在标题栏');
 assert.match(boardPanel, /createCustomSelectWrapper/, '编排下拉复用 APP 组件，不另造选单');
-assert.match(boardPanel, /iconBtn\('help', t\('说明'\)\)/);
+assert.match(boardPanel, /const helpBtn = button\('help', t\('说明'\), `class="hop-icon-only" aria-label="\$\{e\(t\('说明'\)\)\}" data-help-title="[^"]+" data-help="\$\{e\(helpText\)\}" data-help-mode="tap"`\)/, '说明是浮现文字：桌面悬停、手机点一下');
+assert.doesNotMatch(boardPanel, /action === 'help'/, '说明不再弹出详情窗');
 assert.match(boardPanel, /class="hop-icon-only" title="\$\{e\(label\)\}" aria-label="\$\{e\(label\)\}"/, '图标按钮统一带 title 与 aria-label');
 console.log('ok - theme-aware grouped toolbar, accessible icon buttons and full-width mobile save');
 const app = await readFile(new URL('../../src/scripts/ui/app.js', import.meta.url), 'utf8');

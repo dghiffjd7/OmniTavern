@@ -24,6 +24,7 @@ import { createGuideStartFlowTools } from '../../src/scripts/agent/tools/guide-s
 import { createChatFormatRepairTools } from '../../src/scripts/agent/tools/chat-format-tools.js';
 import { createMomentsAgentTools } from '../../src/scripts/agent/tools/moments-tools.js';
 import { createPresetRegexScriptAgentTools } from '../../src/scripts/agent/tools/preset-regex-script-tools.js';
+import { createPresetGroupStore } from '../../src/scripts/storage/preset-group-store.js';
 import { createContactProfileAgentTools } from '../../src/scripts/agent/tools/contact-profile-tools.js';
 import { createAttachmentImportAgentTools } from '../../src/scripts/agent/tools/attachment-import-tools.js';
 import { createAgentToolRegistry } from '../../src/scripts/agent/agent-tool-registry.js';
@@ -32,6 +33,7 @@ globalThis.localStorage = globalThis.localStorage || { getItem: () => null, setI
 const { createAttachmentImportService } = await import('../../src/scripts/import/attachment-import-service.js');
 const { inspectAttachmentFile } = await import('../../src/scripts/import/attachment-file-inspector.js');
 const { createMaidFileAttachmentRegistry } = await import('../../src/scripts/ui/maid-file-attachments.js');
+const { createAttachmentFileAgentTools } = await import('../../src/scripts/agent/tools/attachment-file-tools.js');
 
 const getTool = (tools, name) => tools.find(tool => tool.name === name);
 
@@ -615,6 +617,7 @@ const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
   const catalogRegex = { global: { enabled: true, rules: [{ id: 'g1', scriptName: '规则', findRegex: 'a', replaceString: '' }] }, sets: {}, session: {} };
   const catalogScripts = [{ id: 's1', name: '脚本', enabled: false, compatibility: { blocked: false } }];
   const presetRegexScriptTools = createPresetRegexScriptAgentTools({
+    presetGroupStore: createPresetGroupStore({ storage: null, saveKv: async () => {}, logger: null }),
     presetStore: {
       getState: () => ({ builtinActive: { openai: 'builtin' } }),
       getEnabled: () => true,
@@ -675,7 +678,8 @@ const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
     }),
     readWorldbookSnapshot: readAttachmentWorld,
   });
-  const tools = [...navTools, ...sessionTools, ...groupTools, ...contentTools, ...mediaTools, ...captureTools, ...webTools, ...todoTools, ...maidMemoryTools, ...guideTools, ...formatTools, ...momentsTools, ...presetRegexScriptTools, ...contactProfileTools, ...attachmentTools];
+  const attachmentFileTools = createAttachmentFileAgentTools({ getAttachmentRegistry: () => attachmentRegistry });
+  const tools = [...navTools, ...sessionTools, ...groupTools, ...contentTools, ...mediaTools, ...captureTools, ...webTools, ...todoTools, ...maidMemoryTools, ...guideTools, ...formatTools, ...momentsTools, ...presetRegexScriptTools, ...contactProfileTools, ...attachmentTools, ...attachmentFileTools];
   const worldbookRegistry = createAgentToolRegistry({
     permissionEvaluator: { evaluateTool: () => ({ decision: 'allow', checks: [] }) },
     logger: { warn() {} },
@@ -1125,6 +1129,8 @@ const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
       'preset.switch': { preset: '备用' },
       'preset.prompt_entries.toggle': { preset: '主', entries: ['main'], enabled: false },
       'preset.delete_many': { type: 'openai', presets: ['备用'] },
+      'preset.groups.list': {},
+      'preset.groups': { assignments: [{ preset: '备用', group: '测试' }] },
       'regex.list': {},
       'regex.toggle': { targets: ['g1'], enabled: false },
       'regex.upsert_rules': { rules: [{ scriptName: '新规则', findRegex: 'b', replaceString: 'c' }] },
@@ -1147,6 +1153,23 @@ const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
       const result = await getTool(tools, feature.directAction).execute(args, {});
       assert.equal(result.ok, true, `${feature.id} direct action should succeed: ${JSON.stringify(result).slice(0, 200)}`);
       if (feature.id === 'attachment.import') assert.deepEqual([result.worldbookId, result.verified], ['目录测试', true]);
+      return;
+    }
+    if (['attachment.read', 'attachment.search', 'attachment.extract', 'attachment.create', 'attachment.pack'].includes(feature.id)) {
+      if (feature.id === 'attachment.extract' && !attachmentRegistry.get('catalog-zip')) {
+        const { buildZip } = await import('../../src/scripts/utils/zip-archive.js');
+        const zip = await buildZip([{ path: 'docs/目录.txt', bytes: new TextEncoder().encode('目录测试') }]);
+        attachmentRegistry.register('catalog-zip', { bytes: zip, name: 'catalog.zip', mime: 'application/zip', inspection: { format: 'archive' } });
+      }
+      const args = {
+        'attachment.read': { attachmentId: 'catalog-file' },
+        'attachment.search': { attachmentId: 'catalog-file', query: '目录' },
+        'attachment.extract': { attachmentId: 'catalog-zip', entries: ['docs/目录.txt'] },
+        'attachment.create': { name: 'catalog.md', content: '# 目录' },
+        'attachment.pack': { name: 'catalog', files: [{ attachmentId: 'catalog-file' }] },
+      }[feature.id];
+      const result = await getTool(tools, feature.directAction).execute(args, {});
+      assert.equal(result.ok, true, `${feature.id} direct action should succeed: ${JSON.stringify(result).slice(0, 200)}`);
       return;
     }
     if (feature.directAction === 'app.read_feature_doc') {

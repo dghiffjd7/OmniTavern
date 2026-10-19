@@ -20,6 +20,11 @@ const maidSettingsSource = fs.readFileSync(
     /\.maid-memory-card\s*\{[^}]*?flex:\s*0\s+0\s+auto\s*;/,
     'semantic-memory cards must keep their natural height inside the scrolling flex list',
   );
+  assert.match(
+    maidSettingsSource,
+    /@media\s*\(max-width:\s*640px\)[\s\S]*?\.maid-settings-list-item\.is-file\s+\.maid-memory-delete\s*\{[^}]*?width:\s*auto/,
+    'phone width: the file-library delete button must not inherit width:100% and squeeze the file name to one character',
+  );
   assert.match(maidSettingsSource, /maid-settings-header-copy/);
   assert.match(maidSettingsSource, /ARIA Assistant/);
   assert.match(maidSettingsSource, /maid-settings-section-caption/);

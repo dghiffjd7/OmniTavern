@@ -26,7 +26,7 @@ import {
 } from './rich-render-routing.js';
 import { hideCreativeContentTagsForDisplay } from './creative-content-display-utils.js';
 import { mergeRichCompatInputText } from './rich-input-compat.js';
-import { segmentDialogueText } from './dialogue-segment-utils.js';
+import { segmentDialogueRuns, segmentDialogueText } from './dialogue-segment-utils.js';
 import { createRpMessageIconMarkup } from './rp-message-actions-ui-utils.js';
 import {
     CompatGapCorrelationTracker,
@@ -5213,6 +5213,63 @@ const appendRichFragmentNode = (sourceNode, targetParent, state, mode = 'block')
     targetParent.appendChild(nextEl);
 };
 
+// 富文本片段里的普通正文也做对白着色：只进段落、加粗等纯排版标签；作者卡片（带 class/style 的元素、
+// div、details、表格等）、代码与状态卡整块跳过，并当作段落边界，引号不会跨过它们配对。
+const DIALOGUE_FLOW_TAGS = new Set(['p', 'blockquote', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6']);
+const DIALOGUE_FLOW_INLINE_TAGS = new Set(['strong', 'b', 'em', 'i', 'u', 's', 'del', 'ins', 'mark', 'small', 'sub', 'sup']);
+
+export const highlightDialogueInFlow = (root) => {
+    const doc = root.ownerDocument || document;
+    let runs = [];
+    const flush = () => {
+        const current = runs;
+        runs = [];
+        if (!current.some(run => run.node && /["“「]/.test(run.text))) return;
+        segmentDialogueRuns(current.map(run => run.text)).forEach((segments, index) => {
+            const { node } = current[index];
+            if (!node || !segments.some(segment => segment.kind === 'dialogue')) return;
+            const replacement = doc.createDocumentFragment();
+            segments.forEach(({ kind, text }) => {
+                if (kind !== 'dialogue') {
+                    replacement.appendChild(doc.createTextNode(text));
+                    return;
+                }
+                const span = doc.createElement('span');
+                span.className = 'rp-dialogue-text';
+                span.textContent = text;
+                replacement.appendChild(span);
+            });
+            node.parentNode?.replaceChild(replacement, node);
+        });
+    };
+    const visit = (parent) => {
+        Array.from(parent.childNodes || []).forEach((child) => {
+            if (child.nodeType === Node.TEXT_NODE) {
+                runs.push({ node: child, text: String(child.nodeValue || '') });
+                return;
+            }
+            if (child.nodeType !== Node.ELEMENT_NODE) return;
+            const tag = String(child.tagName || '').toLowerCase();
+            if (tag === 'br') {
+                runs.push({ node: null, text: '\n' });
+                return;
+            }
+            const plain = !child.hasAttribute('class') && !child.hasAttribute('style');
+            if (plain && DIALOGUE_FLOW_INLINE_TAGS.has(tag)) {
+                visit(child);
+                return;
+            }
+            flush();
+            if (plain && DIALOGUE_FLOW_TAGS.has(tag)) {
+                visit(child);
+                flush();
+            }
+        });
+    };
+    visit(root);
+    flush();
+};
+
 const renderScopedRichFragment = (
     containerEl,
     text,
@@ -5223,6 +5280,7 @@ const renderScopedRichFragment = (
         debugTag = '',
         source = 'message',
         openLightbox = null,
+        highlightDialogue = false,
     } = {},
 ) => {
     if (!containerEl) return false;
@@ -5246,6 +5304,7 @@ const renderScopedRichFragment = (
             escapeText: value => String(value ?? ''),
         };
         Array.from(root.childNodes || []).forEach((node) => appendRichFragmentNode(node, fragment, state, 'block'));
+        if (highlightDialogue) highlightDialogueInFlow(fragment);
         if (state.styles.length) {
             const styleEl = document.createElement('style');
             styleEl.className = 'chat-rich-scoped-style';
@@ -10461,6 +10520,7 @@ export const renderRichText = (
                 debugTag,
                 source: 'message',
                 openLightbox,
+                highlightDialogue,
             });
             if (rendered) {
                 if (Boolean(debugTag) || shouldLogRichDebug()) {

@@ -11,6 +11,8 @@ export const createMaidOnboardingAppAdapter = ({
   isElementVisible = element => Boolean(element),
   delay = async () => {},
   openSettingsMenu = null,
+  openChatroomMenu = null,
+  revealSettingsEntry = null,
   openGeneralSettings = null,
   openApiConfig = null,
   openQuickMenu = null,
@@ -43,6 +45,14 @@ export const createMaidOnboardingAppAdapter = ({
       } catch {}
     }
     return null;
+  };
+
+  // 列表顶栏的设置菜单打不开时：写作房间改开房间右上角菜单；手机聊天室先退回列表再打开
+  const openSettingsMenuInPlace = async () => {
+    let opened = await openSettingsMenu?.();
+    if (opened === false && typeof openChatroomMenu === 'function') opened = await openChatroomMenu();
+    if (opened === false && await revealSettingsEntry?.()) opened = await openSettingsMenu?.();
+    return opened;
   };
 
   const preparePreviousStep = async (target = '') => {
@@ -118,17 +128,20 @@ export const createMaidOnboardingAppAdapter = ({
     if (isPrevious && await preparePreviousStep(target)) return;
     if (!isPrevious) await delay(0);
     if (target === 'settings-api-config' && !resolveTarget(target)) {
-      await openSettingsMenu?.();
+      await openSettingsMenuInPlace();
       return;
     }
     if (target === 'settings-general' && !resolveTarget(target)) {
-      await openSettingsMenu?.();
+      await openSettingsMenuInPlace();
       return;
     }
     if (target === 'settings-entry') {
       if (trim(flow?.id) !== 'rich-script-permission') {
         if (isChatRoomVisible?.()) await exitChatRoom?.({ animate: false, source: 'maid-onboarding' });
         await switchPage?.('chat', { animate: false });
+      } else {
+        // 情境引导留在原房间；只有手机聊天室盖住列表、聊天室菜单又没有「设定」时才退回列表
+        await revealSettingsEntry?.();
       }
       return;
     }
@@ -199,7 +212,7 @@ export const createMaidOnboardingAppAdapter = ({
   const runFallback = async ({ step = null } = {}) => {
     const kind = trim(step?.fallback?.kind);
     if (kind === 'open-settings-menu') {
-      return runClickFallback(openSettingsMenu, 'settings-entry');
+      return runClickFallback(openSettingsMenuInPlace, 'settings-entry');
     }
     if (kind === 'open-api-config') {
       if (typeof openApiConfig !== 'function') return false;

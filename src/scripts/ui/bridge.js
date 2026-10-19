@@ -5,7 +5,7 @@
 import { sanitizeRequestPreviewUrl } from '../api/request-params.js';
 import { LLMClient } from '../api/client.js';
 import { captureRequestContext } from '../api/request-context.js';
-import { canInitClient } from '../api/client-config-utils.js';
+import { canInitClient, mergeBackgroundGenerationOptions } from '../api/client-config-utils.js';
 import {
   applyDeepSeekPrefillToStream,
   hasProviderToolRequestOptions,
@@ -146,6 +146,14 @@ import {
   preparePhoneBatchProviderFcRoute,
   runPhoneBatchProviderFcAttempt,
 } from './chat/phone-batch-provider-fc.js';
+import {
+  chatCreativeBodyFc,
+  createCreativeBodyFcDecoder,
+  describeCreativeBodyFcNotice,
+  planCreativeBodyFc,
+  planCreativeBodyFcTruncationHint,
+  streamCreativeBodyFc,
+} from './chat/creative-body-fc.js';
 import {
   derivePhoneReplyJsonFormatCapabilities,
   preparePhoneReplyJsonRoute,
@@ -4988,6 +4996,41 @@ class AppBridge {
         generationClient = creativeRequest.client;
         presetRequestSession = creativeRequest.session;
       }
+      // 防截断传输（设置档开关）：创意写作正文改走函数调用传回。放在预设请求通道之后，
+      // 才能知道本轮是否自带工具或被预设接管；放在请求预览之前，预览也带上工具。
+      const creativeBodyFcPlan = planCreativeBodyFc({
+        enabled: config?.bodyToolTransport === true,
+        uiMode: presetContext?.uiMode,
+        config,
+        requestOptions,
+        presetRequestSession,
+        phoneRoute: phoneProviderFcRoute.eligible,
+      });
+      const notifyCreativeBodyFc = (state) => {
+        const notice = previewOnly ? null : describeCreativeBodyFcNotice(state);
+        if (notice) window.toastr?.[notice.level]?.(notice.message);
+      };
+      if (creativeBodyFcPlan.active) requestOptions = { ...requestOptions, ...creativeBodyFcPlan.requestOptions };
+      else notifyCreativeBodyFc(creativeBodyFcPlan);
+      const reportCreativeBodyFcOutcome = (outcome) => {
+        if (this.lastRequest?.requestId === nativeRequestId) {
+          this.lastRequest.bodyToolTransport = { outcome: outcome.outcome, incomplete: outcome.incomplete, finishReason: outcome.finishReason };
+        }
+        notifyCreativeBodyFc(outcome);
+      };
+      // 开关关着却被截断（接口回报的结束原因）：右上角提示一次，点击跳到 AC「正文生成」卡片的开关
+      const suggestCreativeBodyFcOnTruncation = () => {
+        const hint = planCreativeBodyFcTruncationHint({
+          plan: creativeBodyFcPlan, uiMode: presetContext?.uiMode, phoneRoute: phoneProviderFcRoute.eligible,
+          previewOnly, config, usage: generationUsage, sessionId,
+        });
+        if (!hint.show) return;
+        window.toastr?.warning?.(hint.message, '', {
+          onclick: () => window.dispatchEvent(new CustomEvent('open-body-tool-transport')),
+          timeOut: 10000,
+          extendedTimeOut: 4000,
+        });
+      };
       const preparedRequest = phoneProviderFcRoute.eligible
         ? null
         : (generationClient?.prepareChatRequest?.(messages, { ...requestOptions, stream: Boolean(config?.stream) }) || null);
@@ -5690,7 +5733,13 @@ class AppBridge {
             finishProviderCall(outcome, completedAt);
             completeGenerationDiagnostics({ completedAt, stream: true });
             emitPhoneStructuredRouteStatus(outcome === 'succeeded' ? 'complete' : 'failed', { message: '' });
+            if (outcome === 'succeeded') suggestCreativeBodyFcOnTruncation();
           },
+          creativeBodyFc: creativeBodyFcPlan.active ? {
+            provider: creativeBodyFcPlan.provider,
+            model: creativeBodyFcPlan.model,
+            onOutcome: reportCreativeBodyFcOutcome,
+          } : null,
         });
         return (async function* () {
           try {
@@ -5708,6 +5757,15 @@ class AppBridge {
           legacyAttempt += 1;
           startProviderCall(mode, false);
           try {
+            if (creativeBodyFcPlan.active) {
+              const outcome = await chatCreativeBodyFc({
+                chat: options => generationClient.chat(messages, options),
+                options: requestOptions,
+                decoder: createCreativeBodyFcDecoder({ provider: creativeBodyFcPlan.provider, model: creativeBodyFcPlan.model }),
+              });
+              reportCreativeBodyFcOutcome(outcome);
+              return outcome.text;
+            }
             return await generationClient.chat(messages, requestOptions);
           } catch (error) {
             finishProviderCall(abortController.signal.aborted ? 'cancelled' : 'failed');
@@ -5725,6 +5783,7 @@ class AppBridge {
         const finalResponse = this.mergeAssistantPrefillResponse(responsePrefix, response);
 
         completeGenerationDiagnostics({ stream: false });
+        suggestCreativeBodyFcOnTruncation();
 
         // 保存到历史记录
         if (saveHistory) await this.saveToHistory(originalInput, finalResponse);
@@ -5785,7 +5844,8 @@ class AppBridge {
     if (!msgs.length) throw new Error('messages 不能为空');
 
     // Use the same generation options mapping as normal chat, but allow caller overrides.
-    const { presetContext = null, runtimeConfigOverride = null, previewOnly = false, ...requestOverrides } = options || {};
+    // reasoningMode: 'off'：这次请求不思考（见 getGenerationOptions 的 reasoningOff）。
+    const { presetContext = null, runtimeConfigOverride = null, previewOnly = false, reasoningMode = '', ...requestOverrides } = options || {};
     const resolvedPresetContext = presetContext || {
       sessionId: String(this.activeSessionId || '').trim(),
       uiMode: String(this.activeSessionId || '').trim().startsWith('rp:') ? 'rp' : 'chat',
@@ -5806,8 +5866,7 @@ class AppBridge {
       throw new Error('请先配置 API 信息');
     }
     const genOptions = {
-      ...this.getGenerationOptions(resolvedPresetContext, config),
-      ...requestOverrides,
+      ...mergeBackgroundGenerationOptions(this.getGenerationOptions(resolvedPresetContext, config, { reasoningOff: reasoningMode === 'off' }), requestOverrides),
       requestContext,
     };
     const normalizedMsgs = this.normalizeOutgoingProviderMessages(msgs, config);
@@ -5848,7 +5907,21 @@ class AppBridge {
       if (!requestClient?.streamChat) {
         throw new Error('请先配置 API 信息');
       }
-      const stream = requestClient.streamChat(messages, genOptions);
+      // 防截断传输：正文在工具参数里逐段到达，解码成文字交回同一条流式链路
+      const stream = streamMeta?.creativeBodyFc
+        ? streamCreativeBodyFc({
+            streamChat: options => requestClient.streamChat(messages, options),
+            options: genOptions,
+            decoder: createCreativeBodyFcDecoder({
+              provider: streamMeta.creativeBodyFc.provider,
+              model: streamMeta.creativeBodyFc.model,
+            }),
+            isReasoningEvent: isReasoningStreamEvent,
+            onOutcome: streamMeta.creativeBodyFc.onOutcome,
+            provider: streamMeta.creativeBodyFc.provider,
+            model: streamMeta.creativeBodyFc.model,
+          })
+        : requestClient.streamChat(messages, genOptions);
       const bridge = this;
       const measuredStream = (async function* () {
         for await (const chunk of stream) {
@@ -9242,19 +9315,26 @@ const stringifyMessageContent = (content) => {
    * SillyTavern-like generation parameters (from OpenAI preset)
    * We store the full OpenAI preset JSON, but only map common fields into provider options.
    */
-  getGenerationOptions(presetContext = {}, runtimeConfigOverride = null) {
+  getGenerationOptions(presetContext = {}, runtimeConfigOverride = null, { reasoningOff = false } = {}) {
     try {
-      const state = this.presets?.getSelectionState?.();
-      if (!state?.enabled?.openai) return {};
-      const resolved = this.presets.getResolvedActive('openai', presetContext || {});
-      const p = resolved?.preset;
-      if (!p || typeof p !== 'object') return {};
-
-      const num = v => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
-      const int = v => (typeof v === 'number' && Number.isFinite(v) ? Math.trunc(v) : undefined);
+      // Agent「套用预设」：presetContext.presetId 指定的预设决定采样与推理，不看会话／模式绑定、推理覆盖和主回复的启用开关。
+      // reasoningOff：后台小任务（如变量判断只要一个数字）不思考，预设与会话的推理设置都不生效。
       const runtimeConfig = runtimeConfigOverride && typeof runtimeConfigOverride === 'object'
           ? runtimeConfigOverride
           : (this.config.get?.() || {});
+      // 没有预设参数时也要明确关闭：DeepSeek 不送参数时默认会思考
+      const withoutPreset = () => (reasoningOff ? buildReasoningRequestOptions({ provider: runtimeConfig?.provider, model: runtimeConfig?.model, baseUrl: runtimeConfig?.baseUrl, requestReasoning: false }) : {});
+      const explicitPresetId = String(presetContext?.presetId || '').trim();
+      const explicitPreset = explicitPresetId ? this.presets?.getPreset?.('openai', explicitPresetId) : null;
+      if (!explicitPreset) {
+        const state = this.presets?.getSelectionState?.();
+        if (!state?.enabled?.openai) return withoutPreset();
+      }
+      const p = explicitPreset || this.presets.getResolvedActive('openai', presetContext || {})?.preset;
+      if (!p || typeof p !== 'object') return withoutPreset();
+
+      const num = v => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+      const int = v => (typeof v === 'number' && Number.isFinite(v) ? Math.trunc(v) : undefined);
 
       const sessionId = String(presetContext?.sessionId || '').trim();
       const sessionReasoning = sessionId
@@ -9262,8 +9342,10 @@ const stringifyMessageContent = (content) => {
           : null;
       const modeForReasoning = normalizeBridgePresetUiMode(presetContext?.uiMode, { sessionId });
       const modeReasoning = this.presets.getModeReasoning?.('openai', modeForReasoning) || null;
-      const overrideReasoning = sessionReasoning || modeReasoning;
-      const effectiveRequestReasoning = overrideReasoning
+      const overrideReasoning = explicitPreset ? null : (sessionReasoning || modeReasoning);
+      const effectiveRequestReasoning = reasoningOff
+          ? false
+          : overrideReasoning
           ? overrideReasoning.request_reasoning === true
           : p.request_reasoning === true;
       const effectiveReasoningEffort = overrideReasoning?.reasoning_effort

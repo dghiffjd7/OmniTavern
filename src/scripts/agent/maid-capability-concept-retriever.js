@@ -180,10 +180,15 @@ export const searchMaidCapabilityConcepts = (
   if (presetNoun.test(positiveText)) {
     add('preset.list', 84, 'preset_domain');
     add(['preset.switch', 'preset.prompt_entries.toggle'], 58, 'preset_domain');
-    if (deleteIntent.test(positiveText)) add(['preset.delete_many', 'preset.list'], 106, 'preset_batch_delete');
+    if (/(?:分类|分组|归类|整理|categor|group)/iu.test(positiveText)) add('preset.groups', 108, 'preset_grouping');
+    else if (deleteIntent.test(positiveText)) add(['preset.delete_many', 'preset.list'], 106, 'preset_batch_delete');
     else if (/(?:条目|entries?|entry)/iu.test(positiveText) && toggleIntent.test(positiveText)) add(['preset.prompt_entries.toggle', 'preset.list'], 108, 'preset_entry_toggle');
     else if (switchIntent.test(positiveText)) add(['preset.switch', 'preset.list'], 106, 'preset_switch');
     else if (has(/(?:有哪些|列出|列表|哪个|哪一个|当前|在用|查看|看看|list|which)/iu)) add('preset.list', 100, 'preset_inventory');
+  }
+  // 回复被截断：APP 知识里的「防截断传输」（只说明开关位置）
+  if (/(?:截断|截掉|写(?:到)?一半(?:就)?(?:断|停)|没写完|(?:回复|正文|输出).{0,6}不完整|中途(?:断|停)|防截断|抗截断|truncat)/iu.test(positiveText)) {
+    add('creative.body_tool_transport', 104, 'reply_truncation');
   }
   if (regexNoun.test(positiveText) && !hasPositive(/(?:打开|弹出|show|open).{0,16}(?:正则|regex|regexp).{0,12}(?:面板|页面|panel|editor)/iu)) {
     add('regex.list', 84, 'regex_domain');

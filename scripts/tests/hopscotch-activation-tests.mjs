@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { normalizeHopscotchBoard, validateHopscotchBoard } from '../../src/scripts/ui/chat/hopscotch-board-utils.js';
 import { editHopscotchBoard } from '../../src/scripts/ui/chat/hopscotch-board-editor-utils.js';
-import { resolveHopscotchActivation, getActiveHopscotchFused } from '../../src/scripts/ui/chat/hopscotch-activation-utils.js';
+import { resolveHopscotchActivation, getActiveHopscotchFused, hopscotchInactiveLabel } from '../../src/scripts/ui/chat/hopscotch-activation-utils.js';
 import { createCreativeTurnOrchestrator } from '../../src/scripts/ui/chat/creative-turn-orchestrator.js';
 import { createHopscotchBoardStore } from '../../src/scripts/storage/hopscotch-board-store.js';
 import { createHopscotchTurnRuntime, createHopscotchExecutors } from '../../src/scripts/ui/chat/hopscotch-turn-runtime.js';
@@ -86,4 +86,44 @@ console.log('ok - persistent pause, fused members, dependency skip, original geo
   assert.equal(off.fused.memory_table.reason, 'memory_disabled');
   assert.match(renderHopscotchCourt(board, { activation: off }), /Ⅱ<\/span>已停用/);
   console.log('ok - summary memory mode labels memory houses as summary mode instead of disabled');
+}
+
+{
+  // 自动生图关闭（设定的「AI 回复后自动生图」「创意写作自动生图」或 AC 生图 Agent 卡）时，自定义板上的图片提示与图片生成跟着停用，和记忆、变量一样以设定为准
+  const fusedBoard = normalizeHopscotchBoard({ rows: [
+    { id: 'body-row', houses: [{ id: 'body', kind: 'body', fused: ['memory_table', 'image_prompt'] }] },
+    { id: 'after', houses: [{ id: 'image', kind: 'image_generation' }] },
+  ] });
+  const off = resolveHopscotchActivation(fusedBoard, { memory: { storageMode: 'table' }, autoImage: { enabled: false } });
+  assert.equal(off.fused.image_prompt.enabled, false);
+  assert.equal(off.fused.image_prompt.reason, 'auto_image_disabled');
+  assert.equal(off.houses.image.enabled, false);
+  assert.equal(off.houses.image.reason, 'auto_image_disabled');
+  assert.deepEqual(getActiveHopscotchFused(fusedBoard, off), ['memory_table'], 'only the image prompt leaves the body request');
+  assert.equal(hopscotchInactiveLabel('auto_image_disabled'), '自动生图已关闭');
+  const on = resolveHopscotchActivation(fusedBoard, { memory: { storageMode: 'table' }, autoImage: { enabled: true } });
+  assert.deepEqual(getActiveHopscotchFused(fusedBoard, on), ['memory_table', 'image_prompt']);
+  assert.equal(on.houses.image.enabled, true);
+  assert.equal(resolveHopscotchActivation(fusedBoard).houses.image.enabled, true, 'callers without image settings keep the board as saved');
+
+  const separate = normalizeHopscotchBoard({ rows: [
+    { id: 'body-row', houses: [{ id: 'body', kind: 'body', fused: [] }] },
+    { id: 'prompt-row', houses: [{ id: 'prompt', kind: 'image_prompt' }] },
+    { id: 'after', houses: [{ id: 'image', kind: 'image_generation' }] },
+  ] });
+  const separateOff = resolveHopscotchActivation(separate, { autoImage: { enabled: false } });
+  assert.equal(separateOff.houses.prompt.reason, 'auto_image_disabled');
+  assert.equal(separateOff.houses.image.reason, 'auto_image_disabled');
+
+  const imageStore = createHopscotchBoardStore({ storage: { getItem: () => null, setItem() {} } });
+  await imageStore.setGlobalBoard(fusedBoard);
+  let imageEnabled = false;
+  const imageRuntime = createHopscotchTurnRuntime({ boardStore: imageStore, getSettings: () => ({ creativeHopscotchEnabled: true }),
+    resolveWritingSettings: () => ({ memory: { storageMode: 'table' }, autoImage: { enabled: imageEnabled } }),
+    createExecutors: info => createHopscotchExecutors(info),
+  });
+  assert.deepEqual(imageRuntime.resolveExecutionPlan('rp:image').fused, ['memory_table'], 'the body request no longer carries image prompt rules');
+  imageEnabled = true;
+  assert.deepEqual(imageRuntime.resolveExecutionPlan('rp:image').fused, ['memory_table', 'image_prompt']);
+  console.log('ok - turning off automatic image generation pauses image houses on custom boards');
 }

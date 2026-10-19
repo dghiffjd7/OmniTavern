@@ -45,11 +45,11 @@ try {
       });
       const help = panel.querySelector('[data-action="help"]');
       return { left: r.left, right: r.right, controls, modeButtons: panel.querySelectorAll('[data-action="more"], [data-action="library"]').length,
-        helpLabel: help.getAttribute('aria-label'), helpTitle: help.title, saveFont: s.fontSize, saveRadius: s.borderRadius,
+        helpLabel: help.getAttribute('aria-label'), helpText: help.dataset.help, saveFont: s.fontSize, saveRadius: s.borderRadius,
         saveWidth: save.getBoundingClientRect().width, footerWidth: footer.getBoundingClientRect().width, saveHeight: save.getBoundingClientRect().height, saveMinHeight: s.minHeight };
     })()`);
     assert.equal(toolbar.modeButtons, 2);
-    assert.ok(toolbar.helpLabel && toolbar.helpTitle);
+    assert.ok(toolbar.helpLabel && toolbar.helpText);
     assert.equal(toolbar.saveFont, '12px');
     assert.equal(toolbar.saveRadius, '10px');
     assert.ok(toolbar.controls.every(r => r.left >= toolbar.left - 1 && r.right <= toolbar.right + 1), `toolbar/footer overflow: ${JSON.stringify(toolbar)}`);

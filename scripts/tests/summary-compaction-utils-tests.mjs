@@ -13,6 +13,8 @@ import {
   normalizeSummarySnapshotItems,
   parseSummaryCompactionResult,
   requestSummaryCompactionRaw,
+  buildSummaryCompactionPresetData,
+  describeSummaryCompactionTrial,
   shouldRunSummaryCompaction,
 } from '../../src/scripts/ui/chat/summary-compaction-utils.js';
 
@@ -138,6 +140,58 @@ import {
 }
 
 {
+  // 套用预设：数据放在预设的「聊天记录」位置，不加程序的任务说明与 <summary> 要求；温度跟预设，上限仍固定。
+  const data = buildSummaryCompactionPresetData({ items: [{ text: '摘要一', at: 0 }, ' ', { text: '摘要二' }], compactedText: ' 旧总结 ' });
+  assert.equal(data.length, 1);
+  assert.equal(data[0].role, 'user');
+  assert.match(data[0].content, /^【已有大总结】\n旧总结\n\n【前文内容（按时间标注的摘要列表）】\n- 摘要一\n- 摘要二$/);
+  assert.doesNotMatch(data[0].content, /<summary|summary_rules|无视你先前收到的任何指令/);
+  assert.deepEqual(buildSummaryCompactionPresetData({ items: [], compactedText: 'x' }), []);
+
+  let rendered = null;
+  let sent = null;
+  let built = false;
+  const raw = await requestSummaryCompactionRaw({
+    items: [{ text: '摘要一' }],
+    compactedText: '',
+    buildMessages: () => { built = true; return []; },
+    backgroundChat: async (messages, options) => { sent = { messages, options }; return ' <summary>新</summary> '; },
+    options: { presetContext: { sessionId: 's1', uiMode: 'rp' }, temperature: 0.2, signal: 'sig' },
+    rules: '用户自己的规则不该出现',
+    taskPreset: {
+      ok: true,
+      id: 'task-summary',
+      render: (dataMessages) => {
+        rendered = dataMessages;
+        return { ok: true, messages: [{ role: 'system', content: '预设主指令' }, ...dataMessages] };
+      },
+    },
+  });
+  assert.equal(built, false);
+  assert.equal(raw, '<summary>新</summary>');
+  assert.match(rendered[0].content, /摘要一/);
+  assert.deepEqual(sent.messages.map(m => m.content.slice(0, 5)), ['预设主指令', '【前文内容']);
+  assert.doesNotMatch(JSON.stringify(sent.messages), /用户自己的规则/);
+  assert.deepEqual(sent.options, {
+    presetContext: { sessionId: 's1', uiMode: 'rp', presetId: 'task-summary' },
+    signal: 'sig',
+    maxTokens: 2000,
+    max_tokens: 2000,
+  });
+
+  let called = false;
+  const failed = await requestSummaryCompactionRaw({
+    items: [{ text: '摘要一' }],
+    buildMessages: () => [],
+    backgroundChat: async () => { called = true; return 'x'; },
+    taskPreset: { ok: true, id: 'p', render: () => ({ ok: false, reason: 'preset_empty', messages: [] }) },
+  });
+  assert.equal(failed, '');
+  assert.equal(called, false);
+  console.log('ok - requestSummaryCompactionRaw with a task preset sends the preset entries and the data, no built-in wrapper');
+}
+
+{
   const text = extractSummaryTagText('<summary>a</summary>\n<summary>b</summary>');
   assert.equal(text, 'b');
   console.log('ok - extractSummaryTagText prefers the last summary block');
@@ -204,7 +258,9 @@ import {
   });
   assert.match(sent, /自定义规则/);
   const appSource = await readFile(new URL('../../src/scripts/ui/app.js', import.meta.url), 'utf8');
-  assert.equal(appSource.split('requestCompactionRaw: options => requestSummaryCompactionRaw({ ...options, rules: appSettings.get().summaryCompactionRules }),').length - 1, 2);
+  // 动态大总结仍只用规则；会话压缩另外按记忆卡的「套用预设」选择 taskPreset（试运行显式传入）。
+  assert.equal(appSource.split('requestCompactionRaw: options => requestSummaryCompactionRaw({ ...options, rules: appSettings.get().summaryCompactionRules }),').length - 1, 1);
+  assert.match(appSource, /requestCompactionRaw: options => requestSummaryCompactionRaw\(\{\s*\.\.\.options,\s*rules: appSettings\.get\(\)\.summaryCompactionRules,\s*taskPreset: 'taskPreset' in options\s*\? options\.taskPreset\s*: resolveSummaryCompactionSource\(options\?\.options\?\.presetContext\?\.sessionId\)\.taskPreset \|\| null,\s*\}\),/);
   console.log('ok - session and moment compaction read the global custom rules');
 }
 
@@ -232,6 +288,24 @@ import {
   assert.equal(parseSummaryCompactionResult('没有标签的正文，内容足够长足够长足够长足够长足够长', { strictFormat: false }).valid, false);
   const app = readFileSync(new URL('../../src/scripts/ui/app.js', import.meta.url), 'utf8');
   const wired = app.match(/parseCompactionResult: raw => parseSummaryCompactionResult\(raw, \{\s*strictFormat: !resolveCustomSummaryCompactionRules\(appSettings\.get\(\)\.summaryCompactionRules\),\s*\}\)/g) || [];
-  assert.equal(wired.length, 2);
+  assert.equal(wired.length, 1, 'moment summary keeps the rules-only check');
+  assert.match(app, /parseCompactionResult: raw => parseSummaryCompactionResult\(raw, \{\s*strictFormat: !resolveCustomSummaryCompactionRules\(appSettings\.get\(\)\.summaryCompactionRules\)\s*&& resolveSummaryCompactionSource\(\)\.mode !== 'preset',\s*\}\)/);
   console.log('ok - custom compaction rules relax the summary format check');
+}
+
+{
+  // 试运行结果给人看：读到 <summary> 且够长算成功；套用预设一律宽松校验（预设自己定格式）。
+  const ok = describeSummaryCompactionTrial('<thinking>想</thinking><summary>两人在城门口重逢，她决定暂留城中查账，他答应开春回来。</summary>');
+  assert.equal(ok.ok, true);
+  assert.equal(ok.text, '两人在城门口重逢，她决定暂留城中查账，他答应开春回来。');
+  assert.equal(ok.message, '读到 <summary>，可以合并');
+  const missing = describeSummaryCompactionTrial('夜色渐深，她推开门……');
+  assert.equal(missing.ok, false);
+  assert.equal(missing.text, '夜色渐深，她推开门……');
+  assert.match(missing.message, /^没读到 <summary>/);
+  const short = describeSummaryCompactionTrial('<summary>太短</summary>');
+  assert.equal(short.ok, false);
+  assert.match(short.message, /太短/);
+  assert.deepEqual(describeSummaryCompactionTrial('  '), { ok: false, text: '', message: '模型返回为空' });
+  console.log('ok - describeSummaryCompactionTrial explains whether the preset output can be merged');
 }

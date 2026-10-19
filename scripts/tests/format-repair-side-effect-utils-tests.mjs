@@ -175,6 +175,53 @@ test('app edit writeback executes an added tableEdit through the in-scope memory
   assert.equal(memoryCalls[0].options.timelineMessageId, 'm1');
 });
 
+test('image tags pair by content so inserting one before existing tags only executes the new one', () => {
+  const original = '甲\n<image_prompt>portrait</image_prompt>\n乙\n<image_prompt>garden</image_prompt>';
+  const candidate = '<image_prompt>fairy</image_prompt>\n甲\n<image_prompt>portrait</image_prompt>\n乙\n<image_prompt>garden</image_prompt>';
+  const plan = buildFormatFunctionSideEffectPlan({ originalText: original, candidateText: candidate });
+  assert.deepEqual(plan.executeEntries.map(entry => entry.after.payload), ['fairy']);
+  assert.deepEqual(plan.reuseEntries.map(entry => [entry.after.payload, entry.before.ordinal, entry.after.ordinal]), [['portrait', 1, 2], ['garden', 2, 3]]);
+  const changed = buildFormatFunctionSideEffectPlan({ originalText: original, candidateText: original.replace('portrait', 'landscape') });
+  assert.deepEqual(changed.executeEntries.map(entry => entry.after.payload), ['landscape']);
+  assert.deepEqual(changed.reuseEntries.map(entry => entry.after.payload), ['garden']);
+  const dangling = buildFormatFunctionSideEffectPlan({ originalText: '<image_prompt>portrait\n', candidateText: '<image_prompt>portrait\n</image_prompt>' });
+  assert.deepEqual(dangling.executeEntries.map(entry => [entry.identity, entry.reason]), [['image_prompt:1', 'newly_valid_block']]);
+});
+
+test('app edit writeback generates images from the placeholders the edit put into the body', async () => {
+  // 回归：执行步骤原本丢掉正文里的占位、只拿改动的标签重新排占位；正文里找不到对应占位时，
+  // 回填会把只含标签的文本当成整条正文，正文被换成只剩图片。
+  const app = readFileSync(new URL('../../src/scripts/ui/app.js', import.meta.url), 'utf8');
+  const start = app.indexOf('const resolveFormatFunctionEffectTarget = ');
+  const end = app.indexOf('const applyRepairedProtocolTextToChat = ', start);
+  const placeholders = [{ prompt: 'fairy', pendingToken: '[img-图片生成中]', tag: '<image_prompt>fairy</image_prompt>' }];
+  const message = { id: 'm1', role: 'assistant', rawOriginal: '正文\n<image_prompt>fairy</image_prompt>', rawSource: '正文\n[img-图片生成中]', meta: { autoImagePromptPlaceholders: placeholders } };
+  const scheduled = [];
+  const sandbox = {
+    FORMAT_FUNCTION_BLOCK_KINDS,
+    buildFormatFunctionExecutionLedger,
+    chatStore: { findMessage: id => (id === 'm1' ? message : null), updateMessage: () => message },
+    logger: { warn: () => {} },
+    autoImagePromptProcessedSourceIds: new Set(),
+    getAutoImagePromptSourceKey: (sid, mid) => `${sid}:${mid}`,
+    scheduleAutoImagePromptGenerationForMessage: (source, sid, options) => { scheduled.push({ source, options }); return true; },
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(`${app.slice(start, end)}\nglobalThis.execute = executeFormatFunctionSideEffectPlan;`, sandbox);
+  const run = () => sandbox.execute({
+    plan: buildFormatFunctionSideEffectPlan({ originalText: '正文', candidateText: message.rawOriginal }),
+    capturedMessages: [{ messageId: 'm1', targetSessionId: 'rp:persona_a' }],
+    fallbackSessionId: 'rp:persona_a',
+  });
+  await run();
+  assert.deepEqual(scheduled[0].source.meta.autoImagePromptPlaceholders, placeholders);
+  delete message.meta.autoImagePromptPlaceholders;
+  await run();
+  const empty = scheduled[1].source.meta.autoImagePromptPlaceholders;
+  assert.ok(Array.isArray(empty) && empty.length === 0, 'no placeholder in the body means nothing to generate');
+  assert.match(app, /currentImageTokens\[Math\.max\(0, Number\(entry\?\.before\?\.ordinal \|\| entry\?\.after\?\.ordinal \|\| 1\) - 1\)\]/);
+});
+
 let failed = 0;
 for (const { name, fn } of tests) {
   try {

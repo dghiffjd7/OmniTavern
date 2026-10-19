@@ -1991,9 +1991,11 @@ body[data-theme-mode='dark'] #preset-panel .pp-binding-card {
 `;
 
 export class PresetPanel {
-    constructor({ store = null } = {}) {
+    constructor({ store = null, presetServices = null } = {}) {
         const bridge = typeof window !== 'undefined' ? window.appBridge : null;
         this.store = store || getPresetStore(bridge) || new PresetStore();
+        // 预设分类与按分类的预设选单（app 装配的 agent-preset-services）；没有时保持原下拉。
+        this.presetServices = presetServices;
         this.previewDiscoveryGuide = null;
         this.element = null;
         this.overlayElement = null;
@@ -2328,6 +2330,32 @@ export class PresetPanel {
                     } else {
                         this.refreshCustomSelect(select, scope);
                     }
+                },
+            });
+        });
+
+        select.addEventListener('change', () => this.refreshCustomSelect(select, scope));
+        this.refreshCustomSelect(select, scope);
+    }
+
+    // 自定义提示词预设：可搜索、按分类折叠的预设选单（与 Agent「套用预设」共用）；选中后照旧写回原生下拉并触发 change。
+    bindPresetPickerSelect(selectId, root = null) {
+        const scope = root || this.element || document;
+        const select = scope.querySelector(`#${selectId}`);
+        const button = scope.querySelector(`[data-select-id="${selectId}"]`);
+        if (!select || !button || button.dataset.bound === 'true') return;
+
+        button.dataset.bound = 'true';
+        button.setAttribute('aria-haspopup', 'dialog');
+        button.addEventListener('click', () => {
+            if (button.disabled) return;
+            this.presetServices.openPicker({
+                anchorEl: button,
+                currentId: select.value,
+                onSelect: (value) => {
+                    if (select.value === value) return;
+                    select.value = value;
+                    select.dispatchEvent(new Event('change', { bubbles: true }));
                 },
             });
         });
@@ -3108,6 +3136,7 @@ export class PresetPanel {
                 <div class="pp-manager-actions">
                     <button type="button" class="pp-manager-btn" id="preset-manager-new">新建</button>
                     <button type="button" class="pp-manager-btn" id="preset-manager-rename">重命名</button>
+                    ${storeType === 'openai' && this.presetServices ? '<button type="button" class="pp-manager-btn" id="preset-manager-group">分类</button>' : ''}
                     <button type="button" class="pp-manager-btn" id="preset-manager-bindings">使用位置</button>
                     <button type="button" class="pp-manager-btn pp-danger" id="preset-manager-delete">删除</button>
                 </div>
@@ -3154,7 +3183,16 @@ export class PresetPanel {
                 window.dispatchEvent(new CustomEvent('preset-changed'));
             });
         };
-        this.bindCustomSelect('preset-manager-select', this.managerEl);
+        if (storeType === 'openai' && this.presetServices) {
+            this.bindPresetPickerSelect('preset-manager-select', this.managerEl);
+            const groupBtn = this.managerEl.querySelector('#preset-manager-group');
+            if (groupBtn) {
+                groupBtn.disabled = !activeId;
+                groupBtn.onclick = () => this.presetServices.openMoveDialog({ presetId: select.value });
+            }
+        } else {
+            this.bindCustomSelect('preset-manager-select', this.managerEl);
+        }
 
         if (!enabledReadonly) {
             enabledCb.onchange = async () => {

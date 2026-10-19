@@ -1,6 +1,7 @@
 import { hasZodSchema } from './mvu-schema-parser.js';
 
-const MVU_RUNTIME_BOOTSTRAP_RE = /(?:^|\/)MagVarUpdate\/(?:artifact\/)?bundle(?:\.min)?\.js(?=[?#'"\s);]|$)/i;
+// 网址可能带版本或分支：MagVarUpdate@beta/…、MagVarUpdate@1.2.3/…
+const MVU_RUNTIME_BOOTSTRAP_RE = /(?:^|\/)MagVarUpdate(?:@[\w.-]+)?\/(?:artifact\/)?bundle(?:\.min)?\.js(?=[?#'"\s);]|$)/i;
 const TAVERN_HELPER_LOADER_RE = /\bimport\s+(?:\(\s*)?['"][^'"]*\/(?:酒馆助手|tavern[_-]?helper)\//i;
 const TAVERN_BEHAVIOR_RE = /\b(?:eventOn|eventOnButton|replaceScriptButtons|getTavernRegexes|updateTavernRegexes|getLastMessageId|setChatMessages)\s*\(/;
 

@@ -15,7 +15,7 @@ export const createHopscotchImageExecutor = ({ findMessage, schedule }) => ({ se
     delete meta.autoImagePromptPlaceholders;
     message = { ...message, meta, rawOriginal: rawText, rawSource: rawText };
   }
-  let total = 0, done = 0, failed = 0, settled = false;
+  let total = 0, done = 0, failed = 0, settled = false, skipReason = '';
   const children = [];
   const settle = result => { if (settled) return; settled = true; signal?.removeEventListener('abort', onAbort); resolve(result); };
   const onAbort = () => settle({ status: 'cancelled', reason: 'user_cancelled', childResults: children });
@@ -32,7 +32,8 @@ export const createHopscotchImageExecutor = ({ findMessage, schedule }) => ({ se
       onItemsScheduled: ({ count }) => { total = Number(count) || 0; if (!total) finish(); },
       onItemDone: ({ item, asset }) => { done++; children.push({ index: item?.index, status: 'succeeded', assetId: asset?.id || '' }); finish(); },
       onItemFailed: (err, { item } = {}) => { failed++; children.push({ index: item?.index, status: 'failed', error: String(err?.message || err || '') }); finish(); },
+      onSkipped: ({ reason } = {}) => { skipReason = String(reason || ''); },
     });
-    if (!scheduled && !settled) settle({ status: 'skipped', reason: 'no_prompt' });
+    if (!scheduled && !settled) settle({ status: 'skipped', reason: skipReason || 'no_prompt' });
   } catch (err) { signal?.removeEventListener('abort', onAbort); reject(err); }
 });

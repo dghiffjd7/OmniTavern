@@ -102,3 +102,29 @@ test('public feature help retains its generic owner instead of an unrelated manu
   assert.equal(mapping.featureId,generic.id);
   assert.doesNotMatch(mapping.description,/Manual chat export|Cannot directly export/);
 });
+
+test('a shared panel tool is attributed to the offered owner whose panel the call opens', () => {
+  // app.open_panel 只提供一次；归属决定首次引导与能力记录，必须跟着 args.panel 走，不能按 id 排序固定给第一个
+  const panelSchema = { type: 'object', additionalProperties: false, properties: { panel: { type: 'string' }, focus: { type: 'string' } } };
+  const owner = (id, title, panel, directAction = 'app.open_panel') => ({
+    id, title, panel, directAction, summary: `Open ${panel}.`, writes: false, riskLevel: 'low',
+    tools: ['app.open_panel'], toolSchemas: { 'app.open_panel': panelSchema },
+  });
+  const features = [
+    owner('memory.open', '打开记忆表格', 'memory'),
+    owner('agent.center.open', '打开 Agent Center', 'agent-center'),
+    owner('config.api.open', '打开 API 配置', 'config'),
+    owner('creative.body_tool_transport', '防截断传输', 'agent-center', ''),
+  ];
+  const plan = buildMaidProviderFcToolPlan({ config: providers.deepseek, features });
+  assert.equal(plan.ok, true, plan.reason);
+  const select = args => normalizeMaidProviderFcCompletedCalls({
+    toolPlan: plan, completedToolCalls: [{ toolName: 'app_open_panel', arguments: args }],
+  }).selection;
+  assert.equal(select({ panel: 'config' }).featureId, 'config.api.open');
+  assert.equal(select({ panel: 'config' }).title, '打开 API 配置');
+  assert.equal(select({ panel: 'memory' }).featureId, 'memory.open');
+  assert.equal(select({ panel: 'agent-center' }).featureId, 'agent.center.open', 'two owners of one panel keep the default owner');
+  assert.equal(select({ panel: 'unknown' }).featureId, 'agent.center.open');
+  assert.equal(select({}).featureId, 'agent.center.open');
+});

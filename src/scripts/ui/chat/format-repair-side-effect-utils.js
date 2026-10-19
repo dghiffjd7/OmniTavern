@@ -196,12 +196,24 @@ export const validateFormatRepairFunctionPayloads = ({
   };
 };
 
+// 生图标签按内容配对：在前面插入或删掉一个标签时，后面没改的标签不会因序号错位被当成改动而重新生图。
+const pairImagePromptBlocksByPayload = (beforeBlocks = [], afterBlocks = []) => {
+  const unmatched = beforeBlocks.filter(block => block.kind === FORMAT_FUNCTION_BLOCK_KINDS.imagePrompt);
+  return afterBlocks.map((block) => {
+    if (block.kind !== FORMAT_FUNCTION_BLOCK_KINDS.imagePrompt) return block;
+    const index = unmatched.findIndex(before => isStructureOnlyPayloadMatch(before, block));
+    if (index < 0) return { ...block, identity: `${block.identity}:new` };
+    const [before] = unmatched.splice(index, 1);
+    return { ...block, identity: before.identity };
+  });
+};
+
 export const buildFormatFunctionSideEffectPlan = ({
   originalText = '',
   candidateText = '',
 } = {}) => {
   const beforeBlocks = extractFormatFunctionBlocks(originalText);
-  const afterBlocks = extractFormatFunctionBlocks(candidateText);
+  const afterBlocks = pairImagePromptBlocksByPayload(beforeBlocks, extractFormatFunctionBlocks(candidateText));
   const beforeByIdentity = groupBlocksByIdentity(beforeBlocks);
   const afterByIdentity = groupBlocksByIdentity(afterBlocks);
   const identities = new Set([...beforeByIdentity.keys(), ...afterByIdentity.keys()]);

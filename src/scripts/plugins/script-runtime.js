@@ -5,7 +5,7 @@ import { serializeForInlineScript } from '../utils/inline-script.js';
 import { buildMacroEngineRuntimeSource } from '../utils/macro-engine.js';
 import { createSillyTavernMacroApi } from '../utils/macro-compat-api.js';
 import { createPresetRequestWorker } from './preset-request-worker.js';
-import { toScriptPreset, fromScriptPreset, mergeScriptPresetChanges, createPresetScriptApi } from './preset-script-api.js';
+import { toScriptPreset, fromScriptPreset, mergeScriptPresetChanges, patchScriptPresetRegexes, createPresetScriptApi } from './preset-script-api.js';
 import { runScriptGeneration } from './script-generation.js';
 import { patchScriptUiChildren } from './script-ui-dom.js';
 import { buildTavernConnectionSettings, TAVERN_CONNECTION_SETTING_KEYS } from './tavern-connection-settings.js';
@@ -47,6 +47,32 @@ const getScriptDiagnosticRevision = (value) => {
   return `${content.length}:${(hash >>> 0).toString(16)}`;
 };
 
+// 酒馆助手 tavern_events 常量 → 我们的内部事件名
+const TAVERN_EVENT_TYPES = Object.freeze({
+  APP_READY: 'app.ready',
+  CHAT_CHANGED: 'chat.changed',
+  CHARACTER_SELECTED: 'character.selected',
+  GENERATION_ENDED: 'message.after_receive',
+  MESSAGE_RECEIVED: 'message.after_receive',
+  MESSAGE_SENT: 'message.after_send',
+  MESSAGE_SWIPED: 'message.swiped',
+  CHARACTER_MESSAGE_RENDERED: 'message.after_render',
+  CHAT_COMPLETION_PROMPT_READY: 'chat_completion_prompt_ready',
+  CHAT_COMPLETION_SETTINGS_READY: 'chat_completion_settings_ready',
+  OAI_PRESET_CHANGED_AFTER: 'preset.changed',
+});
+// 卡里直接写酒馆原始事件名（字面量）时，对到同一组内部事件
+const TAVERN_EVENT_ALIASES = Object.freeze({
+  app_ready: 'app.ready',
+  chat_id_changed: 'chat.changed',
+  generation_ended: 'message.after_receive',
+  message_received: 'message.after_receive',
+  message_sent: 'message.after_send',
+  message_swiped: 'message.swiped',
+  character_message_rendered: 'message.after_render',
+  oai_preset_changed_after: 'preset.changed',
+});
+
 const buildWorkerScript = () => `
 const scripts = new Map();
 let currentContext = { sessionId: '', personaId: '', presetId: '', presetIds: [], worldId: '', worldIds: [] };
@@ -64,6 +90,13 @@ const importCache = new Map();
 const IMPORT_CACHE_LIMIT = 32;
 const listenedEvents = new Set();
 const ST_PROMPT_ORDER_DUMMY_ID = ${ST_PROMPT_ORDER_DUMMY_ID};
+// 脚本里的 globalThis 是包住 self 的 Proxy：这些原生全局方法以 Proxy 为 this 调用会报 Illegal invocation
+// （如 globalThis.setTimeout.bind(globalThis)），取出时改绑到真正的 self。
+const SCOPED_GLOBAL_SELF_METHODS = new Set([
+  'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'queueMicrotask',
+  'requestAnimationFrame', 'cancelAnimationFrame', 'fetch', 'atob', 'btoa', 'structuredClone',
+  'createImageBitmap', 'reportError', 'postMessage', 'addEventListener', 'removeEventListener', 'dispatchEvent',
+]);
 let compatUiNodeSeq = 0;
 const compatUiNodes = new Map();
 const compatUiIdIndex = new Map();
@@ -200,6 +233,12 @@ const installWorkerConsoleBridge = () => {
 
 installWorkerConsoleBridge();
 
+const EVENT_ALIASES = ${JSON.stringify(TAVERN_EVENT_ALIASES)};
+const normalizeEventName = (event) => {
+  const name = String(event || '').trim();
+  return EVENT_ALIASES[name] || name;
+};
+
 const legacyListenerMap = new WeakMap();
 const wrapLegacyHandler = (cb) => {
   if (legacyListenerMap.has(cb)) return legacyListenerMap.get(cb);
@@ -220,16 +259,18 @@ const wrapLegacyHandler = (cb) => {
 const eventOn = (event, cb) => {
   const on = self.__chatappScriptOn;
   if (!on || typeof cb !== 'function') return;
-  on(event, wrapLegacyHandler(cb));
-  notifyListener(event);
+  const name = normalizeEventName(event);
+  on(name, wrapLegacyHandler(cb));
+  notifyListener(name);
 };
 
 const eventRemoveListener = (event, cb) => {
   const off = self.__chatappScriptOff;
   if (!off) return;
-  if (!cb) return off(event);
+  const name = normalizeEventName(event);
+  if (!cb) return off(name);
   const wrapped = legacyListenerMap.get(cb) || cb;
-  off(event, wrapped);
+  off(name, wrapped);
 };
 
 self.eventOn = eventOn;
@@ -1658,16 +1699,57 @@ function resetCompatDocumentForSync() {
   compatUiIdIndex.clear();
   compatUiExactAttributeIndex.clear();
   compatUiLayouts.clear();
+  compatPointerCaptures.clear();
   compatUiNodeSeq = 0;
   self.document = makeCompatDocument();
   rebuildCompatUiNodeRegistry();
+}
+
+// 指针捕获（setPointerCapture）：外层只能把指针事件转给鼠标当前所在的节点或 document，鼠标又没有触摸那样的
+// 隐式捕获，拖动时一移出元素事件就丢（元素位置要等 worker 往返才更新）。捕获后同一 pointerId 的 move/up/cancel
+// 改派给捕获元素；up/cancel 后自动释放并发 lostpointercapture，与浏览器一致。
+const compatPointerCaptures = new Map();
+
+function setCompatPointerCapture(element, pointerId) {
+  if (pointerId == null || !isCompatNodeConnected(element)) return;
+  const previous = compatPointerCaptures.get(pointerId);
+  if (previous === element) return;
+  if (previous) releaseCompatPointerCapture(pointerId, previous);
+  compatPointerCaptures.set(pointerId, element);
+}
+
+function releaseCompatPointerCapture(pointerId, element = null) {
+  const captured = compatPointerCaptures.get(pointerId);
+  if (!captured || (element && captured !== element)) return;
+  compatPointerCaptures.delete(pointerId);
+  captured.dispatchEvent(makeCompatEvent('lostpointercapture', { pointerId, bubbles: true, cancelable: false }));
+}
+
+function getCompatPointerCaptureTarget(eventType, pointerId) {
+  if (!['pointermove', 'pointerup', 'pointercancel'].includes(eventType) || pointerId == null) return null;
+  const captured = compatPointerCaptures.get(pointerId);
+  if (captured && !isCompatNodeConnected(captured)) {
+    compatPointerCaptures.delete(pointerId);
+    return null;
+  }
+  return captured || null;
+}
+
+// 外层失焦时补发的 pointercancel 不带 pointerId：逐个交给捕获元素并释放
+function cancelCompatPointerCaptures(data = {}) {
+  Array.from(compatPointerCaptures).forEach(([pointerId, element]) => {
+    element.dispatchEvent(makeCompatEvent('pointercancel', { ...data, pointerId, bubbles: true, cancelable: false }));
+    releaseCompatPointerCapture(pointerId, element);
+  });
 }
 
 function handleCompatUiEvent(msg = {}) {
   const startedAt = compatNow();
   const data = msg.event && typeof msg.event === 'object' ? msg.event : {};
   const node = compatUiNodes.get(String(msg.nodeId || ''));
-  let target = node;
+  const eventType = msg.eventType || data.type || '';
+  if (eventType === 'pointercancel' && data.pointerId == null) cancelCompatPointerCaptures(data);
+  let target = getCompatPointerCaptureTarget(eventType, data.pointerId) || node;
   const targetType = String(msg.targetType || '').toLowerCase();
   if (!target && targetType === 'document') target = self.document;
   if (!target && targetType === 'window') target = self.window || self;
@@ -1679,7 +1761,6 @@ function handleCompatUiEvent(msg = {}) {
     if (node.open) node.setAttribute?.('open', '');
     else node.removeAttribute?.('open');
   }
-  const eventType = msg.eventType || data.type || '';
   compatUiNativeStateRevision = Math.max(
     compatUiNativeStateRevision,
     Number(msg.nativeStateRevision || 0) || 0,
@@ -1697,6 +1778,7 @@ function handleCompatUiEvent(msg = {}) {
     bubbles: data.bubbles !== false,
     cancelable: data.cancelable === true,
   }));
+  if ((eventType === 'pointerup' || eventType === 'pointercancel') && data.pointerId != null) releaseCompatPointerCapture(data.pointerId);
   const workerDispatchMs = Math.max(0, compatNow() - dispatchStartedAt);
   compatUiMeasureSelectors = false;
   if (['click', 'dblclick', 'input', 'change', 'toggle', 'submit', 'keydown', 'keyup'].includes(String(eventType))) {
@@ -2026,6 +2108,15 @@ const makeCompatElement = (tagName = 'div') => {
     blur: () => {},
     click() {
       element.dispatchEvent(makeCompatEvent('click', { bubbles: true, cancelable: true }));
+    },
+    setPointerCapture(pointerId) {
+      setCompatPointerCapture(element, pointerId);
+    },
+    releasePointerCapture(pointerId) {
+      releaseCompatPointerCapture(pointerId, element);
+    },
+    hasPointerCapture(pointerId) {
+      return compatPointerCaptures.get(pointerId) === element;
     },
     getBoundingClientRect() {
       return getCompatElementRect(element);
@@ -2457,19 +2548,7 @@ const replaceVariables = (text = '') => String(text ?? '').replace(/\{\{\s*([^{}
   return typeof value === 'object' ? JSON.stringify(value) : String(value);
 });
 
-const EVENT_TYPES = {
-  APP_READY: 'app.ready',
-  CHAT_CHANGED: 'chat.changed',
-  CHARACTER_SELECTED: 'character.selected',
-  GENERATION_ENDED: 'message.after_receive',
-  MESSAGE_RECEIVED: 'message.after_receive',
-  MESSAGE_SENT: 'message.after_send',
-  MESSAGE_SWIPED: 'message.swiped',
-  CHARACTER_MESSAGE_RENDERED: 'message.after_render',
-  CHAT_COMPLETION_PROMPT_READY: 'chat_completion_prompt_ready',
-  CHAT_COMPLETION_SETTINGS_READY: 'chat_completion_settings_ready',
-  OAI_PRESET_CHANGED_AFTER: 'preset.changed',
-};
+const EVENT_TYPES = ${JSON.stringify(TAVERN_EVENT_TYPES)};
 
 Object.assign(self.tavern_events, EVENT_TYPES);
 
@@ -2577,14 +2656,40 @@ const setChatMessages = async (messages = [], options = {}) => {
   return Array.isArray(result) ? result.map(normalizeTavernMessage) : clone(current);
 };
 
+// 酒馆助手正则接口：新版写 type，旧版写 scope。预设正则从预设脚本接口读（in_use 含会话覆盖），写入走
+// regex.replacePreset（in_use 写会话覆盖、指定名称写预设），与角色正则一样只同步开关；
+// 其他类型（如 global）这里没有对应数据，返回空且不写入。
+const getTavernRegexScope = options => String(options?.type || options?.scope || 'character').trim().toLowerCase();
+
 const getTavernRegexes = (options = {}) => {
-  const scope = String(options?.scope || 'character').trim().toLowerCase();
+  const scope = getTavernRegexScope(options);
+  if (scope === 'preset') {
+    try {
+      return clone(presetScriptApi.getPreset(String(options?.name || 'in_use')).regexes || []);
+    } catch {
+      return [];
+    }
+  }
   if (scope !== 'character') return [];
   return clone(Array.isArray(currentContext.characterRegexes) ? currentContext.characterRegexes : []);
 };
 
 const replaceTavernRegexes = async (regexes = [], options = {}) => {
-  const scope = String(options?.scope || 'character').trim().toLowerCase();
+  const scope = getTavernRegexScope(options);
+  if (scope === 'preset' && Array.isArray(regexes)) {
+    const sessionId = currentContext.sessionId;
+    const saved = await callRpc('regex.replacePreset', {
+      name: String(options?.name || 'in_use'),
+      sessionId,
+      regexes: regexes.map(rule => ({
+        id: String(rule?.id || ''),
+        script_name: String(rule?.script_name || rule?.scriptName || rule?.name || ''),
+        enabled: rule?.enabled !== false,
+      })),
+    });
+    if (saved?.context && currentContext.sessionId === sessionId) updatePresetContext(saved.context);
+    return true;
+  }
   if (scope !== 'character' || !Array.isArray(regexes)) return false;
   currentContext.characterRegexes = clone(regexes);
   return await callRpc('regex.replaceCharacter', {
@@ -2785,9 +2890,15 @@ const getRawPreset = () => {
   };
 };
 
+// 预设写入后外层回传的上下文（updatePresetWith 与 replaceTavernRegexes 的预设类型共用）
+const updatePresetContext = (context) => {
+  currentContext = { ...currentContext, ...context };
+  ensureSillyTavern();
+  scheduleCompatUiFlush();
+};
+
 const presetScriptApi = createPresetScriptApi({
-  getContext: () => currentContext, callRpc, clone,
-  updateContext: context => { currentContext = { ...currentContext, ...context }; ensureSillyTavern(); scheduleCompatUiFlush(); },
+  getContext: () => currentContext, callRpc, clone, updateContext: updatePresetContext,
 });
 const getPreset = presetScriptApi.getPreset;
 
@@ -4071,7 +4182,7 @@ const compileScript = (record) => {
   };
   const legacyHandlerMap = new WeakMap();
   const eventOn = (event, cb) => {
-    const name = String(event || '').trim();
+    const name = normalizeEventName(event);
     if (!name || typeof cb !== 'function') return;
     const wrapped = (payload) => {
       if (payload && typeof payload === 'object' && Array.isArray(payload.args)) {
@@ -4085,7 +4196,7 @@ const compileScript = (record) => {
     return { stop: () => off(name, wrapped) };
   };
   const eventRemoveListener = (event, cb) => {
-    const name = String(event || '').trim();
+    const name = normalizeEventName(event);
     if (!name) return;
     if (!cb) return off(name);
     const wrapped = legacyHandlerMap.get(cb) || cb;
@@ -4146,7 +4257,18 @@ const compileScript = (record) => {
     generate: config => callRpc('generation.generate', { config: clone(config || {}), sessionId: currentContext.sessionId, scriptId: record.id }),
     stopGenerationById: generationId => callRpc('generation.stop', { generationId, scriptId: record.id, sessionId: currentContext.sessionId }),
   };
-  const scopedGlobal = new Proxy(self, { get: (target, key) => Object.hasOwn(scoped, key) ? scoped[key] : target[key] });
+  const scopedGlobalBound = new Map();
+  const scopedGlobal = new Proxy(self, { get: (target, key) => {
+    if (Object.hasOwn(scoped, key)) return scoped[key];
+    const value = target[key];
+    if (typeof value !== 'function' || !SCOPED_GLOBAL_SELF_METHODS.has(key)) return value;
+    // 缓存绑定结果：多次读取仍是同一个函数（可用于比较与 removeEventListener）
+    const cached = scopedGlobalBound.get(key);
+    if (cached?.source === value) return cached.bound;
+    const bound = value.bind(target);
+    scopedGlobalBound.set(key, { source: value, bound });
+    return bound;
+  } });
   let defaultHandler = null;
   // schemaOnly 脚本不执行代码，仅保留记录（Schema 已在导入时静态解析）
   if (record.schemaOnly === true) {
@@ -4348,6 +4470,8 @@ self.onmessage = async (e) => {
         scripts.set(record.id, compileScript(record));
       });
       postMessage({ type: 'sync_done' });
+      // 每批脚本载入后发一次 APP_READY（延到下一轮，让 $(…) 等延后注册的监听也收得到）
+      setTimeout(() => { dispatchEvent('app.ready', { args: [] }, false).catch(() => {}); }, 0);
       scheduleCompatUiFlush();
     });
     await pendingScriptSync;
@@ -4928,35 +5052,55 @@ ${allowNetwork ? `
     listenedEvents.add(eventName);
     parent.postMessage({ type: 'script-iframe-listener', event: eventName, scriptId }, '*');
   }
-  function on(event, fn) {
+  const EVENT_ALIASES = ${JSON.stringify(TAVERN_EVENT_ALIASES)};
+  function normalizeEventName(event) {
     const name = String(event || '').trim();
+    return EVENT_ALIASES[name] || name;
+  }
+  function on(event, fn) {
+    const name = normalizeEventName(event);
     if (!name || typeof fn !== 'function') return;
     ensureArray(handlers, name).push(fn);
     notifyListener(name);
   }
   function off(event, fn) {
-    const name = String(event || '').trim();
+    const name = normalizeEventName(event);
     if (!name) return;
     if (!handlers.has(name)) return;
     if (!fn) { handlers.delete(name); return; }
     handlers.set(name, handlers.get(name).filter(item => item !== fn));
   }
+  // 和 worker 一致：带 args 的事件把参数展开给处理函数
+  const legacyHandlers = new WeakMap();
+  function eventOnCompat(event, fn) {
+    if (typeof fn !== 'function') return;
+    const wrapped = legacyHandlers.get(fn) || ((payload) => (
+      payload && typeof payload === 'object' && Array.isArray(payload.args) ? fn(...payload.args) : fn(payload)
+    ));
+    legacyHandlers.set(fn, wrapped);
+    on(event, wrapped);
+    return { stop: () => off(event, wrapped) };
+  }
+  function eventRemoveListenerCompat(event, fn) {
+    off(event, fn ? (legacyHandlers.get(fn) || fn) : undefined);
+  }
   window.on = on;
   window.off = off;
-  window.eventOn = on;
-  window.eventRemoveListener = off;
+  window.eventOn = eventOnCompat;
+  window.eventRemoveListener = eventRemoveListenerCompat;
   window.eventEmit = (event, payload) => dispatchEvent(event, payload, true);
-  var eventOn = on;
-  var eventRemoveListener = off;
+  var eventOn = eventOnCompat;
+  var eventRemoveListener = eventRemoveListenerCompat;
   var eventEmit = window.eventEmit;
   var on = window.on;
   var off = window.off;
-  window.tavern_events = window.tavern_events || { on, off, eventOn: on, eventRemoveListener: off };
+  window.tavern_events = window.tavern_events || { on, off, eventOn: eventOnCompat, eventRemoveListener: eventRemoveListenerCompat };
+  Object.assign(window.tavern_events, ${JSON.stringify(TAVERN_EVENT_TYPES)});
   function bridgeEventGlobalsToHost(host) {
     try {
       if (!host || host === window) return;
-      if (typeof host.eventOn !== 'function') host.eventOn = on;
-      if (typeof host.eventRemoveListener !== 'function') host.eventRemoveListener = off;
+      if (typeof host.eventOn !== 'function') host.eventOn = eventOnCompat;
+      if (typeof host.eventRemoveListener !== 'function') host.eventRemoveListener = eventRemoveListenerCompat;
       if (!host.tavern_events || typeof host.tavern_events !== 'object') {
         host.tavern_events = window.tavern_events;
       }
@@ -5199,6 +5343,8 @@ ${allowNetwork ? `
     if (mod && typeof mod.default === 'function') {
       window.__chatappSetDefault(mod.default);
     }
+    // 脚本载入后发一次 APP_READY
+    setTimeout(() => { dispatchEvent('app.ready', { args: [] }, false).catch(() => {}); }, 0);
   } catch (err) {
     parent.postMessage({ type: 'script-iframe-error', scriptId: ${scriptIdJson}, error: String(err && err.message || err) }, '*');
   }
@@ -7491,7 +7637,9 @@ export class ScriptRuntime {
       }
       return { name };
     }
-    if (method === 'preset.getSnapshot' || method === 'preset.update') {
+    // regex.replacePreset：酒馆助手 replaceTavernRegexes 的预设类型，脚本只传正则开关，在这里套到当前预设上，
+    // 再走与 preset.update 相同的写入。大预设整份往返（修改前后两份）会超过脚本消息上限。
+    if (method === 'preset.getSnapshot' || method === 'preset.update' || method === 'regex.replacePreset') {
       const uiMode = sessionId.startsWith('rp:') ? 'rp' : 'chat';
       const name = String(params.name || 'in_use');
       const active = this.presets?.getResolvedActive?.('openai', { sessionId, uiMode });
@@ -7505,7 +7653,8 @@ export class ScriptRuntime {
       };
       if (method === 'preset.getSnapshot') return { presetId: id, preset: read() };
       if (!allowModifyVariables) denyScriptPermission('修改变量');
-      if (String(params.presetId || '') !== id) throw new Error('预设已切换，请重新应用设置');
+      const regexPatches = method === 'regex.replacePreset' ? (Array.isArray(params.regexes) ? params.regexes : []) : null;
+      if (!regexPatches && String(params.presetId || '') !== id) throw new Error('预设已切换，请重新应用设置');
       if (estimatePayloadSize(params) > SCRIPT_PAYLOAD_LIMIT) throw new Error('预设修改内容过大');
       const previous = this.presetSettingsWriteQueues.get(id) || Promise.resolve();
       const task = previous.catch(() => {}).then(async () => {
@@ -7513,7 +7662,9 @@ export class ScriptRuntime {
           throw new Error('预设已切换，请重新应用设置');
         }
         const current = read();
-        const merged = mergeScriptPresetChanges(params.before, params.edited, current);
+        const merged = regexPatches
+          ? patchScriptPresetRegexes(current, regexPatches)
+          : mergeScriptPresetChanges(params.before, params.edited, current);
         const data = fromScriptPreset(stored[id], merged);
         const changedRules = merged.extensions?.regex_scripts || merged.regexes || [];
         const changes = changedRules.filter(rule => current.regexes.some(old => old.id === rule.id && old.enabled !== rule.enabled));
@@ -7543,8 +7694,11 @@ export class ScriptRuntime {
         return { preset: read(), context };
       });
       this.presetSettingsWriteQueues.set(id, task);
-      try { return await task; }
-      finally { if (this.presetSettingsWriteQueues.get(id) === task) this.presetSettingsWriteQueues.delete(id); }
+      try {
+        const result = await task;
+        // 正则开关只需要回上下文，不再把整份预设传回 worker
+        return regexPatches ? { context: result.context } : result;
+      } finally { if (this.presetSettingsWriteQueues.get(id) === task) this.presetSettingsWriteQueues.delete(id); }
     }
     if (method === 'preset.saveChatCompletionSettings') {
       if (!allowModifyVariables) denyScriptPermission('修改变量');

@@ -6,11 +6,12 @@
 import { t, translateUiText } from '../../i18n/index.js';
 import { cloneData } from '../../utils/clone-data.js';
 import { getActiveHopscotchFused, resolveHopscotchActivation } from './hopscotch-activation-utils.js';
-import { buildDefaultHopscotchBoard, projectHopscotchVariableRules, compileBoardToLaneTasks, findBodyRowIndex, getHopscotchHouseDisplayStatus, isHopscotchMaintenanceRunning, HOPSCOTCH_CUSTOM_HOUSE_DEFAULTS } from './hopscotch-board-utils.js';
+import { buildDefaultHopscotchBoard, projectHopscotchVariableRules, compileBoardToLaneTasks, findBodyRowIndex, getHopscotchHouseDisplayStatus, isHopscotchMaintenanceRunning, HOPSCOTCH_CUSTOM_HOUSE_DEFAULTS, normalizeCustomHouseConfig } from './hopscotch-board-utils.js';
 import { createCreativeTurnOrchestrator } from './creative-turn-orchestrator.js';
 import { estimateTokens } from '../../memory/memory-prompt-utils.js';
 import { getAgentInvocationMode } from '../../agent/agent-invocation.js';
 import { RECAP_AGENT_ID } from '../../agent/recap-agent.js';
+import { resolveAgentPromptSource } from './agent-task-preset.js';
 
 const trim = value => String(value ?? '').trim();
 const isPlainObject = value => Boolean(value && typeof value === 'object' && !Array.isArray(value));
@@ -68,6 +69,88 @@ export const buildRecentContextText = (messages = [], { maxCount = 8, charBudget
     if (used >= charBudget) break;
   }
   return lines.join('\n');
+};
+
+// 自定义房子「套用预设」放进预设聊天记录位置的数据：最近对话、本轮输入、正文、前面房子的产物（附注不带）。
+// 输入预算先留给本轮输入、正文和产物，最近对话用剩下的（同提示词模式先保任务再分配历史）。
+export const buildCustomHousePresetData = ({ cfg = {}, userInput = '', bodyText = '', artifacts = {}, historySnapshot = [] } = {}) => {
+  const budget = Number(cfg.contextTokenBudget) || HOPSCOTCH_CUSTOM_HOUSE_DEFAULTS.contextTokenBudget;
+  const fixed = [];
+  if (trim(userInput)) fixed.push(`${t('【本轮输入】')}\n${userInput}`);
+  if (trim(bodyText)) fixed.push(`${t('【正文】')}\n${bodyText}`);
+  Object.entries(isPlainObject(artifacts) ? artifacts : {}).forEach(([id, artifact]) => {
+    if (artifact?.mode === 'note') return;
+    const text = typeof artifact === 'string' ? artifact : String(artifact?.text ?? '');
+    if (trim(text)) fixed.push(`${t('【房子 {id} 的产物】', { id })}\n${text}`);
+  });
+  const fixedText = trimHouseInputToBudget(fixed.join('\n\n'), budget);
+  let historyText = '';
+  if (cfg.includeContext !== 'none') {
+    const maxCount = cfg.includeContext === 'full' ? HOPSCOTCH_FULL_CONTEXT_MESSAGE_CAP : (Number(cfg.recentMessageCount) || 8);
+    const contextText = buildRecentContextText(historySnapshot, { maxCount, charBudget: Math.max(200, budget * 2) });
+    if (contextText) {
+      historyText = trimHouseInputToBudget(`${t('【最近对话】')}\n${contextText}`, Math.max(0, budget - estimateTokens(fixedText, 'rough') - 2));
+    }
+  }
+  const content = [historyText, fixedText].filter(item => trim(item)).join('\n\n');
+  return content ? [{ role: 'user', content }] : [];
+};
+
+// 房子卡片「套用预设」的预览／试运行：用最近一轮的输入与正文、之前的对话，按卡片当前（未保存）的设置组请求。
+// 试运行结果只回给卡片，不写入、不进本轮流程。
+export const createCustomHousePresetHandler = ({
+  getSessionId = () => '',
+  getMessages = () => [],
+  resolvePreset = () => ({ ok: false }),
+  backgroundChat = null,
+  getRuntimeConfigByProfileId = null,
+  getNames = () => ({ charName: '', userName: '' }),
+} = {}) => {
+  const prepare = async ({ presetId = '', context = {} } = {}) => {
+    const sessionId = trim(getSessionId());
+    if (!sessionId) return { error: '请先打开一个会话' };
+    if (typeof backgroundChat !== 'function') return { error: '还没有配置可用的模型' };
+    const cfg = normalizeCustomHouseConfig(context?.config || {});
+    const taskPreset = resolvePreset(presetId, sessionId);
+    if (!taskPreset?.ok) return { error: '所选预设已不存在' };
+    const all = (getMessages(sessionId) || []).filter(m => m && (m.role === 'user' || m.role === 'assistant'));
+    let lastUser = -1;
+    all.forEach((m, i) => { if (m.role === 'user') lastUser = i; });
+    const userInput = lastUser >= 0 ? String(all[lastUser].content || '') : '';
+    const bodyText = String(all.slice(lastUser + 1).find(m => m.role === 'assistant')?.content || '');
+    const historySnapshot = lastUser >= 0 ? all.slice(0, lastUser) : all;
+    const names = getNames(sessionId) || {};
+    const data = buildCustomHousePresetData({ cfg, userInput, bodyText, artifacts: {}, historySnapshot });
+    const rendered = taskPreset.render(data, {
+      transform: text => renderCustomHousePrompt(text, { userInput, bodyText, artifacts: {}, charName: names.charName, userName: names.userName }),
+    });
+    if (!rendered?.ok || !rendered.messages.length) return { error: '这个预设组不出请求' };
+    const options = { maxTokens: cfg.maxTokens, tools: [], presetContext: { sessionId, uiMode: 'rp', presetId: taskPreset.id } };
+    if (cfg.modelMode === 'profile' && cfg.modelProfileId) {
+      const config = await getRuntimeConfigByProfileId?.(cfg.modelProfileId);
+      if (!config) return { error: '指定的模型配置不存在' };
+      options.runtimeConfigOverride = cfg.modelOverride ? { ...config, model: cfg.modelOverride } : config;
+    }
+    return { messages: rendered.messages, options };
+  };
+  return {
+    preview: async (input = {}) => {
+      const prepared = await prepare(input);
+      if (prepared.error) return { ok: false, message: prepared.error };
+      const result = await backgroundChat(prepared.messages, { ...prepared.options, previewOnly: true });
+      return { ok: true, messages: result?.messages || prepared.messages };
+    },
+    trial: async ({ signal = null, ...input } = {}) => {
+      const prepared = await prepare(input);
+      if (prepared.error) return { ok: false, message: prepared.error };
+      const startedAt = Date.now();
+      const raw = await backgroundChat(prepared.messages, { ...prepared.options, ...(signal ? { signal } : {}) });
+      const text = trim(typeof raw === 'string' ? raw : String(raw?.content ?? raw?.text ?? ''));
+      return text
+        ? { ok: true, text, message: '完成（试运行结果不会写入）', latencyMs: Date.now() - startedAt }
+        : { ok: false, message: '模型返回为空' };
+    },
+  };
 };
 
 export const buildHousePromptBlock = ({ house = {}, artifact = null, order = 0 } = {}) => {
@@ -234,42 +317,58 @@ export const createHopscotchExecutors = ({
           ? String(custom.getBodyText?.(sessionId, ctx.body.messageId) || '') : '';
         const artifactsText = {};
         Object.entries(rowInput?.artifacts || {}).forEach(([id, artifact]) => { artifactsText[id] = artifact; });
-        const rendered = renderCustomHousePrompt(cfg.prompt, {
-          userInput, bodyText, artifacts: artifactsText, charName: custom.charName, userName: custom.userName,
-        });
-        const system = renderCustomHousePrompt(cfg.systemPrompt, {
-          userInput, bodyText, artifacts: artifactsText, charName: custom.charName, userName: custom.userName,
-        });
-        if (!trim(rendered)) return { status: 'skipped', reason: 'empty_prompt' };
-        const parts = [];
-        if (cfg.includeContext !== 'none') {
-          const maxCount = cfg.includeContext === 'full' ? HOPSCOTCH_FULL_CONTEXT_MESSAGE_CAP : (Number(cfg.recentMessageCount) || 8);
-          const contextText = buildRecentContextText(historySnapshot, {
-            maxCount,
-            charBudget: Math.max(200, (Number(cfg.contextTokenBudget) || HOPSCOTCH_CUSTOM_HOUSE_DEFAULTS.contextTokenBudget) * 2),
+        // 「套用预设」：按所选预设组请求；预设没选或已删除时退回提示词（usage 注明原因）。
+        const source = cfg.promptSource === 'preset'
+          ? resolveAgentPromptSource({ mode: 'preset', presetId: cfg.presetId, resolver: { resolve: presetId => custom.resolveTaskPreset?.(presetId) } })
+          : null;
+        const macroValues = { userInput, bodyText, artifacts: artifactsText, charName: custom.charName, userName: custom.userName };
+        let messages = [];
+        let inputTruncated = false;
+        if (source?.mode === 'preset') {
+          const data = buildCustomHousePresetData({ cfg, userInput, bodyText, artifacts: artifactsText, historySnapshot });
+          const presetRendered = source.taskPreset.render(data, { transform: text => renderCustomHousePrompt(text, macroValues) });
+          if (!presetRendered?.ok || !presetRendered.messages.length) return { status: 'skipped', reason: 'empty_prompt' };
+          messages = presetRendered.messages;
+        } else {
+          const rendered = renderCustomHousePrompt(cfg.prompt, {
+            userInput, bodyText, artifacts: artifactsText, charName: custom.charName, userName: custom.userName,
           });
-          if (contextText) parts.push(`${t('【最近对话】')}\n${contextText}`);
+          const system = renderCustomHousePrompt(cfg.systemPrompt, {
+            userInput, bodyText, artifacts: artifactsText, charName: custom.charName, userName: custom.userName,
+          });
+          if (!trim(rendered)) return { status: 'skipped', reason: 'empty_prompt' };
+          const parts = [];
+          if (cfg.includeContext !== 'none') {
+            const maxCount = cfg.includeContext === 'full' ? HOPSCOTCH_FULL_CONTEXT_MESSAGE_CAP : (Number(cfg.recentMessageCount) || 8);
+            const contextText = buildRecentContextText(historySnapshot, {
+              maxCount,
+              charBudget: Math.max(200, (Number(cfg.contextTokenBudget) || HOPSCOTCH_CUSTOM_HOUSE_DEFAULTS.contextTokenBudget) * 2),
+            });
+            if (contextText) parts.push(`${t('【最近对话】')}\n${contextText}`);
+          }
+          parts.push(rendered);
+          messages = [];
+          const budget = Number(cfg.contextTokenBudget) || HOPSCOTCH_CUSTOM_HOUSE_DEFAULTS.contextTokenBudget;
+          const boundedSystem = trimHouseInputToBudget(system, Math.floor(budget / 3));
+          if (trim(boundedSystem)) messages.push({ role: 'system', content: boundedSystem });
+          const inputText = parts.join('\n\n');
+          // 显式占位也计入预算；优先保留任务指令，再分配历史。
+          const remaining = budget - estimateTokens(boundedSystem, 'rough');
+          const boundedPrompt = trimHouseInputToBudget(rendered, remaining);
+          const historyText = parts.length > 1 ? trimHouseInputToBudget(parts.slice(0, -1).join('\n\n'), Math.max(0, remaining - estimateTokens(boundedPrompt, 'rough') - 2)) : '';
+          messages.push({ role: 'user', content: [historyText, boundedPrompt].filter(Boolean).join('\n\n') });
+          inputTruncated = inputText.length + system.length > messages.reduce((n, m) => n + m.content.length, 0);
         }
-        parts.push(rendered);
-        const messages = [];
-        const budget = Number(cfg.contextTokenBudget) || HOPSCOTCH_CUSTOM_HOUSE_DEFAULTS.contextTokenBudget;
-        const boundedSystem = trimHouseInputToBudget(system, Math.floor(budget / 3));
-        if (trim(boundedSystem)) messages.push({ role: 'system', content: boundedSystem });
-        const inputText = parts.join('\n\n');
-        // 显式占位也计入预算；优先保留任务指令，再分配历史。
-        const remaining = budget - estimateTokens(boundedSystem, 'rough');
-        const boundedPrompt = trimHouseInputToBudget(rendered, remaining);
-        const historyText = parts.length > 1 ? trimHouseInputToBudget(parts.slice(0, -1).join('\n\n'), Math.max(0, remaining - estimateTokens(boundedPrompt, 'rough') - 2)) : '';
-        messages.push({ role: 'user', content: [historyText, boundedPrompt].filter(Boolean).join('\n\n') });
         let providerUsage = null;
         const options = {
           onProviderUsage: value => { providerUsage = value; },
           signal,
           maxTokens: Number(cfg.maxTokens) || HOPSCOTCH_CUSTOM_HOUSE_DEFAULTS.maxTokens,
-          presetContext: { sessionId, uiMode: 'rp' },
+          presetContext: { sessionId, uiMode: 'rp', ...(source?.mode === 'preset' ? { presetId: source.presetId } : {}) },
           ...(custom.runtimeConfig ? { runtimeConfigOverride: { ...custom.runtimeConfig } } : {}),
           tools: [],
         };
+        const promptSource = source ? (({ taskPreset: _taskPreset, presetName: _presetName, ...rest }) => rest)(source) : null;
         let modelSource = 'follow_current';
         if (cfg.modelMode === 'profile' && cfg.modelProfileId) {
           const runtimeConfig = await (profileConfigs.get(cfg.modelProfileId) || custom.getRuntimeConfigByProfileId?.(cfg.modelProfileId));
@@ -283,7 +382,7 @@ export const createHopscotchExecutors = ({
           const raw = await custom.backgroundChat(messages, options);
           const text = typeof raw === 'string' ? raw : String(raw?.content ?? raw?.text ?? '');
           const result = signal?.aborted ? { status: 'cancelled', reason: 'user_cancelled' } : trim(text)
-            ? { status: 'succeeded', artifact: { kind: 'text', text: trim(text), mode: cfg.output?.mode || 'context' }, usage: { latencyMs: Date.now() - startedAt, modelSource, providerUsage: providerUsage || raw?.usage || null, inputTruncated: inputText.length + system.length > messages.reduce((n, m) => n + m.content.length, 0) } }
+            ? { status: 'succeeded', artifact: { kind: 'text', text: trim(text), mode: cfg.output?.mode || 'context' }, usage: { latencyMs: Date.now() - startedAt, modelSource, providerUsage: providerUsage || raw?.usage || null, inputTruncated, ...(promptSource ? { promptSource } : {}) } }
             : { status: 'failed', reason: 'empty_response', error: t('模型返回为空') };
           runRecord?.finish?.(result);
           if (runRecord?.id) result.agentRunIds = [runRecord.id];

@@ -1,17 +1,21 @@
 const clicked = target => (event, payload) => event === 'target-click' && payload?.target === target;
 
 export const MAID_ONBOARDING_TARGET_SELECTORS = Object.freeze({
+  // 写作房间没有列表顶栏的设置按钮：「设定」「API设定」在房间右上角「≡」菜单里
   'settings-entry': [
     '[data-maid-guide-target="settings-entry"]',
     '.qq-message-topbar .user-settings-btn',
+    'body[data-ui-mode="rp"] #chat-menu-btn',
   ],
   'settings-api-config': [
     '[data-maid-guide-target="settings-api-config"]',
     '#settings-menu button[data-action="config"]',
+    '#rp-chatroom-menu button[data-action="config"]',
   ],
   'settings-general': [
     '[data-maid-guide-target="settings-general"]',
     '#settings-menu button[data-action="settings"]',
+    '#rp-chatroom-menu button[data-action="settings"]',
   ],
   'general-ui-advanced': [
     '[data-maid-guide-target="general-ui-advanced"]',
@@ -443,7 +447,8 @@ export const MAID_ONBOARDING_FLOWS = Object.freeze([
         text: '先打开右上角的设置菜单。角色卡与聊天会保留在原处。',
         hint: '点击高亮的设置按钮',
         fallback: { kind: 'open-settings-menu' },
-        canAdvance: clicked('settings-entry'),
+        // 写作房间高亮的是房间右上角「≡」，它自带 chatroom-menu-entry 标记
+        canAdvance: (event, payload) => clicked('settings-entry')(event, payload) || clicked('chatroom-menu-entry')(event, payload),
       },
       {
         target: 'settings-general',

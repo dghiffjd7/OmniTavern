@@ -241,3 +241,101 @@ import { createSessionSummaryCompactionRuntime } from '../../src/scripts/ui/chat
   assert.equal(events[1][1].signal, controller.signal);
   console.log('ok - summary compaction runtime uses the adapter row-count check, per-session request options and run hooks');
 }
+
+{
+  // 试运行／预览：同一份摘要数据与模型选项，用指定的套用预设请求；不写入、不记运行、不影响失败重试记录。
+  const writes = [];
+  const events = [];
+  const requests = [];
+  const chatStore = {
+    getSummaries: () => [{ text: 'a' }, { text: 'b' }],
+    getCompactedSummary: () => ({ text: 'old' }),
+    setCompactedSummaryRaw: () => writes.push('raw'),
+    setCompactedSummary: () => writes.push('set'),
+    setSummaries: () => writes.push('summaries'),
+  };
+  const runtime = createSessionSummaryCompactionRuntime({
+    chatStore,
+    getIsSummaryMemoryEnabled: () => true,
+    getIsConfigured: () => true,
+    buildMessages: () => [],
+    backgroundChat: async (messages, options) => ({ previewOnly: options.previewOnly === true, messages, options }),
+    resolveRequestOptions: async ({ sessionId, place }) => ({ runtimeConfigOverride: { model: `${sessionId}@${place}` } }),
+    requestCompactionRaw: async (payload) => {
+      requests.push(payload);
+      const sent = await payload.backgroundChat([{ role: 'user', content: 'x' }], payload.options);
+      return typeof sent === 'string' ? sent : '<summary>结果</summary>';
+    },
+    onRunStart: async () => { events.push('start'); return {}; },
+    onRunFinish: async () => { events.push('finish'); },
+    setTimeoutFn: async fn => fn(),
+    delayMs: 0,
+  });
+  const taskPreset = { ok: true, id: 'p1' };
+  const trial = await runtime.dryRun('s1', { place: 'chat', taskPreset });
+  assert.equal(trial.ok, true);
+  assert.equal(trial.raw, '<summary>结果</summary>');
+  assert.equal(trial.itemCount, 2);
+  assert.equal(requests[0].taskPreset, taskPreset);
+  assert.equal(requests[0].compactedText, 'old');
+  assert.deepEqual(requests[0].options.presetContext, { sessionId: 's1', uiMode: 'chat' });
+  assert.deepEqual(requests[0].options.runtimeConfigOverride, { model: 's1@chat' });
+
+  const preview = await runtime.dryRun('s1', { place: 'writing', taskPreset, previewOnly: true });
+  assert.equal(preview.ok, true);
+  assert.equal(preview.raw, '');
+  assert.equal(preview.preview.previewOnly, true);
+  assert.deepEqual(preview.preview.messages, [{ role: 'user', content: 'x' }]);
+  assert.equal(requests[1].options.presetContext.uiMode, 'rp');
+
+  assert.deepEqual(writes, [], 'dry run never writes summaries');
+  assert.deepEqual(events, [], 'dry run never records an agent run');
+
+  const empty = createSessionSummaryCompactionRuntime({
+    chatStore: { ...chatStore, getSummaries: () => [] },
+    getIsConfigured: () => true,
+    buildMessages: () => [],
+    backgroundChat: async () => 'x',
+  });
+  assert.deepEqual(await empty.dryRun('s1', { taskPreset }), { ok: false, reason: 'no_items' });
+  assert.deepEqual(await empty.dryRun('', { taskPreset }), { ok: false, reason: 'missing_session' });
+  const offline = createSessionSummaryCompactionRuntime({ chatStore, getIsConfigured: () => false, buildMessages: () => [], backgroundChat: async () => 'x' });
+  assert.deepEqual(await offline.dryRun('s1', { taskPreset }), { ok: false, reason: 'model_unavailable' });
+  assert.equal((await offline.dryRun('s1', { taskPreset, previewOnly: true })).ok, true, 'preview needs no configured model');
+  console.log('ok - summary compaction dry run uses the same data and options without writing or recording runs');
+}
+
+{
+  // 记忆卡「套用预设」的预览与试运行：按当前会话解析预设，结果翻成卡片要显示的文字。
+  const { createSummaryCompactionPresetHandler } = await import('../../src/scripts/ui/chat/summary-compaction-runtime-utils.js');
+  const calls = [];
+  const handler = createSummaryCompactionPresetHandler({
+    getSessionId: () => 's1',
+    getPlace: () => 'writing',
+    resolvePreset: (presetId, sessionId) => (presetId === 'p1' ? { ok: true, id: presetId, sessionId } : { ok: false }),
+    dryRun: async (sessionId, options) => {
+      calls.push([sessionId, options.place, options.previewOnly, options.taskPreset.id]);
+      if (options.previewOnly) return { ok: true, preview: { messages: [{ role: 'user', content: 'x' }] } };
+      return { ok: true, raw: '<summary>两人在城门口重逢，她决定暂留城中查账，他答应开春回来。</summary>', latencyMs: 1200 };
+    },
+    describeTrial: raw => ({ ok: raw.includes('<summary>'), text: 'parsed', message: 'merged' }),
+  });
+  assert.deepEqual(await handler.preview({ presetId: 'p1' }), { ok: true, messages: [{ role: 'user', content: 'x' }] });
+  assert.deepEqual(await handler.trial({ presetId: 'p1' }), { ok: true, text: 'parsed', message: 'merged', latencyMs: 1200 });
+  assert.deepEqual(calls, [['s1', 'writing', true, 'p1'], ['s1', 'writing', false, 'p1']]);
+  assert.deepEqual(await handler.trial({ presetId: 'gone' }), { ok: false, message: '所选预设已不存在' });
+
+  const failing = createSummaryCompactionPresetHandler({
+    getSessionId: () => 's1',
+    resolvePreset: () => ({ ok: true, id: 'p1' }),
+    dryRun: async () => ({ ok: false, reason: 'no_items' }),
+  });
+  assert.deepEqual(await failing.trial({ presetId: 'p1' }), { ok: false, message: '这个会话还没有可合并的摘要' });
+  const broken = createSummaryCompactionPresetHandler({
+    getSessionId: () => 's1',
+    resolvePreset: () => ({ ok: true, id: 'p1' }),
+    dryRun: async () => ({ ok: false, reason: 'request_failed', error: '401 Unauthorized' }),
+  });
+  assert.deepEqual(await broken.preview({ presetId: 'p1' }), { ok: false, message: '401 Unauthorized' });
+  console.log('ok - summary compaction preset handler previews and trials against the current session');
+}

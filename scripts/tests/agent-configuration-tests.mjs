@@ -170,6 +170,13 @@ assert.equal(draft.ok, true); assert.equal(draft.config.enabled, false);
 assert.equal(draft.config.target.mode, 'rendered'); assert.equal(draft.config.modelMode, 'follow_current'); assert.equal(draft.config.invocationMode, 'auto');
 const invalid = await actions.saveAgentConfiguration({ ...store.read(draft.id, writing), config: { ...draft.config, enabled: true, modelMode: 'none' } });
 assert.equal(invalid.ok, false, 'cannot enable missing model');
+// 套用预设：任务要求可以留空，但要先选预设
+const noTask = { ...draft.config, enabled: true, modelMode: 'follow_current', prompt: '', target: { mode: 'rendered' } };
+assert.equal((await actions.saveAgentConfiguration({ ...store.read(draft.id, writing), config: noTask })).message, '请填写任务要求');
+assert.equal((await actions.saveAgentConfiguration({ ...store.read(draft.id, writing), config: { ...noTask, promptSource: 'preset', presetId: '' } })).message, '请先选择预设');
+const withPresetSave = await actions.saveAgentConfiguration({ ...store.read(draft.id, writing), config: { ...noTask, promptSource: 'preset', presetId: 'p1' } });
+assert.notEqual(withPresetSave.message, '请填写任务要求');
+assert.notEqual(withPresetSave.message, '请先选择预设');
 const beforePreview = writes;
 await actions.getAgentTargetPreview({ id: draft.id, context: writing });
 await actions.buildAgentConfigurationPreview({ id: draft.id, context: writing });

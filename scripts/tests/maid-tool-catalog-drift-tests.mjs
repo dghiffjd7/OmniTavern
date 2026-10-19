@@ -41,6 +41,10 @@ registerWebSearchAgentTools(registry, {});
 registerMomentsAgentTools(registry, {});
 registerPresetRegexScriptAgentTools(registry, {});
 registerAttachmentImportAgentTools(registry, {});
+// 通用文件工具经附件识别引入 regex-transfer → logger（加载时读 localStorage）：补最小浏览器环境后再动态加载
+globalThis.localStorage = globalThis.localStorage || { getItem: () => null, setItem() {}, removeItem() {} };
+const { registerAttachmentFileAgentTools } = await import('../../src/scripts/agent/tools/attachment-file-tools.js');
+registerAttachmentFileAgentTools(registry, {});
 
 const registeredNames = new Set(registry.listTools().map(tool => tool.name));
 const features = listAppFeatures();

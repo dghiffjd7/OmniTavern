@@ -1,6 +1,8 @@
 // 女仆附件：图片照旧压缩看图；JSON 与带角色卡数据的 PNG 另外保留原文件，供本地解析和后续导入。
-// 原文件只放在内存里（按附件 ID 取用）；APP 重启后需重新上传。
+// 原文件登记进女仆文件库（APP 内持久保存，按附件 ID 取用）。
+import { inspectAttachmentContent } from '../import/attachment-content.js';
 import { inspectAttachmentFile } from '../import/attachment-file-inspector.js';
+import { createMaidFileLibrary } from '../storage/maid-file-library.js';
 import { t } from '../i18n/index.js';
 import { createImageAttachmentFromFile, isImageAttachmentFile } from './image-attachment-input-utils.js';
 
@@ -21,50 +23,24 @@ export const isScriptAttachmentFile = file => Boolean(file)
 
 const isPngFile = file => trim(file?.type).toLowerCase() === 'image/png' || fileExtension(file?.name) === 'png';
 
-const RECENT_ATTACHMENT_MAX_AGE_MS = 30 * 60 * 1000;
-
-// 原文件缓存：总量超过上限时丢弃最早的附件。
-// 每项另记上传时间、首次发送时的会话／角色卡（「当前」按发送时解释）和导入记录。
-export const createMaidFileAttachmentRegistry = ({ maxBytes = REGISTRY_MAX_BYTES, now = () => Date.now() } = {}) => {
-  const entries = new Map();
-  let totalBytes = 0;
-  const release = (id) => {
-    const entry = entries.get(id);
-    if (!entry) return false;
-    totalBytes -= entry.bytes.byteLength;
-    entries.delete(id);
-    return true;
-  };
-  return {
-    register(id, entry) {
-      release(id);
-      entries.set(id, { ...entry, id, registeredAt: now(), submittedContext: null, imports: [] });
-      totalBytes += entry.bytes.byteLength;
-      for (const oldId of entries.keys()) {
-        if (totalBytes <= maxBytes || oldId === id) break;
-        release(oldId);
-      }
-    },
-    get: id => entries.get(trim(id)) || null,
-    release: id => release(trim(id)),
-    // 只记第一次发送时的上下文：追问期间用户切卡，不会悄悄改成新目标
-    markSubmitted(id, context = {}) {
-      const entry = entries.get(trim(id));
-      if (!entry || entry.submittedContext) return;
-      entry.submittedContext = { roleCardId: trim(context.roleCardId), sessionId: trim(context.sessionId) };
-    },
-    recordImport(id, record) {
-      entries.get(trim(id))?.imports.push({ ...record, at: now() });
-    },
-    // 最近上传、还没导入过的文件（供追问后的下一轮继续使用）
-    listRecent({ excludeIds = [], maxAgeMs = RECENT_ATTACHMENT_MAX_AGE_MS } = {}) {
-      const excluded = new Set(excludeIds.map(trim));
-      return Array.from(entries.values())
-        .filter(entry => !excluded.has(entry.id) && !entry.imports.length && now() - entry.registeredAt <= maxAgeMs)
-        .map(entry => ({ id: entry.id, name: entry.name, hash: entry.hash, file: entry.inspection }));
-    },
-  };
+const OFFICE_MIME = Object.freeze({
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+});
+const fallbackMimeFor = (file, inspection = {}) => {
+  if (isCharxAttachmentFile(file)) return 'application/zip';
+  if (isScriptAttachmentFile(file)) return 'text/javascript';
+  if (inspection.format === 'archive') return 'application/zip';
+  if (inspection.format === 'document') return OFFICE_MIME[inspection.details?.type] || 'application/zip';
+  if (inspection.format === 'text') return 'text/plain';
+  return 'application/json';
 };
+
+// 纯内存的附件缓存（测试与无存储时使用）；APP 内用持久化的女仆文件库，接口相同
+export const createMaidFileAttachmentRegistry = ({ maxBytes = REGISTRY_MAX_BYTES, now = () => Date.now() } = {}) => (
+  createMaidFileLibrary({ now, limits: { cacheBytes: maxBytes } })
+);
 
 const sha256Hex = async (bytes) => {
   const subtle = globalThis.crypto?.subtle;
@@ -86,15 +62,18 @@ export const createMaidAttachmentsFromFiles = async (files = [], {
   createId = defaultCreateId,
   notify = null,
   readCharx = null,
+  maxCount = Infinity,
 } = {}) => {
   const attachments = [];
+  const leftOut = [];
   const warn = message => { try { notify?.(message); } catch {} };
   for (const file of Array.from(files || [])) {
     if (!file) continue;
     const name = trim(file.name);
     const isImage = isImageAttachmentFile(file);
-    if (!isImage && !isJsonAttachmentFile(file) && !isScriptAttachmentFile(file) && !isCharxAttachmentFile(file)) {
-      warn(t('暂不支持这类文件：{name}', { name: name || fileExtension(name) }));
+    // 名额已满：不再读取，最后统一提示没加入的文件
+    if (attachments.length >= maxCount) {
+      leftOut.push(name);
       continue;
     }
     if (Number(file.size || 0) > MAX_MAID_FILE_ATTACHMENT_BYTES) {
@@ -132,12 +111,21 @@ export const createMaidAttachmentsFromFiles = async (files = [], {
         continue;
       }
     } else {
-      inspection = inspectAttachmentFile({ name, mime: file.type, bytes });
+      // 按内容识别：文本、压缩包、Office 文档，以及原有的世界书／正则／脚本／预设／角色卡 JSON
+      const content = await inspectAttachmentContent({ name, mime: file.type, bytes });
+      if (content.unsupported) {
+        warn(content.unsupported === 'pdf'
+          ? t('PDF 暂不支持（计划中）：{name}', { name })
+          : t('暂不支持这类文件：{name}', { name: name || fileExtension(name) }));
+        continue;
+      }
+      inspection = content.inspection;
     }
     const hash = await sha256Hex(bytes);
-    const mime = trim(file.type) || (isScriptAttachmentFile(file) ? 'text/javascript' : isCharxAttachmentFile(file) ? 'application/zip' : 'application/json');
+    const mime = trim(file.type) || fallbackMimeFor(file, inspection);
     registry?.register(id, { bytes, hash, name, mime, size: bytes.byteLength, inspection });
     attachments.push({ id, kind: 'file', name, mime, size: bytes.byteLength, hash, source, file: inspection });
   }
+  if (leftOut.length) warn(t('附件数量已达上限，未加入：{names}', { names: leftOut.join('、') }));
   return attachments;
 };

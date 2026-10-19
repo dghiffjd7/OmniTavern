@@ -6,7 +6,13 @@ import { pickSavePath } from '../utils/save-dialog.js';
 import { safeInvoke } from '../utils/tauri.js';
 import { bindReplyNotificationSettings } from './reply-notification-service.js';
 import { appConfirm } from './app-confirm.js';
-import { resolveImportKindFromZipEntries } from './import-package-kind-utils.js';
+import {
+  IMPORT_PACKAGE_FORMATS,
+  IMPORT_PACKAGE_KINDS,
+  isDataBundleDescriptor,
+  resolveImportKindFromZipEntries,
+} from './import-package-kind-utils.js';
+import { readZipManifestFromBlob, readZipRootJsonFromBlob, uploadBlobForImport } from './large-import-file-utils.js';
 import {
   applyMemoryStorageMode,
   deriveMemoryStorageMode,
@@ -3277,13 +3283,6 @@ export class GeneralSettingsPanel {
       if (this.bundleStatus) this.bundleStatus.textContent = text;
     };
 
-    const readFileAsDataUrl = (file) => new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = () => reject(reader.error || new Error('读取文件失败'));
-      reader.readAsDataURL(file);
-    });
-
     const readFileAsArrayBuffer = (file) => new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result || new ArrayBuffer(0));
@@ -3291,7 +3290,19 @@ export class GeneralSettingsPanel {
       reader.readAsArrayBuffer(file);
     });
 
+    // 先只读 zip 结尾的目录和 manifest.json 判断类型：完整资料包可能有几百 MB，整包转成数组会超过上限（Invalid array length）。
+    // 体验包、自定义资料包本来就小（条目内容上限 30MB），才照旧整包读取条目；目录读不出时，大文件直接报错，不当成完整资料包去覆盖资料。
+    const SMALL_PACKAGE_BYTES = 30 * 1024 * 1024;
     const detectImportKind = async (file) => {
+      const probe = await readZipManifestFromBlob(file);
+      const format = String(probe.manifest?.format || '').trim();
+      const isPackage = format === IMPORT_PACKAGE_FORMATS.EXPERIENCE_PACK || format === IMPORT_PACKAGE_FORMATS.CUSTOM_BUNDLE;
+      if (probe.ok && !isPackage) {
+        // 完整资料包会先清空全部资料：必须认出 bundle.json 才走那条路，其余 zip 一律不导入
+        const backup = await readZipRootJsonFromBlob(file, 'bundle.json');
+        return { kind: isDataBundleDescriptor(backup.json) ? IMPORT_PACKAGE_KINDS.BUNDLE : IMPORT_PACKAGE_KINDS.UNKNOWN, entries: null };
+      }
+      if (!probe.ok && file.size > SMALL_PACKAGE_BYTES) throw new Error(t('读不出资料包的目录，请确认文件是完整的 zip'));
       const buffer = await readFileAsArrayBuffer(file);
       const bytes = Array.from(new Uint8Array(buffer));
       const entries = await safeInvoke('read_zip_entries', { bytes });
@@ -3362,7 +3373,10 @@ export class GeneralSettingsPanel {
           tone: 'normal',
         });
         const detected = await detectImportKind(file);
-        const kind = String(detected?.kind || 'bundle').trim() || 'bundle';
+        const kind = String(detected?.kind || IMPORT_PACKAGE_KINDS.UNKNOWN).trim() || IMPORT_PACKAGE_KINDS.UNKNOWN;
+        if (kind === IMPORT_PACKAGE_KINDS.UNKNOWN) {
+          throw new Error(t('无法识别这个文件：不是本 APP 的完整资料包、体验包或自定义资料包，未导入任何内容。'));
+        }
         if (kind === 'experience-pack') {
           setBundleStatus('识别为体验包，正在导入...');
           this.setBundleProgress({
@@ -3426,8 +3440,32 @@ export class GeneralSettingsPanel {
         if (filePath) {
           result = await safeInvoke('import_data_bundle', { path: filePath, mode });
         } else {
-          const dataUrl = await readFileAsDataUrl(file);
-          result = await safeInvoke('import_data_bundle_bytes', { data: dataUrl, mode });
+          // 分块写进 APP 的临时文件再导入，不把整个资料包读进内存
+          const uploadPath = await uploadBlobForImport(file, {
+            invoke: safeInvoke,
+            onProgress: (done, total) => {
+              const percent = total ? Math.round((done / total) * 100) : 100;
+              this.setBundleProgress({
+                visible: true,
+                progress: 18 + Math.round(percent * 0.5),
+                text: t('正在读取资料包 {percent}%', { percent }),
+                indeterminate: false,
+                tone: 'normal',
+              });
+            },
+          });
+          try {
+            this.setBundleProgress({
+              visible: true,
+              progress: 70,
+              text: '正在导入完整资料包...',
+              indeterminate: true,
+              tone: 'normal',
+            });
+            result = await safeInvoke('import_data_bundle', { path: uploadPath, mode });
+          } finally {
+            await safeInvoke('import_upload_discard', { path: uploadPath }).catch(() => {});
+          }
         }
         try {
           const prefs = await safeInvoke('load_kv', { name: 'app_settings_v1' });

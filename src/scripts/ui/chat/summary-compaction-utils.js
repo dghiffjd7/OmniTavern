@@ -133,6 +133,19 @@ export const SUMMARY_COMPACTION_MAX_TOKENS = 2000;
 // 长时间写不到 <summary>（实测 mimo：预设下 5900 token 提示、三种上限都截断；独立请求 9 秒完成）。
 export const buildStandaloneSummaryCompactionMessages = prompt => [{ role: 'user', content: String(prompt || '') }];
 
+// 套用预设时放进预设「聊天记录」位置的数据：已有大总结 + 按时间标注的待合并摘要。
+// 不加程序的任务说明与 <summary> 要求——由预设自己写（计划书第 6 节）。
+export const buildSummaryCompactionPresetData = ({ items = [], compactedText = '' } = {}) => {
+  const payload = buildSummaryCompactionPayload(items);
+  if (!payload.trim()) return [];
+  const previous = String(compactedText || '').trim();
+  const parts = [
+    ...(previous ? [`${compactionPrompt('previous_header', '【已有大总结】')}\n${previous}`] : []),
+    `${compactionPrompt('history_header', '【前文内容（按时间标注的摘要列表）】')}\n${payload}`,
+  ];
+  return [{ role: 'user', content: parts.join('\n\n') }];
+};
+
 export const requestSummaryCompactionRaw = async ({
   items = [],
   compactedText = '',
@@ -141,7 +154,24 @@ export const requestSummaryCompactionRaw = async ({
   backgroundChat = null,
   options = null,
   rules = '',
+  // 已解析的「套用预设」（agent-task-preset.js 的 resolve 结果）；有它就不用大总结规则与内置包装。
+  taskPreset = null,
 } = {}) => {
+  if (taskPreset?.ok && typeof backgroundChat === 'function') {
+    const data = buildSummaryCompactionPresetData({ items, compactedText });
+    if (!data.length) return '';
+    const rendered = taskPreset.render(data);
+    if (!rendered?.ok) return '';
+    // 温度等采样参数跟预设（presetId 交给 backgroundChat 解析）；输出上限仍按压缩固定。
+    const { temperature: _temperature, presetContext = {}, ...rest } = options || {};
+    const result = await backgroundChat(rendered.messages, {
+      presetContext: { ...presetContext, presetId: taskPreset.id },
+      ...rest,
+      maxTokens: SUMMARY_COMPACTION_MAX_TOKENS,
+      max_tokens: SUMMARY_COMPACTION_MAX_TOKENS,
+    });
+    return String(result || '').trim();
+  }
   if (typeof buildMessages !== 'function' || typeof backgroundChat !== 'function') return '';
   const payload = buildSummaryCompactionPayload(items);
   if (!payload.trim()) return '';
@@ -229,4 +259,18 @@ export const parseSummaryCompactionResult = (input, { strictFormat = true } = {}
     ? isValidCompactedSummaryText(text)
     : text.replace(/\s+/g, '').length >= SUMMARY_COMPACTION_MIN_CUSTOM_LENGTH);
   return { raw, text, valid };
+};
+
+// 「套用预设」试运行的结果说明：预设自己定格式，所以用宽松校验（有 <summary> 且正文够长）。
+export const describeSummaryCompactionTrial = (raw = '') => {
+  const source = String(raw || '').trim();
+  if (!source) return { ok: false, text: '', message: '模型返回为空' };
+  const { text, valid } = parseSummaryCompactionResult(source, { strictFormat: false });
+  if (valid) return { ok: true, text, message: '读到 <summary>，可以合并' };
+  if (text) return { ok: false, text, message: '读到的 <summary> 内容太短，真的压缩时会算失败' };
+  return {
+    ok: false,
+    text: source,
+    message: '没读到 <summary>：这个预设可能是写正文用的。真的压缩时遇到这种情况会算失败，旧摘要保持不变。',
+  };
 };

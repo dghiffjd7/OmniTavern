@@ -76,6 +76,13 @@ const createZodRecorder = () => {
       nonpositive: () => { info._range = { ...(info._range || {}), max: 0 }; return chain; },
       finite: () => chain,
       safe: () => chain,
+      // 校验类方法只影响运行期校验，记录结构时不调用回调
+      refine: () => chain,
+      superRefine: () => chain,
+      catch: (val) => {
+        if (!('_default' in info)) info._default = val;
+        return chain;
+      },
     };
 
     return chain;
@@ -115,6 +122,8 @@ const createZodRecorder = () => {
     promise: (inner) => createChain('promise', { _inner: inner }),
     function: () => createChain('function'),
     lazy: (getter) => createChain('lazy', { _getter: getter }),
+    // 预处理只改运行期输入，结构取第二个参数
+    preprocess: (_fn, schema) => schema || createChain('any'),
 
     // coerce 系列
     coerce: {
@@ -170,21 +179,216 @@ const createLodashMock = () => ({
     current[keys[keys.length - 1]] = value;
     return obj;
   },
+  // 结构定义时常用的几个（MVU 脚本里 lodash 是全局的）
+  mapValues: (obj, fn) => Object.fromEntries(Object.entries(obj || {})
+    .map(([key, value]) => [key, typeof fn === 'function' ? fn(value, key, obj) : value?.[fn]])),
+  uniq: (arr) => [...new Set(Array.isArray(arr) ? arr : [])],
+  pick: (obj, ...keys) => Object.fromEntries(keys.flat()
+    .filter(key => obj && Object.prototype.hasOwnProperty.call(obj, key))
+    .map(key => [key, obj[key]])),
+  pickBy: (obj, fn = Boolean) => Object.fromEntries(Object.entries(obj || {}).filter(([key, value]) => fn(value, key))),
+  omit: (obj, ...keys) => {
+    const drop = new Set(keys.flat());
+    return Object.fromEntries(Object.entries(obj || {}).filter(([key]) => !drop.has(key)));
+  },
 });
+
+// ---- 代码扫描：跳过字符串、模板字符串、注释与正则字面量，按括号配对 ----
+const IDENT_CHAR_RE = /[\w$\u4e00-\u9fff]/;
+const REGEX_PREFIX_CHARS = '(,=:[!&|?{};+-*%<>~^';
+const REGEX_PREFIX_WORDS = /(?:^|[^\w$])(?:return|typeof|case|in|of|new|delete|void|throw)$/;
+
+// 返回非代码片段（字符串、注释、正则）的结束位置；i 处不是这类片段时返回 -1
+const skipNonCode = (source, i, lastSignificant = '', before = '') => {
+  const ch = source[i];
+  const next = source[i + 1];
+  if (ch === '/' && next === '/') {
+    const end = source.indexOf('\n', i);
+    return end < 0 ? source.length : end;
+  }
+  if (ch === '/' && next === '*') {
+    const end = source.indexOf('*/', i + 2);
+    return end < 0 ? source.length : end + 2;
+  }
+  if (ch === '"' || ch === "'") {
+    for (let j = i + 1; j < source.length; j += 1) {
+      if (source[j] === '\\') { j += 1; continue; }
+      if (source[j] === ch || source[j] === '\n') return j + 1;
+    }
+    return source.length;
+  }
+  if (ch === '`') {
+    for (let j = i + 1; j < source.length; j += 1) {
+      if (source[j] === '\\') { j += 1; continue; }
+      if (source[j] === '`') return j + 1;
+      if (source[j] === '$' && source[j + 1] === '{') {
+        const close = findMatchingBracket(source, j + 1);
+        if (close < 0) return source.length;
+        j = close;
+      }
+    }
+    return source.length;
+  }
+  if (ch === '/' && (!lastSignificant || REGEX_PREFIX_CHARS.includes(lastSignificant) || REGEX_PREFIX_WORDS.test(before))) {
+    let inClass = false;
+    for (let j = i + 1; j < source.length; j += 1) {
+      const c = source[j];
+      if (c === '\\') { j += 1; continue; }
+      if (c === '\n') return -1;
+      if (c === '[') inClass = true;
+      else if (c === ']') inClass = false;
+      else if (c === '/' && !inClass) {
+        let k = j + 1;
+        while (k < source.length && /[a-z]/i.test(source[k])) k += 1;
+        return k;
+      }
+    }
+  }
+  return -1;
+};
+
+// 逐字遍历代码，跳过非代码片段；visit 返回 false 时停止
+const walkCode = (source, start, visit) => {
+  let lastSignificant = '';
+  for (let i = start; i < source.length; i += 1) {
+    const skipped = skipNonCode(source, i, lastSignificant, source.slice(Math.max(0, i - 12), i).trimEnd());
+    if (skipped > i) {
+      if (source[i] !== '/' || source[i + 1] === '/' || source[i + 1] === '*') {
+        if (source[i] === '"' || source[i] === "'" || source[i] === '`') lastSignificant = 'a';
+      } else {
+        lastSignificant = 'a';
+      }
+      if (visit(i, null, skipped) === false) return;
+      i = skipped - 1;
+      continue;
+    }
+    const ch = source[i];
+    if (visit(i, ch) === false) return;
+    if (!/\s/.test(ch)) lastSignificant = IDENT_CHAR_RE.test(ch) ? 'a' : ch;
+  }
+};
+
+const OPEN_BRACKETS = { '(': ')', '[': ']', '{': '}' };
+
+// openIndex 处是 ( [ {，返回配对的结束括号位置
+function findMatchingBracket(source, openIndex) {
+  let depth = 0;
+  let result = -1;
+  walkCode(source, openIndex, (i, ch) => {
+    if (!ch) return true;
+    if (OPEN_BRACKETS[ch]) depth += 1;
+    else if (ch === ')' || ch === ']' || ch === '}') {
+      depth -= 1;
+      if (depth === 0) { result = i; return false; }
+    }
+    return true;
+  });
+  return result;
+}
+
+// 从 start 读一个完整表达式：到顶层分号、顶层换行后接新语句，或遇到外层的结束括号为止
+const readExpression = (source, start) => {
+  let depth = 0;
+  let end = source.length;
+  const CONTINUE_RE = /^\s*(?:\/\/[^\n]*\n\s*|\/\*[\s\S]*?\*\/\s*)*([.?)\]},+\-*\/&|:=<>%^])/;
+  walkCode(source, start, (i, ch) => {
+    if (!ch) return true;
+    if (OPEN_BRACKETS[ch]) depth += 1;
+    else if (ch === ')' || ch === ']' || ch === '}') {
+      if (depth === 0) { end = i; return false; }
+      depth -= 1;
+    } else if (depth === 0 && ch === ';') {
+      end = i;
+      return false;
+    } else if (depth === 0 && ch === '\n') {
+      const before = source.slice(start, i).trimEnd();
+      const lastChar = before[before.length - 1] || '';
+      if (before && !'=([{,+-*/&|?:<>%^!'.includes(lastChar) && !CONTINUE_RE.test(source.slice(i))) {
+        end = i;
+        return false;
+      }
+    }
+    return true;
+  });
+  return source.slice(start, end).trim();
+};
+
+// 展开 $(() => { ... }) / $(function () { ... }) 包装（按括号配对，避免被内部的 }) 截断）
+const unwrapReadyCallbacks = (source) => {
+  let out = source;
+  const re = /\$\s*\(\s*(?:\(\s*\)\s*=>|function\s*\(\s*\))\s*\{/g;
+  let m;
+  while ((m = re.exec(out))) {
+    const braceIndex = m.index + m[0].length - 1;
+    const close = findMatchingBracket(out, braceIndex);
+    const tail = close < 0 ? null : out.slice(close + 1).match(/^\s*\)\s*;?/);
+    if (!tail) { re.lastIndex = braceIndex + 1; continue; }
+    out = `${out.slice(0, m.index)}${out.slice(braceIndex + 1, close)}${out.slice(close + 1 + tail[0].length)}`;
+    re.lastIndex = m.index;
+  }
+  return out;
+};
+
+// 只收集最外层的 const/let/var/function 声明
+const collectTopLevelDeclarations = (source) => {
+  const declarations = [];
+  let depth = 0;
+  const DECL_RE = /^(?:export\s+)?(?:(?:const|let|var)\s+([A-Za-z_$\u4e00-\u9fff][\w$\u4e00-\u9fff]*)\s*=(?!=)|function\s+([A-Za-z_$\u4e00-\u9fff][\w$\u4e00-\u9fff]*)\s*\()/;
+  walkCode(source, 0, (i, ch, skipEnd) => {
+    if (!ch) return true;
+    if (OPEN_BRACKETS[ch]) { depth += 1; return true; }
+    if (ch === ')' || ch === ']' || ch === '}') { depth = Math.max(0, depth - 1); return true; }
+    if (depth !== 0 || (i > 0 && IDENT_CHAR_RE.test(source[i - 1])) || !/[ecflv]/.test(ch)) return true;
+    const m = source.slice(i, i + 200).match(DECL_RE);
+    if (!m) return true;
+    const name = m[1] || m[2];
+    if (m[1]) {
+      const exprStart = i + m[0].length;
+      const expression = readExpression(source, exprStart);
+      declarations.push({ name, start: i, text: `const ${name} = ${expression};`, expression });
+    } else {
+      const braceIndex = source.indexOf('{', source.indexOf(')', i + m[0].length - 1));
+      const close = braceIndex < 0 ? -1 : findMatchingBracket(source, braceIndex);
+      if (close > 0) declarations.push({ name, start: i, text: source.slice(i, close + 1).replace(/^export\s+/, ''), expression: source.slice(i, close + 1) });
+    }
+    return true;
+  });
+  return declarations;
+};
+
+// 结构引用到的顶层辅助声明（递归）；含网络、页面、事件等副作用的不带进来
+const SCHEMA_HELPER_SIDE_EFFECT_RE = /\b(?:fetch|XMLHttpRequest|WebSocket|EventSource|import|require|document|window|globalThis|self|parent|top|location|navigator|localStorage|sessionStorage|indexedDB|postMessage|setTimeout|setInterval|eventOn|eventEmit|triggerSlash|Function|eval)\b|\$\s*\(/;
+const collectSchemaHelpers = (source, expression, excludeNames = []) => {
+  const declarations = collectTopLevelDeclarations(source).filter(item => !excludeNames.includes(item.name));
+  const picked = new Map();
+  const queue = [expression];
+  const referencedNames = (text) => declarations
+    .filter(item => !picked.has(item.name))
+    .filter(item => new RegExp(`(?<![.\\w$\\u4e00-\\u9fff])${item.name.replace(/\$/g, '\\$')}(?![\\w$\\u4e00-\\u9fff])(?!\\s*:(?!:))`).test(text));
+  // 每个声明最多收一次，队列自然会结束
+  while (queue.length && picked.size < declarations.length) {
+    const text = queue.shift();
+    referencedNames(text).forEach((item) => {
+      if (SCHEMA_HELPER_SIDE_EFFECT_RE.test(item.expression)) return;
+      picked.set(item.name, item);
+      queue.push(item.expression);
+    });
+  }
+  return [...picked.values()].sort((a, b) => a.start - b.start).map(item => item.text);
+};
+
+// 移除 import 语句，展开 $(() => { ... }) 包装
+const cleanSchemaScript = (content) => {
+  let cleaned = String(content || '').replace(/import\s+[\s\S]*?from\s+['"][^'"]+['"];?\s*/g, '');
+  cleaned = cleaned.replace(/import\s+['"][^'"]+['"];?\s*/g, '');
+  return unwrapReadyCallbacks(cleaned);
+};
 
 /**
  * 从脚本内容中提取 Schema 定义部分
  */
 const extractSchemaCode = (content) => {
-  const raw = String(content || '');
-
-  // 移除 import 语句
-  let cleaned = raw.replace(/import\s+[\s\S]*?from\s+['"][^'"]+['"];?\s*/g, '');
-  cleaned = cleaned.replace(/import\s+['"][^'"]+['"];?\s*/g, '');
-
-  // 展开 $(() => { ... }) 包装，保留内部内容
-  cleaned = cleaned.replace(/\$\s*\(\s*\(\s*\)\s*=>\s*\{([\s\S]*?)\}\s*\)\s*;?/g, '$1');
-  cleaned = cleaned.replace(/\$\s*\(\s*function\s*\(\s*\)\s*\{([\s\S]*?)\}\s*\)\s*;?/g, '$1');
+  const cleaned = cleanSchemaScript(content);
 
   const findCallArgs = (source, fnName) => {
     if (!source || !fnName) return null;
@@ -256,14 +460,12 @@ const extractSchemaCode = (content) => {
     return args;
   };
 
+  // 按括号配对读完整个赋值表达式（回调里的 const/let 不会把它截断）
   const findAssignedExpression = (name) => {
     const key = String(name || '').trim();
     if (!key) return null;
-    const re = new RegExp(
-      `(?:export\\s+)?(?:const|let|var)\\s+${key}\\s*=\\s*([\\s\\S]*?)(?:;?\\s*$|;?\\s*(?:export|const|let|var|function|class)\\s)`,
-    );
-    const match = cleaned.match(re);
-    return match ? match[1].replace(/;+\s*$/, '') : null;
+    const declaration = collectTopLevelDeclarations(cleaned).find(item => item.name === key && item.text.startsWith('const '));
+    return declaration ? declaration.expression || null : null;
   };
 
   const resolveSchemaExpr = (expr) => {
@@ -306,17 +508,10 @@ const extractSchemaCode = (content) => {
     }
   }
 
-  // 尝试提取 export const Schema = z.object({...})
-  const exportMatch = cleaned.match(/export\s+const\s+Schema\s*=\s*([\s\S]*?)(?:;?\s*$|;?\s*(?:export|const|let|var|function|class)\s)/);
-  if (exportMatch) {
-    const resolved = resolveSchemaExpr(exportMatch[1]);
-    if (resolved) return resolved;
-  }
-
-  // 尝试提取 const Schema = z.object({...})
-  const constMatch = cleaned.match(/const\s+Schema\s*=\s*([\s\S]*?)(?:;?\s*$|;?\s*(?:export|const|let|var|function|class)\s)/);
-  if (constMatch) {
-    const resolved = resolveSchemaExpr(constMatch[1]);
+  // 尝试提取 (export) const Schema = z.object({...})
+  const schemaAssigned = findAssignedExpression('Schema');
+  if (schemaAssigned) {
+    const resolved = resolveSchemaExpr(schemaAssigned);
     if (resolved) return resolved;
   }
 
@@ -524,13 +719,16 @@ export const parseMvuScript = (scriptContent) => {
     // 创建沙箱环境
     const z = createZodRecorder();
     const _ = createLodashMock();
+    // 结构引用的顶层辅助函数（不含副作用的）一起带上
+    const helpers = collectSchemaHelpers(cleanSchemaScript(scriptContent), schemaCode, ['Schema', 'z', '_']);
 
     // 在沙箱中执行 Schema 定义
     // 使用 Function 构造器创建隔离的执行环境
     const sandbox = new Function('z', '_', `
       "use strict";
       try {
-        return ${schemaCode};
+        ${helpers.join('\n')}
+        return (${schemaCode});
       } catch (e) {
         return { _error: e.message };
       }

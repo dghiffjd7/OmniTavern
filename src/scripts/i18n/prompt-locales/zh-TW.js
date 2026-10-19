@@ -369,6 +369,8 @@ export default Object.freeze({
   "character.context.personality": "性格特點:\n{value}",
   "variable.ai_evaluate.system": "你是規則評估器，只輸出一個整數，不要解釋。",
   "variable.ai_evaluate.affection": "根據本輪對話判斷好感度變化（-5~+5 之間的整數，只輸出數字）。",
+  "creative_body_fc.tool_description": "提交本輪的完整回覆：原本要直接輸出的全部內容（正文以及要求的其他區塊）都按原格式寫進 content，呼叫之外不寫任何內容。",
+  "creative_body_fc.content_description": "本輪完整回覆，按原本的格式要求書寫。",
   "maid.continue.unknown_tool": "未知工具",
   "maid.continue.step": "{tool}（{summary}）",
   "maid.continue.separator": "；",

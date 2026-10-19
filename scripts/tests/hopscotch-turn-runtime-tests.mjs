@@ -6,6 +6,8 @@ import {
   createHopscotchExecutors,
   createHopscotchTurnRuntime,
   renderCustomHousePrompt,
+  buildCustomHousePresetData,
+  createCustomHousePresetHandler,
 } from '../../src/scripts/ui/chat/hopscotch-turn-runtime.js';
 import { createHopscotchBoardStore } from '../../src/scripts/storage/hopscotch-board-store.js';
 
@@ -32,7 +34,8 @@ const userBoard = () => ({ rows: [
   { id: 'r3', houses: [{ id: 'image', kind: 'image_generation' }, { id: 'review', kind: 'format_review' }, { id: 'memory', kind: 'memory_table' }] },
   { id: 'r4', houses: [{ id: 'compaction', kind: 'summary_compaction' }, { id: 'h_edit', kind: 'custom_prompt', label: '编修', config: { prompt: '建议：{{body}} / {{house:h_analysis}}', includeContext: 'none', output: { mode: 'note' } } }] },
 ] });
-const writingSettings = () => ({ place: 'writing', memory: { storageMode: 'table', autoExtract: true, autoExtractMode: 'inline' }, replyCheck: { enabled: true, hasFormatGuide: true, modelMode: 'follow_current' }, autoImage: { enabled: false }, variables: { enabled: false } });
+// 自动生图开着：用户板上的图片房子才会执行（设定关掉时一并停用，见 hopscotch-activation-tests）
+const writingSettings = () => ({ place: 'writing', memory: { storageMode: 'table', autoExtract: true, autoExtractMode: 'inline' }, replyCheck: { enabled: true, hasFormatGuide: true, modelMode: 'follow_current' }, autoImage: { enabled: true }, variables: { enabled: false } });
 
 const makeDeps = (overrides = {}) => {
   const log = [];
@@ -234,6 +237,99 @@ const makeDeps = (overrides = {}) => {
   turn2.abort('test');
   await turn2.turnPromise;
   console.log('ok - memory inline respects table memory master switch; history snapshot bounded by board');
+}
+
+{
+  // 套用预设：数据（最近对话、本轮输入、正文、前面房子的产物）放在预设的聊天记录位置；不发系统提示词；上限仍按房子设定。
+  const data = buildCustomHousePresetData({
+    cfg: { includeContext: 'recent', recentMessageCount: 2, contextTokenBudget: 10000 },
+    userInput: '去港口',
+    bodyText: 'BODY',
+    artifacts: { h_a: { text: '分析结果' }, h_note: { text: '只读建议', mode: 'note' }, h_blank: { text: ' ' } },
+    historySnapshot: [{ role: 'user', content: '早' }, { role: 'assistant', content: '晚' }, { role: 'user', content: '去港口' }],
+  });
+  assert.equal(data.length, 1);
+  assert.equal(data[0].role, 'user');
+  assert.match(data[0].content, /^【最近对话】\nassistant: 晚\nuser: 去港口\n\n【本轮输入】\n去港口\n\n【正文】\nBODY\n\n【房子 h_a 的产物】\n分析结果$/);
+  assert.deepEqual(buildCustomHousePresetData({ cfg: { includeContext: 'none' } }), []);
+
+  const sent = [];
+  const renders = [];
+  const { deps } = makeDeps({
+    custom: {
+      backgroundChat: async (messages, options) => { sent.push({ messages, options }); return '预设结果'; },
+      getRuntimeConfigByProfileId: async () => null,
+      getRecentMessages: () => [],
+      getBodyText: () => 'BODY',
+      charName: 'Alice', userName: 'Me',
+      resolveTaskPreset: id => (id === 'p1' ? {
+        ok: true, id: 'p1', name: '剧情分析',
+        render: (dataMessages, { transform }) => {
+          renders.push(transform('看{{user_input}}'));
+          return { ok: true, messages: [{ role: 'system', content: transform('看{{user_input}}') }, ...dataMessages] };
+        },
+      } : { ok: false, reason: 'preset_missing' }),
+    },
+  });
+  const ex = createHopscotchExecutors({ sessionId: 'rp:a', userInput: '去港口', getTurnContext: () => ({}), ...deps, logger: { warn() {} } });
+  const house = { id: 'c', config: { prompt: '', systemPrompt: '不该发送', promptSource: 'preset', presetId: 'p1', includeContext: 'none', maxTokens: 600 } };
+  const result = await ex.custom_prompt.run({ house, rowInput: { artifacts: {} }, signal: new AbortController().signal });
+  assert.equal(result.status, 'succeeded');
+  assert.equal(result.artifact.text, '预设结果');
+  assert.deepEqual(renders, ['看去港口']);
+  assert.deepEqual(sent[0].messages, [{ role: 'system', content: '看去港口' }, { role: 'user', content: '【本轮输入】\n去港口' }]);
+  assert.equal(sent[0].options.maxTokens, 600);
+  assert.deepEqual(sent[0].options.presetContext, { sessionId: 'rp:a', uiMode: 'rp', presetId: 'p1' });
+  assert.deepEqual(result.usage.promptSource, { mode: 'preset', presetId: 'p1' });
+
+  // 预设被删除：退回提示词；提示词也空时照旧跳过，并注明原因
+  const gone = await ex.custom_prompt.run({ house: { id: 'c', config: { ...house.config, presetId: 'gone' } }, rowInput: { artifacts: {} }, signal: new AbortController().signal });
+  assert.equal(gone.status, 'skipped');
+  assert.equal(gone.reason, 'empty_prompt');
+  const fallback = await ex.custom_prompt.run({ house: { id: 'c', config: { ...house.config, presetId: 'gone', prompt: '写点什么' } }, rowInput: { artifacts: {} }, signal: new AbortController().signal });
+  assert.equal(fallback.status, 'succeeded');
+  assert.deepEqual(fallback.usage.promptSource, { mode: 'prompt', fallback: 'preset_missing', presetId: 'gone' });
+  assert.equal(sent.at(-1).options.presetContext.presetId, undefined);
+  console.log('ok - custom house with a task preset sends the preset entries and its data, falls back to the prompt when deleted');
+}
+
+{
+  // 房子卡片的预览／试运行：用最近一轮的输入与正文、之前的对话，按卡片当前（未保存）的设置组请求。
+  const sent = [];
+  const handler = createCustomHousePresetHandler({
+    getSessionId: () => 'rp:a',
+    getMessages: () => [
+      { role: 'user', content: '早' }, { role: 'assistant', content: '晚' },
+      { role: 'user', content: '去港口' }, { role: 'assistant', content: 'BODY' },
+    ],
+    resolvePreset: (id, sid) => (id === 'p1' ? { ok: true, id, sid, render: (data, { transform }) => ({ ok: true, messages: [{ role: 'system', content: transform('{{user_input}}/{{body}}/{{char}}') }, ...data] }) } : { ok: false }),
+    getNames: () => ({ charName: 'Alice', userName: 'Me' }),
+    getRuntimeConfigByProfileId: async id => (id === 'm1' ? { provider: 'openai', model: 'x' } : null),
+    backgroundChat: async (messages, options) => {
+      sent.push({ messages, options });
+      return options.previewOnly ? { messages: [...messages, { role: 'user', content: 'normalized' }] } : ' 分析完毕 ';
+    },
+  });
+  const context = { config: { includeContext: 'recent', recentMessageCount: 2, maxTokens: 700, modelMode: 'profile', modelProfileId: 'm1', modelOverride: 'y' } };
+  const preview = await handler.preview({ presetId: 'p1', context });
+  assert.equal(preview.ok, true);
+  assert.equal(preview.messages.at(-1).content, 'normalized');
+  assert.equal(sent[0].messages[0].content, '去港口/BODY/Alice');
+  assert.match(sent[0].messages[1].content, /^【最近对话】\nuser: 早\nassistant: 晚\n\n【本轮输入】\n去港口\n\n【正文】\nBODY$/);
+  assert.deepEqual(sent[0].options.presetContext, { sessionId: 'rp:a', uiMode: 'rp', presetId: 'p1' });
+  assert.equal(sent[0].options.maxTokens, 700);
+  assert.deepEqual(sent[0].options.runtimeConfigOverride, { provider: 'openai', model: 'y' });
+  assert.equal(sent[0].options.previewOnly, true);
+
+  const trial = await handler.trial({ presetId: 'p1', context });
+  assert.equal(trial.ok, true);
+  assert.equal(trial.text, '分析完毕');
+  assert.equal(sent[1].options.previewOnly, undefined);
+  assert.equal(Number.isFinite(trial.latencyMs), true);
+
+  assert.deepEqual(await handler.trial({ presetId: 'gone', context }), { ok: false, message: '所选预设已不存在' });
+  assert.deepEqual(await handler.trial({ presetId: 'p1', context: { config: { modelMode: 'profile', modelProfileId: 'missing' } } }), { ok: false, message: '指定的模型配置不存在' });
+  console.log('ok - custom house preset handler previews and trials with the latest turn and the unsaved card settings');
 }
 
 console.log('hopscotch-turn-runtime tests passed');

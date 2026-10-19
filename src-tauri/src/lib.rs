@@ -2,6 +2,7 @@
 
 mod app_update;
 mod charx;
+mod maid_files;
 mod commands;
 mod external_links;
 mod memory_db;
@@ -101,6 +102,9 @@ pub fn run() {
             commands::export_data_bundle,
             commands::import_data_bundle,
             commands::import_data_bundle_bytes,
+            commands::import_upload_begin,
+            commands::import_upload_append,
+            commands::import_upload_discard,
             commands::http_request,
             commands::public_http_request,
             commands::http_stream_request_start,
@@ -122,6 +126,10 @@ pub fn run() {
             charx::read_charx,
             charx::save_persona_charx,
             charx::export_charx,
+            maid_files::maid_file_put,
+            maid_files::maid_file_get,
+            maid_files::maid_file_delete,
+            maid_files::maid_file_list,
             commands::init_database,
             commands::create_memory,
             commands::update_memory,

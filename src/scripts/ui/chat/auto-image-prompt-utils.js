@@ -34,8 +34,25 @@ const stripMarkdownCodeBlocks = (value = '') => String(value ?? '')
 const stripReasoningLikeBlocks = (value = '') => String(value ?? '')
   .replace(/<\s*(?:think|thinking|reasoning)(?:\s[^>]*)?\s*>[\s\S]*?<\s*\/\s*(?:think|thinking|reasoning)\s*>/gi, '');
 
+// 整篇回复被同一个代码块从头包到尾（如预设把回复伪装成终端输出）时，这层只是外壳，里面的标签照常识别。
+const findWholeReplyFenceRange = (value = '') => {
+  const text = String(value ?? '');
+  const start = text.search(/\S/);
+  const fence = start < 0 ? '' : text.slice(start, start + 3);
+  if (fence !== '```' && fence !== '~~~') return null;
+  const end = text.trimEnd().length;
+  return text.indexOf(fence, start + 3) === end - 3 && end - 3 > start + 3 ? { start, end } : null;
+};
+
+const unwrapWholeReplyFence = (value = '') => {
+  const text = String(value ?? '');
+  const range = findWholeReplyFenceRange(text);
+  return range ? text.slice(0, range.start) + text.slice(range.start + 3, range.end - 3) + text.slice(range.end) : text;
+};
+
 const collectIgnoredAutoImagePromptRanges = (source = '') => {
   const text = String(source ?? '');
+  const wrapper = findWholeReplyFenceRange(text);
   const ranges = [];
   const collect = (re) => {
     re.lastIndex = 0;
@@ -48,7 +65,9 @@ const collectIgnoredAutoImagePromptRanges = (source = '') => {
   collect(/```[\s\S]*?```/g);
   collect(/~~~[\s\S]*?~~~/g);
   collect(/<\s*(?:think|thinking|reasoning)(?:\s[^>]*)?\s*>[\s\S]*?<\s*\/\s*(?:think|thinking|reasoning)\s*>/gi);
-  return ranges.sort((a, b) => a.start - b.start || a.end - b.end);
+  return ranges
+    .filter(range => !wrapper || range.start !== wrapper.start || range.end !== wrapper.end)
+    .sort((a, b) => a.start - b.start || a.end - b.end);
 };
 
 const rangeIntersects = (start = 0, end = 0, ranges = []) =>
@@ -335,7 +354,7 @@ const normalizeAutoImagePromptLimit = (max, fallback) => {
 
 export const extractAutoImagePrompts = (text = '', { max = 1, maxLength = 2000, dedupe = true, stripMomentBlocks = false } = {}) => {
   const decoded = stripMomentBlocks ? stripMomentBlocksForAutoImagePrompt(text) : htmlDecodeLite(text);
-  const source = stripReasoningLikeBlocks(stripMarkdownCodeBlocks(decoded));
+  const source = stripReasoningLikeBlocks(stripMarkdownCodeBlocks(unwrapWholeReplyFence(decoded)));
   const limit = normalizeAutoImagePromptLimit(max, 1);
   const lengthLimit = Math.max(80, Math.trunc(Number(maxLength)) || 2000);
   const prompts = [];

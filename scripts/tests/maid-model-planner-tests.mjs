@@ -172,7 +172,8 @@ const cloneJson = value => JSON.parse(JSON.stringify(value));
   assert.doesNotMatch(catalog.detailText, /aliases:/, '详情不带检索别名');
   assert.match(catalog.staticText, /^- regex\.open: /m);
   assert.match(catalog.staticText, /^- regex\.list: /m, '索引包含全部功能，不随候选变化');
-  assert.equal((catalog.staticText.split('<maid_skills>')[0].match(/^- /gm) || []).length, all.filter(feature => feature.tools?.length).length, 'every feature with tools is indexed separately from skill descriptions');
+  // 索引列出女仆看得到的全部功能（awareness_only 除外），含只有说明、没有工具的 APP 知识（如防截断传输）
+  assert.equal((catalog.staticText.split('<maid_skills>')[0].match(/^- /gm) || []).length, all.filter(feature => feature.maidModelContext !== 'awareness_only').length, 'every model-visible feature is indexed separately from skill descriptions');
   assert.match(catalog.staticText, /app\.search_skills/);
   assert.doesNotMatch(catalog.staticText, /avatar\.create_and_set/, 'the editable skill directory is dynamic context');
   assert.match(catalog.staticText, /app\.read_feature_doc/);

@@ -95,6 +95,24 @@ export function fromScriptPreset(original, edited) {
   return result;
 }
 
+// 酒馆助手 replaceTavernRegexes（预设类型）只同步开关：按 id、其次按名称对上已有规则；
+// 新增、删除规则和其他字段不处理（与角色正则的写法一致）。
+export function patchScriptPresetRegexes(preset, patches = []) {
+  const result = JSON.parse(JSON.stringify(preset));
+  const byId = new Map(), byName = new Map();
+  for (const patch of Array.isArray(patches) ? patches : []) {
+    const id = String(patch?.id || ''), name = String(patch?.script_name || patch?.scriptName || patch?.name || '');
+    if (id) byId.set(id, patch);
+    if (name) byName.set(name, patch);
+  }
+  result.regexes = (result.regexes || []).map((rule) => {
+    const patch = byId.get(String(rule.id || '')) || byName.get(String(rule.script_name || rule.name || ''));
+    return patch ? { ...rule, enabled: patch.enabled !== false } : rule;
+  });
+  result.extensions = { ...(result.extensions || {}), regex_scripts: result.regexes };
+  return result;
+}
+
 // Apply only the updater's actual changes. A concurrent edit to the same field
 // is reported instead of silently replacing the user's newer data.
 export function mergeScriptPresetChanges(before, edited, current, path = '') {

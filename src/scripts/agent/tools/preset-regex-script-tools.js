@@ -185,6 +185,9 @@ export const createPresetRegexScriptAgentTools = ({
   onPresetsChanged = null,
   onRegexChanged = null,
   onScriptsChanged = null,
+  // 预设分类（本机整理，storage/preset-group-store.js）
+  presetGroupStore = null,
+  onPresetGroupsChanged = null,
 } = {}) => {
   const snapshots = new WeakMap();
   const sessionIdOf = context => trim(context?.sessionId || getCurrentSessionId?.());
@@ -255,6 +258,113 @@ export const createPresetRegexScriptAgentTools = ({
     }
     const previousId = scope === 'session' ? trim(presetStore.getSessionBindingId?.(type, ctx.sessionId)) : trim(presetStore.getActiveId(type));
     return { type, scope, ctx, presetId: preset.id, name: trim(preset.name) || preset.id, previousId, previousName: presetName(type, previousId) || previousId };
+  };
+
+  /* ───────────── 预设分类（女仆帮忙分类：先列分法，确认后才移动） ───────────── */
+
+  const openaiPresetRefs = () => presetSummaries('openai').map(preset => ({ id: preset.id, name: trim(preset.name) || preset.id }));
+
+  const listPresetGroups = async () => {
+    if (!presetGroupStore) return { ok: false, reason: 'preset_groups_unavailable' };
+    await ready(presetStore); await ready(presetGroupStore);
+    const list = openaiPresetRefs();
+    const byId = new Map(list.map(preset => [preset.id, preset]));
+    const grouped = new Set();
+    const groups = presetGroupStore.getGroups().map(group => ({
+      name: group.name,
+      presets: group.presetIds.filter(id => byId.has(id)).map(id => { grouped.add(id); return byId.get(id); }),
+    }));
+    return { ok: true, groups, uncategorized: list.filter(preset => !grouped.has(preset.id)).slice(0, 300) };
+  };
+
+  const capturePresetGrouping = async (args = {}) => {
+    if (!presetGroupStore) return { error: { ok: false, reason: 'preset_groups_unavailable' } };
+    await ready(presetStore); await ready(presetGroupStore);
+    const list = openaiPresetRefs();
+    const existing = new Set(presetGroupStore.getGroups().map(group => group.name));
+    const seen = new Set();
+    const items = (Array.isArray(args.assignments) ? args.assignments : []).slice(0, 200).map((entry) => {
+      const query = trim(entry?.preset);
+      const group = trim(entry?.group).replace(/\s+/g, ' ').slice(0, 24);
+      const target = resolveNamedTarget(list, query);
+      if (target.error) return { target: query, group, status: target.error === 'ambiguous_target' ? 'ambiguous' : 'missing', reason: target.error, candidates: target.candidates };
+      const { id, name } = target.item;
+      if (seen.has(id)) return { target: query, presetId: id, name, group, status: 'skipped', reason: 'duplicate_assignment' };
+      seen.add(id);
+      const from = presetGroupStore.getGroupOfPreset(id)?.name || '';
+      return { target: query, presetId: id, name, group, from, status: from === group ? 'skipped' : 'planned', reason: from === group ? 'already_in_group' : '' };
+    });
+    const planned = items.filter(item => item.status === 'planned');
+    const newGroups = [...new Set(planned.map(item => item.group).filter(name => name && !existing.has(name)))];
+    return { items, plannedCount: planned.length, newGroups };
+  };
+
+  const presetGroupApplyTool = {
+    name: 'preset.groups.apply',
+    title: 'Categorize presets',
+    description: 'Put chat-completion (openai) presets into categories for the user\'s own organization (like contact groups; categories are local and never change the presets). Read preset.groups.list first, propose a grouping (for example by series or version family), then call once with assignments [{preset: id or exact name, group: category name}]. Missing categories are created; group "" moves a preset back to uncategorized. The user sees the whole plan and confirms before anything moves.',
+    source: 'maid-app-content', permissions: [], riskLevel: 'medium',
+    capabilities: { read: true, write: true, network: false, cost: 'none', undo: 'manual_regroup', modelContext: 'none', confirmation: 'required' },
+    schema: {
+      type: 'object', required: ['assignments'], additionalProperties: false,
+      properties: {
+        assignments: {
+          type: 'array', minItems: 1, maxItems: 200,
+          items: { type: 'object', required: ['preset', 'group'], additionalProperties: false,
+            properties: { preset: { type: 'string', minLength: 1, maxLength: 200 }, group: { type: 'string', maxLength: 24 } } },
+        },
+      },
+    },
+    safety: {
+      operationType: 'group_presets', destructive: 'conditional',
+      preflight: async (args) => {
+        const snap = await capturePresetGrouping(args);
+        snapshots.set(args, snap);
+        if (snap.error || !snap.plannedCount) return { destructive: false };
+        return confirmRequest({
+          kind: 'preset.groups.apply', operationType: 'group_presets', danger: false,
+          title: t('整理预设分类'),
+          message: snap.newGroups.length
+            ? t('将新建 {groups} 个分类，移动 {count} 个预设。分类只是本机整理，不会改动预设。', { groups: snap.newGroups.length, count: snap.plannedCount })
+            : t('将移动 {count} 个预设。分类只是本机整理，不会改动预设。', { count: snap.plannedCount }),
+          confirmText: t('分类'),
+          items: snap.items.map(item => ({
+            id: item.presetId || item.target, label: item.name || item.target,
+            meta: item.status === 'planned' ? (item.group || t('未分类')) : t(item.reason || item.status), status: item.status,
+          })),
+          denyReason: 'preset_grouping_cancelled',
+        });
+      },
+    },
+    execute: async (args = {}, context = {}) => {
+      const snap = snapshots.get(args) || await capturePresetGrouping(args);
+      if (snap.error) return snap.error;
+      if (snap.plannedCount && !isAllowed(context, 'preset.groups.apply')) return { ok: false, reason: 'confirmation_required' };
+      const colors = ['sky', 'violet', 'emerald', 'amber', 'rose'];
+      const groupIds = new Map(presetGroupStore.getGroups().map(group => [group.name, group.id]));
+      const results = [];
+      let changed = false;
+      for (const item of snap.items) {
+        if (item.status !== 'planned') { results.push(item); continue; }
+        if (context.signal?.aborted) { results.push({ ...item, status: 'cancelled', reason: 'user_aborted' }); continue; }
+        let groupId = '';
+        if (item.group) {
+          groupId = groupIds.get(item.group) || '';
+          if (!groupId) {
+            const created = await presetGroupStore.createGroup(item.group, colors[groupIds.size % colors.length]);
+            if (!created.ok) { results.push({ ...item, status: 'failed', reason: created.reason }); continue; }
+            groupId = created.group.id;
+            groupIds.set(item.group, groupId);
+          }
+        }
+        const moved = await presetGroupStore.movePreset(item.presetId, groupId);
+        if (moved.ok) changed = true;
+        results.push(moved.ok ? { ...item, status: 'succeeded', changed: true } : { ...item, status: 'failed', reason: moved.reason });
+      }
+      if (changed) notify(onPresetGroupsChanged);
+      return batchResult('preset.groups.apply', results, { requestedCount: snap.items.length });
+    },
+    summarizeResult: summarizeBatch('preset grouping'),
   };
 
   const presetSwitchTool = {
@@ -1211,6 +1321,14 @@ export const createPresetRegexScriptAgentTools = ({
     presetSwitchTool,
     presetEntriesTool,
     presetDeleteTool,
+    readTool({
+      name: 'preset.groups.list', title: 'List preset categories',
+      description: 'List the user\'s categories for chat-completion (openai) presets with the presets in each, plus the uncategorized presets. Use it before preset.groups.apply to propose a grouping.',
+      schema: {},
+      execute: listPresetGroups,
+      summarize: result => (result?.ok ? `listed ${(result.groups || []).length} preset categor(ies), ${(result.uncategorized || []).length} uncategorized` : `preset category list failed: ${trim(result?.reason)}`),
+    }),
+    presetGroupApplyTool,
     readTool({
       name: 'regex.list', title: 'List regex rules',
       description: 'List regex rules across the global set, rule sets (with their preset/worldbook bindings) and the current session, with ids, enabled state and placement. includeRules:false lists only the containers with rule counts (use it to answer "which sets exist"); includeRules:true adds find/replace text; scope narrows to global/sets/session; container reads just one of global, session, or a rule set (id or exact name).',

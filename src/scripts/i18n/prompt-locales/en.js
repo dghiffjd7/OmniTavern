@@ -854,6 +854,8 @@ dialogue_examples:
   'character.context.personality': 'Personality:\n{value}',
   'variable.ai_evaluate.system': 'You are a rule evaluator. Output one integer only, with no explanation.',
   'variable.ai_evaluate.affection': 'Evaluate the change in affinity from this turn. Output only an integer from -5 to +5.',
+  'creative_body_fc.tool_description': 'Submit this turn\'s complete reply: put everything you would otherwise output directly (the story text and any other required blocks) into content in the original format, and write nothing outside this call.',
+  'creative_body_fc.content_description': 'The complete reply for this turn, written in the originally required format.',
   'maid.continue.unknown_tool': 'Unknown tool',
   'maid.continue.step': '{tool} ({summary})',
   'maid.continue.separator': '; ',

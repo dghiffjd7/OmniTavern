@@ -548,6 +548,8 @@ dialogue_examples:
   'character.context.personality': '性格特点:\n{value}',
   'variable.ai_evaluate.system': '你是规则评估器，只输出一个整数，不要解释。',
   'variable.ai_evaluate.affection': '根据本轮对话判断好感度变化（-5~+5 之间的整数，只输出数字）。',
+  'creative_body_fc.tool_description': '提交本轮的完整回复：原本要直接输出的全部内容（正文以及要求的其他区块）都按原格式写进 content，调用之外不写任何内容。',
+  'creative_body_fc.content_description': '本轮完整回复，按原本的格式要求书写。',
   'maid.continue.unknown_tool': '未知工具',
   'maid.continue.step': '{tool}（{summary}）',
   'maid.continue.separator': '；',

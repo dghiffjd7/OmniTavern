@@ -116,6 +116,15 @@ body[data-theme-mode='dark'] :is(.hop-dialog, .hop-board-card-controls) { --app-
 .hop-content { padding: 18px 24px; }
 .hop-content label { display: grid; gap: 7px; margin-bottom: 16px; font-size: 13px; color: var(--app-text-secondary); }
 .hop-content label.hop-check { display: flex; align-items: center; }
+/* 工作流导出导入：分块、标题与清单 */
+.hop-workflow-block { margin: 16px 0 0; padding-top: 14px; border-top: 1px solid var(--app-border-subtle); }
+.hop-workflow-block:first-of-type { border-top: 0; padding-top: 4px; }
+.hop-workflow-block h3 { margin: 0 0 8px; color: var(--app-text-primary); font-size: 14px; font-weight: 750; }
+.hop-workflow-block ul { margin: 0; padding-left: 18px; color: var(--app-text-secondary); font-size: 13px; line-height: 1.7; }
+.hop-workflow-block > button { margin-top: 8px; }
+.hop-workflow-block + .hop-check { margin-top: 14px; }
+.hop-workflow-advanced { margin-top: 18px; color: var(--app-text-muted); font-size: 13px; }
+.hop-workflow-advanced > summary { cursor: pointer; padding: 4px 0; }
 .hop-dialog input:not([type=checkbox]), .hop-dialog textarea, .hop-dialog select {
   box-sizing: border-box; border: 1px solid var(--app-border-default); border-radius: 12px;
   padding: 8px 10px; color: var(--app-text-primary); background: var(--app-surface-card); font: inherit; font-size: 13px; min-width: 0;
@@ -218,8 +227,14 @@ body[data-theme-mode='dark'] :is(.hop-dialog, .hop-board-card-controls) { --app-
 .hop-court .is-disabled > .hop-cell-mark { display: none; }
 .hop-variable-info dl { margin: 0; }
 .hop-variable-info dd { margin: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.55; }
-.agent-center-setting-row.hop-fusion-setting { grid-template-columns: minmax(0, 1fr) auto; }
-.hop-fusion-setting .agent-center-switch { justify-self: end; }
+.agent-center-setting-row.hop-fusion-setting,
+.agent-center-setting-row.hop-body-transport-setting { grid-template-columns: minmax(0, 1fr) auto; }
+.hop-fusion-setting .agent-center-switch,
+.hop-body-transport-setting .agent-center-switch { justify-self: end; }
+/* 截断提示通知跳转过来时短暂高亮防截断传输开关 */
+[data-body-tool-transport] { transition: box-shadow 240ms ease; }
+[data-body-tool-transport].is-attention { box-shadow: 0 0 0 2px var(--app-accent-primary); }
+@media (prefers-reduced-motion: reduce) { [data-body-tool-transport] { transition: none; } }
 .hop-flow-toggle-row .agent-center-switch { flex: none; }
 .hop-dialog .agent-center-switch[data-action='toggle-enabled'] { border: 0; background: transparent; padding: 6px; box-shadow: none; }
 @media (hover: hover) and (pointer: fine) {

@@ -1,6 +1,7 @@
 import { t } from '../i18n/index.js';
 import { appConfirm } from './app-confirm.js';
 import { AGENT_TIMEOUT_MAX_SECONDS } from '../agent/agent-generation-settings.js';
+import { bindAgentPresetSourceControls, readAgentPresetSource, renderAgentPresetSourceControl } from './agent-preset-source-control.js';
 
 const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const statuses = { queued: '等待中', running: '处理中', succeeded: '已完成', failed: '失败', cancelled: '已停止' };
@@ -10,6 +11,8 @@ export const createUtilityAgentEditor = ({ actions, id, scope = 'local', context
   context = saved.context; scope = saved.scope;
   let config = structuredClone(saved.config), disposed = false, pending = false;
   const node = doc.createElement('div'); node.className = 'agent-config-editor'; node.dataset.agentCommonEditor = id;
+  node.dataset.agentPresetArea = '';
+  const presetServices = actions.getAgentPresetServices?.() || null;
   const options = () => ({ id, scope, context, config, revision: saved.revision });
   const hasDraft = () => JSON.stringify(config) !== JSON.stringify(saved.config);
   const updateDraft = () => { node.querySelector('[name=agent-config-draft]').value = JSON.stringify(config); };
@@ -30,12 +33,16 @@ export const createUtilityAgentEditor = ({ actions, id, scope = 'local', context
   const render = () => {
     const version = ++renderVersion;
     const sample = node.querySelector('[name=sample]')?.value || '';
+    const presetView = presetServices && config.presetId ? presetServices.describePreset(config.presetId) : null;
+    const hidePrompt = config.promptSource === 'preset' && presetView?.ok ? 'hidden' : '';
+    const presetHtml = presetServices ? renderAgentPresetSourceControl({ scope: `agent-${id}`, kind: 'archive_naming', mode: config.promptSource, presetId: config.presetId, view: presetView, limitValue: String(config.maxTokens), showActions: false }) : '';
     node.innerHTML = `<div class="ac-utility-head"><label>${escape(t('配置范围'))}<select name="scope"><option value="local" ${scope === 'local' ? 'selected' : ''}>${escape(t(context.place === 'writing' ? '当前角色' : '当前聊天'))}</option><option value="global" ${scope === 'global' ? 'selected' : ''}>${escape(t('全局'))}</option></select></label>
     <p class="ac-hint">${escape(t('新存档未填写名称时自动命名；手动名称保持不变。'))}</p></div>
     <section class="ac-utility-card">
     <label class="ac-switch ac-utility-toggle"><span>${escape(t('自动命名存档'))}</span><input type="checkbox" role="switch" name="enabled" ${config.enabled ? 'checked' : ''}></label>
     <label>${escape(t('模型配置'))}<select name="profile"></select></label>
-    <label>${escape(t('补充要求（可选）'))}<textarea name="prompt" rows="3">${escape(config.prompt)}</textarea></label>
+    ${presetHtml}
+    <label data-agent-preset-prompt-part ${hidePrompt}>${escape(t('补充要求（可选）'))}<textarea name="prompt" rows="3">${escape(config.prompt)}</textarea></label>
     <details class="ac-utility-disclosure"><summary>${escape(t('生成设置'))}</summary><div class="ac-row"><label>${escape(t('最大输出 token'))}<input type="number" name="maxTokens" min="16" max="16000" value="${config.maxTokens}"></label><label>${escape(t('最长等待'))}<select name="timeoutMode"><option value="follow" ${config.timeoutMode !== 'custom' ? 'selected' : ''}>${escape(t('跟随模型配置'))}</option><option value="custom" ${config.timeoutMode === 'custom' ? 'selected' : ''}>${escape(t('自定义'))}</option></select></label>${config.timeoutMode === 'custom' ? `<label>${escape(t('自定义等待（秒）'))}<input type="number" name="timeoutSeconds" min="5" max="${AGENT_TIMEOUT_MAX_SECONDS}" value="${config.timeoutSeconds ?? ''}"></label>` : ''}</div>${config.timeoutMode === 'custom' ? `<p class="ac-hint">${escape(t('自定义优先于 API 配置的请求超时。'))}</p>` : ''}</details>
     <div class="ac-actions"><button type="button" class="agent-center-card-action is-primary" data-action="save">${escape(t('保存'))}</button><button type="button" class="agent-center-card-action" data-action="reset">${escape(t(scope === 'global' ? '恢复默认' : '跟随全局配置'))}</button><small data-status role="status" aria-live="polite"></small></div>
     </section>
@@ -58,9 +65,17 @@ export const createUtilityAgentEditor = ({ actions, id, scope = 'local', context
     // Config managers may not be hydrated until the connection panel is opened.
     Promise.resolve(actions.listAgentModelProfiles?.()).then(profiles => { if (Array.isArray(profiles)) { profileOptions = profiles; showProfiles(); } }).catch(error => status(error.message || '加载失败'));
     runs();
+    bindAgentPresetSourceControls(node, { services: presetServices });
   };
   render();
   node.addEventListener('input', event => {
+    const presetControl = event.target.closest?.('[data-agent-preset-source]');
+    if (presetControl) {
+      const { mode, presetId } = readAgentPresetSource(presetControl);
+      config.promptSource = mode; config.presetId = presetId;
+      updateDraft();
+      return;
+    }
     const field = event.target.name;
     if (field === 'enabled') config.enabled = event.target.checked;
     else if (field === 'profile') { config.modelMode = event.target.value ? 'profile' : 'none'; config.modelProfileId = event.target.value; }

@@ -19,7 +19,8 @@ import {
 import { getCurrentLocale, t, translateUiText } from '../i18n/index.js';
 import { getLocalizedPromptText } from '../i18n/prompt-locale.js';
 import { DEFAULT_MEMORY_TEMPLATE } from '../memory/default-template.js';
-import { getDefaultSummaryCompactionRules, resolveCustomSummaryCompactionRules } from './chat/summary-compaction-utils.js';
+import { getDefaultSummaryCompactionRules, resolveCustomSummaryCompactionRules, SUMMARY_COMPACTION_MAX_TOKENS } from './chat/summary-compaction-utils.js';
+import { bindAgentPresetSourceControls, readAgentPresetSource, renderAgentPresetSourceControl } from './agent-preset-source-control.js';
 import { appChoice, appConfirm, appPromptText } from './app-confirm.js';
 import { bindBackdropActivation } from './backdrop-activation-utils.js';
 import { captureAgentEditorDrafts, restoreAgentEditorDrafts } from './agent-editor-draft-utils.js';
@@ -1505,6 +1506,8 @@ const PANEL_CSS = `
     border-radius: 22px;
     background: color-mix(in srgb, var(--app-surface-card) 98%, var(--app-surface-subtle));
     box-shadow: 0 48px 110px -24px rgba(30, 41, 59, 0.55), 0 0 0 1px rgba(15, 23, 42, 0.04);
+    /* 手机 WebView 在进场动画结束时拆掉卡片图层，会有一帧卡片背景没画出来（闪一下）；常驻图层避免 */
+    will-change: transform;
 }
 .agent-center-floating-card.is-entering {
     animation: agent-center-floating-in 430ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
@@ -3266,7 +3269,10 @@ export class AgentCenterPanel {
         markFailureSeen = () => {},
         getHopscotchPanel = () => null,
         resolveSessionLabel = sessionId => sessionId,
+        // Agent「套用预设」与预设分类服务（app 装配的 agent-preset-services）；没有时不显示「提示词 | 套用预设」。
+        presetServices = null,
     } = {}) {
+        this.presetServices = presetServices;
         this.getActions = getActions;
         this.resolveSessionLabel = resolveSessionLabel;
         this.confirm = confirm;
@@ -4151,16 +4157,41 @@ export class AgentCenterPanel {
         `;
     }
 
+    // 摘要压缩的「提示词 | 套用预设」：两种记忆模式各一处，共用同一组设置。
+    renderCompactionPresetSource(scope) {
+        if (!this.presetServices) return { html: '', hidePrompt: '' };
+        const settings = appSettings.get();
+        const mode = settings.summaryCompactionPromptSource === 'preset' ? 'preset' : 'prompt';
+        const presetId = String(settings.summaryCompactionPresetId || '').trim();
+        const view = presetId ? this.presetServices.describePreset(presetId) : null;
+        return {
+            html: renderAgentPresetSourceControl({ scope, kind: 'summary_compaction', mode, presetId, view, limitValue: String(SUMMARY_COMPACTION_MAX_TOKENS) }),
+            hidePrompt: mode === 'preset' && view?.ok ? 'hidden' : '',
+            tag: mode === 'preset' && view?.ok ? t('预设 · {name}', { name: view.name }) : t('提示词'),
+        };
+    }
+
+    // 保存时一起记下「提示词 | 套用预设」与所选预设（选了套用预设但没选预设时，运行时仍用提示词）。
+    saveCompactionPresetSource(editor) {
+        const control = editor?.querySelector?.('[data-agent-preset-source]');
+        if (!control) return;
+        const { mode, presetId } = readAgentPresetSource(control);
+        appSettings.update({ summaryCompactionPromptSource: mode, summaryCompactionPresetId: presetId });
+        window.dispatchEvent(new CustomEvent('app-settings-changed', { detail: { key: 'summaryCompactionPromptSource', value: mode } }));
+    }
+
     renderSummaryCompactionEditor() {
         const saved = resolveCustomSummaryCompactionRules(appSettings.get().summaryCompactionRules);
+        const source = this.renderCompactionPresetSource('compaction-summary');
         return `
             <details class="agent-memory-prompt-block" data-memory-badge-kind="compaction" open><summary>${escapeHtml(t('大总结提示词'))}${this.memoryPromptBadge(Boolean(saved))}</summary>
-                <div class="agent-center-agent-editor" data-summary-compaction-editor="global">
+                <div class="agent-center-agent-editor" data-summary-compaction-editor="global" data-agent-preset-area>
                     <p class="agent-center-card-sub">${escapeHtml(t('满足「触发与频率」的条件时，单独请求一次，把较早的摘要合并成大总结。'))}</p>
-                    <textarea class="agent-center-agent-textarea" data-summary-compaction-rules data-i18n-skip="true" aria-label="${escapeHtml(t('大总结提示词'))}" spellcheck="false" maxlength="20000">${escapeHtml(saved || getDefaultSummaryCompactionRules())}</textarea>
-                    <p class="agent-center-card-sub">${escapeHtml(t('开头的任务说明、<summary> 标签要求和要合并的摘要由程序自动附加，不用写在这里；标题、列表或段落可以自由改。动态的大总结也使用这份提示词。'))}</p>
+                    ${source.html}
+                    <textarea class="agent-center-agent-textarea" data-summary-compaction-rules data-agent-preset-prompt-part ${source.hidePrompt} data-i18n-skip="true" aria-label="${escapeHtml(t('大总结提示词'))}" spellcheck="false" maxlength="20000">${escapeHtml(saved || getDefaultSummaryCompactionRules())}</textarea>
+                    <p class="agent-center-card-sub" data-agent-preset-prompt-part ${source.hidePrompt}>${escapeHtml(t('开头的任务说明、<summary> 标签要求和要合并的摘要由程序自动附加，不用写在这里；标题、列表或段落可以自由改。动态的大总结也使用这份提示词。'))}</p>
                     <div class="agent-center-card-actions">
-                        <button type="button" class="agent-center-card-action" data-summary-compaction-reset>${escapeHtml(t('恢复默认'))}</button>
+                        <button type="button" class="agent-center-card-action" data-summary-compaction-reset data-agent-preset-prompt-part ${source.hidePrompt}>${escapeHtml(t('恢复默认'))}</button>
                         <button type="button" class="agent-center-card-action is-primary" data-summary-compaction-save>${escapeHtml(t('保存'))}</button>
                     </div>
                 </div>
@@ -4176,6 +4207,7 @@ export class AgentCenterPanel {
         const compactionUsesTableModel = globalSettings.memoryAutoExtractMode === 'separate'
             && String(globalSettings.memoryUpdateApiMode || 'chat').toLowerCase() === 'profile';
         const savedCompactionRules = resolveCustomSummaryCompactionRules(globalSettings.summaryCompactionRules);
+        const compactionSource = this.renderCompactionPresetSource('compaction-table');
         const defaults = new Map(prompt.fields.map(field => [field.id, field.defaultValue]));
         const groupCustom = group => prompt.fields.filter(field => field.group === group && defaults.has(field.id))
             .some(field => String(field.value ?? '').trim() !== String(field.defaultValue ?? '').trim());
@@ -4193,11 +4225,12 @@ export class AgentCenterPanel {
                         ${prompt.fields.filter(field => field.group === group).map(field => `<label class="agent-center-agent-field"><span>${escapeHtml(field.label)}</span><textarea class="agent-center-agent-textarea is-compact" name="memory-prompt-${escapeHtml(field.id)}" data-memory-prompt-field="${escapeHtml(field.id)}" data-i18n-skip="true" aria-label="${escapeHtml(group + ' · ' + field.label)}" spellcheck="false" maxlength="20000">${escapeHtml(field.value)}</textarea></label>`).join('')}
                         </details>`).join('')}
                 </div>
-                <details class="agent-memory-prompt-block agent-memory-assembly" data-memory-summary-compaction><summary>${escapeHtml(t('摘要压缩'))}<span>${escapeHtml(t('提示词'))}</span></summary>
+                <details class="agent-memory-prompt-block agent-memory-assembly" data-agent-preset-area data-memory-summary-compaction><summary>${escapeHtml(t('摘要压缩'))}<span data-agent-preset-tag>${escapeHtml(compactionSource.tag || t('提示词'))}</span></summary>
                 <div class="agent-center-agent-field-grid">
                     <div class="agent-center-agent-field is-wide agent-center-card-sub">${escapeHtml(t('何时压缩在上方「触发与频率」设置。'))}</div>
                     <div class="agent-center-agent-field is-wide agent-center-card-sub">${escapeHtml(compactionUsesTableModel ? t('压缩使用表格独立更新所选的模型。') : t('压缩使用该会话的正文模型。'))}</div>
-                    <div class="agent-center-agent-field is-wide" data-memory-badge-kind="compaction">
+                    ${compactionSource.html ? `<div class="agent-center-agent-field is-wide">${compactionSource.html}</div>` : ''}
+                    <div class="agent-center-agent-field is-wide" data-memory-badge-kind="compaction" data-agent-preset-prompt-part ${compactionSource.hidePrompt}>
                         <label>${escapeHtml(t('摘要压缩提示词'))}${this.memoryPromptBadge(Boolean(savedCompactionRules))}</label>
                         <textarea class="agent-center-agent-textarea is-compact" data-summary-compaction-rules data-i18n-skip="true" aria-label="${escapeHtml(t('摘要压缩提示词'))}" spellcheck="false" maxlength="20000">${escapeHtml(savedCompactionRules || getDefaultSummaryCompactionRules())}</textarea>
                         <span class="agent-center-card-sub">${escapeHtml(t('合并较早摘要时使用；任务说明、<summary> 标签要求和摘要内容由程序自动附加，标题、列表或段落可以自由改。与摘要模式的「大总结提示词」共用同一份。'))}</span>
@@ -5329,6 +5362,7 @@ export class AgentCenterPanel {
                 appSettings.update({ summaryCompactionRules: rules });
                 window.dispatchEvent(new CustomEvent('app-settings-changed', { detail: { key: 'summaryCompactionRules', value: rules } }));
             }
+            this.saveCompactionPresetSource(editor);
             markAgentPromptDraftSaved(editor,snapshot);
             this.notifySuccess?.(t('已保存'));
             await this.refresh();
@@ -5388,6 +5422,7 @@ export class AgentCenterPanel {
         if (!rules) field.value = getDefaultSummaryCompactionRules();
         appSettings.update({ summaryCompactionRules: rules });
         window.dispatchEvent(new CustomEvent('app-settings-changed', { detail: { key: 'summaryCompactionRules', value: rules } }));
+        this.saveCompactionPresetSource(editor);
         markAgentPromptDraftSaved(editor);
         this.syncMemoryPromptBadges(editor.closest('.agent-memory-hub'));
         this.notifySuccess?.(t('已保存'));
@@ -7244,6 +7279,7 @@ export class AgentCenterPanel {
     bindAgentCardEvents(root = this.contentElement, { onFlip = () => this.toggleFloatingAgentCard(), onClose = () => this.closeFloatingAgentCard(), onPromptPreview = id => this.handleAgentPromptPreview(id) } = {}) {
         if (!root) return;
         this.mountCommonAgentEditors(root);
+        bindAgentPresetSourceControls(root, { services: this.presetServices });
         this.boundAgentControls ||= new WeakMap();
         const controls = selector => [...root.querySelectorAll(selector)].filter(node => {
             const selectors = this.boundAgentControls.get(node) || new Set();

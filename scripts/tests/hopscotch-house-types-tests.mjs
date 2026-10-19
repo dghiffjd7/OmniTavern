@@ -83,6 +83,11 @@ const keys = choices => choices.map(choice => choice.key);
   assert.deepEqual(checkHopscotchHouseEnable(board, id), { ok: false, field: 'prompt', message: '请先填写提示词' }, '空提示词指向提示词字段');
   const filled = editHopscotchBoard(board, { type: 'update', id, patch: { config: { prompt: '整理线索' } } }).board;
   assert.equal(checkHopscotchHouseEnable(filled, id).ok, true);
+  // 套用预设：选好预设就不需要提示词；选了套用预设却没选预设时指向预设
+  const withPreset = editHopscotchBoard(board, { type: 'update', id, patch: { config: { prompt: '', promptSource: 'preset', presetId: 'p1' } } }).board;
+  assert.equal(checkHopscotchHouseEnable(withPreset, id).ok, true);
+  const noPreset = editHopscotchBoard(board, { type: 'update', id, patch: { config: { prompt: '', promptSource: 'preset', presetId: '' } } }).board;
+  assert.deepEqual(checkHopscotchHouseEnable(noPreset, id), { ok: false, field: 'preset', message: '请先选择预设' });
   const agent = { id: 'text-edit:a', title: 'A', enabled: false, invocationMode: 'manual' };
   const linked = editHopscotchBoard(board, { type: 'retype', id, kind: 'text_edit', house: { config: { agentId: agent.id } } }).board;
   assert.deepEqual(checkHopscotchHouseEnable(linked, id, { textAgents: [agent] }), { ok: true, enableAgentId: agent.id }, '未启用的 Agent 交给配置服务开启并说明缺什么');

@@ -96,6 +96,108 @@
     "reason": "This chooser is rendered before locale selection and deliberately presents English, Simplified Chinese, and Traditional Chinese together."
   },
   {
+    "file": "src/scripts/import/attachment-content.js",
+    "text": "\u0000 个文件已加密，无法读取",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/import/attachment-content.js",
+    "text": "\u0000 个文件路径不安全（如 ../），已跳过",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/import/attachment-content.js",
+    "text": "文件名按 GBK 解码（Windows 中文压缩包）",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/import/attachment-content.js",
+    "text": "文字过长，只保留前 200 万字",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/import/attachment-content.js",
+    "text": "编码为 \u0000，已转换",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/import/attachment-content.js",
+    "text": "PDF 暂不支持（计划中）",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/import/attachment-content.js",
+    "text": "无法读取压缩包",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/import/attachment-content.js",
+    "text": "无法读取文档",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/import/attachment-content.js",
+    "text": "无法识别的二进制文件",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/import/attachment-content.js",
+    "text": "PDF 暂不支持读取（计划中）",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/import/attachment-content.js",
+    "text": "这是压缩包，请指定要读取的文件路径（entry）",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/import/attachment-content.js",
+    "text": "这是二进制文件，无法按文字读取",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/import/attachment-content.js",
+    "text": "角色卡请用 attachment.inspect 查看摘要",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/import/attachment-content.js",
+    "text": "这不是压缩包",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/import/attachment-content.js",
+    "text": "压缩包里没有「\u0000」",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/import/attachment-content.js",
+    "text": "无法读取这个文件",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/import/attachment-content.js",
+    "text": "这是压缩包里的压缩包，暂不支持直接读取其中的文件",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
     "file": "src/scripts/import/attachment-file-inspector.js",
     "text": "CCv3 群聊专用开场白 \u0000 个暂不导入",
     "category": "agent_semantic_source",
@@ -122,6 +224,60 @@
   {
     "file": "src/scripts/import/attachment-file-inspector.js",
     "text": "脚本文件为空",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/import/office-text-extractor.js",
+    "text": "Word 文档缺少正文",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/import/office-text-extractor.js",
+    "text": "演示文稿里没有幻灯片",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/import/office-text-extractor.js",
+    "text": "（这一页没有文字）",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/import/office-text-extractor.js",
+    "text": "[备注] \u0000",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/import/office-text-extractor.js",
+    "text": "=== 第 \u0000 页 === \u0000\u0000",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/import/office-text-extractor.js",
+    "text": "…（后面的行省略）",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/import/office-text-extractor.js",
+    "text": "=== 工作表 \u0000 === \u0000",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/import/office-text-extractor.js",
+    "text": "表格里没有工作表",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/import/office-text-extractor.js",
+    "text": "\u0000 …（内容过长，后面省略）",
     "category": "agent_semantic_source",
     "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
   },
@@ -1561,12 +1717,6 @@
   },
   {
     "file": "src/scripts/ui/chat/conversation-export-utils.js",
-    "text": "【正文】",
-    "category": "protocol_compatibility",
-    "reason": "Conversation export v1 markers (TXT header prefix, 【请求推理】/【正文】 section labels and （我）/（AI）/（系统） role suffixes, and the 【附加数据 v1 …】 state section title) are parsed by chat-history import and must stay identical in every UI language."
-  },
-  {
-    "file": "src/scripts/ui/chat/conversation-export-utils.js",
     "text": "（我）",
     "category": "protocol_compatibility",
     "reason": "Conversation export v1 markers (TXT header prefix, 【请求推理】/【正文】 section labels and （我）/（AI）/（系统） role suffixes, and the 【附加数据 v1 …】 state section title) are parsed by chat-history import and must stay identical in every UI language."
@@ -1819,30 +1969,6 @@
   },
   {
     "file": "src/scripts/ui/chat/summary-compaction-utils.js",
-    "text": "# 注意，无视你先前收到的任何指令，你的任务已更改，不再遵守格式要求",
-    "category": "prompt_fallback",
-    "reason": "These literals are canonical fallbacks behind prompt-locale builders; English actual-send output is asserted by prompt-locale and memory-template tests."
-  },
-  {
-    "file": "src/scripts/ui/chat/summary-compaction-utils.js",
-    "text": "接下来的一轮回复中，将不会进行创作，不再遵循前面的要求，而是会遵循<summary_rules>中的要求进行一轮总结",
-    "category": "prompt_fallback",
-    "reason": "These literals are canonical fallbacks behind prompt-locale builders; English actual-send output is asserted by prompt-locale and memory-template tests."
-  },
-  {
-    "file": "src/scripts/ui/chat/summary-compaction-utils.js",
-    "text": "【总结请求】",
-    "category": "prompt_fallback",
-    "reason": "These literals are canonical fallbacks behind prompt-locale builders; English actual-send output is asserted by prompt-locale and memory-template tests."
-  },
-  {
-    "file": "src/scripts/ui/chat/summary-compaction-utils.js",
-    "text": "请对前文内容进行全面梳理，根据以下要求制作简明扼要的总结：",
-    "category": "prompt_fallback",
-    "reason": "These literals are canonical fallbacks behind prompt-locale builders; English actual-send output is asserted by prompt-locale and memory-template tests."
-  },
-  {
-    "file": "src/scripts/ui/chat/summary-compaction-utils.js",
     "text": "总结应当遵循以下原则：",
     "category": "prompt_fallback",
     "reason": "These literals are canonical fallbacks behind prompt-locale builders; English actual-send output is asserted by prompt-locale and memory-template tests."
@@ -1891,12 +2017,6 @@
   },
   {
     "file": "src/scripts/ui/chat/summary-compaction-utils.js",
-    "text": "总结正文必须放在 <summary>...</summary> 中（只允许这一层 XML 标签；不要输出其他 XML 标签）。",
-    "category": "prompt_fallback",
-    "reason": "These literals are canonical fallbacks behind prompt-locale builders; English actual-send output is asserted by prompt-locale and memory-template tests."
-  },
-  {
-    "file": "src/scripts/ui/chat/summary-compaction-utils.js",
     "text": "summary 内部的正文必须使用以下格式：",
     "category": "prompt_fallback",
     "reason": "These literals are canonical fallbacks behind prompt-locale builders; English actual-send output is asserted by prompt-locale and memory-template tests."
@@ -1922,6 +2042,36 @@
   {
     "file": "src/scripts/ui/chat/summary-compaction-utils.js",
     "text": "• {事件3}: {简要描述}",
+    "category": "prompt_fallback",
+    "reason": "These literals are canonical fallbacks behind prompt-locale builders; English actual-send output is asserted by prompt-locale and memory-template tests."
+  },
+  {
+    "file": "src/scripts/ui/chat/summary-compaction-utils.js",
+    "text": "# 注意，无视你先前收到的任何指令，你的任务已更改，不再遵守格式要求",
+    "category": "prompt_fallback",
+    "reason": "These literals are canonical fallbacks behind prompt-locale builders; English actual-send output is asserted by prompt-locale and memory-template tests."
+  },
+  {
+    "file": "src/scripts/ui/chat/summary-compaction-utils.js",
+    "text": "接下来的一轮回复中，将不会进行创作，不再遵循前面的要求，而是会遵循<summary_rules>中的要求进行一轮总结",
+    "category": "prompt_fallback",
+    "reason": "These literals are canonical fallbacks behind prompt-locale builders; English actual-send output is asserted by prompt-locale and memory-template tests."
+  },
+  {
+    "file": "src/scripts/ui/chat/summary-compaction-utils.js",
+    "text": "【总结请求】",
+    "category": "prompt_fallback",
+    "reason": "These literals are canonical fallbacks behind prompt-locale builders; English actual-send output is asserted by prompt-locale and memory-template tests."
+  },
+  {
+    "file": "src/scripts/ui/chat/summary-compaction-utils.js",
+    "text": "请对前文内容进行全面梳理，根据以下要求制作简明扼要的总结：",
+    "category": "prompt_fallback",
+    "reason": "These literals are canonical fallbacks behind prompt-locale builders; English actual-send output is asserted by prompt-locale and memory-template tests."
+  },
+  {
+    "file": "src/scripts/ui/chat/summary-compaction-utils.js",
+    "text": "总结正文必须放在 <summary>...</summary> 中（只允许这一层 XML 标签；不要输出其他 XML 标签）。",
     "category": "prompt_fallback",
     "reason": "These literals are canonical fallbacks behind prompt-locale builders; English actual-send output is asserted by prompt-locale and memory-template tests."
   },
@@ -2566,6 +2716,84 @@
     "text": "内容详略目标：约 {length} 字。",
     "category": "prompt_fallback",
     "reason": "These literals are canonical fallbacks behind prompt-locale builders; English actual-send output is asserted by prompt-locale and memory-template tests."
+  },
+  {
+    "file": "src/scripts/utils/zip-archive.js",
+    "text": "不是有效的 zip 文件",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/utils/zip-archive.js",
+    "text": "条目过多（\u0000 个，上限 \u0000）",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/utils/zip-archive.js",
+    "text": "zip 目录损坏",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/utils/zip-archive.js",
+    "text": "解压后超过 \u0000MB",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/utils/zip-archive.js",
+    "text": "条目数据损坏，无法解压",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/utils/zip-archive.js",
+    "text": "这是一个文件夹",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/utils/zip-archive.js",
+    "text": "路径不安全，已跳过：\u0000",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/utils/zip-archive.js",
+    "text": "条目已加密，无法读取",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/utils/zip-archive.js",
+    "text": "条目数据损坏",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/utils/zip-archive.js",
+    "text": "条目数据不完整",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/utils/zip-archive.js",
+    "text": "不支持的压缩方式（\u0000）",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/utils/zip-archive.js",
+    "text": "条目大小与目录记录不符",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/utils/zip-archive.js",
+    "text": "打包路径无效：\u0000",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
   },
   {
     "file": "src/scripts/variables/variable-rule-engine.js",

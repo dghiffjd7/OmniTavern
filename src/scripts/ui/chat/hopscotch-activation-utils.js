@@ -15,6 +15,7 @@ export const hopscotchInactiveLabel = reason => ({
   memory_disabled: t('记忆表格功能已关闭'),
   memory_summary_mode: t('摘要模式：摘要随正文一起生成，不更新记忆表格'),
   image_prompt_disabled: t('图片提示已停用'),
+  auto_image_disabled: t('自动生图已关闭'),
   no_variable_rules: t('当前角色暂无此阶段的变量规则'),
   dependency_disabled: t('依赖的房子已停用'),
   format_guide_missing: t('请先设置格式要求'),
@@ -32,12 +33,15 @@ export const resolveHopscotchActivation = (board, settings = {}) => {
   // 摘要模式下表格更新同样不运行，但要标明是摘要模式而不是被停用。
   const memoryReason = settings.memory?.storageMode === 'summary' ? 'memory_summary_mode' : 'memory_disabled';
   const variable = settings.variables?.activity;
+  // 自动生图的开关在设定（与 AC 生图 Agent 卡同一个）；关掉时图片提示与图片生成跟着停用，和记忆、变量一样以设定为准
+  const imageOff = settings.autoImage && settings.autoImage.enabled !== true;
   const status = (requested, reason = '') => ({ requested, enabled: requested && !reason, reason: requested ? reason : 'disabled' });
   for (const kind of body?.fused || []) {
     let reason = '';
     if (kind === 'memory_table' && memoryOff) reason = memoryReason;
     if (kind === 'variable' && (variable ? !variable.enabled : settings.variables?.enabled === false)) reason = variable?.reason || 'variable_runtime_disabled';
     if (kind === 'variable' && variable?.available && Array.isArray(variable.updateModes) && !variable.updateModes.includes('inline')) reason = 'independent_variable_rules';
+    if (kind === 'image_prompt' && imageOff) reason = 'auto_image_disabled';
     fused[kind] = status(body.fusedEnabled?.[kind] !== false, reason);
   }
   for (const house of all) {
@@ -47,6 +51,7 @@ export const resolveHopscotchActivation = (board, settings = {}) => {
     if (house.kind === 'variable' && variable && (!variable.enabled || !variable.updateModes?.includes('inline'))) reason = variable.reason || 'no_variable_updates';
     if (house.kind === 'variable_rules' && variable && (!variable.enabled || !variable.rulePhases?.includes(house.config.phase))) reason = variable.reason || 'no_variable_rules';
     if (house.kind === 'image_generation' && (prompt ? prompt.enabled === false : fused.image_prompt?.enabled === false)) reason = 'image_prompt_disabled';
+    if ((house.kind === 'image_prompt' || house.kind === 'image_generation') && imageOff) reason = 'auto_image_disabled';
     if (house.kind === 'text_edit') {
       const config = settings.textAgents?.find(c => c.id === house.config?.agentId);
       reason = !config?.enabled ? 'disabled' : config.triggerMode === 'manual' ? 'manual_only' : config.modelMode === 'none' || (config.modelMode === 'profile' && !config.modelProfileId) ? 'model_unavailable' : '';

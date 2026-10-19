@@ -4,8 +4,12 @@ import { t } from '../i18n/index.js';
 import { buildVariableContext } from './variable-path-utils.js';
 import { evaluateBooleanExpression } from './safe-expression-evaluator.js';
 import { buildRuleConditionDiagnostics } from './expression-compat-diagnostics.js';
+import { resolveAgentConfigTaskPreset } from '../ui/chat/agent-task-preset.js';
 
 const DEFAULT_AFFECTION_EVALUATION_PROMPT = '根据本轮对话判断好感度变化（-5~+5 之间的整数，只输出数字）。';
+// AI 评估只要一个数字：请求不思考（DeepSeek 等开思考时，原来的 40 会全被思考用掉而拿不到结果）；
+// 上限放宽，给关不掉思考的模型留余量，不思考时模型回完数字就停。
+export const VARIABLE_AI_EVALUATE_MAX_TOKENS = 1024;
 
 export const localizeVariableAiEvaluationPrompt = (value = '') => {
   const prompt = String(value || '').trim();
@@ -48,6 +52,9 @@ const normalizeRule = (raw) => {
       depth: Number.isFinite(Number(action.depth)) ? Math.max(0, Math.trunc(Number(action.depth))) : 0,
       order: Number.isFinite(Number(action.order)) ? Number(action.order) : 3500,
       mode: String(action.mode || '').trim().toLowerCase(),
+      // AI 评估「套用预设」
+      promptSource: action.promptSource === 'preset' ? 'preset' : 'prompt',
+      presetId: typeof action.presetId === 'string' ? action.presetId.trim() : '',
     },
   };
 };
@@ -287,27 +294,38 @@ export class VariableRuleEngine {
         logger.warn('ai_evaluate skipped: backgroundChat/buildMessages unavailable');
         return;
       }
+      // 「套用预设」：评估任务（含只输出数字）由预设写，最近对话放在预设的聊天记录位置；预设没了退回原提示词。
+      const presetSource = resolveAgentConfigTaskPreset(action, sessionId);
       const prompt = localizeVariableAiEvaluationPrompt(action.prompt);
-      if (!prompt) return;
+      if (presetSource.mode !== 'preset' && !prompt) return;
       try {
         const history = this.chatStore?.getMessages?.(sessionId) || [];
         const recent = history.slice(-6).map(m => `${m.role || ''}: ${String(m.content || '').slice(0, 120)}`).join('\n');
+        const rendered = presetSource.mode === 'preset'
+          ? presetSource.taskPreset.render([{ role: 'user', content: `<chat_history>\n${recent}\n</chat_history>`, source: '最近对话' }])
+          : null;
+        if (!rendered?.ok && !prompt) return;
         const system = getLocalizedPromptText(
           'variable.ai_evaluate.system',
           '你是规则评估器，只输出一个整数，不要解释。',
         );
         const user = `${prompt}\n\n<chat_history>\n${recent}\n</chat_history>`;
-        const messages = [
+        const messages = rendered?.ok ? rendered.messages.map(({ role, content }) => ({ role, content })) : [
           { role: 'system', content: system },
           { role: 'user', content: user },
         ];
         const variables = () => useGlobalVariables ? this.chatStore?.listGlobalVariables?.() || {} : this.chatStore?.listVariables?.(sessionId) || {};
         const variableSnapshot = JSON.stringify(variables());
-        const response = await bridge.backgroundChat(messages, { ...requestOptions, temperature: 0.2, maxTokens: 40, ...(signal ? { signal } : {}) });
+        const presetOptions = rendered?.ok ? { presetContext: {
+          ...(requestOptions?.presetContext || { sessionId, uiMode: String(sessionId || '').startsWith('rp:') ? 'rp' : 'chat' }),
+          presetId: presetSource.presetId,
+        } } : { temperature: 0.2 };
+        const response = await bridge.backgroundChat(messages, { ...requestOptions, ...presetOptions, maxTokens: VARIABLE_AI_EVALUATE_MAX_TOKENS, reasoningMode: 'off', ...(signal ? { signal } : {}) });
         if (signal?.aborted || canCommit?.() === false) throw Object.assign(new Error('variable task cancelled'), { name: 'AbortError' });
         if (strict && variableSnapshot !== JSON.stringify(variables())) throw new Error(t('变量已发生变化，请重新执行'));
         const text = String(response || '').trim();
-        const match = text.match(strict ? /^-?\d+(?:\.\d+)?$/ : /-?\d+(?:\.\d+)?/);
+        // 默认提示词写「-5~+5」，模型常回「+3」：正号与负号都接受
+        const match = text.match(strict ? /^[+-]?\d+(?:\.\d+)?$/ : /[+-]?\d+(?:\.\d+)?/);
         if (!match) {
           if (strict) throw new Error(t('模型未返回有效的变量更新'));
           logger.warn('ai_evaluate: no number found', text);

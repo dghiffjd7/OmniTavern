@@ -90,9 +90,12 @@ export const createAgentConfigurationService = ({ store, getContext, getMessages
       if (!repairDraft && config.enabled && (config.modelMode === 'none' || (config.modelMode === 'profile' && !config.modelProfileId))) return { ok: false, message: '请先选择模型' };
       const independentModel = agentIndependentModelRequirement(config);
       if (independentModel) return { ok: false, message: independentModel };
-      if (config.enabled && config.kind === 'input_agent' && !config.prompt.trim()) return { ok: false, message: '请填写任务要求' };
+      // 套用预设时任务由预设代替，任务要求可以留空，但要先选预设
+      const usesPreset = config.promptSource === 'preset';
+      if (config.enabled && usesPreset && ['input_agent', 'text_edit'].includes(config.kind) && !config.presetId) return { ok: false, message: '请先选择预设' };
+      if (config.enabled && !usesPreset && config.kind === 'input_agent' && !config.prompt.trim()) return { ok: false, message: '请填写任务要求' };
       if (!repairDraft && config.enabled && config.id === 'reply_check' && context(options).place === 'writing' && !config.formatGuide.trim()) return { ok: false, message: '请先填写格式要求' };
-      if (config.enabled && config.kind === 'text_edit' && !config.prompt.trim()) return { ok: false, message: '请填写任务要求' };
+      if (config.enabled && !usesPreset && config.kind === 'text_edit' && !config.prompt.trim()) return { ok: false, message: '请填写任务要求' };
       if (config.enabled && config.kind === 'text_edit') {
         const rule = config.target.mode === 'body' ? options.bodyRule || store.read(BODY_SELECTOR_ID, context(options), options.scope).config?.target : config.target;
         if (!rule || rule.mode === 'body' || (rule.mode === 'tags' && (!rule.start || !rule.end)) || (rule.mode === 'regex' && !rule.pattern))

@@ -7734,6 +7734,20 @@ body.is-android .bottom-nav {
   }
 }
 
+/* 长按出说明的控件（help-tooltip.js 的 press）：手机长按不触发系统选字，否则选字菜单会和说明一起弹出 */
+button[data-help],
+a[href][data-help],
+[role="button"][data-help],
+[role="tab"][data-help],
+[role="switch"][data-help],
+[role="menuitem"][data-help],
+[role="checkbox"][data-help],
+[onclick][data-help],
+[data-help-mode="press"]:not(input):not(textarea) {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 /* 请求预览：本次记忆 / 世界书 / 前文注入构成（只读） */
 .memory-injection-audit-card {
   margin: 12px;

@@ -14,3 +14,16 @@ export const canInitClient = (cfg) => {
   }
   return hasKey;
 };
+
+// 后台请求参数：预设在前、调用方覆盖在后。调用方只给驼峰 maxTokens 时去掉预设的 max_tokens／max_completion_tokens——
+// OpenAI 类接口按 max_completion_tokens > max_tokens > maxTokens 取值，否则房子、变量判断等定的上限会被预设上限盖掉。
+export const mergeBackgroundGenerationOptions = (presetOptions, overrides) => {
+  const caller = overrides || {};
+  const merged = { ...(presetOptions || {}), ...caller };
+  const own = key => Object.prototype.hasOwnProperty.call(caller, key);
+  if (Number.isFinite(caller.maxTokens) && !own('max_tokens') && !own('max_completion_tokens')) {
+    delete merged.max_tokens;
+    delete merged.max_completion_tokens;
+  }
+  return merged;
+};

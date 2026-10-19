@@ -884,6 +884,9 @@ export const createMaidCapabilityRoutingRuntime = ({
     if (fileAttachments.some(item => item?.file)) {
       addRecord(projectedById.get('attachment.import'), 117, 'file_attachment', { pinned: true });
       addRecord(projectedById.get('attachment.inspect'), 116, 'file_attachment', { pinned: true });
+      // 通用文件处理：读、搜、从压缩包取出、写出与打包
+      ['attachment.read', 'attachment.search', 'attachment.extract', 'attachment.create', 'attachment.pack']
+        .forEach((id, index) => addRecord(projectedById.get(id), 115 - index, 'file_attachment', { pinned: true }));
     }
     // 模型读过说明的功能进入下一步候选：提示词只给其余功能的名称索引，“查说明→使用”这条路要走得通
     (Array.isArray(steps) ? steps : []).forEach((step) => {

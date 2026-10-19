@@ -98,3 +98,51 @@ console.log('ok - script preset edits separate in-use working data from named pe
   assert.deepEqual(store.listLocalSets().map(set => set.id), ['a', 'b'], '不传筛选时行为不变');
   console.log('ok - regex listLocalSets filters before cloning');
 }
+
+{
+  // regex.replacePreset（酒馆助手 replaceTavernRegexes 的预设类型）：只传正则开关，由外层套到当前预设再写入。
+  // Izumi 这类大预设走 preset.update 时，修改前后两份整份往返会超过脚本消息上限。
+  const big = { name: 'big', app_scope: 'creative',
+    prompts: [{ identifier: 'row', content: 'x'.repeat(700000) }],
+    prompt_order: [{ character_id: 100001, order: [{ identifier: 'row', enabled: false }] }],
+    extensions: { regex_scripts: [{ id: 'rule', scriptName: 'display', disabled: false }] },
+  };
+  const bigPresets = Object.create(PresetStore.prototype);
+  bigPresets.state = { presets: { openai: { p: structuredClone(big) } }, active: { openai: 'p' }, enabled: { openai: true } };
+  bigPresets.ready = Promise.resolve();
+  let writes = { preset: 0, regex: 0 };
+  bigPresets.persist = async () => { writes.preset++; };
+  const bigRegex = Object.create(RegexStore.prototype);
+  bigRegex.state = { local: { order: ['set'], sets: { set: { id: 'set', name: 'bound', enabled: true,
+    bind: { type: 'preset', presetType: 'openai', presetId: 'p' },
+    rules: [{ id: 'rule', scriptName: 'display', findRegex: 'text', replaceString: 'changed', disabled: false }],
+  } } } };
+  bigRegex.upsertLocalSet = async set => { bigRegex.state.local.sets[set.id] = structuredClone(set); writes.regex++; };
+  const rt = new ScriptRuntime({ ready: Promise.resolve(), getScripts: () => [] });
+  await rt.ready;
+  rt.presets = bigPresets;
+  rt.bridge = { regex: bigRegex };
+  rt.context = { ...context, openaiPresetId: 'p' };
+  rt.buildContext = (sessionId = sid) => ({ sessionId, openaiPresetId: 'p' });
+  rt.syncScripts = async () => {};
+  const snap = await rt.processRpc('preset.getSnapshot', { name: 'big', sessionId: sid });
+  const edited = structuredClone(snap.preset);
+  edited.regexes[0].enabled = false;
+  await assert.rejects(rt.processRpc('preset.update', { name: 'big', sessionId: sid, presetId: 'p', before: snap.preset, edited }), /预设修改内容过大/);
+
+  const inUse = await rt.processRpc('regex.replacePreset', { name: 'in_use', sessionId: sid, regexes: [{ id: 'rule', script_name: 'display', enabled: false }] });
+  assert.equal(inUse.preset, undefined, '只回上下文，不把整份预设传回 worker');
+  assert.deepEqual(bigPresets.getInUsePresetRegexOverrides('openai', context).map(rule => [rule.id, rule.enabled]), [['rule', false]]);
+  assert.deepEqual(writes, { preset: 0, regex: 0 }, 'in_use 只写会话覆盖');
+
+  await rt.processRpc('regex.replacePreset', { name: 'big', sessionId: sid, regexes: [{ id: 'rule', script_name: 'display', enabled: false }] });
+  assert.equal(bigRegex.state.local.sets.set.rules[0].disabled, true);
+  assert.equal(bigPresets.state.presets.openai.p.extensions.regex_scripts[0].disabled, true);
+  assert.equal(bigPresets.state.presets.openai.p.prompt_order[0].order[0].enabled, false, '条目开关不受影响');
+  assert.equal(bigPresets.state.presets.openai.p.prompts[0].content.length, 700000);
+  assert.deepEqual(writes, { preset: 1, regex: 1 });
+
+  await rt.processRpc('regex.replacePreset', { name: 'big', sessionId: sid, regexes: [{ script_name: 'display', enabled: true }] });
+  assert.equal(bigRegex.state.local.sets.set.rules[0].disabled, false, '没有 id 时按名称对上');
+  console.log('ok - regex.replacePreset toggles preset regexes without sending the whole preset');
+}

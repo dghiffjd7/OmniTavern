@@ -64,6 +64,7 @@ const GUIDE_STEP_SELECTOR_CANDIDATES = Object.freeze({
   '设定': [
     '[data-maid-guide-target="settings-general"]',
     '#settings-menu button[data-action="settings"]',
+    '#rp-chatroom-menu button[data-action="settings"]',
   ],
   '记忆表格': [
     '[data-maid-guide-target="general-memory-templates"]',
@@ -72,6 +73,7 @@ const GUIDE_STEP_SELECTOR_CANDIDATES = Object.freeze({
   'API / 模型配置': [
     '[data-maid-guide-target="settings-api-config"]',
     '#settings-menu button[data-action="config"]',
+    '#rp-chatroom-menu button[data-action="config"]',
   ],
   '服务商': [
     '[data-maid-guide-target="config-provider-select"]',
@@ -93,6 +95,10 @@ const GUIDE_STEP_SELECTOR_CANDIDATES = Object.freeze({
   'Agent Center': [
     '[data-maid-guide-target="settings-agent-center"]',
     '#settings-menu button[data-action="agent-center"]',
+  ],
+  '右上角 A 按钮': [
+    '[data-maid-guide-target="agent-center-entry"]',
+    '.agent-status-chip',
   ],
   '世界书': [
     '[data-maid-guide-target="chatroom-world"]',
@@ -130,13 +136,16 @@ const GUIDE_STEP_SELECTOR_CANDIDATES = Object.freeze({
     '[data-maid-guide-target="chat-title-entry"]',
     '#current-chat-title',
   ],
+  // 写作房间的头像打开同一个用户/角色卡切换菜单（聊天模式的房间头像打开的是会话菜单）
   '头像/用户入口': [
     '[data-maid-guide-target="avatar-user-entry"]',
     '.qq-message-topbar .user-avatar-btn',
+    'body[data-ui-mode="rp"] #current-chat-avatar-button',
   ],
   '头像/角色入口': [
     '[data-maid-guide-target="avatar-user-entry"]',
     '.qq-message-topbar .user-avatar-btn',
+    'body[data-ui-mode="rp"] #current-chat-avatar-button',
   ],
   '用户': [
     '[data-maid-guide-target="persona-switcher-tab-user"]',
@@ -157,6 +166,10 @@ const GUIDE_STEP_SELECTOR_CANDIDATES = Object.freeze({
   '聊天室右上角菜单': [
     '[data-maid-guide-target="chatroom-menu-entry"]',
     '#chat-menu-btn',
+  ],
+  // 只有写作房间的右上角菜单带「设定」「API设定」
+  '写作房间右上角菜单': [
+    'body[data-ui-mode="rp"] #chat-menu-btn',
   ],
   '会话配置': [
     '[data-maid-guide-target="chat-title-session-config"]',
@@ -281,6 +294,8 @@ export const prepareGuidedActionEntryNavigation = async ({
   meta = {},
   isTargetVisible = null,
   isChatRoomVisible = null,
+  isWritingMode = null,
+  exitWritingMode = null,
   hideMenus = null,
   exitChatRoom = null,
   switchPage = null,
@@ -299,6 +314,8 @@ export const prepareGuidedActionEntryNavigation = async ({
 
     if (GUIDE_CHAT_LIST_ENTRY_LABELS.has(label)) {
       await hideMenus?.();
+      // 写作模式没有聊天列表：像点女仆悬浮球那样切回聊天模式；直接退出房间会把写作房间藏起来
+      if (isWritingMode?.()) await exitWritingMode?.();
       if (isChatRoomVisible?.()) await exitChatRoom?.({ animate: false, source: 'maid-guide' });
       await switchPage?.('chat', { animate: false });
       return { navigated: true, route: 'chat_list', reason: 'navigated' };
@@ -359,26 +376,75 @@ export const isGuidedActionOutputOk = (output = {}) => {
   return true;
 };
 
+const buildGuidedActionRoute = (labels = []) => {
+  const steps = list(labels);
+  return {
+    steps,
+    stepDetails: steps.map((label, index) => ({
+      index,
+      label,
+      selectors: GUIDE_STEP_SELECTOR_CANDIDATES[label] || [],
+    })),
+    pathText: steps.join(' -> '),
+  };
+};
+
 export const buildGuidedActionGuide = (feature = {}) => {
   const guideId = trim(feature.firstRunGuide);
   if (!guideId) return null;
   const title = trim(feature.title || feature.id, '这个功能');
-  const steps = list(feature.uiPath);
-  const stepDetails = steps.map((label, index) => ({
-    index,
-    label,
-    selectors: GUIDE_STEP_SELECTOR_CANDIDATES[label] || [],
-  }));
+  const main = buildGuidedActionRoute(feature.uiPath);
+  // 同一功能的其他入口（例如聊天室右上角的 A），首次引导从用户当前看得到的入口走
+  const alternatives = (Array.isArray(feature.uiPathAlternatives) ? feature.uiPathAlternatives : [])
+    .map(buildGuidedActionRoute)
+    .filter(route => route.steps.length);
   return {
     guideId,
     featureId: trim(feature.id),
     title,
-    steps,
-    stepDetails,
-    pathText: steps.join(' -> '),
-    message: steps.length
-      ? `首次引导：${title}的 APP 路径是「${steps.join(' -> ')}」。`
-      : `首次引导：${title}没有固定界面路径，我会直接帮你执行。`,
+    ...main,
+    ...(main.steps.length && alternatives.length ? { routes: [main, ...alternatives] } : {}),
+    message: !main.steps.length
+      ? `首次引导：${title}没有固定界面路径，我会直接帮你执行。`
+      : alternatives.length
+        ? `首次引导：${title}的 APP 路径是「${main.pathText}」，也可以用「${alternatives.map(route => route.pathText).join(' / ')}」。`
+        : `首次引导：${title}的 APP 路径是「${main.pathText}」。`,
+  };
+};
+
+export const listGuidedActionEntrySteps = (guide = {}) => (
+  Array.isArray(guide?.routes) ? guide.routes : [guide]
+)
+  .map(route => getGuideFirstStep(route))
+  .filter(Boolean);
+
+// 选第一条入口看得到的路线；都看不到时用主路线（之后由入口导航带到主路线的起点）
+export const selectGuidedActionRoute = (guide = {}, isEntryVisible = null) => {
+  const routes = Array.isArray(guide?.routes) ? guide.routes : [];
+  if (!routes.length || typeof isEntryVisible !== 'function') return guide;
+  const route = routes.find((item) => {
+    const step = getGuideFirstStep(item);
+    return step && isEntryVisible(step);
+  }) || routes[0];
+  return {
+    ...guide,
+    steps: route.steps,
+    stepDetails: route.stepDetails,
+    pathText: route.pathText,
+  };
+};
+
+// 引导实际走的路线（showGuide 回报选中的那条）；交给女仆的结果只写这条，回复里的路径才和高亮一致
+const applyShownGuidedActionRoute = (guide = {}, shown = null) => {
+  const pathText = trim(shown?.pathText);
+  if (!pathText || !Array.isArray(guide?.routes)) return guide;
+  const { routes, ...rest } = guide;
+  return {
+    ...rest,
+    steps: list(shown.steps),
+    stepDetails: clone(shown.stepDetails || []),
+    pathText,
+    message: `首次引导：${guide.title}的 APP 路径是「${pathText}」。`,
   };
 };
 
@@ -406,7 +472,7 @@ export const createAppGuidedActionRuntime = ({
       throw new Error('guided action execute function is required');
     }
     const feature = resolveFeature(plan);
-    const guide = feature ? buildGuidedActionGuide(feature) : null;
+    let guide = feature ? buildGuidedActionGuide(feature) : null;
     const skippedByContext = typeof shouldSkipGuide === 'function' && shouldSkipGuide({ plan, context }) === true;
     const shouldGuide = Boolean(
       guide?.guideId &&
@@ -415,7 +481,8 @@ export const createAppGuidedActionRuntime = ({
       (plan?.forceGuide === true || !isGuideCompleted(guide.guideId))
     );
     if (shouldGuide && typeof showGuide === 'function') {
-      await showGuide(clone(guide), { plan: clone(plan), context: clone(context) });
+      const shown = await showGuide(clone(guide), { plan: clone(plan), context: clone(context) });
+      guide = applyShownGuidedActionRoute(guide, shown);
     }
     const output = await execute();
     if (shouldGuide && isGuidedActionOutputOk(output)) {

@@ -35,7 +35,7 @@ import {
   AGENT_FEATURE_IDS,
   createAgentFeatureSettingsStore,
 } from '../agent/agent-feature-settings.js';
-import { createAgentCenterSettingsStore } from '../storage/agent-center-settings-store.js';
+import { createAgentCenterSettingsStore, pickAgentCenterProfilesForPresets } from '../storage/agent-center-settings-store.js';
 import { buildAgentMessagePartsFromRun } from '../agent/agent-message-parts.js';
 import { createContactProfilerAgent } from '../agent/contact-profiler-agent.js';
 import { createImageDirectorAgent } from '../agent/image-director-agent.js';
@@ -114,6 +114,7 @@ import { registerGroupChatAgentTools } from '../agent/tools/group-chat-agent-too
 import { registerAppContentAgentTools } from '../agent/tools/app-content-tools.js';
 import { registerPresetRegexScriptAgentTools } from '../agent/tools/preset-regex-script-tools.js';
 import { registerAttachmentImportAgentTools } from '../agent/tools/attachment-import-tools.js';
+import { extractArchiveEntryToLibrary, registerAttachmentFileAgentTools } from '../agent/tools/attachment-file-tools.js';
 import { createAttachmentImportService } from '../import/attachment-import-service.js';
 import { registerMaidMediaAssetTools } from '../agent/tools/media-asset-tools.js';
 import { createMaidMediaAttachmentPersistence } from './maid-media-attachment-persistence.js';
@@ -171,8 +172,13 @@ import {
   createImageAttachmentFromFile,
   eventHasImageFiles,
 } from './image-attachment-input-utils.js';
-import { createMaidAttachmentsFromFiles, createMaidFileAttachmentRegistry } from './maid-file-attachments.js';
+import { createMaidAttachmentsFromFiles } from './maid-file-attachments.js';
+import { createMaidFileBlobStore, createMaidFileLibrary } from '../storage/maid-file-library.js';
 import { buildMaidImportOpenActions } from './maid-import-result-actions.js';
+import { formatFileTimestamp, resolveChatImageDownloadName, safeFileNamePart } from './chat/chat-image-download-name.js';
+import { buildMaidFilePreviewText, buildMaidFileResultActions, toMaidFileAttachment } from './maid-file-result-actions.js';
+import { createReadonlyTextareaModal } from './session-summary-modal-utils.js';
+import { createAttachmentTextReader } from '../import/attachment-content.js';
 import { createCharacterCardAssetWriter } from './character-card-asset-writer.js';
 import { prepareImageDataUrlForAsset } from './image-transform-utils.js';
 import {
@@ -285,7 +291,9 @@ import {
   createAppGuidedActionRuntime,
   dismissGuidedActionObstructions,
   isGuidedActionElementVisible,
+  listGuidedActionEntrySteps,
   prepareGuidedActionEntryNavigation,
+  selectGuidedActionRoute,
 } from './app-guided-action-runtime-utils.js';
 import { createMaidCommandSubmit } from './maid-command-submit-runtime.js';
 import { createVoiceAwareMaidRuntimeResolver, createVoiceTaskModelRegistry, resolveVoiceTaskModel } from './realtime/voice-task-model.js';
@@ -541,12 +549,13 @@ import {
 } from './chat/lineage-graph-view-utils.js';
 import { createCreativeExecutionLaneRuntime } from './chat/creative-execution-lane-runtime-utils.js';
 import { createCreativeTurnTracker } from './chat/creative-turn-tracker.js';
-import { createHopscotchExecutors, createHopscotchTurnRuntime } from './chat/hopscotch-turn-runtime.js';
-import { createHopscotchSidecarExecutors } from './chat/hopscotch-sidecar-executors.js';
+import { createHopscotchExecutors, createHopscotchTurnRuntime, createCustomHousePresetHandler } from './chat/hopscotch-turn-runtime.js';
+import { createHopscotchSidecarExecutors, createImagePromptHousePresetHandler } from './chat/hopscotch-sidecar-executors.js';
 import { createHopscotchImageExecutor } from './chat/hopscotch-image-executor.js';
 import { resolveHopscotchBoardSettings } from './chat/hopscotch-settings-utils.js';
 import { createScopedHopscotchBoardStore } from '../storage/hopscotch-board-store.js';
 import { createHopscotchBoardPanel } from './chat/hopscotch-board-panel.js';
+import { createBodyToolTransportSetting } from './chat/creative-body-fc.js';
 import { createFormatGuideSettingsRuntime, resolveFormatReviewAvailability } from './chat/format-review-settings-utils.js';
 import { createFormatReviewExecutor, createCreativeFormatReviewRuntime } from './chat/format-review-runtime.js';
 import {
@@ -558,7 +567,10 @@ import {
 import { buildFormatRepairRequest } from '../agent/format-repair-request.js';
 import { validateFormatRepairWriteScope } from '../agent/format-repair-selection.js';
 import { bindInputSuggestionComposer } from './chat/input-suggestion-composer.js';
-import { createAgentConfigStore, BODY_SELECTOR_ID } from '../storage/agent-config-store.js';
+import { createAgentConfigStore, BODY_SELECTOR_ID, createInputAgentId, createTextAgentId } from '../storage/agent-config-store.js';
+import { createAgentWorkflowTransferService } from './chat/agent-workflow-transfer-service.js';
+import { findPresetIdByName, resolveImportedPresetIdByName } from './preset-import-dedupe-utils.js';
+import { downloadJsonFile, pickJsonFileText } from '../utils/regex-transfer.js';
 import { createScopedAgentFeatures } from '../agent/scoped-agent-features.js';
 import { createAgentToolsAppRuntime } from './agent-tools-app-runtime.js';
 import { createUtilityAgentRuntime } from '../agent/utility-agent-runtime.js';
@@ -615,13 +627,17 @@ import {
 import {
   buildStandaloneSummaryCompactionMessages,
   buildSummaryCompactionContext,
+  describeSummaryCompactionTrial,
   normalizeSummarySnapshotItems,
   parseSummaryCompactionResult,
   requestSummaryCompactionRaw,
   resolveCustomSummaryCompactionRules,
   shouldRunSummaryCompaction,
 } from './chat/summary-compaction-utils.js';
-import { createSessionSummaryCompactionRuntime } from './chat/summary-compaction-runtime-utils.js';
+import { createAgentTaskPresetResolver, resolveAgentPromptSource, setAgentTaskPresetSource } from './chat/agent-task-preset.js';
+import { createAgentPresetServices } from './chat/agent-preset-services.js';
+import { createPresetGroupStore } from '../storage/preset-group-store.js';
+import { createSessionSummaryCompactionRuntime, createSummaryCompactionPresetHandler } from './chat/summary-compaction-runtime-utils.js';
 import { createArchiveTransferStateRuntime, resolveArchivePointerVariableSnapshotId } from './chat/archive-transfer-state-utils.js';
 import { createMemoryTableSummaryCompactionAdapter, resolveMemorySummaryTableId } from './chat/summary-compaction-memory-adapter-utils.js';
 import {
@@ -1244,7 +1260,7 @@ const initApp = async () => {
   }).catch((error) => {
     logger.debug('preset scope migration notice skipped', error);
   });
-  const sessionConfigPanel = new SessionConfigPanel({ store: presetStore });
+  const sessionConfigPanel = new SessionConfigPanel({ store: presetStore, getPresetServices: () => agentPresetServices });
   const pluginStore = new PluginStore();
   const pluginRuntime =
     typeof Worker === 'undefined' ? null : new PluginRuntime(pluginStore);
@@ -1260,7 +1276,42 @@ const initApp = async () => {
   if (!scriptRuntime) {
     logger.warn('script runtime disabled (Worker unsupported or store missing)');
   }
-  const presetPanel = new PresetPanel({ store: presetStore });
+  // 预设分类（本机整理）与 Agent「套用预设」：分类存储、按 id 组请求、选单与预览／试运行服务（计划书第 6 节）。
+  const presetGroupStore = createPresetGroupStore({
+    loadKv: name => safeInvoke('load_kv', { name }),
+    saveKv: (name, data) => safeInvoke('save_kv', { name, data }),
+    onChange: () => window.dispatchEvent(new CustomEvent('preset-groups-changed')),
+    logger,
+  });
+  const agentPresetServices = createAgentPresetServices({ presetStore, groupStore: presetGroupStore,
+    // 管理分类里的「让女仆帮忙分类」：只预填请求，由用户自己发送；女仆的分法确认后才移动
+    askMaidToGroup: () => maidCommandInputRuntime?.open({ initialText: t('帮我把预设按系列整理成分类，先把分法列给我确认'), autoFocus: true }) });
+  const agentTaskPresetResolver = createAgentTaskPresetResolver({
+    getPreset: id => presetStore?.getPreset?.('openai', id) || null,
+    renderMacros: (text, ctx) => window.appBridge.processTextMacros(text, ctx),
+    getFill: ({ sessionId }) => {
+      const card = getEffectivePersona(sessionId);
+      return {
+        charDescription: card?.description || '',
+        charPersonality: card?.personality || '',
+        scenario: card?.scenario || '',
+        personaDescription: getActiveUserProfile()?.description || '',
+      };
+    },
+  });
+  const getAgentTaskPresetContext = (sessionId = '') => {
+    const sid = String(sessionId || chatStore.getCurrent() || '').trim();
+    return { sessionId: sid, userName: getActiveUserName(), charName: getCharacterCardName(getEffectivePersona(sid), '') };
+  };
+  // 直接发请求的 Agent（修改文本、输入助手、文本建议、小管家、格式修复）套用预设时由此解析
+  setAgentTaskPresetSource({ resolve: (presetId, sessionId) => agentTaskPresetResolver.resolve(presetId, getAgentTaskPresetContext(sessionId)) });
+  const resolveSummaryCompactionSource = (sessionId = '') => resolveAgentPromptSource({
+    mode: appSettings.get().summaryCompactionPromptSource,
+    presetId: appSettings.get().summaryCompactionPresetId,
+    resolver: agentTaskPresetResolver,
+    ctx: getAgentTaskPresetContext(sessionId),
+  });
+  const presetPanel = new PresetPanel({ store: presetStore, presetServices: agentPresetServices });
   configPanel.onOpenPresetParams = options => presetPanel.show(options);
   registerRegexStoreBridgeContract(window.appBridge, {
     getRegexStore: window.appBridge.getRegexStore?.bind(window.appBridge),
@@ -2917,6 +2968,7 @@ const initApp = async () => {
     chatStore,
     getSessionId: () => chatStore.getCurrent(),
     getVariableScope: sid => (isSharedVariableSession(sid) ? 'global' : 'session'),
+    presetServices: agentPresetServices,
     isVariableRuntimeEnabled,
     setVariableRuntimeEnabled,
   });
@@ -3572,7 +3624,13 @@ const initApp = async () => {
   });
   registerAppNavigationAgentTools(agentToolRegistry, {
     actions: {
-      'agent-center': options => agentCenterPanel.show(options || {}),
+      // focus=body-tool-transport：与截断通知同一条跳转（打开「正文生成」卡片并定位防截断传输开关），回报是否定位到
+      'agent-center': options => (options?.focus === 'body-tool-transport'
+        ? Promise.race([
+          new Promise(resolve => window.dispatchEvent(new CustomEvent('open-body-tool-transport', { detail: { resolve } }))),
+          new Promise(resolve => setTimeout(() => resolve(false), 6000)),
+        ]).then(found => ({ opened: found === true, focus: 'body-tool-transport', ...(found === true ? {} : { reason: 'body tool transport switch not found (the body generation card only exists in creative writing mode)' }) }))
+        : agentCenterPanel.show(options || {})),
       config: options => configPanel.show({ tab: options?.tab || 'chat' }),
       session: () => sessionPanel.show(),
       'session-config': options => sessionConfigPanel.show({ sessionId: options?.sessionId || chatStore.getCurrent() }),
@@ -3873,10 +3931,15 @@ const initApp = async () => {
     onPresetsChanged: () => window.dispatchEvent(new CustomEvent('preset-changed')),
     onRegexChanged: () => window.dispatchEvent(new CustomEvent('regex-changed')),
     onScriptsChanged: () => window.appBridge.restartScriptWorker?.('脚本已重新加载'),
+    // 女仆帮忙分类预设（分类存储改动时自身会发 preset-groups-changed）
+    presetGroupStore,
   });
+  // 女仆通用文件工具（读、搜、取出、写文件、打包）：文件库在女仆输入条装配处创建，这里按需读取
+  registerAttachmentFileAgentTools(agentToolRegistry, { getAttachmentRegistry: () => maidFileAttachmentRegistry });
   // 女仆附件导入（世界书／正则）：附件缓存与导入服务在女仆输入条装配处创建，这里按需读取
   registerAttachmentImportAgentTools(agentToolRegistry, {
     getAttachmentRegistry: () => maidFileAttachmentRegistry,
+    extractArchiveEntry: (library, parent, path) => extractArchiveEntryToLibrary(library, parent, path),
     getImportService: () => maidAttachmentImportService,
     personaStore,
     chatStore,
@@ -4360,6 +4423,7 @@ const initApp = async () => {
   let hasRejectedFormatRepairAgentRunCandidate = () => false;
   const agentCenterPanel = new AgentCenterPanel({
     getHopscotchPanel: () => hopscotchBoardPanel,
+    presetServices: agentPresetServices,
     // 活动记录显示会话名称：RP 会话取角色名，聊天会话取联系人名
     resolveSessionLabel: sessionId => {
       const sid = String(sessionId || '').trim();
@@ -4665,6 +4729,7 @@ const initApp = async () => {
           options?.settings || {},
           {
             presetIdMap: options?.presetIdMap || {},
+            sourcePresetIds: options?.sourcePresetIds || {},
           },
         ),
         resolveAgentSyspromptPreset: async (options = {}) => {
@@ -7460,11 +7525,19 @@ const initApp = async () => {
     const meta = message.meta && typeof message.meta === 'object' ? message.meta : {};
     if (type === 'image') {
       const localPath = String(meta.localPath || '').trim();
-      const baseName = sanitizeExportName(meta.originalName || message.content || 'image', 'image');
+      // 文件名：生成图「角色名_生成时间」，用户发的图用原文件名（见 chat-image-download-name.js）
+      const sessionId = String(message.sessionId || chatStore.getCurrent() || '').trim();
+      const characterName = isRpSessionId(sessionId)
+        ? String(window.appBridge?.getRpCharacterNameForSession?.(sessionId) || '')
+        : String(contactsStore.getContact(sessionId)?.name || '');
+      const downloadName = ext => resolveChatImageDownloadName(message, { characterName, ext });
       if (localPath) {
+        const ext = localPath.toLowerCase().match(/\.([a-z0-9]{1,5})$/)?.[1]
+          || String(meta.generatedMedia?.output?.mime || '').toLowerCase().match(/^image\/(png|jpe?g|webp|gif)$/)?.[1]
+          || 'png';
         await exportAttachmentFile({
           sourcePath: localPath,
-          fileName: ensureFileExtension(baseName, 'png'),
+          fileName: downloadName(ext),
           filters: [{ name: 'Image', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }],
         });
         return;
@@ -7477,7 +7550,7 @@ const initApp = async () => {
       const ext = inferImageExtension(dataUrl, 'png');
       await exportAttachmentFile({
         dataUrl,
-        fileName: ensureFileExtension(baseName, ext),
+        fileName: downloadName(ext),
         filters: [{ name: 'Image', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }],
       });
       return;
@@ -13675,7 +13748,8 @@ const initApp = async () => {
       if (!item) return;
       const ext = inferStickerAiExtension(item);
       const modeLabel = stickerAiMode === 'sprite' ? 'sprite' : 'sticker';
-      const fileName = `${modeLabel}_source_${idx + 1}.${ext}`;
+      // 按生成时间命名（原来固定为 _source_1，多次下载会重名）
+      const fileName = `${modeLabel}_${formatFileTimestamp(item.createdAt || Date.now())}_${idx + 1}.${ext}`;
       const base = normalizeStickerAiImage(item);
       let dataUrl = base.dataUrl;
       if (!dataUrl && !base.path && base.url) {
@@ -18337,7 +18411,7 @@ const initApp = async () => {
     }));
     steps[index] = {
       action: targetExpected ? 'click' : 'observe',
-      text: pathText ? `${label} · 路径：${pathText}` : label,
+      text: pathText && pathText !== label ? `${label} · 路径：${pathText}` : label,
       hint: targetExpected ? '点击高亮位置继续' : '完成后继续',
       ...(targetExpected ? { fallback: { kind: 'click-target' } } : {}),
     };
@@ -18372,8 +18446,14 @@ const initApp = async () => {
     const list = candidates.flatMap(item => (Array.isArray(item) || item instanceof NodeList ? Array.from(item) : [item]));
     return list.find(el => el && isMaidGuideElementVisible(el)) || null;
   };
+  // 写作房间没有聊天列表的头像，用户/角色卡切换挂在房间头像上
+  const findMaidPersonaSwitcherAnchor = () => pickVisibleGuideAnchor(
+    avatarBtns,
+    document.querySelectorAll('[data-maid-guide-target="avatar-user-entry"]'),
+    document.querySelectorAll('body[data-ui-mode="rp"] #current-chat-avatar-button'),
+  );
   const openMaidPersonaSwitcherForGuide = () => {
-    const anchor = pickVisibleGuideAnchor(avatarBtns, document.querySelectorAll('[data-maid-guide-target="avatar-user-entry"]'));
+    const anchor = findMaidPersonaSwitcherAnchor();
     if (!anchor || !personaSwitcherMenu) return false;
     hideMenus({ force: true });
     renderPersonaSwitcher();
@@ -18387,7 +18467,7 @@ const initApp = async () => {
     persistPersonaSwitcherTab();
     syncPersonaSwitcherEntryUI(chatStore.getCurrent(), { tab: personaSwitcherTab });
     renderPersonaSwitcher();
-    const anchor = pickVisibleGuideAnchor(avatarBtns, document.querySelectorAll('[data-maid-guide-target="avatar-user-entry"]'));
+    const anchor = findMaidPersonaSwitcherAnchor();
     if (anchor) positionSheet(personaSwitcherMenu, anchor, 0, 4, false);
     personaSwitcherMenu?.classList.remove('hidden');
     await maidGuideDelay(80);
@@ -18412,7 +18492,8 @@ const initApp = async () => {
   };
   const openMaidChatroomMenuForGuide = async () => {
     const anchor = pickVisibleGuideAnchor(chatMenuBtn, document.querySelectorAll('[data-maid-guide-target="chatroom-menu-entry"]'));
-    const menu = document.querySelector('#rp-chatroom-menu:not(.hidden), #chatroom-menu:not(.hidden)') || chatroomMenu || rpChatroomMenu;
+    const menu = document.querySelector('#rp-chatroom-menu:not(.hidden), #chatroom-menu:not(.hidden)')
+      || (uiMode === 'rp' ? rpChatroomMenu : chatroomMenu);
     if (!anchor || !menu) return false;
     hideMenus({ force: true });
     positionSheet(menu, anchor, 0, 4, true);
@@ -18479,12 +18560,15 @@ const initApp = async () => {
       }
       return;
     }
-    if (label === 'API / 模型配置' || label === 'Agent Center') {
+    if (label === 'Agent Center') {
       if (!findMaidGuideTarget(guide, step)) await openMaidSettingsMenuForGuide();
       return;
     }
-    if (label === '设定') {
-      if (!findMaidGuideTarget(guide, step)) await openMaidSettingsMenuForGuide();
+    if (label === 'API / 模型配置' || label === '设定') {
+      // 写作房间的这两项在右上角菜单里
+      if (!findMaidGuideTarget(guide, step)) {
+        await (uiMode === 'rp' ? openMaidChatroomMenuForGuide() : openMaidSettingsMenuForGuide());
+      }
       return;
     }
     if (label === '记忆表格') {
@@ -18594,12 +18678,15 @@ const initApp = async () => {
     if (maidCommandInputRuntime?.isSubmitting?.() === true) return;
     maidCommandInputRuntime?.open?.({ autoFocus: false });
   };
-  const showMaidGuideSteps = async (guide = {}, meta = {}) => {
-    if (guide?.message) window.toastr?.info?.(guide.message);
-    const details = Array.isArray(guide?.stepDetails) && guide.stepDetails.length
-      ? guide.stepDetails
-      : (Array.isArray(guide?.steps) ? guide.steps.map((label, index) => ({ label, index })) : []);
-    if (!details.length) return;
+  const showMaidGuideSteps = async (featureGuide = {}, meta = {}) => {
+    const listStepDetails = routeGuide => (Array.isArray(routeGuide?.stepDetails) && routeGuide.stepDetails.length
+      ? routeGuide.stepDetails
+      : (Array.isArray(routeGuide?.steps) ? routeGuide.steps.map((label, index) => ({ label, index })) : []));
+    // 逐步引导的气泡已写明路径，不再弹提示：右上角的提示会盖住要高亮的入口（如聊天室的 A），入口被判成看不见
+    if (!listStepDetails(featureGuide).length) {
+      if (featureGuide?.message) window.toastr?.info?.(featureGuide.message);
+      return;
+    }
     const restoreMaidCommandInput = maidCommandInputRuntime?.isOpen?.() === true;
     maidOnboardingRuntime?.skip?.();
     maidCommandInputRuntime?.close?.();
@@ -18607,16 +18694,22 @@ const initApp = async () => {
       registerWallpaperActivity({ force: true });
       await maidGuideDelay(280);
     }
+    const isEntryVisible = step => Boolean(findMaidGuideTarget(featureGuide, step));
     await dismissGuidedActionObstructions({
-      isTargetVisible: () => Boolean(findMaidGuideTarget(guide, details[0])),
+      isTargetVisible: () => listGuidedActionEntrySteps(featureGuide).some(isEntryVisible),
       closeTopLayer: options => closeTopAppLayer(options),
       wait: maidGuideDelay,
     });
+    // 功能有多个入口时从当前看得到的那个走（例如聊天室里直接点右上角的 A），不必退出房间
+    const guide = selectGuidedActionRoute(featureGuide, isEntryVisible);
+    const details = listStepDetails(guide);
     const navigation = await prepareGuidedActionEntryNavigation({
       guide,
       meta,
       isTargetVisible: (entryGuide, entryStep) => Boolean(findMaidGuideTarget(entryGuide, entryStep)),
       isChatRoomVisible: () => Boolean(chatRoom && !chatRoom.classList.contains('hidden')),
+      isWritingMode: () => uiMode === 'rp',
+      exitWritingMode: () => exitRpMode(),
       hideMenus,
       exitChatRoom,
       switchPage,
@@ -18643,8 +18736,11 @@ const initApp = async () => {
       if (advance?.skipped) break; // 用户跳过：中断教学，女仆直接执行
       await maidGuideDelay(120);
     }
+    // 引导期间 hideMenus 不生效（避免刚点开的菜单被收起），结束时收起途经的菜单，免得留在打开的面板后面
+    hideMenus({ force: true });
     hideMaidGuideBubble();
     if (restoreMaidCommandInput) void restoreMaidCommandInputAfterRun();
+    return guide;
   };
   showMaidGuide = showMaidGuideSteps;
 
@@ -20247,6 +20343,7 @@ const initApp = async () => {
     onItemsScheduled = null,
     onItemDone = null,
     onItemFailed = null,
+    onSkipped = null,
   } = {}) => {
     const sessionId = String(targetSessionId || '').trim();
     const messageId = String(message?.id || '').trim();
@@ -20273,7 +20370,10 @@ const initApp = async () => {
         promptPreview: item.prompt.slice(0, 160),
       })),
     });
-    if (!sessionId || !messageId || !items.length) return false;
+    if (!sessionId || !messageId || !items.length) {
+      onSkipped?.({ reason: !sessionId || !messageId ? 'message_missing' : 'no_prompt' });
+      return false;
+    }
     const firstPrompt = items[0]?.prompt || '';
     const guard = bypassRateLimit
       ? { ok: true }
@@ -20307,6 +20407,7 @@ const initApp = async () => {
         autoImagePromptSourceTag: item.tag,
         autoImagePromptFallbackSource: fallbackSource,
       }));
+      onSkipped?.({ reason: guard.reason });
       return false;
     }
     patchAutoImagePromptSourceMeta(message, sessionId, {
@@ -20596,11 +20697,17 @@ const initApp = async () => {
       onItemsScheduled = null,
       onItemDone = null,
       onItemFailed = null,
+      // 跳过时告知实际原因（频率限制、已处理等），生图房子据此显示
+      onSkipped = null,
     } = {},
   ) => {
     const sessionId = String(targetSessionId || '').trim();
     const messageId = String(message?.id || '').trim();
     const surface = sessionId ? resolveMediaSurfaceForSession(sessionId) : '';
+    const reportSkip = (reason) => {
+      onSkipped?.({ reason });
+      return false;
+    };
     const isWritingSurface = surface === 'writing';
     const isSurfaceAutoImagePromptEnabled = () => (
       isWritingSurface ? isWritingAutoImagePromptEnabled() : isAutoImagePromptEnabled()
@@ -20633,12 +20740,12 @@ const initApp = async () => {
     if (signal?.aborted || !(force || boardEnabled || isSurfaceAutoImagePromptEnabled()) || !sessionId || !messageId) {
       if (isWritingSurface) traceWritingAutoImagePrompt('schedule-skip-basic', { sessionId, messageId, enabled: force || isSurfaceAutoImagePromptEnabled(), force });
       logEditSchedule('skip-basic', { enabled: force || isSurfaceAutoImagePromptEnabled() });
-      return false;
+      return reportSkip(signal?.aborted ? 'user_cancelled' : (!sessionId || !messageId ? 'message_missing' : 'disabled'));
     }
     if (message?.role !== 'assistant' || message?.meta?.generatedMedia) {
       if (isWritingSurface) traceWritingAutoImagePrompt('schedule-skip-message', { role: message?.role, hasGeneratedMedia: Boolean(message?.meta?.generatedMedia) });
       logEditSchedule('skip-message', { role: message?.role, hasGeneratedMedia: Boolean(message?.meta?.generatedMedia) });
-      return false;
+      return reportSkip('not_image_source');
     }
     const key = getAutoImagePromptSourceKey(sessionId, messageId);
     if (!force && (autoImagePromptProcessedSourceIds.has(key) || message?.meta?.autoImagePrompt?.status)) {
@@ -20653,7 +20760,7 @@ const initApp = async () => {
         processed: autoImagePromptProcessedSourceIds.has(key),
         status: message?.meta?.autoImagePrompt?.status || '',
       });
-      return false;
+      return reportSkip('already_processed');
     }
     const prompts = [];
     const candidates = collectAutoImagePromptCandidates(message, rawText);
@@ -20692,7 +20799,7 @@ const initApp = async () => {
           preview: String(candidate || '').slice(0, 160),
         })),
       });
-      return false;
+      return reportSkip('no_prompt');
     }
     if (surface === 'writing') {
       const hasStoredPlaceholders = Array.isArray(message?.meta?.autoImagePromptPlaceholders);
@@ -20731,6 +20838,7 @@ const initApp = async () => {
         onItemsScheduled,
         onItemDone,
         onItemFailed,
+        onSkipped,
       });
     }
     const guard = force
@@ -20750,7 +20858,7 @@ const initApp = async () => {
         reason: guard.reason,
         at: Date.now(),
       });
-      return false;
+      return reportSkip(guard.reason);
     }
     autoImagePromptProcessedSourceIds.add(key);
     logEditSchedule('chat-queued', {
@@ -22742,6 +22850,8 @@ const initApp = async () => {
       // 必须在真正进房后再同步一次，否则按钮会被上一次“不支持”判定永久隐藏。
       syncRealtimeCallButtonAvailability();
       maidGuideEmit(window, 'chat-room-entered', { sessionId: sid });
+      // 酒馆助手 CHAT_CHANGED：参数是聊天 ID
+      scriptRuntime?.dispatchEvent?.('chat.changed', { sessionId: sid, args: [sid] }, { sessionId: sid, allowMutate: false })?.catch?.(() => {});
     }
 	    return result;
 	  };
@@ -24245,6 +24355,14 @@ const initApp = async () => {
     clearHistoryContext: () => maidConversationStore.clearHistory(),
     clearMemoryTable: () => maidConversationStore.clearMemoryRows(),
     confirmMemoryAction: ({ title, message }) => appConfirm({ title, message, danger: true }),
+    // 女仆文件库（下面才创建，这里按需读取）
+    fileLibrary: {
+      list: () => maidFileAttachmentRegistry.list(),
+      usage: () => maidFileAttachmentRegistry.usage(),
+      remove: id => maidFileAttachmentRegistry.remove(id),
+      clear: () => maidFileAttachmentRegistry.clear(),
+      preview: id => previewMaidLibraryFile(id),
+    },
     listRuns: options => agentRunStore.listRuns({ ...(options || {}), kind: 'maid_assistant' }),
     allowRulesStore: maidToolSafetyAllowStore,
     onResumeRun: (run = {}) => {
@@ -24257,8 +24375,14 @@ const initApp = async () => {
     isApiConfigured: () => hasConfiguredMaidProfile(),
     logger,
   });
-  // 女仆附件：图片照旧压缩看图；JSON／角色卡 PNG 的原文件留在内存缓存，供本地解析与导入
-  const maidFileAttachmentRegistry = createMaidFileAttachmentRegistry();
+  // 女仆附件：图片照旧压缩看图；JSON／角色卡 PNG 等原文件进女仆文件库（持久保存，限总量与闲置时间）
+  const maidFileAttachmentRegistry = createMaidFileLibrary({
+    loadKv: name => safeInvoke('load_kv', { name }),
+    saveKv: (name, data) => safeInvoke('save_kv', { name, data }),
+    blobs: createMaidFileBlobStore({ invoke: safeInvoke }),
+    logger,
+  });
+  void maidFileAttachmentRegistry.hydrate();
   const maidAttachmentImportService = createAttachmentImportService({
     getAttachment: id => maidFileAttachmentRegistry.get(id),
     worldbooks: {
@@ -24289,13 +24413,47 @@ const initApp = async () => {
     onRegexChanged: () => window.dispatchEvent(new CustomEvent('regex-changed')),
     onWorldbookImported: () => emitWorldInfoChanged(window.appBridge),
   });
-  const buildMaidAttachments = (files = [], { source = 'maid-input' } = {}) => createMaidAttachmentsFromFiles(files, {
+  const buildMaidAttachments = (files = [], { source = 'maid-input', maxCount = Infinity } = {}) => createMaidAttachmentsFromFiles(files, {
     source,
+    maxCount,
     registry: maidFileAttachmentRegistry,
     imageOptions: { readFileAsDataUrl, compressImageDataUrl, isGifFile, maxDim: 1280, quality: 0.82, maxBytes: 1_200_000, mime: 'image/jpeg' },
     notify: message => window.toastr?.warning?.(message),
     readCharx: bytes => readCharxCard(bytes),
   });
+  // 女仆产出的文件：「查看」用只读文本框（可复制），「附加给女仆」放回输入条接着处理
+  const maidFilePreviewReader = createAttachmentTextReader({ maxCachedChars: 2_000_000 });
+  let maidFilePreviewModal = null;
+  const previewMaidLibraryFile = async (id) => {
+    const entry = await maidFileAttachmentRegistry.ensureLoaded(id);
+    if (!maidFilePreviewModal) {
+      maidFilePreviewModal = createReadonlyTextareaModal({
+        copySuccessMessage: t('已复制'),
+        copyText: text => navigator.clipboard.writeText(text),
+        toastr: window.toastr,
+      });
+      // 文件库的「查看」是在女仆设定面板（z-index 26120）里点的，预览框要盖在面板上面
+      maidFilePreviewModal.overlay.style.zIndex = '26130';
+      maidFilePreviewModal.panel.style.zIndex = '26131';
+    }
+    // 先收起女仆输入条，免得和预览框叠在一起（保留结果，下次打开还在）
+    maidCommandInputRuntime?.close?.({ preserve: true });
+    maidFilePreviewModal.setTitle(entry?.name || t('文件预览'));
+    maidFilePreviewModal.setValue(await buildMaidFilePreviewText(entry, { reader: maidFilePreviewReader }));
+    maidFilePreviewModal.show();
+  };
+  const attachMaidLibraryFiles = async (ids = []) => {
+    const entries = (await Promise.all(ids.map(id => maidFileAttachmentRegistry.ensureLoaded(id)))).filter(Boolean);
+    if (!entries.length) {
+      window.toastr?.warning?.(t('文件已被清理，无法附加。'));
+      return;
+    }
+    maidCommandInputRuntime?.open?.({ autoFocus: true });
+    maidCommandInputRuntime?.addAttachments?.(entries.map(toMaidFileAttachment));
+    const attachedIds = new Set((maidCommandInputRuntime?.getAttachments?.() || []).map(item => item.id));
+    const leftOut = entries.filter(entry => !attachedIds.has(entry.id)).map(entry => entry.name);
+    if (leftOut.length) window.toastr?.warning?.(t('附件数量已达上限，未加入：{names}', { names: leftOut.join('、') }));
+  };
   const checkMaidVisionInput = async (attachments = [], context = {}, runtimeConfig = null) => {
     const hasImages = Array.isArray(attachments) && attachments.some(item => item?.kind === 'image' && (item.url || item.llmUrl));
     if (!hasImages) return { ok: true, capability: null };
@@ -24390,6 +24548,7 @@ const initApp = async () => {
     getBallDragRuntime: () => modeSwitchInteractionRuntime,
     maxImageAttachments: 4,
     onAttachFiles: buildMaidAttachments,
+    onDiscardAttachments: list => list.forEach(item => maidFileAttachmentRegistry.discardUnsubmitted(item?.id)),
     onSubmit: createMaidCommandSubmit({
       getVoiceRuntime: () => maidVoiceRuntime,
       getOnboardingRuntime: () => maidOnboardingRuntime,
@@ -24398,16 +24557,19 @@ const initApp = async () => {
       logger, checkMaidVisionInput, maidSettingsStore, buildAppFeatureSearchContextText,
       markFileAttachmentsSubmitted: (attachments, turnContext) => attachments.forEach(item => maidFileAttachmentRegistry.markSubmitted(item.id, turnContext)),
       listRecentFileAttachments: options => maidFileAttachmentRegistry.listRecent(options),
-      buildResultActions: result => buildMaidImportOpenActions(result?.steps, {
-        worldbook: worldId => worldPanel.openEditor(worldId),
-        roleCard: async (personaId) => {
-          await personaPanel.show();
-          personaPanel.openEdit(personaId);
-        },
-        preset: () => presetPanel.show(),
-        regex: () => regexPanel.show(),
-        script: () => scriptPanel.show(),
-      }),
+      buildResultActions: result => [
+        ...buildMaidImportOpenActions(result?.steps, {
+          worldbook: worldId => worldPanel.openEditor(worldId),
+          roleCard: async (personaId) => {
+            await personaPanel.show();
+            personaPanel.openEdit(personaId);
+          },
+          preset: () => presetPanel.show(),
+          regex: () => regexPanel.show(),
+          script: () => scriptPanel.show(),
+        }),
+        ...buildMaidFileResultActions(result?.steps, { preview: previewMaidLibraryFile, attach: attachMaidLibraryFiles }),
+      ],
       getAppContext: () => ({ sessionId: chatStore.getCurrent(), roleCardId: String(personaStore.getActive?.()?.id || ''), agentId: 'maid-assistant', uiMode, activePage, userSelection: maidSelectionMode.getItems() }),
       maidAssistantAgent,
       resolveSelectionRegion: (regionId, context) => context.source === 'maid_realtime' && (context.sessionId !== chatStore.getCurrent() || context.activePage !== activePage)
@@ -24520,6 +24682,14 @@ const initApp = async () => {
     isElementVisible: isMaidGuideElementVisible,
     delay: maidGuideDelay,
     openSettingsMenu: openMaidSettingsMenuForGuide,
+    openChatroomMenu: () => (uiMode === 'rp' ? openMaidChatroomMenuForGuide() : false),
+    // 手机聊天室盖住列表顶栏时退回列表；按排版判断（不受引导遮罩影响），写作模式不退出房间
+    revealSettingsEntry: async () => {
+      if (uiMode === 'rp' || !isChatRoomVisible()) return false;
+      if ([...settingsBtns].some(btn => btn.getBoundingClientRect().width > 0)) return false;
+      await exitChatRoom({ animate: false, source: 'maid-onboarding' });
+      return true;
+    },
     openGeneralSettings: options => generalSettingsPanel.show(options),
     openApiConfig: options => openMaidApiConfigPanel(options),
     openQuickMenu: openMaidQuickMenuForGuide,
@@ -26057,6 +26227,11 @@ const initApp = async () => {
       syncTurnCheckpointForMessage(sid, saved).catch(err => {
         logger.warn('sync turn checkpoint after swipe change failed', err);
       });
+      // 酒馆助手 MESSAGE_SWIPED：参数是这条消息的楼层号（与脚本看到的 message_id 一致）
+      const floor = (chatStore.getMessages(sid) || []).findIndex(item => String(item?.id || '') === String(msgId));
+      if (floor >= 0) {
+        scriptRuntime?.dispatchEvent?.('message.swiped', { sessionId: sid, messageId: msgId, args: [floor] }, { sessionId: sid, allowMutate: false })?.catch?.(() => {});
+      }
     }
   });
 
@@ -26120,6 +26295,8 @@ const initApp = async () => {
     let partialCommitted = false;
     let branchFinalized = false;
     let swipeVariableUpdatesEnabled = true;
+    // 跳房子接手本轮时由生图房子出图，提交分支后不再按占位补跑一次
+    let swipeImageOwnedByTurn = false;
     let swipeStreamCtrl = null;
     let baselineMemorySnapshot = null;
     let baselineMemoryUpdateEntry = null;
@@ -26278,7 +26455,7 @@ const initApp = async () => {
 	      syncTurnCheckpointForMessage(sid, updated).catch(err => {
 	        logger.warn('sync turn checkpoint after swipe commit failed', err);
 	      });
-	      if (!partial && !cancelled && sourceAutoImagePlaceholders.length) {
+	      if (!partial && !cancelled && sourceAutoImagePlaceholders.length && !swipeImageOwnedByTurn) {
 	        setTimeout(() => {
 	          autoImagePromptProcessedSourceIds.delete(getAutoImagePromptSourceKey(sid, msgId));
 	          scheduleAutoImagePromptGenerationForMessage(updated, sid, {
@@ -26442,6 +26619,7 @@ const initApp = async () => {
 	          msgId,
 	          suppressAfterReceive: true,
               onVariableUpdatePolicy: enabled => { swipeVariableUpdatesEnabled = enabled; },
+              onImageOwnedByTurn: () => { swipeImageOwnedByTurn = true; },
 	          onPartial: partial => {
             partialCommitted = commitBranch(partial, {
               partial: true,
@@ -26727,6 +26905,8 @@ const initApp = async () => {
   const startSummaryCompactionRun = async ({ sessionId, place, itemCount, managed }) => {
     let runId = '';
     try {
+      // 运行记录注明这次用的提示词来源；选了预设但已被删除时写明改用提示词。
+      const { taskPreset: _taskPreset, ...promptSource } = resolveSummaryCompactionSource(sessionId);
       const run = await Promise.resolve(agentTaskRuntime?.startRun?.({
         kind: 'summary_compaction',
         title: 'Summary compaction',
@@ -26734,8 +26914,10 @@ const initApp = async () => {
         surface: place === 'writing' ? 'writing' : 'chat',
         trigger: managed ? 'hopscotch.maintenance' : 'memory.after_write',
         source: 'summary-compaction-runtime',
-        summary: 'summary compaction started',
-        metadata: { place, itemCount },
+        summary: promptSource.mode === 'preset'
+          ? `summary compaction started (preset: ${promptSource.presetName})`
+          : (promptSource.fallback === 'preset_missing' ? 'summary compaction started (selected preset deleted, using prompt)' : 'summary compaction started'),
+        metadata: { place, itemCount, promptSource },
       }));
       runId = String(run?.id || '').trim();
     } catch (err) {
@@ -26831,10 +27013,18 @@ const initApp = async () => {
     // 压缩是内部维护：用独立的最小请求（同记忆表格独立更新），不套正文的预设/思维链/角色扮演提示。
     buildMessages: buildStandaloneSummaryCompactionMessages,
     backgroundChat: (...args) => window.appBridge.backgroundChat(...args),
-    requestCompactionRaw: options => requestSummaryCompactionRaw({ ...options, rules: appSettings.get().summaryCompactionRules }),
-    // 用户改过大总结规则时只要求 <summary> 里有正文，不再按内置版式（【关键事件】+ 列表）校验
+    // 记忆卡选了「套用预设」时按所选预设组请求（预设删除后退回提示词）；试运行由 dryRun 显式传入 taskPreset。
+    requestCompactionRaw: options => requestSummaryCompactionRaw({
+      ...options,
+      rules: appSettings.get().summaryCompactionRules,
+      taskPreset: 'taskPreset' in options
+        ? options.taskPreset
+        : resolveSummaryCompactionSource(options?.options?.presetContext?.sessionId).taskPreset || null,
+    }),
+    // 用户改过大总结规则或套用预设时只要求 <summary> 里有正文，不再按内置版式（【关键事件】+ 列表）校验
     parseCompactionResult: raw => parseSummaryCompactionResult(raw, {
-      strictFormat: !resolveCustomSummaryCompactionRules(appSettings.get().summaryCompactionRules),
+      strictFormat: !resolveCustomSummaryCompactionRules(appSettings.get().summaryCompactionRules)
+        && resolveSummaryCompactionSource().mode !== 'preset',
     }),
     normalizeItems: normalizeSummarySnapshotItems,
     // 摘要模式：按「触发与频率」的条数或字数判断（表格模式由适配器自己判断）。
@@ -26862,6 +27052,13 @@ const initApp = async () => {
   registerUiUtilityBridgeContract(window.appBridge, {
     requestSummaryCompaction,
   });
+  agentPresetServices.registerHandler('summary_compaction', createSummaryCompactionPresetHandler({
+    getSessionId: () => chatStore.getCurrent(),
+    getPlace: () => resolveMemoryTablePlace(uiMode),
+    resolvePreset: (presetId, sessionId) => agentTaskPresetResolver.resolve(presetId, getAgentTaskPresetContext(sessionId)),
+    dryRun: (sessionId, options) => requestSummaryCompaction.dryRun(sessionId, options),
+    describeTrial: describeSummaryCompactionTrial,
+  }));
 
   requestMomentSummaryCompaction = createMomentSummaryCompactionRuntime({
     momentSummaryStore,
@@ -27451,6 +27648,7 @@ const initApp = async () => {
     },
   });
   Object.assign(agentConfigurationActions, {
+    getAgentPresetServices: () => agentPresetServices,
     runUtilityAgent: options => utilityAgentRuntime.run(options),
     getUtilityAgentSample: ({ id, context }) => utilityAgentRuntime.sample(id, context),
     listUtilityAgentRuns: ({ id, context }) => utilityAgentRuntime.list(id, context),
@@ -27543,6 +27741,7 @@ const initApp = async () => {
         ],
         renderMacros: text => window.appBridge.processTextMacros(text, { sessionId: info.sessionId, user: info.userName, char: info.charName }),
         imageEligibility: shouldRunAutoImagePromptGeneration,
+        resolveTaskPreset: presetId => agentTaskPresetResolver.resolve(presetId, { sessionId: info.sessionId, userName: info.userName, charName: info.charName }),
         imageSettings: {
           modelHint: imagePromptModelHintCache,
           style: appSettings.get().autoImagePromptStyle,
@@ -27558,6 +27757,9 @@ const initApp = async () => {
         getBodyText: (sid, mid) => String(chatStore.findMessage(mid, sid)?.content || ''),
         charName: String(info.charName || ''),
         userName: String(info.userName || ''),
+        resolveTaskPreset: presetId => agentTaskPresetResolver.resolve(presetId, {
+          sessionId: info.sessionId, userName: String(info.userName || ''), charName: String(info.charName || ''),
+        }),
         recordRun: ({ house, modelSource }) => {
           const run = agentTaskRuntime.startRun({
             kind: 'hopscotch_custom_house',
@@ -27619,8 +27821,85 @@ const initApp = async () => {
       return { ...request, previewLabel:t(published ? '发布后评论请求' : '动态评论回复请求'), previewNote:t('使用所选动态及其当前评论组装。') };
     },
   });
+  agentPresetServices.registerHandler('custom_house', createCustomHousePresetHandler({
+    getSessionId: () => chatStore.getCurrent(),
+    getMessages: sid => chatStore.getMessages(sid) || [],
+    resolvePreset: (presetId, sid) => agentTaskPresetResolver.resolve(presetId, getAgentTaskPresetContext(sid)),
+    backgroundChat: (messages, options) => window.appBridge.backgroundChat(messages, options),
+    getRuntimeConfigByProfileId: id => chatConfigManager.getRuntimeConfigByProfileId(id),
+    getNames: sid => getAgentTaskPresetContext(sid),
+  }));
+  agentPresetServices.registerHandler('image_prompt_house', createImagePromptHousePresetHandler({
+    getSessionId: () => chatStore.getCurrent(),
+    getMessages: sid => chatStore.getMessages(sid) || [],
+    resolvePreset: (presetId, sid) => agentTaskPresetResolver.resolve(presetId, getAgentTaskPresetContext(sid)),
+    backgroundChat: (messages, options) => window.appBridge.backgroundChat(messages, options),
+    getRuntimeConfigByProfileId: id => chatConfigManager.getRuntimeConfigByProfileId(id),
+  }));
+  // 截断提示通知（bridge 发出）：点击后打开 AC，交给画板面板定位「正文生成」卡片的防截断传输开关
+  window.addEventListener('open-body-tool-transport', (event) => {
+    agentCenterPanel.show({ tab: 'agents' });
+    const located = Promise.resolve(hopscotchBoardPanel?.openBodyToolTransport?.()).catch(() => false);
+    event?.detail?.resolve?.(located);
+  });
+  // AC 工作流文件导出导入（房子菜单「导入 / 导出」）：不含 API 配置，导入前备份、可撤销
+  let workflowAppVersion = '';
+  safeInvoke('app_version').then((value) => { workflowAppVersion = String(value || ''); }).catch(() => {});
+  const agentWorkflowTransferService = createAgentWorkflowTransferService({
+    boardStore: hopscotchBoardStore,
+    getSessionSettings: sid => chatStore.getSessionSettings?.(sid) || {},
+    agentConfigStore,
+    getAgentContext: () => getAgentConfigContext(),
+    presetStore,
+    findPresetIdByName,
+    resolveImportedPresetIdByName,
+    pickAgentCenterProfilesForPresets,
+    agentCenterSettings: agentCenterSettingsStore,
+    appSettings,
+    notifySettingsChanged: keys => keys.forEach(key => window.dispatchEvent(new CustomEvent('app-settings-changed', { detail: { key, value: appSettings.get()[key] } }))),
+    listWorldbookNames: async () => (await window.appBridge.listWorlds?.()) || [],
+    createAgentId: kind => (kind === 'input_agent' ? createInputAgentId() : createTextAgentId()),
+    loadKv: name => safeInvoke('load_kv', { name }),
+    saveKv: (name, data) => safeInvoke('save_kv', { name, data }),
+    getAppVersion: () => workflowAppVersion,
+  });
+  // 角色体验包带上联系人的聊天 Agent 配置（导出时取、导入时写到新联系人）
+  patchDebugUiRegistry((registry) => {
+    registry.actions.exportContactAgentWorkflow = ({ sessionId } = {}) => agentWorkflowTransferService.exportContactAgents(getAgentConfigContext(sessionId));
+    registry.actions.importContactAgentWorkflow = ({ workflow, sessionId } = {}) => agentWorkflowTransferService.importContactAgents(workflow, getAgentConfigContext(sessionId));
+  });
   hopscotchBoardPanel = createHopscotchBoardPanel({
     embedded: true,
+    presetServices: agentPresetServices,
+    workflowTransfer: {
+      defaultName: (target) => {
+        if (uiMode !== 'rp') {
+          return target === 'global'
+            ? t('聊天全局的工作流')
+            : t('{name}的聊天工作流', { name: String(contactsStore.getContact?.(chatStore.getCurrent())?.name || '').trim() || t('当前聊天') });
+        }
+        return target === 'global'
+          ? t('所有角色卡的工作流')
+          : t('{name}的工作流', { name: window.appBridge?.getRpCharacterNameForSession?.(chatStore.getCurrent()) || t('角色卡') });
+      },
+      exportToFile: async ({ target, board, name, includePresets }) => {
+        const built = agentWorkflowTransferService.exportWorkflow({ target, board, name, includePresets });
+        if (!built.ok) return { ok: false, message: (built.errors || []).map(item => item.message).join('；') || t('导出失败') };
+        const saved = await downloadJsonFile(built.package, `${safeFileNamePart(built.package.name, 60) || 'workflow'}.json`);
+        return { ok: saved.saved === true, cancelled: saved.cancelled === true, path: saved.path };
+      },
+      pickFile: () => pickJsonFileText(),
+      plan: text => agentWorkflowTransferService.planImportFromText(text),
+      apply: (pkg, options) => agentWorkflowTransferService.applyImport(pkg, options),
+      undo: () => agentWorkflowTransferService.undoLastImport(),
+      getLastImport: () => agentWorkflowTransferService.getLastImport(),
+    },
+    // 「正文生成」卡片的防截断传输：读写 bridge 的设置档；设置面板那份已载入时一并重载，免得保存时盖回旧值
+    bodyToolTransport: createBodyToolTransportSetting({
+      getConfigManager: () => window.appBridge?.config || null,
+      presetStore,
+      onChanged: async () => { if (chatConfigManager.isLoaded) await chatConfigManager.reload(); },
+    }),
     onOpen: () => agentCenterPanel.show({ tab: 'agents' }),
     mountAgentCard: (host, options) => agentCenterPanel.mountHopscotchAgentCard(host, options),
     buildPromptPreview: async ({ sessionId, agentId, draft, house, member }) => {
@@ -27783,16 +28062,20 @@ const initApp = async () => {
           autoImagePromptProcessedSourceIds.delete(
             getAutoImagePromptSourceKey(targetSessionId, targetMessage.id),
           );
+          // 只按写回时放进正文的占位出图：占位与正文一一对应；正文里没有占位的标签（如代码块里的）不出图，
+          // 也不会把只含标签的文本当成整条正文回填。
           const isolatedImageSource = {
             ...targetMessage,
             content: '',
             meta: {
               ...(targetMessage.meta || {}),
               autoImagePromptRawContent: imageRawText,
+              autoImagePromptPlaceholders: Array.isArray(targetMessage.meta?.autoImagePromptPlaceholders)
+                ? targetMessage.meta.autoImagePromptPlaceholders
+                : [],
             },
           };
           delete isolatedImageSource.meta.autoImagePrompt;
-          delete isolatedImageSource.meta.autoImagePromptPlaceholders;
           const started = scheduleAutoImagePromptGenerationForMessage(isolatedImageSource, targetSessionId, {
             rawText: imageRawText,
             source: 'format_repair',
@@ -31839,6 +32122,7 @@ const initApp = async () => {
         allowExisting: Boolean(continueTarget),
       });
       if (hopscotchTurn) {
+        swipeTarget?.onImageOwnedByTurn?.();
         const bodyMessageId = hopscotchBodyMessageId || checkpointTargetMessageId;
         if (sendSucceeded && swipeTarget && variableUpdatesEnabled()) {
           const message = chatStore.findMessage(bodyMessageId, sessionId);
@@ -33123,7 +33407,7 @@ const initApp = async () => {
           if (placeholder?.pendingToken && currentImageTokens.includes(placeholder.pendingToken)) {
             return placeholder.pendingToken;
           }
-          return currentImageTokens[Math.max(0, Number(entry?.after?.ordinal || 1) - 1)] || '';
+          return currentImageTokens[Math.max(0, Number(entry?.before?.ordinal || entry?.after?.ordinal || 1) - 1)] || '';
         },
       );
       const cleanedForRender = stripTableEditBlocks(stripUpdateVariableBlocks(renderSource));

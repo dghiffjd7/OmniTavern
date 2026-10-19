@@ -99,6 +99,22 @@ import {
 }
 
 {
+  // 整篇回复被同一个代码块包住（如伪装成终端输出）时，这层只是外壳，里面的标签照常识别。
+  const wrapped = '\n```bash\nuser@linux:~$ cat chapter_01.txt\n<content>\n正文\n<image_prompt>fairy</image_prompt>\n</content>\n```\n';
+  assert.deepEqual(extractAutoImagePrompts(wrapped, { max: 10 }), ['fairy']);
+  assert.deepEqual(extractAutoImagePrompts('~~~\n<image_prompt>tilde</image_prompt>\n~~~', { max: 10 }), ['tilde']);
+  const prepared = prepareAutoImagePromptPlaceholders(wrapped, { max: 10 });
+  assert.deepEqual(prepared.prompts.map(item => item.prompt), ['fairy']);
+  assert.match(prepared.text, /^\n```bash\n[\s\S]*\[img-图片生成中\][\s\S]*\n```\n$/);
+  // 前面有正文，或首尾是两个独立代码块时，仍按代码处理。
+  assert.deepEqual(extractAutoImagePrompts('intro\n```\n<image_prompt>x</image_prompt>\n```', { max: 10 }), []);
+  const twoBlocks = '```\n<image_prompt>a</image_prompt>\n```\nmiddle\n```\n<image_prompt>b</image_prompt>\n```';
+  assert.deepEqual(extractAutoImagePrompts(twoBlocks, { max: 10 }), []);
+  assert.deepEqual(prepareAutoImagePromptPlaceholders(twoBlocks, { max: 10 }).prompts, []);
+  console.log('ok - reads image_prompt tags when the whole reply is one code block');
+}
+
+{
   const source = '<image_prompt>A</image_prompt>\n<image_prompt>B</image_prompt>\n<image_prompt>C</image_prompt>';
   const prepared = prepareAutoImagePromptPlaceholders(source, {
     max: 2,

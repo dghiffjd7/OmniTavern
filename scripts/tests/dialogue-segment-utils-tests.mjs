@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 
 import {
   buildDualVoiceSpeechChunks,
+  segmentDialogueRuns,
   segmentDialogueText,
 } from '../../src/scripts/ui/chat/dialogue-segment-utils.js';
 
@@ -35,6 +36,26 @@ import {
     { kind: 'dialogue', text: '"She said \\"hello\\"."' },
   ]);
   console.log('ok - dialogue segmentation is deterministic and rejects cross-paragraph or unclosed quotes');
+}
+
+{
+  // 一段里被加粗等格式拆开的几段文字：引号跨格式也能配对，切回各段后拼起来与原文一致
+  const runs = ['她说：“快', '走', '！”随后转身。'];
+  const segments = segmentDialogueRuns(runs);
+  assert.deepEqual(segments, [
+    [{ kind: 'narration', text: '她说：' }, { kind: 'dialogue', text: '“快' }],
+    [{ kind: 'dialogue', text: '走' }],
+    [{ kind: 'dialogue', text: '！”' }, { kind: 'narration', text: '随后转身。' }],
+  ]);
+  assert.deepEqual(segments.map(items => items.map(item => item.text).join('')), runs);
+  // 换行当作独立一段传入：跨行的引号仍不配对
+  assert.deepEqual(segmentDialogueRuns(['“跨行', '\n', '对白”']), [
+    [{ kind: 'narration', text: '“跨行' }],
+    [{ kind: 'narration', text: '\n' }],
+    [{ kind: 'narration', text: '对白”' }],
+  ]);
+  assert.deepEqual(segmentDialogueRuns(['', '“对白”']), [[], [{ kind: 'dialogue', text: '“对白”' }]]);
+  console.log('ok - dialogue runs split by inline formatting still pair their quotes');
 }
 
 {

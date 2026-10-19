@@ -21,6 +21,13 @@ import {
   assert.equal(richScript.steps.at(-1).canAdvance('rich-script-enabled', { enabled: false }), false);
   assert.equal(ids.includes('rich-script-permission'), false, 'contextual security help must not become a first-run checklist task');
   assert.ok(MAID_ONBOARDING_TARGET_SELECTORS['settings-general'].includes('#settings-menu button[data-action="settings"]'));
+  // 写作房间没有列表顶栏的设置按钮：「设定」在房间右上角菜单里，点「≡」也算打开了设置菜单
+  assert.ok(MAID_ONBOARDING_TARGET_SELECTORS['settings-entry'].includes('body[data-ui-mode="rp"] #chat-menu-btn'));
+  assert.ok(MAID_ONBOARDING_TARGET_SELECTORS['settings-general'].includes('#rp-chatroom-menu button[data-action="settings"]'));
+  assert.ok(MAID_ONBOARDING_TARGET_SELECTORS['settings-api-config'].includes('#rp-chatroom-menu button[data-action="config"]'));
+  assert.equal(richScript.steps[1].canAdvance('target-click', { target: 'chatroom-menu-entry' }), true);
+  assert.equal(richScript.steps[1].canAdvance('target-click', { target: 'settings-entry' }), true);
+  assert.equal(getMaidOnboardingFlow('setup-api').steps[1].canAdvance('target-click', { target: 'chatroom-menu-entry' }), false);
   assert.ok(MAID_ONBOARDING_TARGET_SELECTORS['general-ui-advanced'].includes('#general-ui-advanced-toggle'));
   assert.ok(MAID_ONBOARDING_TARGET_SELECTORS['general-rich-iframe-scripts'].includes('#general-rich-iframe-scripts'));
   console.log('ok - maid onboarding exports the four planned tasks and their dependency');

@@ -126,6 +126,9 @@ const defaults = {
   memorySummaryCompactionChars: 1000,
   // 大总结（摘要压缩）的自定义规则；空字符串 = 用内置默认。会话大总结、表格摘要压缩、动态大总结共用。
   summaryCompactionRules: '',
+  // 会话摘要压缩改用所选预设组请求（'prompt' | 'preset'）；动态大总结仍用上面的规则。预设删除后自动退回提示词。
+  summaryCompactionPromptSource: 'prompt',
+  summaryCompactionPresetId: '',
   chatDefaultColorMode: 'theme',
   chatDefaultBubbleColor: '#c9c9c9',
   chatDefaultTextColor: '#1F2937',

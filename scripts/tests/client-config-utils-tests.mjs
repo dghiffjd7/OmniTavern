@@ -1,9 +1,40 @@
 import assert from 'node:assert/strict';
 
-import { canInitClient } from '../../src/scripts/api/client-config-utils.js';
+import { canInitClient, mergeBackgroundGenerationOptions } from '../../src/scripts/api/client-config-utils.js';
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
+
+test('background options: caller camel maxTokens replaces the preset token limit', () => {
+  // OpenAI 类接口按 max_completion_tokens > max_tokens > maxTokens 取值；房子只传 maxTokens 时曾被预设 30000 盖掉。
+  const merged = mergeBackgroundGenerationOptions(
+    { temperature: 1, max_tokens: 30000, max_completion_tokens: 30000 },
+    { maxTokens: 500, tools: [] },
+  );
+  assert.equal(merged.maxTokens, 500);
+  assert.equal('max_tokens' in merged, false);
+  assert.equal('max_completion_tokens' in merged, false);
+  assert.equal(merged.temperature, 1);
+  assert.deepEqual(merged.tools, []);
+});
+
+test('background options: explicit snake token limits from the caller are kept', () => {
+  assert.deepEqual(
+    mergeBackgroundGenerationOptions({ max_tokens: 30000 }, { maxTokens: 2000, max_tokens: 2000 }),
+    { max_tokens: 2000, maxTokens: 2000 },
+  );
+  assert.deepEqual(
+    mergeBackgroundGenerationOptions({ max_tokens: 30000 }, { max_completion_tokens: 900 }),
+    { max_tokens: 30000, max_completion_tokens: 900 },
+  );
+});
+
+test('background options: without a caller limit the preset limit stays', () => {
+  assert.deepEqual(mergeBackgroundGenerationOptions({ max_tokens: 30000, top_p: 0.9 }, { temperature: 0.2 }),
+    { max_tokens: 30000, top_p: 0.9, temperature: 0.2 });
+  assert.deepEqual(mergeBackgroundGenerationOptions({ maxTokens: 8000 }, { maxTokens: undefined }), { maxTokens: undefined });
+  assert.deepEqual(mergeBackgroundGenerationOptions(null, null), {});
+});
 
 test('canInitClient accepts non-empty api keys', () => {
   assert.equal(canInitClient({ apiKey: 'sk-test' }), true);

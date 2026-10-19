@@ -78,7 +78,12 @@ export const getHopscotchHouseType = id => TYPE_BY_ID.get(id) || null;
 export const checkHopscotchHouseEnable = (board, houseId, { textAgents = [], resolveActivation = () => ({ houses: {} }) } = {}) => {
   const house = findHouse(board, houseId);
   if (!house) return { ok: false, message: t('房子不存在') };
-  if (house.kind === 'custom_prompt' && !String(house.config?.prompt || '').trim()) return { ok: false, field: 'prompt', message: t('请先填写提示词') };
+  if (house.kind === 'custom_prompt') {
+    // 套用预设时由预设条目组请求，提示词可以留空；选了套用预设却没选预设时先选预设。
+    const usesPreset = house.config?.promptSource === 'preset';
+    if (usesPreset && !String(house.config?.presetId || '').trim()) return { ok: false, field: 'preset', message: t('请先选择预设') };
+    if (!usesPreset && !String(house.config?.prompt || '').trim()) return { ok: false, field: 'prompt', message: t('请先填写提示词') };
+  }
   const next = editHopscotchBoard(board, { type: 'toggle', id: houseId, enabled: true });
   if (!next.ok) return { ok: false, message: next.reason };
   if (house.kind === 'text_edit') {

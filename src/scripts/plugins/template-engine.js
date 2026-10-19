@@ -71,6 +71,179 @@ const estimatePayloadSize = (value) => {
   }
 };
 
+// 模板里常用的 lodash 函数（酒馆里 _ 是全局的）。也会被转成字符串放进 worker，不能引用外部名称。
+function createTemplateLodash() {
+  const toPath = path => (Array.isArray(path) ? path : String(path ?? '').replace(/\[(\w+)\]/g, '.$1').split('.').filter(Boolean));
+  const isObjectLike = value => value !== null && typeof value === 'object';
+  const isPlainObject = value => isObjectLike(value) && Object.getPrototypeOf(value) === Object.prototype;
+  const cloneDeep = (value) => {
+    if (Array.isArray(value)) return value.map(cloneDeep);
+    if (isPlainObject(value)) return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, cloneDeep(item)]));
+    return value;
+  };
+  const get = (obj, path, defaultValue) => {
+    let current = obj;
+    for (const key of toPath(path)) {
+      if (current == null) return defaultValue;
+      current = current[key];
+    }
+    return current === undefined ? defaultValue : current;
+  };
+  const isEqual = (a, b) => {
+    if (a === b) return true;
+    if (!isObjectLike(a) || !isObjectLike(b) || Array.isArray(a) !== Array.isArray(b)) return false;
+    const keys = Object.keys(a);
+    return keys.length === Object.keys(b).length && keys.every(key => isEqual(a[key], b[key]));
+  };
+  const merge = (target, ...sources) => {
+    sources.forEach((source) => {
+      Object.entries(source || {}).forEach(([key, value]) => {
+        if (isPlainObject(value) && isPlainObject(target[key])) merge(target[key], value);
+        else target[key] = cloneDeep(value);
+      });
+    });
+    return target;
+  };
+  return {
+    get,
+    set: (obj, path, value) => {
+      const keys = toPath(path);
+      let current = obj;
+      keys.slice(0, -1).forEach((key, index) => {
+        if (!isObjectLike(current[key])) current[key] = /^\d+$/.test(keys[index + 1]) ? [] : {};
+        current = current[key];
+      });
+      if (keys.length) current[keys[keys.length - 1]] = value;
+      return obj;
+    },
+    has: (obj, path) => {
+      let current = obj;
+      for (const key of toPath(path)) {
+        if (!isObjectLike(current) || !Object.prototype.hasOwnProperty.call(current, key)) return false;
+        current = current[key];
+      }
+      return true;
+    },
+    cloneDeep,
+    isEqual,
+    isEmpty: value => (value == null ? true
+      : (Array.isArray(value) || typeof value === 'string' ? value.length === 0
+        : (isObjectLike(value) ? Object.keys(value).length === 0 : true))),
+    isPlainObject,
+    mapValues: (obj, fn) => Object.fromEntries(Object.entries(obj || {})
+      .map(([key, value]) => [key, typeof fn === 'function' ? fn(value, key, obj) : get(value, fn)])),
+    pick: (obj, ...keys) => Object.fromEntries(keys.flat()
+      .filter(key => isObjectLike(obj) && key in obj).map(key => [key, obj[key]])),
+    pickBy: (obj, fn = Boolean) => Object.fromEntries(Object.entries(obj || {}).filter(([key, value]) => fn(value, key))),
+    omit: (obj, ...keys) => {
+      const drop = new Set(keys.flat().map(String));
+      return Object.fromEntries(Object.entries(obj || {}).filter(([key]) => !drop.has(key)));
+    },
+    transform: (obj, fn, accumulator) => {
+      const acc = accumulator !== undefined ? accumulator : (Array.isArray(obj) ? [] : {});
+      for (const [key, value] of Object.entries(obj || {})) {
+        if (fn(acc, value, key, obj) === false) break;
+      }
+      return acc;
+    },
+    merge,
+    clamp: (value, lower, upper) => Math.min(Math.max(value, lower), upper),
+    uniq: arr => [...new Set(Array.isArray(arr) ? arr : [])],
+    keys: obj => Object.keys(obj || {}),
+    values: obj => Object.values(obj || {}),
+    sum: arr => (Array.isArray(arr) ? arr : []).reduce((total, value) => total + (Number(value) || 0), 0),
+  };
+}
+
+// 整段执行失败时的退路：把模板按「括号成对」切成块，每块各自 try，出错的块不输出；
+// 块里最外层的 const/let 改成 var，后面的块仍能用到前面块声明的变量。
+// 只拼函数体源码（配 new Function('ctx', '__esc', 'with (ctx) {…}')），也会被放进 worker，不能引用外部名称。
+function buildIsolatedTemplateSource(template, outputLimit) {
+  const skipQuoted = (code, start) => {
+    for (let i = start + 1; i < code.length; i += 1) {
+      if (code[i] === '\\') { i += 1; continue; }
+      if (code[i] === code[start]) return i;
+    }
+    return code.length;
+  };
+  const scanCode = (code, startDepth) => {
+    let depth = startDepth;
+    let out = '';
+    for (let i = 0; i < code.length; i += 1) {
+      const ch = code[i];
+      if (ch === '"' || ch === "'" || ch === '`') {
+        const end = skipQuoted(code, i);
+        out += code.slice(i, end + 1);
+        i = end;
+        continue;
+      }
+      if (ch === '/' && (code[i + 1] === '/' || code[i + 1] === '*')) {
+        const end = code[i + 1] === '/' ? code.indexOf('\n', i) : code.indexOf('*/', i + 2) + 1;
+        const stop = end <= 0 ? code.length : end + (code[i + 1] === '*' ? 1 : 0);
+        out += code.slice(i, stop);
+        i = stop - 1;
+        continue;
+      }
+      if (ch === '(' || ch === '[' || ch === '{') depth += 1;
+      else if (ch === ')' || ch === ']' || ch === '}') depth -= 1;
+      else if (depth === 0 && /^(?:const|let)\s/.test(code.slice(i, i + 6)) && !/[\w$.]/.test(code[i - 1] || '')) {
+        out += 'var';
+        i += code.startsWith('const', i) ? 4 : 2;
+        continue;
+      }
+      out += ch;
+    }
+    return { code: out, depth };
+  };
+  const re = /<%([_=#-]?)([\s\S]*?)([-_]?)%>/g;
+  const open = '{ const __mark = __out.length; try {\n';
+  const close = '} catch (__e) { __out = __out.slice(0, __mark); __segErrors.push(__e); } }\n';
+  let src = "let __out = '';\n";
+  src += 'const __segErrors = Array.isArray(ctx.__segErrors) ? ctx.__segErrors : [];\n';
+  src += 'const __outLimit = typeof ctx.__outLimit === "number" ? ctx.__outLimit : ' + Number(outputLimit) + ';\n';
+  src += 'const __ensureOut = () => { if (__out.length > __outLimit) throw new Error("模板输出过大"); };\n';
+  src += 'const print = (...args) => { __out += args.join(""); __ensureOut(); };\n';
+  src += 'const __escape = __esc;\n';
+  src += 'const __guard = ctx.__guard;\n';
+  src += 'if (__guard) __guard();\n';
+  const emitText = (text) => {
+    if (text) src += '__out += ' + JSON.stringify(text) + ';\n__ensureOut();\n';
+  };
+  let cursor = 0;
+  let depth = 0;
+  let inBlock = false;
+  let match;
+  while ((match = re.exec(template))) {
+    const [full, flag, code, closeFlag] = match;
+    let text = template.slice(cursor, match.index);
+    if (flag === '_') text = text.replace(/\s+$/, '');
+    emitText(text);
+    if (flag !== '#') {
+      if (!inBlock) { src += open; inBlock = true; }
+      src += '__guard && __guard();\n';
+      if (flag === '=') src += '__out += __escape((' + code + ') ?? "");\n__ensureOut();\n';
+      else if (flag === '-') src += '__out += ((' + code + ') ?? "");\n__ensureOut();\n';
+      else {
+        const scanned = scanCode(code, depth);
+        depth = scanned.depth;
+        src += scanned.code + '\n';
+      }
+      if (depth <= 0) {
+        depth = 0;
+        src += close;
+        inBlock = false;
+      }
+    }
+    cursor = match.index + full.length;
+    if (closeFlag === '_') cursor += (template.slice(cursor).match(/^\s+/) || [''])[0].length;
+    else if (closeFlag === '-') cursor += (template.slice(cursor).match(/^\r?\n/) || [''])[0].length;
+  }
+  if (inBlock) src += close;
+  emitText(template.slice(cursor));
+  src += 'return __out;';
+  return src;
+}
+
 const buildTemplateWorkerScript = () => `
 const CACHE_LIMIT = ${CACHE_LIMIT};
 const TEMPLATE_GUARD_LIMIT = ${TEMPLATE_GUARD_LIMIT};
@@ -257,7 +430,13 @@ const compileTemplate = (template) => {
   return fn;
 };
 
-const renderTemplate = (template, runtime) => {
+const createTemplateLodash = ${createTemplateLodash.toString()};
+const buildIsolatedTemplateSource = ${buildIsolatedTemplateSource.toString()};
+const compileIsolatedTemplate = (template) => new Function(
+  'ctx', '__esc', 'with (ctx) {\\n' + buildIsolatedTemplateSource(template, TEMPLATE_OUTPUT_LIMIT) + '\\n}',
+);
+
+const renderTemplate = (template, runtime, options = {}) => {
   if (!template || typeof template !== 'string') {
     return { text: template, error: null };
   }
@@ -265,10 +444,11 @@ const renderTemplate = (template, runtime) => {
     return { text: template, error: null };
   }
   try {
-    const fn = compileTemplate(template);
+    const fn = options.isolate ? compileIsolatedTemplate(template) : compileTemplate(template);
     const escapeValue = runtime?.__escapeTemplateOutput === false
       ? (value => String(value ?? ''))
       : escapeHtml;
+    if (options.isolate) runtime.__segErrors = [];
     const text = fn(runtime, escapeValue);
     return { text: String(text ?? ''), error: null };
   } catch (err) {
@@ -332,7 +512,7 @@ const findWorldEntry = (world, title) => {
   );
 };
 
-const renderTemplateWithRuntime = (template, runtime) => {
+const renderTemplateWithRuntime = (template, runtime, options = {}) => {
   const startAt = nowMs();
   runtime.__guardCount = 0;
   runtime.__guardLimit = TEMPLATE_GUARD_LIMIT;
@@ -351,7 +531,7 @@ const renderTemplateWithRuntime = (template, runtime) => {
       throw err;
     }
   };
-  return renderTemplate(template, runtime);
+  return renderTemplate(template, runtime, options);
 };
 
 const createRuntime = (payload) => {
@@ -638,6 +818,11 @@ const createRuntime = (payload) => {
     user: context?.user || {},
     character: payload?.character || context?.character || {},
     session: context?.session || {},
+    // 酒馆模板常用：lodash、读「这一楼」的变量（我们的变量按会话存、每楼另有快照，读当前值）、用户名与角色名
+    _: createTemplateLodash(),
+    getMessageVar: (key, options) => readVar(key, { ...(options && typeof options === 'object' ? options : {}), scope: 'cache' }),
+    userName: String(context?.user?.name || ''),
+    charName: String((payload?.character || context?.character || {}).name || ''),
     __escapeTemplateOutput: payload?.escapeTemplateOutput !== false,
   };
 
@@ -674,12 +859,21 @@ self.onmessage = (event) => {
       }
       self.postMessage({ type: 'render_chunk', id, chunk: text });
     };
-    const pack = createRuntime(payload);
+    let pack = createRuntime(payload);
     if (payload.chunked) {
       pack.runtime.__emit = emitChunk;
       pack.runtime.__chunkLimit = chunkSize;
     }
-    const result = renderTemplateWithRuntime(payload.template || '', pack.runtime);
+    let result = renderTemplateWithRuntime(payload.template || '', pack.runtime);
+    if (result.error && !payload.chunked) {
+      // 整段失败：用全新状态按块重跑，出错的块不输出、其余照常（失败仍回报，变量不会被改两次）
+      const retry = createRuntime(payload);
+      const isolated = renderTemplateWithRuntime(payload.template || '', retry.runtime, { isolate: true });
+      if (!isolated.error) {
+        pack = retry;
+        result = { text: isolated.text, error: result.error };
+      }
+    }
     const output = result.text;
     const printBuffer = pack.runtime.__printBuffer;
     const finalText = Array.isArray(printBuffer) && printBuffer.length
@@ -1471,6 +1665,11 @@ const createRuntime = ({
     user: runtimeContext?.user || {},
     character: runtimeContext?.character || {},
     session: runtimeContext?.session || {},
+    // 酒馆模板常用：lodash、读「这一楼」的变量（我们的变量按会话存、每楼另有快照，读当前值）、用户名与角色名
+    _: createTemplateLodash(),
+    getMessageVar: (key, options) => readVar(key, { ...(options && typeof options === 'object' ? options : {}), scope: 'cache' }),
+    userName: String(runtimeContext?.user?.name || ''),
+    charName: String(runtimeContext?.character?.name || ''),
   };
 
   Object.entries(shared.defines || {}).forEach(([key, value]) => {
@@ -1737,7 +1936,11 @@ const applyWorldUpdates = (updates = []) => {
   });
 };
 
-const renderTemplate = (template, { runtime }, { escapeTemplateOutput = true } = {}) => {
+const compileIsolatedTemplate = (template) => new Function(
+  'ctx', '__esc', 'with (ctx) {\n' + buildIsolatedTemplateSource(template, TEMPLATE_OUTPUT_LIMIT) + '\n}',
+);
+
+const renderTemplate = (template, { runtime }, { escapeTemplateOutput = true, isolate = false } = {}) => {
   if (!template || typeof template !== 'string') {
     return { text: template, error: null };
   }
@@ -1745,10 +1948,11 @@ const renderTemplate = (template, { runtime }, { escapeTemplateOutput = true } =
     return { text: template, error: null };
   }
   try {
-    const fn = compileTemplate(template);
+    const fn = isolate ? compileIsolatedTemplate(template) : compileTemplate(template);
     const escapeValue = escapeTemplateOutput
       ? escapeHtml
       : (value => String(value ?? ''));
+    if (isolate) runtime.__segErrors = [];
     const text = fn(runtime, escapeValue);
     return { text: String(text ?? ''), error: null };
   } catch (err) {
@@ -1770,20 +1974,23 @@ export const renderTemplateText = (rawText, options = {}) => {
   const template = String(rawText ?? '');
   const stage = String(options.stage || '').trim().toLowerCase() || 'render';
   const state = options.state || { defines: Object.create(null) };
-  const runtimePack = createRuntime({
+  const buildRuntimePack = (readOnly) => createRuntime({
     chatStore: options.chatStore,
     sessionId: options.sessionId,
     messageVars: options.messageVars,
     initialVars: options.initialVars,
     state,
     context: options.context,
-    readOnly: options.readOnly === true,
+    readOnly,
     variableRuntimeEnabled: options.variableRuntimeEnabled !== false,
   });
+  const runtimePack = buildRuntimePack(options.readOnly === true);
   const startAt = nowMs();
   const timeoutMs = TEMPLATE_TIMEOUT_MS;
   const hasTemplate = template.includes('<%');
-  if (runtimePack?.runtime) {
+  const armGuard = (pack) => {
+    if (!pack?.runtime) return;
+    const runtimePack = pack;
     runtimePack.runtime.__guardCount = 0;
     runtimePack.runtime.__guardLimit = TEMPLATE_GUARD_LIMIT;
     runtimePack.runtime.__outLimit = TEMPLATE_OUTPUT_LIMIT;
@@ -1801,10 +2008,21 @@ export const renderTemplateText = (rawText, options = {}) => {
         throw err;
       }
     };
-  }
-  const result = renderTemplate(template, runtimePack, {
+  };
+  armGuard(runtimePack);
+  let result = renderTemplate(template, runtimePack, {
     escapeTemplateOutput: stage !== 'generate',
   });
+  if (result.error && hasTemplate) {
+    // 整段失败：用复制出来的状态按块重跑（不把已执行过的变量改动再写一次），出错的块不输出、其余照常
+    const retryPack = buildRuntimePack(true);
+    armGuard(retryPack);
+    const isolated = renderTemplate(template, retryPack, {
+      escapeTemplateOutput: stage !== 'generate',
+      isolate: true,
+    });
+    if (!isolated.error) result = { text: isolated.text, error: result.error };
+  }
   const durationMs = Math.round(nowMs() - startAt);
   if (hasTemplate || result.error) {
     recordTemplateExecution({
@@ -1949,7 +2167,8 @@ export const renderTemplateTextAsync = async (rawText, options = {}) => {
         durationMs,
       });
       return {
-        text: template,
+        // worker 按块重跑成功时 text 是重跑结果；整段都没法执行时 worker 回传的就是原文
+        text: payload.chunked ? template : String(result?.text ?? template),
         error: err,
         messageVars: result?.messageVars || {},
         state,
@@ -2045,6 +2264,8 @@ export const renderTemplateMessages = async (messages, options = {}) => {
   }
   return { messages: out, errors };
 };
+
+export const buildTemplateWorkerScriptForTests = buildTemplateWorkerScript;
 
 export const templateDebug = {
   getLogs() {

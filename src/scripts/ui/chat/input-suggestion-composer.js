@@ -42,11 +42,39 @@ export const bindInputSuggestionComposer = ({ input, getSettings, getContext, re
   };
   const layout = () => {
     if (mirror.hidden) return;
-    const style = win.getComputedStyle(input);
-    for (const prop of ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'lineHeight', 'letterSpacing', 'wordSpacing', 'textIndent', 'textAlign', 'direction', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth']) mirror.style[prop] = style[prop];
     mirror.style.left = `${input.offsetLeft}px`; mirror.style.top = `${input.offsetTop}px`;
     mirror.style.width = `${input.offsetWidth}px`; mirror.style.height = `${input.offsetHeight}px`;
     mirror.scrollTop = input.scrollTop; mirror.scrollLeft = input.scrollLeft;
+  };
+  // 灰字超出当前行时输入框临时长高，可超过平时打字的上限，最多约可见高度的四成；草稿本身已超出时补底部留白，
+  // 让输入框能滚到灰字末尾。border-box 下留白不能超过框高，再长的建议只能截断（建议条仍可采纳或长按拖选）。
+  let grown = null;
+  const releaseGrowth = () => {
+    if (!grown) return;
+    input.style.minHeight = grown.minHeight; input.style.paddingBottom = grown.paddingBottom;
+    grown = null;
+  };
+  const fit = () => {
+    releaseGrowth();
+    if (mirror.hidden) return;
+    const style = win.getComputedStyle(input);
+    for (const prop of ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'lineHeight', 'letterSpacing', 'wordSpacing', 'textIndent', 'textAlign', 'direction', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth']) mirror.style[prop] = style[prop];
+    mirror.style.width = `${input.offsetWidth}px`; mirror.style.height = 'auto';
+    const needed = mirror.offsetHeight;
+    if (needed > input.offsetHeight) {
+      ghost.hidden = true;
+      const typed = mirror.offsetHeight;
+      ghost.hidden = false;
+      const visible = win.visualViewport?.height || win.innerHeight;
+      const height = Math.min(needed, Math.max(parseFloat(style.maxHeight) || 0, Math.round(visible * 0.4)));
+      grown = { minHeight: input.style.minHeight, paddingBottom: input.style.paddingBottom };
+      input.style.minHeight = `${height}px`;
+      if (needed > height) {
+        const room = height - parseFloat(style.paddingTop) - parseFloat(style.borderTopWidth) - parseFloat(style.borderBottomWidth);
+        input.style.paddingBottom = `${Math.min(room, parseFloat(style.paddingBottom) + needed - typed)}px`;
+      }
+    }
+    layout();
   };
   const render = () => {
     const selection = touchSelection?.active ? touchSelection : tabSelection;
@@ -63,7 +91,7 @@ export const bindInputSuggestionComposer = ({ input, getSettings, getContext, re
     accept.hidden = !suggestion;
     accept.classList.toggle('is-selecting', selecting);
     accept.classList.toggle('is-touch-selecting', touchSelection?.active === true);
-    layout();
+    fit();
     if (selected && !touchSelection) {
       const rects = labelParts.selected.getClientRects();
       const edge = rects[rects.length - 1], bounds = label.getBoundingClientRect();
@@ -103,12 +131,15 @@ export const bindInputSuggestionComposer = ({ input, getSettings, getContext, re
     target.addEventListener(type, handler, options);
     bindings.push(() => target.removeEventListener(type, handler, options));
   };
+  // 捕获阶段先撤掉临时长高，原有自动长高才会按实际文字计算高度。
+  listen(input, 'input', releaseGrowth, true);
   listen(input, 'input', () => { if (!inserting) runtime.schedule(); });
   listen(input, 'input-suggestion-reset', () => runtime.cancel());
   listen(input, 'compositionstart', () => { composing = true; runtime.cancel(); });
   listen(input, 'compositionend', () => { composing = false; runtime.schedule(); });
   listen(input, 'blur', () => runtime.cancel());
-  listen(input, 'pointerdown', () => runtime.cancel());
+  // 点输入框（手机上常用来唤出键盘）不直接取消；光标真的离开生成建议时的位置才收起。
+  listen(doc, 'selectionchange', () => { if (suggestion && doc.activeElement === input && !runtime.peek()) runtime.cancel(); });
   listen(input, 'keydown', event => {
     if (composing || event.isComposing || event.keyCode === 229 || event.defaultPrevented) return;
     if (touchSelection) touch.cancel();
@@ -142,14 +173,14 @@ export const bindInputSuggestionComposer = ({ input, getSettings, getContext, re
     if (!selection.adjusted || selection.count > 0) apply(selection.adjusted ? selection.count : undefined);
   }, true);
   listen(input, 'scroll', layout);
-  listen(win, 'resize', layout);
+  listen(win, 'resize', fit);
   listen(win, 'blur', () => runtime.cancel());
   listen(doc, 'visibilitychange', () => { if (doc.hidden) runtime.cancel(); });
   listen(win, 'agent-feature-settings-changed', event => { if (event.detail?.id === 'text_completion') runtime.reset(); });
   listen(win, 'session-changed', () => runtime.cancel());
-  const resize = typeof win.ResizeObserver === 'function' ? new win.ResizeObserver(layout) : null;
+  const resize = typeof win.ResizeObserver === 'function' ? new win.ResizeObserver(fit) : null;
   resize?.observe(input);
   const modeObserver = new win.MutationObserver(() => runtime.cancel());
   modeObserver.observe(doc.body, { attributes: true, attributeFilter: ['data-ui-mode'] });
-  return { cancel: runtime.cancel, dispose: () => { runtime.dispose(); touch.dispose(); bindings.forEach(unbind => unbind()); resize?.disconnect(); modeObserver.disconnect(); mirror.remove(); accept.remove(); } };
+  return { cancel: runtime.cancel, dispose: () => { runtime.dispose(); touch.dispose(); releaseGrowth(); bindings.forEach(unbind => unbind()); resize?.disconnect(); modeObserver.disconnect(); mirror.remove(); accept.remove(); } };
 };

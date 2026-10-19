@@ -110,7 +110,7 @@ try {
 
   await reset(); await hold(); await touch('touchMove', await pointAt(2));
   point = await ev(`const r = f.label().getBoundingClientRect(); return { x: r.left - 4, y: r.top + r.height / 2 };`);
-  await touch('touchMove', point); assert.equal((await state()).selected, '');
+  await touch('touchMove', point); await pause(); assert.equal((await state()).selected, '');
   await touch('touchEnd'); assert.equal((await state()).value, '今天想去');
 
   point = await pointAt(0); await touch('touchStart', point);

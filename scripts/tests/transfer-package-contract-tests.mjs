@@ -807,6 +807,11 @@ const { logger } = await import('../../src/scripts/utils/logger.js');
       };
     }
 
+    collectAgentWorkflowBundle(sessionId) {
+      calls.push(`agents:${sessionId}`);
+      return { format: 'omnitavern.agent-workflow', agents: {} };
+    }
+
     async buildMemorySnapshot(sessionId, options = {}) {
       calls.push(`memory:${sessionId}:${options.isGroup === true}`);
       return { rows: [{ id: 'row-1' }] };
@@ -840,6 +845,7 @@ const { logger } = await import('../../src/scripts/utils/logger.js');
     includeStickers: true,
     includeMemoryTemplate: true,
     hideServiceAddresses: true,
+    includeAgents: true,
     includeMemoryData: true,
     includeVariableState: true,
     includeChatHistory: true,
@@ -853,6 +859,7 @@ const { logger } = await import('../../src/scripts/utils/logger.js');
     'var-state:session:alice',
     'regex:session:alice:world:main',
     'room:session:alice:true:true',
+    'agents:session:alice',
     'memory:session:alice:false',
     'chat:session:alice:recent_50:true',
   ]);
@@ -870,6 +877,7 @@ const { logger } = await import('../../src/scripts/utils/logger.js');
     'room/connection-profile.json',
     'room/stickers.json',
     'memory/template.json',
+    'agents/workflow.json',
     'memory/data.json',
     'chat/session.json',
     'chat/current.json',
@@ -884,6 +892,7 @@ const { logger } = await import('../../src/scripts/utils/logger.js');
     memory_data: true,
     variable_state: true,
     chat_history: true,
+    agents: true,
   });
   assert.equal(built.manifest.options.hideServiceAddresses, true);
   assert.deepEqual(readDataUrlJson(built.entries.find(entry => entry.name === 'chat/session.json')).archives, [{
@@ -1069,6 +1078,10 @@ const { logger } = await import('../../src/scripts/utils/logger.js');
       return 'tpl:imported';
     }
 
+    async importAgentWorkflow(packageData, sessionId) {
+      calls.push(`agents:${sessionId}:${packageData.agentWorkflow.name}`);
+    }
+
     async resolveDefaultMemoryTemplateId() {
       calls.push('default-template');
       return 'tpl:default';
@@ -1124,6 +1137,7 @@ const { logger } = await import('../../src/scripts/utils/logger.js');
     roomStickers: [{ id: 'pack:source' }],
     memoryTemplate: { id: 'tpl:source' },
     memoryData: { rows: [{ table_id: 'profile' }] },
+    agentWorkflow: { name: 'Alice 的 Agent' },
     chatSession: { draft: 'draft' },
     chatCurrent: [{ id: 'm1' }],
     chatArchives: [],
@@ -1135,6 +1149,7 @@ const { logger } = await import('../../src/scripts/utils/logger.js');
       includeRoom: true,
       includeStickers: true,
       includeMemoryTemplate: true,
+      includeAgents: true,
       includeVariableState: true,
       includeMemoryData: true,
       includeChatHistory: true,
@@ -1156,6 +1171,7 @@ const { logger } = await import('../../src/scripts/utils/logger.js');
       'stickers:Alice Imported',
       'memory-template',
       'settings:Alice Imported:cozy:persona:imported',
+      'agents:Alice Imported:Alice 的 Agent',
       'initial:Alice Imported:mood:calm',
       'value:Alice Imported:mood:happy',
       'default-template',

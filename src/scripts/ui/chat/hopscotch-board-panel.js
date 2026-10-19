@@ -13,6 +13,9 @@ import { escapeHopscotchHtml as e, hopscotchHouseLabel, hopscotchFusedLabel, hop
 import { hopscotchInactiveBadgeLabel, hopscotchInactiveLabel, resolveHopscotchActivation, findManualHopscotchDependencies } from './hopscotch-activation-utils.js';
 import { buildHopscotchVariableCard, renderHopscotchVariableInfo } from './hopscotch-variable-card-view.js';
 import { bindHopscotchPointerDrag } from './hopscotch-pointer-drag.js';
+import { bindAgentPresetSourceControls, readAgentPresetSource, renderAgentPresetSourceControl } from '../agent-preset-source-control.js';
+import { bindBodyToolTransportSection, renderBodyToolTransportSection } from './body-tool-transport-control.js';
+import { openHopscotchWorkflowTransfer } from './hopscotch-workflow-transfer-view.js';
 
 const actionIcon = action => {
   const path = {
@@ -45,6 +48,12 @@ export const createHopscotchBoardPanel = ({
   createTextAgent = null, openTextAgent = null, listTextAgents = () => [], patchTextAgent = null, removeTextAgent = null, onScopeChange = () => {},
   getStandbyAgents = () => ({ standby: [] }), openStandbyAgent = null, getWritePreviewSwitch = () => false,
   storage = globalThis.localStorage,
+  // 自定义房子「提示词 | 套用预设」用的预设服务（agent-preset-services）；没有时不显示
+  presetServices = null,
+  // 「正文生成」卡片的防截断传输开关（creative-body-fc 的 createBodyToolTransportSetting）；没有时不显示
+  bodyToolTransport = null,
+  // 工作流文件导出导入（agent-workflow-transfer-service）；没有时只有板 JSON
+  workflowTransfer = null,
 } = {}) => {
   const doc = documentRef;
   const panel = doc.createElement(embedded ? 'section' : 'dialog');
@@ -275,6 +284,11 @@ export const createHopscotchBoardPanel = ({
       .map(config => ({ id: config.id, title: config.title, enabled: config.enabled === true, custom: true, manual: getAgentInvocationMode(config) === 'manual' }))];
     panel.dataset.hopPlace = place;
     const iconBtn = (action, label, attrs = '') => button(action, label, `class="hop-icon-only" title="${e(label)}" aria-label="${e(label)}" ${attrs}`);
+    // 说明用浮现文字（桌面悬停、手机点一下），不弹窗；不加 title，免得和浮层重复
+    const helpText = [t('同行并行，整行结束后进入下一行。长方形内的各项共享一次请求。'),
+      place === 'writing' ? t('按住房子查看落点；中心融合，左右并行，上下换行。手机可长按或拖动右上角把手。') : t('聊天模式跟随当前设置；点击房子配置 Agent。'),
+      ...(place === 'writing' ? [t('空格开始拖动，方向键选择落点，回车放置，Esc 取消。保存后用于后续轮次。')] : [])].join('\n');
+    const helpBtn = button('help', t('说明'), `class="hop-icon-only" aria-label="${e(t('说明'))}" data-help-title="${e(t('从上往下'))}" data-help="${e(helpText)}" data-help-mode="tap"`);
     const saveLabel = dirty ? t('保存并启用') : (resolved.source === 'derived' ? t('保存并启用') : t('已启用'));
     const saveDisabled = !editable || (!dirty && resolved.source !== 'derived');
     panel.innerHTML = `<div class="hop-board-toolbar"><div class="hop-header">
@@ -284,11 +298,12 @@ export const createHopscotchBoardPanel = ({
         <span class="hop-spacer"></span>
         ${busy() ? button('stop', t('停止'), 'class="hop-danger"') : ''}
         ${place === 'writing' && latest ? (live ? iconBtn('edit-mode', t('编辑'), 'aria-pressed="true"') : iconBtn('run-mode', t('上一轮'), 'aria-pressed="false"')) : ''}
-        ${place === 'writing' ? iconBtn('more', t('更多'), 'aria-haspopup="menu" aria-expanded="false"') : ''}
+        ${iconBtn('more', t('更多'), 'aria-haspopup="menu" aria-expanded="false"')}
         ${iconBtn('library', t('全部 Agent'))}
-        ${iconBtn('help', t('说明'))}
+        ${helpBtn}
         ${embedded ? '' : iconBtn('close', t('关闭'))}
-        ${place === 'writing' ? `<div class="hop-menu hop-secondary-actions" role="menu" hidden>${button('settings', t('执行规则'), 'role="menuitem"' + (editable ? '' : ' disabled'))}${button('transfer', t('导入 / 导出'), 'role="menuitem"' + (editable ? '' : ' disabled'))}${button('reset', target !== 'global' ? t('跟随默认') : t('恢复推导'), 'role="menuitem"' + (editable ? '' : ' disabled'))}</div>` : ''}
+        ${place === 'writing' ? `<div class="hop-menu hop-secondary-actions" role="menu" hidden>${button('settings', t('执行规则'), 'role="menuitem"' + (editable ? '' : ' disabled'))}${button('transfer', t('导入 / 导出'), 'role="menuitem"' + (editable ? '' : ' disabled'))}${button('reset', target !== 'global' ? t('跟随默认') : t('恢复推导'), 'role="menuitem"' + (editable ? '' : ' disabled'))}</div>`
+    : `<div class="hop-menu hop-secondary-actions" role="menu" hidden>${button('transfer', t('导入 / 导出'), 'role="menuitem"' + (workflowTransfer && !busy() && !saving ? '' : ' disabled'))}</div>`}
       </div></div>
       ${renderHopscotchCourt(live ? latest.board : draft, { editable, states, place, activation, inputSuggestion: live ? null : getInputSuggestion(target), inputAgents: live ? [] : getInputAgents(target), agentRuns: getAgentRuns(), canAddInput: !live && !saving && Boolean(createInputAgent), formatReview: live ? null : getFormatReview(target), standby, canAddStandby: !live && !saving && place === 'writing' && (dirty || resolved.source !== 'derived') && Boolean(createTextAgent) && textAgents.length < 8, typeTray: trayHouseId ? { houseId: trayHouseId, choices: houseChoices(trayHouseId) } : null, status: live ? latest.result?.status || 'running' : '' })}
       <p class="hop-error" role="alert">${e(error)}</p>
@@ -332,15 +347,27 @@ export const createHopscotchBoardPanel = ({
         ${state?.childResults?.length ? `<pre class="hop-output" data-i18n-skip="true">${e(JSON.stringify(state.childResults, null, 2))}</pre>` : ''}`
       : `<span class="hop-card-mark" aria-hidden="true">${String(number).padStart(2, '0')}</span><p class="hop-card-name" data-i18n-skip="true">${e(hopscotchHouseLabel(house))}</p><p class="hop-hint">${e(hints[house.kind] || '')}</p>${house.fused?.length ? `<p class="hop-fused">${house.fused.map(kind => `<span><i></i>${e(hopscotchFusedLabel(kind))}</span>`).join('')}</p>` : ''}`;
     const cfg = house.config || {};
+    // 「提示词 | 套用预设」：预览／试运行按卡片当前（还没点「完成」）的设置组请求
+    const bindPresetSource = root => bindAgentPresetSourceControls(root, {
+      services: presetServices,
+      getContext: () => ({ config: house.kind === 'custom_prompt' ? customUpdate().patch.config : independentConfig() }),
+    });
     const independentModel = !member && ['image_prompt', 'variable'].includes(house.kind);
     let content = '';
     if (member) {
       content = '';
     } else if (house.kind === 'custom_prompt') {
+      // 套用预设且预设还在时，提示词与系统提示词不发送，先收起（切回提示词时原文还在）。
+      const presetView = presetServices && cfg.presetId ? presetServices.describePreset(cfg.presetId) : null;
+      const hidePrompt = cfg.promptSource === 'preset' && presetView?.ok ? 'hidden' : '';
+      const presetSource = presetServices ? renderAgentPresetSourceControl({
+        scope: `house-${id}`, kind: 'custom_house', mode: cfg.promptSource, presetId: cfg.presetId, view: presetView,
+      }) : '';
       content = `${field('label', t('名称'), house.label)}<p class="hop-hint" data-i18n-skip="true">${e(id)}</p>
-        <label>${e(t('提示词'))}<textarea name="prompt" data-i18n-skip="true">${e(cfg.prompt)}</textarea></label>
-        <p class="hop-hint" data-i18n-skip="true">{{user_input}} · {{body}} · {{house:id}} · {{char}} · {{user}}</p>
-        <details><summary>${e(t('更多设置'))}</summary><label>${e(t('系统提示词'))}<textarea name="systemPrompt" data-i18n-skip="true">${e(cfg.systemPrompt)}</textarea></label>
+        ${presetSource}
+        <label data-agent-preset-prompt-part ${hidePrompt}>${e(t('提示词'))}<textarea name="prompt" data-i18n-skip="true">${e(cfg.prompt)}</textarea></label>
+        <p class="hop-hint" data-i18n-skip="true" data-agent-preset-prompt-part ${hidePrompt}>{{user_input}} · {{body}} · {{house:id}} · {{char}} · {{user}}</p>
+        <details><summary>${e(t('更多设置'))}</summary><label data-agent-preset-prompt-part ${hidePrompt}>${e(t('系统提示词'))}<textarea name="systemPrompt" data-i18n-skip="true">${e(cfg.systemPrompt)}</textarea></label>
         ${select('model', t('模型配置'), option('', t('跟随当前'), cfg.modelMode === 'profile' ? cfg.modelProfileId : '') + getProfiles().map(profile => option(profile.id, profile.name, cfg.modelProfileId)).join(''))}
         ${field('modelOverride', t('模型覆盖'), cfg.modelOverride)}
         <div class="hop-fields">${select('includeContext', t('上下文'), [['none', t('无')], ['recent', t('最近对话')], ['full', t('全部已载入对话')]].map(([v, l]) => option(v, l, cfg.includeContext)).join(''))}${field('recentMessageCount', t('最近消息数'), cfg.recentMessageCount, 'number', 'min="1" max="50"')}${field('contextTokenBudget', t('输入预算（估算 token）'), cfg.contextTokenBudget, 'number', 'min="100" max="32000"')}${field('maxTokens', t('最大输出 token'), cfg.maxTokens, 'number', 'min="16" max="8192"')}</div></details>
@@ -351,12 +378,17 @@ export const createHopscotchBoardPanel = ({
     } else {
       content = `<p class="hop-hint">${e(hints[house.kind] || '')}</p>`;
     }
+    // 图片提示拖出成单独的房子时可套用预设（规则仍在 AC 的图片提示卡里；套用时不用那份规则）
+    if (house.kind === 'image_prompt' && !member && presetServices) {
+      const imagePresetView = cfg.presetId ? presetServices.describePreset(cfg.presetId) : null;
+      content += renderAgentPresetSourceControl({ scope: `house-${id}`, kind: 'image_prompt_house', mode: cfg.promptSource, presetId: cfg.presetId, view: imagePresetView, limitValue: '4096' });
+    }
     if (independentModel) content += `<div class="agent-center-agent-settings"><div class="agent-center-setting-row is-model"><span class="agent-center-setting-label">${e(t('模型配置'))}</span><select name="model" aria-label="${e(t('模型配置'))}">${option('', t('跟随正文'), cfg.modelMode === 'profile' ? cfg.modelProfileId : '')}${getProfiles().map(profile => option(profile.id, profile.name, cfg.modelProfileId)).join('')}</select></div><div class="agent-center-setting-row is-model"><span class="agent-center-setting-label">${e(t('模型覆盖'))}</span><input class="agent-center-agent-input" name="modelOverride" aria-label="${e(t('模型覆盖'))}" value="${e(cfg.modelOverride || '')}"></div></div>`;
     // 摘要压缩使用专用压缩提示，不能把记忆表格模板冒充其共享配置。
     const fusedAgents = { memory_table: 'memory_table_agent', image_prompt: 'image_director' };
     const agentId = house.kind === 'text_edit' ? house.config.agentId : variableCard ? '' : member ? fusedAgents[member] : ({ memory_table: 'memory_table_agent', format_review: 'reply_check', image_generation: 'image_director', image_prompt: 'image_director' })[house.kind];
     const typeChips = editable && !member && isHopscotchHouseDraft(house) ? renderHopscotchTypeTray(id, houseChoices(id)) : '';
-    const fields = `<fieldset class="hop-card-fields" ${editable ? '' : 'disabled'}>${typeChips ? `<div class="hop-card-type">${typeChips}</div>` : ''}${content}</fieldset>`;
+    const fields = `<fieldset class="hop-card-fields" data-agent-preset-area ${editable ? '' : 'disabled'}>${typeChips ? `<div class="hop-card-type">${typeChips}</div>` : ''}${content}</fieldset>`;
     const removeButton = editable && house.kind !== 'body' ? button('remove', t('删除房子'), `class="agent-center-icon-button hop-icon-only hop-remove" title="${e(t('删除房子'))}" aria-label="${e(t('删除房子'))}"`) : '';
     const footer = editable ? `${house.kind === 'custom_prompt' ? button('copy', t('复制'), mountAgentCard ? 'class="agent-center-card-action"' : '') : ''}<span class="hop-spacer"></span>${button('apply', t('完成'), mountAgentCard ? 'class="agent-center-card-action is-primary"' : 'class="hop-primary"')}` : '';
     if (mountAgentCard) {
@@ -372,8 +404,13 @@ export const createHopscotchBoardPanel = ({
       const settingsSection = hasHouseSettings
         ? `<div class="agent-center-agent-section"><div class="agent-center-agent-section-title has-help" data-help-mode="tap" data-help="${e(workflowHelp)}">${e(house.kind === 'body' && !member ? t('融合') : t('房子设置'))}</div>${fields}</div>`
         : content ? `<div class="agent-center-agent-section">${fields}</div>` : '';
-      boardContent.innerHTML = `${toggle}${variableInfo}${place === 'writing' ? `${settingsSection}${footer ? `<div class="agent-center-card-actions hop-card-actions">${footer}</div>` : ''}` : ''}`;
+      // 防截断传输存在模型设置档里、一拨就生效，不进画板草稿，所以另起一区
+      const bodyTransportSection = place === 'writing' && house.kind === 'body' && !member && bodyToolTransport
+        ? renderBodyToolTransportSection(bodyToolTransport.describe(sid)) : '';
+      boardContent.innerHTML = `${toggle}${variableInfo}${place === 'writing' ? `${settingsSection}${bodyTransportSection}${footer ? `<div class="agent-center-card-actions hop-card-actions">${footer}</div>` : ''}` : ''}`;
+      if (bodyTransportSection) bindBodyToolTransportSection(boardContent, { setting: bodyToolTransport, getSessionId: () => sid });
       bindBoardSelects(boardContent);
+      bindPresetSource(boardContent);
       const previewSessionId = sid, previewPlace = place;
       sharedConfig = mountAgentCard(detail, {
         agentId, configScope: target === 'global' ? 'global' : 'local', card: variableCard ? { ...buildHopscotchVariableCard(variableActivity, active), ...(house.kind === 'variable_rules' ? { title: hopscotchHouseLabel(house) } : {}) } : { id: house.kind, title: hopscotchHouseLabel(house), summary: hints[house.kind], detail: [hints[house.kind]], category: place === 'writing' ? 'creative' : 'chat', accent: house.kind === 'summary_compaction' ? 'summary' : 'dialogue', implemented: true, enabled: true },
@@ -394,13 +431,25 @@ export const createHopscotchBoardPanel = ({
       showDetail();
     } else {
       frameDetail(hopscotchHouseLabel(house), fields, footer, front);
+      bindPresetSource(detail);
       detail.querySelector('.hop-header .hop-spacer').insertAdjacentHTML('afterend', removeButton);
       if (configure) detail.querySelector('[data-action="flip"]').click();
     }
+    // 图片提示／变量房子的模型设置（图片提示另带「套用预设」）
+    const independentConfig = () => {
+      const profile = detail.querySelector('[name="model"]')?.value || '';
+      const presetControl = detail.querySelector('[data-agent-preset-source]');
+      const presetSource = presetControl ? readAgentPresetSource(presetControl) : { mode: cfg.promptSource, presetId: cfg.presetId };
+      return { ...cfg, modelMode: profile ? 'profile' : 'follow_current', modelProfileId: profile, modelOverride: detail.querySelector('[name="modelOverride"]')?.value || '',
+        ...(house.kind === 'image_prompt' ? { promptSource: presetSource.mode, presetId: presetSource.presetId } : {}) };
+    };
     const customUpdate = () => {
       const value = name => detail.querySelector(`[name="${name}"]`).value;
+      const presetControl = detail.querySelector('[data-agent-preset-source]');
+      const presetSource = presetControl ? readAgentPresetSource(presetControl) : { mode: cfg.promptSource, presetId: cfg.presetId };
       return { type: 'update', id, patch: { label: value('label'), config: {
-        ...cfg, prompt: value('prompt'), systemPrompt: value('systemPrompt'), modelMode: value('model') ? 'profile' : 'follow_current', modelProfileId: value('model'), modelOverride: value('modelOverride'), includeContext: value('includeContext'),
+        ...cfg, promptSource: presetSource.mode, presetId: presetSource.presetId,
+        prompt: value('prompt'), systemPrompt: value('systemPrompt'), modelMode: value('model') ? 'profile' : 'follow_current', modelProfileId: value('model'), modelOverride: value('modelOverride'), includeContext: value('includeContext'),
         recentMessageCount: Number(value('recentMessageCount')), contextTokenBudget: Number(value('contextTokenBudget')), maxTokens: Number(value('maxTokens')),
         output: { mode: value('outputMode'), injectIntoBody: detail.querySelector('[name="injectIntoBody"]').checked },
       } } };
@@ -444,8 +493,7 @@ export const createHopscotchBoardPanel = ({
         return;
       } else if (action === 'apply') {
         if (independentModel) {
-          const profile = detail.querySelector('[name="model"]').value;
-          if (edit({ type: 'update', id, patch: { config: { ...cfg, modelMode: profile ? 'profile' : 'follow_current', modelProfileId: profile, modelOverride: detail.querySelector('[name="modelOverride"]').value } } })) closeDetail();
+          if (edit({ type: 'update', id, patch: { config: independentConfig() } })) closeDetail();
           return;
         }
         if (house.kind !== 'custom_prompt') { closeDetail(); refreshSettings(); return; }
@@ -681,8 +729,8 @@ export const createHopscotchBoardPanel = ({
     if (action === 'close') {
       if (requestClose(close)) close();
     }
-    if (action === 'help') frameDetail(t('从上往下'), `<p class="hop-hint">${e(t('同行并行，整行结束后进入下一行。长方形内的各项共享一次请求。'))}</p><p class="hop-hint">${e(place === 'writing' ? t('按住房子查看落点；中心融合，左右并行，上下换行。手机可长按或拖动右上角把手。') : t('聊天模式跟随当前设置；点击房子配置 Agent。'))}</p>${place === 'writing' ? `<p class="hop-hint">${e(t('空格开始拖动，方向键选择落点，回车放置，Esc 取消。保存后用于后续轮次。'))}</p>` : ''}`);
-    if (place !== 'writing') return;
+    // 聊天模式只有「导入 / 导出」（Agent 配置），其余操作属于创意写作的板子
+    if (place !== 'writing' && action !== 'transfer') return;
     if (action === 'edit-mode' || action === 'run-mode') { mode = action === 'edit-mode' ? 'edit' : 'run'; render(); }
     if (action === 'stop') runtime.abortSessionTurn(sid);
     if (action === 'undo' && undoStack.length && !busy() && !saving) {
@@ -703,16 +751,33 @@ export const createHopscotchBoardPanel = ({
       };
     }
     if (action === 'transfer') {
-      frameDetail(t('板 JSON'), `<p class="hop-hint">${e(t('复制下方内容导出；粘贴后导入为草稿，不立即生效。'))}</p><textarea name="boardJson" rows="12" data-i18n-skip="true">${e(JSON.stringify(draft, null, 2))}</textarea>`, button('import', t('导入草稿')));
-      detail.querySelector('[data-action="import"]').onclick = () => {
+      const legacyBoardImport = (text) => {
         try {
-          const result = validateHopscotchBoard(JSON.parse(detail.querySelector('[name="boardJson"]').value));
+          const result = validateHopscotchBoard(JSON.parse(text));
           if (!result.ok) throw new Error(result.errors.map(item => item.message || item.code).join('\n'));
           const missing = result.board.rows.flatMap(row => row.houses).filter(h => h.config?.modelMode === 'profile' && !getProfiles().some(p => p.id === h.config.modelProfileId));
           if (missing.length) throw new Error(t('指定的模型配置不存在'));
           undoStack.push({ board: cloneData(draft), dirty }); draft = result.board; dirty = true; closeDetail(); render();
         } catch (err) { showError(err.message); }
       };
+      if (!workflowTransfer) {
+        frameDetail(t('板 JSON'), `<p class="hop-hint">${e(t('复制下方内容导出；粘贴后导入为草稿，不立即生效。'))}</p><textarea name="boardJson" rows="12" data-i18n-skip="true">${e(JSON.stringify(draft, null, 2))}</textarea>`, button('import', t('导入草稿')));
+        detail.querySelector('[data-action="import"]').onclick = () => legacyBoardImport(detail.querySelector('[name="boardJson"]').value);
+        return;
+      }
+      void openHopscotchWorkflowTransfer({
+        detail, frameDetail, button, option, select, e, t, showError, confirm,
+        workflowTransfer, place, target, getDraft: () => draft, isDirty: () => dirty,
+        legacyBoardImport,
+        // 导入或撤销后：切到导入的范围并重新载入（未保存的草稿已在导入前确认放弃）
+        onImported: async (nextTarget) => {
+          if (draft && place === 'writing') settleDraftAgents();
+          target = nextTarget === 'global' ? 'global' : (place === 'writing' && boardStore.getPersonaBoard ? 'persona' : 'session');
+          loadDraft();
+          render();
+          onScopeChange();
+        },
+      });
     }
   };
   panel.addEventListener('cancel', event => {
@@ -786,6 +851,26 @@ export const createHopscotchBoardPanel = ({
   });
   return {
     getConfigScope: () => target === 'global' ? 'global' : 'local',
+    // 截断提示通知的跳转：打开「正文生成」卡片，捲到防截断传输开关并短暂高亮
+    openBodyToolTransport: async () => {
+      const wait = () => new Promise(resolve => setTimeout(resolve, 100));
+      for (let index = 0; index < 30 && !mounted; index += 1) await wait();
+      if (!mounted || place !== 'writing') return false;
+      const body = draft?.rows?.flatMap(row => row.houses).find(house => house.kind === 'body');
+      if (!body) return false;
+      openHouse(body.id, true);
+      for (let index = 0; index < 30; index += 1) {
+        const section = doc.querySelector('[data-body-tool-transport]');
+        if (section) {
+          section.scrollIntoView({ block: 'center' });
+          section.classList.add('is-attention');
+          setTimeout(() => section.classList.remove('is-attention'), 2400);
+          return true;
+        }
+        await wait();
+      }
+      return false;
+    },
     addTextAgent: config => {
       if (!draft || !config || draft.rows.some(row => row.houses.some(h => h.config?.agentId === config.id))) return;
       const last = draft.rows.length - 1;

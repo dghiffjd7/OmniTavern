@@ -65,3 +65,9 @@ assert.match(appSource, /variablePanel\.closeTopLayer\(\)/);
 assert.match(appSource, /variablePanel\.hasVisibleLayer\(\)/);
 
 console.log('ok - variable manager keeps the three-page responsive tokenized motion contract');
+
+// --app-accent-secondary 没有任何主题定义：不带备用色时整条渐变失效，浅色下主按钮成了白字白底（规则编辑「保存」看不见）
+const runtimeSource = await readFile(new URL('../../src/scripts/ui/variable-panel-runtime.js', import.meta.url), 'utf8');
+assert.doesNotMatch(runtimeSource, /var\(--app-accent-secondary\)/);
+assert.match(runtimeSource, /id="rule-save" style="[^"]*var\(--app-accent-secondary, var\(--app-accent-primary\)\)/);
+console.log('ok - variable panel primary buttons keep a background when the secondary accent token is undefined');

@@ -138,10 +138,13 @@ export const initHelpTooltips = (options = {}) => {
     hide();
   });
 
-  // ---- 键盘可达性：focus 出、blur 收 ----
+  // ---- 键盘可达性：键盘 focus 出、blur 收（手机点按按钮也会聚焦，那不算，否则短按就出说明） ----
+  const isKeyboardFocus = (el) => {
+    try { return el.matches(':focus-visible'); } catch { return true; }
+  };
   doc.addEventListener('focusin', (e) => {
     const target = findTarget(e.target);
-    if (target) show(target);
+    if (target && isKeyboardFocus(e.target)) show(target);
   });
   doc.addEventListener('focusout', (e) => {
     const target = findTarget(e.target);
@@ -156,10 +159,11 @@ export const initHelpTooltips = (options = {}) => {
     if (!target) { hide(); return; }
     if (!e.pointerType || e.pointerType === 'mouse') return; // 鼠标交给 hover 逻辑
     const trigger = resolveHelpTrigger(target);
+    // 先清旧的再记这次按下：clearPress 会清掉 pressStart，放在后面会让松手/滑动取消不了长按计时
+    clearPress();
     pressStart = { x: e.clientX, y: e.clientY, el: target, trigger, toggled: false };
     if (trigger === 'press') {
       // 可点控件：长按出说明并吞掉随后的 click；短按放行原功能
-      clearPress();
       pressTimer = setTimeout(() => {
         pressTimer = null;
         suppressNextClick = true;

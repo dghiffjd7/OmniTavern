@@ -45,7 +45,7 @@ const createHeader = ({ documentRef, title = '', onClose = () => {} } = {}) => {
 
   header.appendChild(titleEl);
   header.appendChild(closeBtn);
-  return { header, closeBtn };
+  return { header, closeBtn, titleEl };
 };
 
 const createTextareaSection = ({
@@ -90,7 +90,7 @@ export const createReadonlyTextareaModal = ({
   toastr = null,
 } = {}) => {
   const { overlay, panel, close } = createBottomSheetShell({ overlayClass, panelClass, documentRef });
-  const { header, closeBtn } = createHeader({ documentRef, title, onClose: close });
+  const { header, closeBtn, titleEl } = createHeader({ documentRef, title, onClose: close });
   const { body, textarea } = createTextareaSection({
     documentRef,
     minHeight: '220px',
@@ -139,6 +139,9 @@ export const createReadonlyTextareaModal = ({
     },
     setValue: (value) => {
       textarea.value = String(value || '');
+    },
+    setTitle: (value) => {
+      titleEl.textContent = String(value || '');
     },
     focus: () => textarea?.focus?.(),
   };

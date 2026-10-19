@@ -33,7 +33,8 @@ export const resolveVariableWorkflowActivity = ({
     if (rule.enabled === false || !AUTOMATIC_TRIGGERS.has(rule.trigger.type)) return false;
     const action = rule.action || {}, target = String(action.target || '').trim();
     if (!WRITING_ACTIONS.has(action.type) || !target || ![...names].some(name => target === name || target.startsWith(`${name}.`) || target.startsWith(`${name}[`))) return false;
-    if (action.type === 'ai_evaluate' && !String(action.prompt || '').trim()) return false;
+    // 套用预设的 AI 评估由预设写任务，提示词可以留空，但要选了预设
+    if (action.type === 'ai_evaluate' && (action.promptSource === 'preset' ? !String(action.presetId || '').trim() : !String(action.prompt || '').trim())) return false;
     if (rule.trigger.type === 'every_n_turns' && !Number.isFinite(Number(rule.trigger.n))) return false;
     if (rule.trigger.type === 'keyword' && !(Array.isArray(rule.trigger.keywords) ? rule.trigger.keywords : String(rule.trigger.keywords || '').split(',')).some(key => String(key || '').trim())) return false;
     if (rule.trigger.type === 'condition' && (!String(rule.trigger.expr || '').trim() || getExpressionCompatibilityDiagnostic(rule.trigger.expr))) return false;

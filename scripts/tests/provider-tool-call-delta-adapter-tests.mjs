@@ -261,3 +261,32 @@ import {
   );
   console.log('ok - provider tool delta accumulator supports Gemini functionCall parts');
 }
+
+{
+  // Vertex streamFunctionCallArguments：开头一段只有工具名和 id，参数以 partialArgs（jsonPath + 值片段）分段到达，
+  // 中间各段没有工具名和 id，最后以空的 functionCall 结束（2026-10-16 实测形状）。
+  const accumulator = createProviderToolCallDeltaAccumulator({ provider: 'vertexai', model: 'gemini-4-argon' });
+  const chunk = part => ({ candidates: [{ content: { role: 'model', parts: [part] } }] });
+  const start = accumulator.push(chunk({ thoughtSignature: 'sig', functionCall: { name: 'submit_reply', id: 'Ppw7', willContinue: true } }));
+  assert.equal(start.completed.length, 0, '分段开始时不算完成');
+  accumulator.push(chunk({ functionCall: { partialArgs: [{ jsonPath: '$.content', stringValue: '钟楼的', willContinue: true }], willContinue: true } }));
+  const mid = accumulator.push(chunk({ functionCall: { partialArgs: [{ jsonPath: '$.content', stringValue: '怀表\n停了', willContinue: true }, { jsonPath: '$.count', numberValue: 3 }], willContinue: true } }));
+  assert.equal(mid.completed.length, 0);
+  assert.equal(mid.deltas[0].phase, PROVIDER_TOOL_CALL_DELTA_PHASES.argumentsDelta);
+  const open = accumulator.getSnapshot();
+  assert.equal(open.length, 1);
+  assert.equal(open[0].toolName, 'submit_reply');
+  assert.deepEqual(open[0].arguments, { content: '钟楼的怀表\n停了', count: 3 });
+  accumulator.push(chunk({ functionCall: { partialArgs: [{ jsonPath: '$.content', stringValue: '' }], willContinue: true } }));
+  const done = accumulator.push(chunk({ functionCall: {} }));
+  assert.equal(done.completed.length, 1);
+  assert.equal(done.completed[0].toolName, 'submit_reply');
+  assert.equal(done.completed[0].toolCallId, 'Ppw7');
+  assert.deepEqual(done.completed[0].arguments, { content: '钟楼的怀表\n停了', count: 3 });
+  assert.equal(done.completed[0].providerContinuation.assistantContent.parts[0].thoughtSignature, 'sig');
+  assert.equal(accumulator.getSnapshot().length, 0);
+  // 非分段的整包 functionCall 照旧立即完成
+  const whole = accumulator.push(chunk({ functionCall: { name: 'submit_reply', id: 'w1', args: { content: '整段' } } }));
+  assert.deepEqual(whole.completed.map(call => call.arguments), [{ content: '整段' }]);
+  console.log('ok - provider tool delta accumulator assembles Vertex streamed partialArgs');
+}

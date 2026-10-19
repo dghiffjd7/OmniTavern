@@ -4,6 +4,7 @@ import { t } from '../../i18n/index.js';
 import { extractScriptTree } from '../../import/script-tree-utils.js';
 import { CARD_ASSET_SKIP_LABELS } from '../../utils/character-card-assets.js';
 import { resolveWorldbookCurrentPersona } from '../worldbook-resource-ownership.js';
+import { listZipEntries } from '../../utils/zip-archive.js';
 
 const trim = value => String(value ?? '').trim();
 const key = value => trim(value).toLowerCase().replace(/\s+/g, '');
@@ -19,6 +20,9 @@ const SUPPORTED_TARGETS = Object.freeze({
 const EXCLUDABLE_PARTS = Object.freeze(['worldbook', 'greetings', 'regex', 'scripts', 'system_prompt', 'mvu', 'expressions', 'background']);
 const SCRIPT_SCOPES = Object.freeze({ global: 'global', role_card: 'character', preset: 'preset' });
 const PREVIEW_LIMIT = 20;
+const ARCHIVE_LIST_DEFAULT = 60;
+const ARCHIVE_LIST_MAX = 100;
+const LIBRARY_LIST_LIMIT = 30;
 
 const failure = (reason, extra = {}) => ({ ok: false, reason, ...extra });
 
@@ -35,14 +39,42 @@ const resolveByIdOrName = (store, query, { getById } = {}) => {
   return { error: 'not_found' };
 };
 
-const previewAttachment = (entry) => {
+// 文件库里的原文件可能不在内存：先按需载入；载不到（已被清理）视为失效
+const loadAttachment = async (registry, id) => {
+  const entry = typeof registry.ensureLoaded === 'function' ? await registry.ensureLoaded(id) : registry.get(id);
+  return entry?.bytes ? entry : null;
+};
+
+const previewAttachment = (entry, { listOffset = 0, listLimit = ARCHIVE_LIST_DEFAULT } = {}) => {
   const base = {
     attachmentId: entry.id, name: entry.name, format: entry.inspection?.format || '',
     label: entry.inspection?.label || '', title: entry.inspection?.title || '',
     counts: entry.inspection?.counts || {}, targets: entry.inspection?.targets || [],
     diagnostics: entry.inspection?.diagnostics || [], candidates: entry.inspection?.candidates || [],
     imported: (entry.imports || []).map(item => ({ target: item.target, worldbookId: item.worldbookId || '' })),
+    ...(entry.origin && entry.origin !== 'upload' ? { origin: entry.origin } : {}),
+    ...(entry.entryPath ? { fromArchive: entry.parentId, entry: entry.entryPath } : {}),
   };
+  if (base.format === 'archive') {
+    // 压缩包分页列目录；内容用 attachment.read／search（entry 填路径），可导入的文件 attachment.import 带 entry
+    try {
+      const files = listZipEntries(entry.bytes).entries.filter(item => !item.isDirectory);
+      const start = Math.max(0, Math.floor(Number(listOffset) || 0));
+      const limit = Math.min(ARCHIVE_LIST_MAX, Math.max(1, Math.floor(Number(listLimit) || ARCHIVE_LIST_DEFAULT)));
+      base.totalFiles = files.length;
+      base.files = files.slice(start, start + limit).map(item => ({
+        path: item.path, size: item.size,
+        ...(item.encrypted ? { encrypted: true } : {}), ...(item.unsafe ? { unsafe: true } : {}),
+      }));
+      base.nextListOffset = start + limit < files.length ? start + limit : null;
+      base.importable = entry.inspection?.details?.importable || [];
+    } catch {}
+    return base;
+  }
+  if (base.format === 'text' || base.format === 'document') {
+    base.hint = '用 attachment.read 读内容，attachment.search 搜关键词';
+    return base;
+  }
   try {
     const json = JSON.parse(new TextDecoder('utf-8').decode(entry.bytes).replace(/^﻿/, ''));
     if (base.format === 'worldbook') {
@@ -58,6 +90,8 @@ const previewAttachment = (entry) => {
 
 export const createAttachmentImportAgentTools = ({
   getAttachmentRegistry = () => null,
+  // 从压缩包取出单个文件进文件库（attachment-file-tools 的 extractArchiveEntryToLibrary），由装配处注入
+  extractArchiveEntry = null,
   getImportService = () => null,
   personaStore = null,
   chatStore = null,
@@ -118,11 +152,18 @@ export const createAttachmentImportAgentTools = ({
     const service = getImportService();
     const registry = getAttachmentRegistry();
     if (!registry) return { error: failure('attachment_import_unavailable') };
-    const entry = registry.get(args.attachmentId);
-    if (!entry) return { error: failure('attachment_not_found', { message: '附件已失效（可能 APP 重启或超出缓存），请让用户重新上传。' }) };
+    let entry = await loadAttachment(registry, args.attachmentId);
+    if (!entry) return { error: failure('attachment_not_found', { message: '附件已失效（可能已被清理或删除），请让用户重新上传。' }) };
+    // 压缩包里的文件：先取出成单独的文件（同一路径只取一次），再按原流程导入
+    if (trim(args.entry)) {
+      if (typeof extractArchiveEntry !== 'function') return { error: failure('archive_entry_import_unavailable') };
+      const extracted = await extractArchiveEntry(registry, entry, args.entry);
+      if (!extracted.ok) return { error: failure(extracted.reason, { entry: trim(args.entry), message: extracted.message || '' }) };
+      entry = extracted.entry;
+    }
     const format = entry.inspection?.format || '';
     if (!SUPPORTED_TARGETS[format]) {
-      return { error: failure('format_not_supported_yet', { format, message: '这类文件（如预设）暂不支持由女仆导入，请用户在对应管理面板手动导入。' }) };
+      return { error: failure('format_not_supported_yet', { format, message: '这类文件暂不支持由女仆导入，请用户在对应管理面板手动导入。' }) };
     }
     const targetType = trim(args.target);
     if (!SUPPORTED_TARGETS[format].includes(targetType)) {
@@ -283,37 +324,65 @@ export const createAttachmentImportAgentTools = ({
   const inspectTool = {
     name: 'attachment.inspect',
     title: 'Inspect file attachments',
-    description: 'Read the local parse result of files the user attached to the Maid (worldbook, regex, character card, script JSON or character card PNG): format, name, counts, possible import targets, diagnostics, and a short list of entry titles / rule names. Without attachmentId it lists recently uploaded files that are not imported yet. File contents are never returned.',
+    description: 'Read the local parse result of a file in the Maid file library: format, name, counts, possible import targets, diagnostics, and a short list of worldbook entry titles / regex rule names. For a zip archive it lists the files inside (paged with listOffset / listLimit) and which of them can be imported. Text, Office documents and archive contents are read with attachment.read / attachment.search. Without attachmentId it lists recently sent files that are not imported yet; with list = "library" it lists the whole file library (uploads, files taken out of archives and files the Maid created), most recently used first.',
     source: 'maid-app-content', permissions: [], riskLevel: 'low',
     capabilities: { read: true, write: false, network: false, cost: 'none', undo: 'none', modelContext: 'summary', confirmation: 'none' },
     schema: {
       type: 'object', additionalProperties: false,
-      properties: { attachmentId: { type: 'string', maxLength: 120 } },
+      properties: {
+        attachmentId: { type: 'string', maxLength: 120 },
+        list: { type: 'string', enum: ['recent', 'library'] },
+        listOffset: { type: 'integer', minimum: 0 },
+        listLimit: { type: 'integer', minimum: 1, maximum: ARCHIVE_LIST_MAX },
+      },
     },
     execute: async (args = {}) => {
       const registry = getAttachmentRegistry();
       if (!registry) return failure('attachment_import_unavailable');
       const id = trim(args.attachmentId);
       if (id) {
-        const entry = registry.get(id);
-        return entry ? { ok: true, attachments: [previewAttachment(entry)] } : failure('attachment_not_found');
+        const entry = await loadAttachment(registry, id);
+        return entry ? { ok: true, attachments: [previewAttachment(entry, args)] } : failure('attachment_not_found');
       }
-      const recent = registry.listRecent().map(item => previewAttachment(registry.get(item.id)));
+      if (args.list === 'library') {
+        const files = typeof registry.list === 'function' ? registry.list() : [];
+        return {
+          ok: true,
+          library: files.slice(0, LIBRARY_LIST_LIMIT).map(item => ({
+            attachmentId: item.id, name: item.name, size: item.size, origin: item.origin,
+            format: item.inspection?.format || '', label: item.inspection?.label || '',
+            lastUsedAt: item.lastUsedAt, ...(item.entryPath ? { entry: item.entryPath } : {}),
+          })),
+          total: files.length,
+          usage: registry.usage?.() || null,
+        };
+      }
+      const recent = [];
+      for (const item of registry.listRecent()) {
+        const entry = await loadAttachment(registry, item.id);
+        if (entry) recent.push(previewAttachment(entry));
+      }
       return { ok: true, attachments: recent };
     },
-    summarizeResult: result => (result?.ok ? `attachments inspected: ${(result.attachments || []).length}` : `attachment inspect failed: ${trim(result?.reason)}`),
+    summarizeResult: (result) => {
+      if (!result?.ok) return `attachment inspect failed: ${trim(result?.reason)}`;
+      return Array.isArray(result.library)
+        ? `file library listed: ${result.library.length} of ${Number(result.total || 0)}`
+        : `attachments inspected: ${(result.attachments || []).length}`;
+    },
   };
 
   const importTool = {
     name: 'attachment.import',
     title: 'Import an attached file',
-    description: 'Import a file the user attached to the Maid, by attachmentId. Worldbook targets: global, role_card (roleCard id/name, "current" = the card when the file was sent), chat_room (contact name/id or "current"), none (store only). Regex targets: global, chat_room, worldbook (existing worldbook id), role_card_worldbook (the worldbook bound to roleCard). Character card: target new_role_card creates a new card with everything in the file (worldbook, greetings, regex, scripts kept disabled, system prompt as an inactive preset, MVU variables) unless excluded; it does not switch cards unless switchTo is true. A same-name card fails with role_card_name_conflict; ask, then retry with onNameConflict "copy". A failed import is fully rolled back. Script JSON targets: global, role_card, preset (preset id/name or "current"); scripts are imported disabled. Preset JSON: target preset_library imports it and switches to it as the current creative-writing preset, like the manual import. Bundled regex/scripts/worldbook/greetings/system prompt are imported unless the user excluded them (exclude). If a worldbook with the same name exists the call fails with worldbook_name_conflict; ask the user, then retry with onNameConflict "copy" (new copy) or "overwrite" (app confirmation).',
+    description: 'Import a file the user attached to the Maid, by attachmentId (for a file inside a zip archive also pass entry = its path; the archive lists importable files). Worldbook targets: global, role_card (roleCard id/name, "current" = the card when the file was sent), chat_room (contact name/id or "current"), none (store only). Regex targets: global, chat_room, worldbook (existing worldbook id), role_card_worldbook (the worldbook bound to roleCard). Character card: target new_role_card creates a new card with everything in the file (worldbook, greetings, regex, scripts kept disabled, system prompt as an inactive preset, MVU variables) unless excluded; it does not switch cards unless switchTo is true. A same-name card fails with role_card_name_conflict; ask, then retry with onNameConflict "copy". A failed import is fully rolled back. Script JSON targets: global, role_card, preset (preset id/name or "current"); scripts are imported disabled. Preset JSON: target preset_library imports it and switches to it as the current creative-writing preset, like the manual import. Bundled regex/scripts/worldbook/greetings/system prompt are imported unless the user excluded them (exclude). If a worldbook with the same name exists the call fails with worldbook_name_conflict; ask the user, then retry with onNameConflict "copy" (new copy) or "overwrite" (app confirmation).',
     source: 'maid-app-content', permissions: [], riskLevel: 'medium',
     capabilities: { read: true, write: true, network: false, cost: 'none', undo: 'manual_edit', modelContext: 'none', confirmation: 'conditional' },
     schema: {
       type: 'object', required: ['attachmentId', 'target'], additionalProperties: false,
       properties: {
         attachmentId: { type: 'string', minLength: 1, maxLength: 120 },
+        entry: { type: 'string', maxLength: 500 },
         target: { type: 'string', enum: ['global', 'role_card', 'chat_room', 'none', 'worldbook', 'role_card_worldbook', 'new_role_card', 'preset', 'preset_library'] },
         exclude: { type: 'array', maxItems: 8, items: { type: 'string', enum: EXCLUDABLE_PARTS } },
         switchTo: { type: 'boolean' },

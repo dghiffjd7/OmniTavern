@@ -157,6 +157,8 @@ const normalizeProfile = (p = {}, { touchUpdatedAt = false } = {}) => {
         proxyAuthToken: typeof p.proxyAuthToken === 'string' ? p.proxyAuthToken : '',
         forwardProviderAuth: p.forwardProviderAuth !== false,
         promptPostProcessing: normalizePromptPostProcessing(p.promptPostProcessing),
+        // 防截断传输：创意写作正文改走函数调用传回（AC「正文生成」卡片切换）
+        bodyToolTransport: p.bodyToolTransport === true,
         model: p.model || 'gpt-3.5-turbo',
         ...(typeof p.ttsModel === 'string' ? { ttsModel: p.ttsModel } : {}),
         ...(typeof p.sttModel === 'string' ? { sttModel: p.sttModel } : {}),
@@ -407,6 +409,7 @@ export class ConfigManager {
             proxyAuthToken: '',
             forwardProviderAuth: true,
             promptPostProcessing: 'none',
+            bodyToolTransport: false,
             model: isImage
                 ? 'gpt-image-2'
                 : isVoiceTts || isVoiceShared
@@ -767,6 +770,20 @@ export class ConfigManager {
         await this.persistProfiles();
     }
 
+    // 防截断传输开关：单独切换某个设置档（不经过 save 的完整校验，也不换当前启用的设置档）
+    async setProfileBodyToolTransport(profileId, enabled) {
+        await this.ensureStores();
+        const p = this.profileStore.profiles[String(profileId || '').trim()];
+        if (!p) return false;
+        p.bodyToolTransport = enabled === true;
+        p.updatedAt = Date.now();
+        await this.persistProfiles();
+        if (this.profileStore.activeProfileId === p.id && this.config) {
+            this.config = { ...this.config, bodyToolTransport: p.bodyToolTransport };
+        }
+        return true;
+    }
+
     async deleteProfile(profileId) {
         await this.ensureStores();
         if (!this.profileStore.profiles[profileId]) return;
@@ -1040,6 +1057,7 @@ export class ConfigManager {
             proxyAuthToken: String(p.proxyAuthToken || ''),
             forwardProviderAuth: p.forwardProviderAuth !== false,
             promptPostProcessing: normalizePromptPostProcessing(p.promptPostProcessing),
+            bodyToolTransport: p.bodyToolTransport === true,
             model: p.model,
             ...(typeof p.ttsModel === 'string' ? { ttsModel: p.ttsModel } : {}),
             ...(typeof p.sttModel === 'string' ? { sttModel: p.sttModel } : {}),

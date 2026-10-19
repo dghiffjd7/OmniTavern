@@ -49,3 +49,11 @@ const engine = new VariableRuleEngine({
 await engine.handleAfterReceive({ sessionId: 'own', message: { role: 'assistant', content: 'hello' } });
 assert.equal(calls, 1); assert.equal(value, 3, 'the advertised native update route actually requests a model and changes the variable');
 console.log('ok - empty/ST/native variable capability, request/effect evidence, scope and native update execution');
+{
+  // AI 评估规则「套用预设」：提示词可以留空，但要选了预设才算有效规则
+  const presetRule = action => ({ ...native, rules: [{ enabled: true, trigger: { type: 'every_turn' }, action: { type: 'ai_evaluate', target: '好感度', ...action } }] });
+  assert.equal(activity(presetRule({ prompt: '' })).enabled, false);
+  assert.equal(activity(presetRule({ prompt: '', promptSource: 'preset', presetId: 'p1' })).enabled, true);
+  assert.equal(activity(presetRule({ prompt: '', promptSource: 'preset', presetId: '' })).enabled, false);
+  console.log('ok - ai_evaluate rules with a task preset count as automatic rules');
+}

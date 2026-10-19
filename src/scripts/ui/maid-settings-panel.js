@@ -6,6 +6,7 @@ import {
   normalizeMaidReactStepLimit,
 } from '../storage/maid-settings-store.js';
 import { escapeHtml } from '../utils/name-badges.js';
+import { t } from '../i18n/index.js';
 import { getAgentReasoningControl } from '../agent/agent-generation-settings.js';
 import { rankModelCandidates } from '../utils/model-candidates.js';
 import { ONBOARDING_TASKS } from './maid-onboarding-flows.js';
@@ -188,6 +189,12 @@ const injectStyle = (documentRef) => {
   color: var(--app-text-secondary, #6b7280);
   font-size: 12px;
   word-break: break-word;
+}
+.maid-settings-hint {
+  margin: 6px 0 10px;
+  color: var(--app-text-muted, #94a3b8);
+  font-size: 12px;
+  line-height: 1.6;
 }
 .maid-settings-status-chip {
   flex: 0 0 auto;
@@ -961,6 +968,17 @@ const injectStyle = (documentRef) => {
   color: var(--app-text-secondary, #64748b);
   font-size: 13px;
   font-weight: 750;
+}
+.maid-settings-field > .maid-settings-file-usage {
+  padding: 12px 18px 0;
+}
+.maid-settings-field > .maid-settings-hint {
+  margin: 4px 18px 10px;
+}
+.maid-settings-field > .maid-settings-list.is-files {
+  min-height: 0;
+  overflow: auto;
+  padding: 0 12px 12px;
 }
 .maid-settings-field > .maid-settings-label {
   min-height: 44px;
@@ -1792,6 +1810,10 @@ const injectStyle = (documentRef) => {
   .maid-memory-clear-all {
     width: auto;
   }
+  /* 文件库一行是横排（文件名 + 查看 + 删除），删除钮沿用上面的 100% 会把文件名挤成一个字宽 */
+  .maid-settings-list-item.is-file .maid-memory-delete {
+    width: auto;
+  }
 }
 
 @media (max-width: 380px) {
@@ -1959,6 +1981,8 @@ export const createMaidSettingsPanel = ({
   clearHistoryContext = null,
   clearMemoryTable = null,
   confirmMemoryAction = null,
+  // 女仆文件库：{ list, usage, remove, clear, preview }（由 APP 注入）
+  fileLibrary = null,
   listRuns = null,
   allowRulesStore = null,
   onResumeRun = null,
@@ -2028,6 +2052,65 @@ export const createMaidSettingsPanel = ({
       logger?.warn?.('maid settings clear memory failed', error);
       setStatus('清除失败');
     }
+  };
+
+  const MAID_FILE_ORIGIN_LABELS = { upload: '上传', archive: '从压缩包取出', maid: '女仆产出' };
+  const formatFileSize = (bytes = 0) => {
+    const value = Number(bytes) || 0;
+    if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1).replace(/\.0$/, '')} MB`;
+    if (value >= 1024) return `${Math.round(value / 1024)} KB`;
+    return `${value} B`;
+  };
+  let fileLibraryListEl = null;
+  let fileLibraryUsageEl = null;
+  const renderFileLibrary = () => {
+    if (!fileLibraryListEl) return;
+    clearChildren(fileLibraryListEl);
+    let files = [];
+    let usage = null;
+    try {
+      files = fileLibrary?.list?.() || [];
+      usage = fileLibrary?.usage?.() || null;
+    } catch (error) {
+      logger?.warn?.('maid settings list files failed', error);
+    }
+    if (fileLibraryUsageEl) {
+      fileLibraryUsageEl.textContent = usage
+        ? t('已用 {used} / {limit} · {count} 个文件', { used: formatFileSize(usage.bytes), limit: formatFileSize(usage.limitBytes), count: usage.count })
+        : '';
+    }
+    if (!files.length) {
+      appendEmptyItem(fileLibraryListEl, '文件库是空的。附给女仆的文件和女仆产出的文件会保存在这里。');
+      return;
+    }
+    files.forEach((file) => {
+      const item = documentRef.createElement?.('div');
+      item.className = 'maid-settings-list-item is-file';
+      const main = documentRef.createElement?.('div');
+      main.className = 'maid-settings-item-main';
+      const title = documentRef.createElement?.('div');
+      title.className = 'maid-settings-item-title';
+      title.textContent = trim(file?.name, file?.id || '');
+      const meta = documentRef.createElement?.('div');
+      meta.className = 'maid-settings-item-meta';
+      meta.textContent = [
+        t(MAID_FILE_ORIGIN_LABELS[file?.origin] || '上传'),
+        trim(file?.inspection?.label) ? t(file.inspection.label) : '',
+        formatFileSize(file?.size),
+        formatRunTime(file?.lastUsedAt),
+      ].filter(Boolean).join(' · ');
+      main.append(title, meta);
+      const previewBtn = createButton(documentRef, 'maid-settings-action', '查看');
+      previewBtn.addEventListener?.('click', () => void fileLibrary?.preview?.(file.id));
+      const removeBtn = createButton(documentRef, 'maid-memory-delete', '删除');
+      removeBtn.addEventListener?.('click', () => {
+        const removed = fileLibrary?.remove?.(file.id);
+        setStatus(removed ? '文件已删除' : '删除失败');
+        renderFileLibrary();
+      });
+      item.append(main, previewBtn, removeBtn);
+      fileLibraryListEl.appendChild(item);
+    });
   };
 
   const appendEmptyItem = (container, message = '') => {
@@ -2428,8 +2511,9 @@ export const createMaidSettingsPanel = ({
   };
 
   const switchPromptTab = (tab = 'persona') => {
-    const next = ['persona', 'appKnowledge', 'historyContext', 'semanticMemory', 'memoryTable', 'lastPrompt', 'lastResponse'].includes(tab) ? tab : 'persona';
+    const next = ['persona', 'appKnowledge', 'historyContext', 'semanticMemory', 'memoryTable', 'files', 'lastPrompt', 'lastResponse'].includes(tab) ? tab : 'persona';
     activePromptTab = next;
+    if (next === 'files') renderFileLibrary();
     promptTabButtons.forEach((button, key) => {
       button.classList.toggle('is-active', key === activePromptTab);
       button.setAttribute?.('aria-selected', key === activePromptTab ? 'true' : 'false');
@@ -3082,6 +3166,7 @@ export const createMaidSettingsPanel = ({
       ['historyContext', '历史上下文'],
       ['semanticMemory', '长期记忆'],
       ['memoryTable', '轮次归档'],
+      ...(fileLibrary ? [['files', '文件库']] : []),
       ['lastPrompt', '本次提示词'],
       ['lastResponse', '本次完整回复'],
     ].forEach(([key, label]) => {
@@ -3252,6 +3337,35 @@ export const createMaidSettingsPanel = ({
     memoryTableField.append(memoryTableLabel, memoryTableTextarea);
     memoryTablePane.append(memoryTableField, memoryTableFooter);
 
+    const filesPane = documentRef.createElement?.('div');
+    filesPane.className = 'maid-settings-prompt-pane';
+    const filesField = documentRef.createElement?.('div');
+    filesField.className = 'maid-settings-field';
+    const filesLabel = documentRef.createElement?.('div');
+    filesLabel.className = 'maid-settings-label';
+    filesLabel.textContent = '女仆文件库';
+    fileLibraryUsageEl = documentRef.createElement?.('div');
+    fileLibraryUsageEl.className = 'maid-settings-item-meta maid-settings-file-usage';
+    const filesHint = documentRef.createElement?.('p');
+    filesHint.className = 'maid-settings-hint';
+    filesHint.textContent = '附给女仆的文件、从压缩包取出的文件和女仆产出的文件都保存在 APP 内，之后的对话里也能继续处理。30 天没用过的会自动清理；超出空间上限时先清最久没用的。';
+    fileLibraryListEl = documentRef.createElement?.('div');
+    fileLibraryListEl.className = 'maid-settings-list is-files';
+    const filesFooter = documentRef.createElement?.('div');
+    filesFooter.className = 'maid-settings-footer';
+    if (typeof fileLibrary?.clear === 'function') {
+      const clearFilesBtn = createButton(documentRef, 'maid-memory-delete', '全部清空');
+      clearFilesBtn.addEventListener?.('click', () => void runMemoryClear({
+        title: '清空女仆文件库',
+        message: '将删除文件库里的全部文件（上传的、从压缩包取出的和女仆产出的）。此操作无法恢复。',
+        action: () => fileLibrary.clear(),
+        done: '文件库已清空',
+      }).then(renderFileLibrary));
+      filesFooter.appendChild(clearFilesBtn);
+    }
+    filesField.append(filesLabel, fileLibraryUsageEl, filesHint, fileLibraryListEl);
+    filesPane.append(filesField, filesFooter);
+
     const lastPromptPane = documentRef.createElement?.('div');
     lastPromptPane.className = 'maid-settings-prompt-pane';
     const lastPromptField = documentRef.createElement?.('div');
@@ -3290,6 +3404,7 @@ export const createMaidSettingsPanel = ({
     promptPanes.set('historyContext', historyContextPane);
     promptPanes.set('semanticMemory', semanticMemoryPane);
     promptPanes.set('memoryTable', memoryTablePane);
+    if (fileLibrary) promptPanes.set('files', filesPane);
     promptPanes.set('lastPrompt', lastPromptPane);
     promptPanes.set('lastResponse', lastResponsePane);
     promptPanes.forEach((pane, key) => {
@@ -3305,6 +3420,7 @@ export const createMaidSettingsPanel = ({
       historyContextPane,
       semanticMemoryPane,
       memoryTablePane,
+      ...(fileLibrary ? [filesPane] : []),
       lastPromptPane,
       lastResponsePane,
     );

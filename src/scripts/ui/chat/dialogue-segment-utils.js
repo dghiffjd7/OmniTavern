@@ -77,6 +77,24 @@ export const segmentDialogueText = (value = '') => {
   return segments;
 };
 
+// 同一段落被加粗、斜体等拆成几段文字时，合起来切分再按原段切回，引号跨格式也能配对。
+export const segmentDialogueRuns = (runs = []) => {
+  const texts = runs.map(run => String(run ?? ''));
+  const output = texts.map(() => []);
+  let runIndex = 0, offset = 0;
+  segmentDialogueText(texts.join('')).forEach(({ kind, text }) => {
+    let rest = text;
+    while (rest) {
+      while (runIndex < texts.length && offset >= texts[runIndex].length) { runIndex += 1; offset = 0; }
+      const take = Math.min(rest.length, texts[runIndex].length - offset);
+      pushSegment(output[runIndex], kind, rest.slice(0, take));
+      rest = rest.slice(take);
+      offset += take;
+    }
+  });
+  return output;
+};
+
 export const buildDualVoiceSpeechChunks = (value = '', {
   narrationConfig = null,
   dialogueConfig = null,

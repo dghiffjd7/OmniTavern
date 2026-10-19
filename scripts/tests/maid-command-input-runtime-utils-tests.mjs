@@ -339,6 +339,37 @@ class FakeDocument {
 }
 
 {
+  // 名额交给附件构建去判断（先分类再占位），没发送就移除或关闭丢弃的附件交回释放
+  const documentRef = new FakeDocument();
+  const calls = [];
+  const discarded = [];
+  const runtime = createMaidCommandInputRuntime({
+    documentRef,
+    getViewportSize: () => ({ w: 360, h: 640 }),
+    maxImageAttachments: 2,
+    onAttachFiles: async (files, options) => {
+      calls.push([files.map(file => file.name), options.maxCount]);
+      return files.slice(0, options.maxCount).map(file => ({ id: file.name, kind: 'file', name: file.name, file: { format: 'worldbook' } }));
+    },
+    onDiscardAttachments: list => discarded.push(...list.map(item => item.id)),
+    setTimeoutFn: () => 1,
+    clearTimeoutFn: () => {},
+  });
+  assert.equal(runtime.open(), true);
+  await runtime.addFiles([{ name: 'a.json' }, { name: 'b.json' }, { name: 'c.json' }]);
+  await runtime.addFiles([{ name: 'd.json' }]);
+  assert.deepEqual(calls, [[['a.json', 'b.json', 'c.json'], 2], [['d.json'], 0]]);
+  assert.deepEqual(runtime.getAttachments().map(item => item.id), ['a.json', 'b.json']);
+  runtime.getElements().attachmentsEl.dispatchEvent('click', {
+    target: { className: 'maid-command-input-attachment-remove', dataset: { attachmentId: 'a.json' } },
+  });
+  assert.deepEqual(runtime.getAttachments().map(item => item.id), ['b.json']);
+  runtime.close();
+  assert.deepEqual(discarded, ['a.json', 'b.json'], 'removing a chip and closing without keeping the draft both release unsent files');
+  console.log('ok - maid command input lets attachment building fill slots and releases discarded drafts');
+}
+
+{
   const documentRef = new FakeDocument();
   const submitted = [];
   const runtime = createMaidCommandInputRuntime({

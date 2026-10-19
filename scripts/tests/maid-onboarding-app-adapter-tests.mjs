@@ -180,6 +180,53 @@ assert.equal(adapter.hasConfiguredProfile(), true);
   console.log('ok - onboarding exposes settings and first-chat contact surfaces when started or reversed from a room');
 }
 
+{
+  // 写作房间：列表顶栏的设置按钮看不到，房间右上角「≡」可用；情境引导留在房间，帮点时打开房间菜单
+  const roomCalls = [];
+  const menuButton = { id: 'chat-menu-btn' };
+  const roomAdapter = createMaidOnboardingAppAdapter({
+    documentRef: { querySelectorAll: selector => (selector === '#room-menu-btn' ? [menuButton] : []) },
+    targetSelectors: { 'settings-entry': ['#list-settings-btn', '#room-menu-btn'], 'settings-general': ['#general-item'] },
+    isElementVisible: element => element === menuButton,
+    delay: async () => {},
+    openSettingsMenu: () => { roomCalls.push('settings-menu'); return false; },
+    openChatroomMenu: () => { roomCalls.push('room-menu'); return true; },
+    isChatRoomVisible: () => true,
+    exitChatRoom: () => roomCalls.push('exit'),
+    switchPage: page => roomCalls.push(`page:${page}`),
+    emit: (event, payload) => roomCalls.push(`emit:${event}:${payload?.target}`),
+  });
+  await roomAdapter.prepareStep({ flow: { id: 'rich-script-permission' }, step: { target: 'settings-entry' } });
+  assert.deepEqual(roomCalls.splice(0), [], 'the writing room keeps the reader in place');
+  assert.equal(await roomAdapter.runFallback({ step: { target: 'settings-entry', fallback: { kind: 'open-settings-menu' } } }), true);
+  assert.deepEqual(roomCalls.splice(0), ['settings-menu', 'room-menu', 'emit:target-click:settings-entry']);
+  await roomAdapter.prepareStep({ flow: { id: 'rich-script-permission' }, step: { target: 'settings-general' } });
+  assert.deepEqual(roomCalls.splice(0), ['settings-menu', 'room-menu']);
+  console.log('ok - rich-card guide opens settings from the writing room menu when the list topbar is hidden');
+}
+
+{
+  // 手机聊天室：列表顶栏被盖住、聊天室菜单没有「设定」→ 退回列表露出设置按钮，再打开设置菜单
+  const chatCalls = [];
+  let revealed = false;
+  const chatAdapter = createMaidOnboardingAppAdapter({
+    documentRef: { querySelectorAll: () => [] },
+    targetSelectors: { 'settings-entry': ['#list-settings-btn'], 'settings-general': ['#general-item'] },
+    isElementVisible: () => false,
+    delay: async () => {},
+    openSettingsMenu: () => { chatCalls.push('settings-menu'); return revealed; },
+    openChatroomMenu: () => { chatCalls.push('room-menu'); return false; },
+    revealSettingsEntry: () => { chatCalls.push('reveal'); revealed = true; return true; },
+    emit: (event, payload) => chatCalls.push(`emit:${event}:${payload?.target}`),
+  });
+  await chatAdapter.prepareStep({ flow: { id: 'rich-script-permission' }, step: { target: 'settings-entry' } });
+  assert.deepEqual(chatCalls.splice(0), ['reveal']);
+  revealed = false;
+  assert.equal(await chatAdapter.runFallback({ step: { target: 'settings-entry', fallback: { kind: 'open-settings-menu' } } }), true);
+  assert.deepEqual(chatCalls.splice(0), ['settings-menu', 'room-menu', 'reveal', 'settings-menu', 'emit:target-click:settings-entry']);
+  console.log('ok - rich-card guide returns to the chat list on phone when the room menu has no settings entry');
+}
+
 const vertexAdapter = createMaidOnboardingAppAdapter({
   configManager: {
     getProfiles: () => [{ id: 'vertex', provider: 'vertexai', model: 'gemini-2.5-pro', vertexaiServiceAccount: 'encoded-json' }],

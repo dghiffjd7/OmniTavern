@@ -733,39 +733,57 @@ export const setMemoryAgentSettings = (settings = {}, {
   return normalizeAgentCenterSettings(normalized);
 };
 
+// 导出（体验包）：只带这个聊天室所用预设的提示词档；卡片开关、全局提示词库与迁移记录是本机设置，不导出
+export const pickAgentCenterProfilesForPresets = (settings = {}, presetIds = {}) => {
+  const normalized = normalizeAgentCenterSettings(settings);
+  const profiles = {};
+  Object.entries(presetIds || {}).forEach(([type, presetId]) => {
+    const key = makeAgentProfileKey(trim(type), trim(presetId));
+    if (key && normalized.profiles?.[key]) profiles[key] = normalized.profiles[key];
+  });
+  return { version: normalized.version, profiles };
+};
+
+// 导入（体验包）：随包带来的预设对应到导入后的新预设——按包内原预设 ID 找到那一个提示词档换成新 ID
+// （presetIdMap {类型: 新预设 ID}，sourcePresetIds {类型: 包内原预设 ID}；没有原 ID 的旧包只在该类型恰好一个档时对应）。
+// 其余档保留原预设 ID（同一台设备上仍有效），不再全部挤到同一个新预设上。
+// 卡片开关、全局提示词库与迁移记录属于本机设置，不导入。
 export const mergeImportedAgentCenterSettings = (settings = {}, imported = {}, {
   presetIdMap = {},
+  sourcePresetIds = {},
   now = Date.now,
 } = {}) => {
   const current = normalizeAgentCenterSettings(settings);
   const incoming = normalizeAgentCenterSettings(imported);
   const timestamp = toTimestamp(now);
-  Object.entries(incoming.cards || {}).forEach(([cardId, card]) => {
-    current.cards[cardId] = {
-      ...normalizeCardState(card),
-      updatedAt: timestamp,
-    };
+  const incomingProfiles = Object.entries(incoming.profiles || {}).map(([key, profile]) => ({
+    type: trim(profile.profileType || key.split(':')[0]),
+    presetId: trim(profile.presetId || key.split(':').slice(1).join(':')),
+    profile,
+  }));
+  const mappedSource = new Map();
+  Object.entries(presetIdMap || {}).forEach(([type, mappedPresetId]) => {
+    if (!trim(type) || !trim(mappedPresetId)) return;
+    const sourceId = trim(sourcePresetIds?.[type]);
+    const ofType = incomingProfiles.filter(item => item.type === type);
+    const match = sourceId
+      ? ofType.find(item => item.presetId === sourceId)
+      : (ofType.length === 1 ? ofType[0] : null);
+    if (match) mappedSource.set(match, trim(mappedPresetId));
   });
-  Object.entries(incoming.profiles || {}).forEach(([key, profile]) => {
-    const type = trim(profile.profileType || key.split(':')[0]);
-    const mappedPresetId = trim(presetIdMap[type]);
-    const presetId = mappedPresetId || trim(profile.presetId || key.split(':').slice(1).join(':'));
-    const nextKey = makeAgentProfileKey(type, presetId);
+  incomingProfiles.forEach((item) => {
+    const presetId = mappedSource.get(item) || item.presetId;
+    const nextKey = makeAgentProfileKey(item.type, presetId);
     if (!nextKey) return;
     current.profiles[nextKey] = normalizeProfile({
-      ...profile,
-      profileType: type,
+      ...item.profile,
+      profileType: item.type,
       presetId,
       updatedAt: timestamp,
     });
   });
-  current.global = {
-    ...(current.global || {}),
-    ...(incoming.global || {}),
-  };
   current.migrations = {
     ...(current.migrations || {}),
-    ...(incoming.migrations || {}),
     importedAgentCenterSettingsAt: timestamp,
   };
   // migration 是设备级历史；旧导出缺少 rollback 标记时，导入边界即视为已处理，

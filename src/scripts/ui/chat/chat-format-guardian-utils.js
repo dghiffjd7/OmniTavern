@@ -14,6 +14,7 @@ import {
 } from '../../utils/builtin-phone-format-contract.js';
 import { getLocalizedPromptText } from '../../i18n/prompt-locale.js';
 import { getBuiltinAgentTask, resolveBuiltinAgentTask } from '../../agent/agent-builtin-defaults.js';
+import { applyTaskPresetToParts, resolveAgentConfigTaskPreset } from './agent-task-preset.js';
 
 export const CHAT_FORMAT_EVENT_TYPES = Object.freeze({
   privateMessage: 'private_message',
@@ -520,11 +521,16 @@ export const buildChatFormatGuardianModelPrompt = ({
   const task = resolveBuiltinAgentTask(agentConfig, 'reply_check');
   const replacesTask = agentConfig?.taskPromptMode === 'replace';
   const protocol = getPromptLine('format_guardian.system.protocol', { version: FORMAT_PATCH_PROTOCOL_VERSION });
+  // 「套用预设」：任务说明、任务提示词与区块由预设代替；补丁协议、场景规则与当次 baseRevision 仍由程序组装（补丁类，2026-10-15 用户定）。
+  const presetSource = agentConfig?.promptSource === 'preset'
+    ? resolveAgentConfigTaskPreset(agentConfig, trim(repairTarget?.sessionId || repairTarget?.sourceSessionId))
+    : null;
+  const taskFromPreset = presetSource?.mode === 'preset';
   // Preserve the existing default/legacy message shape. Explicit task edits
   // replace the business instructions, while patch and scene rules still apply.
   const system = [
     getPromptLine(timeMode==='ai'?'phone_time.ai':'phone_time.local'),
-    ...(replacesTask && task !== defaultTaskLines.join('\n')
+    ...(taskFromPreset ? [protocol] : replacesTask && task !== defaultTaskLines.join('\n')
       ? [task, protocol]
       : [defaultTaskLines[0], protocol, ...defaultTaskLines.slice(1)]),
     hasPrivateFormat ? getPromptLine('format_guardian.system.private') : '',
@@ -588,7 +594,23 @@ export const buildChatFormatGuardianModelPrompt = ({
       baseRevision: JSON.stringify(revisionToken),
     }),
   ].filter(Boolean).join('\n\n');
+  if (taskFromPreset) {
+    const applied = applyTaskPresetToParts({ keepFormat: true, taskPreset: presetSource.taskPreset, parts: [
+      { part: 'format', role: 'system', content: system, source: '格式检查协议' },
+      ...(referenceContext?.text ? [{ part: 'data', role: 'user', content: `Reference context (read only):\n${referenceContext.text}`, source: referenceContext.truncated ? '参考上下文 · 已截断' : '参考上下文' }] : []),
+      { part: 'data', role: 'user', content: user, source: '格式要求与原始回复' },
+    ] });
+    if (applied.ok) {
+      return { messages: applied.messages, sections: applied.sections, responseFormat: 'json_object',
+        enabledFormatIds: formatEntries.map(entry => entry.id), promptSource: { mode: 'preset', presetId: presetSource.presetId } };
+    }
+    // 预设组不出请求：整份改回提示词（含内置任务说明）
+    return { ...buildChatFormatGuardianModelPrompt({ assistantText, formatReminderText, customFormatGuide, agentConfig: { ...agentConfig, promptSource: 'prompt' },
+      referenceContext, enabledFormats, parserReport, userName, sessionLabel, surface, formatTarget, baseRevision, repairTarget, repairSelection, timeMode }),
+    promptSource: { mode: 'prompt', fallback: applied.reason, presetId: presetSource.presetId } };
+  }
   return {
+    ...(presetSource ? { promptSource: { mode: 'prompt', fallback: presetSource.fallback, presetId: presetSource.presetId } } : {}),
     messages: [
       { role: 'system', content: system },
       ...(!replacesTask && agentConfig?.prompt?.trim() ? [{ role: 'system', content: agentConfig.prompt }] : []),

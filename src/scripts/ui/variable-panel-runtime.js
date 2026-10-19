@@ -10,6 +10,7 @@ import {
     formatUnsupportedExpressionMessage,
 } from '../variables/expression-compat-diagnostics.js';
 import { validateExpressionSyntax } from '../variables/safe-expression-evaluator.js';
+import { bindAgentPresetSourceControls, readAgentPresetSource, renderAgentPresetSourceControl } from './agent-preset-source-control.js';
 import {
     buildVariableListRows,
     buildVariableScopeImpactText,
@@ -29,8 +30,10 @@ export {
 };
 
 export class VariablePanel {
-    constructor({ chatStore, getSessionId, getVariableScope }) {
+    constructor({ chatStore, getSessionId, getVariableScope, presetServices = null }) {
         this.chatStore = chatStore;
+        // AI 评估规则的「提示词 | 套用预设」（agent-preset-services）；没有时不显示
+        this.presetServices = presetServices;
         this.getSessionId = typeof getSessionId === 'function' ? getSessionId : () => '';
         this.getVariableScope = typeof getVariableScope === 'function' ? getVariableScope : null;
         this.overlay = null;
@@ -104,7 +107,7 @@ export class VariablePanel {
                     <button id="var-clear-search" type="button" aria-label="清除搜索" style="display:none; width:28px; height:28px; border:none; border-radius:8px; background:var(--app-surface-panel); cursor:pointer; font-size:14px; color:var(--app-text-primary);">×</button>
                 </div>
                 <div style="margin-top:10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-                    <button id="var-add" style="border:none; background:linear-gradient(135deg, var(--app-accent-primary), var(--app-accent-secondary)); color:var(--app-text-inverse); border-radius:10px; padding:8px 14px; font-size:13px; cursor:pointer; display:flex; align-items:center; gap:6px;">
+                    <button id="var-add" style="border:none; background:linear-gradient(135deg, var(--app-accent-primary), var(--app-accent-secondary, var(--app-accent-primary))); color:var(--app-text-inverse); border-radius:10px; padding:8px 14px; font-size:13px; cursor:pointer; display:flex; align-items:center; gap:6px;">
                         <span style="font-size:14px;">+</span>新增
                     </button>
                     <button id="var-templates" style="border:1px solid var(--app-border-default); background:var(--app-surface-card); border-radius:10px; padding:8px 12px; font-size:13px; cursor:pointer;">模板</button>
@@ -273,7 +276,7 @@ export class VariablePanel {
                 <button id="schema-delete" style="border:1px solid color-mix(in srgb, var(--app-danger-text) 35%, var(--app-border-default)); background:var(--app-surface-card); color:var(--app-danger-text); border-radius:10px; padding:8px 10px;">删除配置</button>
                 <div style="flex:1;"></div>
                 <button id="schema-cancel" style="border:1px solid var(--app-border-default); background:var(--app-surface-card); border-radius:10px; padding:8px 10px;">取消</button>
-                <button id="schema-save" style="border:none; background:linear-gradient(135deg, var(--app-accent-primary), var(--app-accent-secondary)); color:var(--app-text-inverse); border-radius:10px; padding:8px 12px;">保存</button>
+                <button id="schema-save" style="border:none; background:linear-gradient(135deg, var(--app-accent-primary), var(--app-accent-secondary, var(--app-accent-primary))); color:var(--app-text-inverse); border-radius:10px; padding:8px 12px;">保存</button>
             </div>
         `;
 
@@ -365,7 +368,7 @@ export class VariablePanel {
         `;
 
         panel.querySelector('#rule-close')?.addEventListener('click', () => this.hideRules());
-        panel.querySelector('#rule-add')?.addEventListener('click', () => this.openRuleEditor());
+        panel.querySelector('#rule-add')?.addEventListener('click', () => this.showRuleEditor(null));
         panel.querySelector('#rule-json')?.addEventListener('click', () => this.promptRulesJson());
         panel.querySelector('#rule-run')?.addEventListener('click', () => this.runRules());
 
@@ -490,9 +493,10 @@ export class VariablePanel {
                     <input id="rule-action-delta" type="number" value="1" style="padding:8px 10px; border:1px solid var(--app-border-default); border-radius:10px;">
                 </div>
 
-                <div id="rule-action-ai-wrap" style="display:none;">
-                    <label style="font-size:12px; color:var(--app-text-muted);">AI 评估提示词</label>
-                    <textarea id="rule-action-prompt" rows="4" style="padding:8px 10px; border:1px solid var(--app-border-default); border-radius:10px;"></textarea>
+                <div id="rule-action-ai-wrap" style="display:none;" data-agent-preset-area>
+                    <div id="rule-action-preset-host"></div>
+                    <label style="font-size:12px; color:var(--app-text-muted);" data-agent-preset-prompt-part>AI 评估提示词</label>
+                    <textarea id="rule-action-prompt" rows="4" style="padding:8px 10px; border:1px solid var(--app-border-default); border-radius:10px;" data-agent-preset-prompt-part></textarea>
                     <label style="font-size:12px; color:var(--app-text-muted);">应用方式</label>
                     <select id="rule-action-mode" style="display:none;">
                         <option value="delta">增量</option>
@@ -569,7 +573,7 @@ export class VariablePanel {
                 <button id="rule-delete" style="border:1px solid color-mix(in srgb, var(--app-danger-text) 35%, var(--app-border-default)); background:var(--app-surface-card); color:var(--app-danger-text); border-radius:10px; padding:8px 10px;">删除</button>
                 <div style="flex:1;"></div>
                 <button id="rule-cancel" style="border:1px solid var(--app-border-default); background:var(--app-surface-card); border-radius:10px; padding:8px 10px;">取消</button>
-                <button id="rule-save" style="border:none; background:linear-gradient(135deg, var(--app-accent-primary), var(--app-accent-secondary)); color:var(--app-text-inverse); border-radius:10px; padding:8px 12px;">保存</button>
+                <button id="rule-save" style="border:none; background:linear-gradient(135deg, var(--app-accent-primary), var(--app-accent-secondary, var(--app-accent-primary))); color:var(--app-text-inverse); border-radius:10px; padding:8px 12px;">保存</button>
             </div>
         `;
 
@@ -599,6 +603,7 @@ export class VariablePanel {
             actionDelta: q('#rule-action-delta'),
             actionAiWrap: q('#rule-action-ai-wrap'),
             actionPrompt: q('#rule-action-prompt'),
+            actionPresetHost: q('#rule-action-preset-host'),
             actionMode: q('#rule-action-mode'),
             actionModeBtn: q('#rule-action-mode-btn'),
             actionMessageWrap: q('#rule-action-message-wrap'),
@@ -757,7 +762,7 @@ export class VariablePanel {
                 <button id="data-copy" style="border:1px solid var(--app-border-default); background:var(--app-surface-card); border-radius:10px; padding:8px 10px;">复制</button>
                 <div style="flex:1;"></div>
                 <button id="data-merge" style="border:1px solid var(--app-accent-primary); background:var(--app-surface-card); color:var(--app-accent-primary); border-radius:10px; padding:8px 10px;">合并导入</button>
-                <button id="data-overwrite" style="border:none; background:linear-gradient(135deg, var(--app-accent-primary), var(--app-accent-secondary)); color:var(--app-text-inverse); border-radius:10px; padding:8px 12px;">覆盖导入</button>
+                <button id="data-overwrite" style="border:none; background:linear-gradient(135deg, var(--app-accent-primary), var(--app-accent-secondary, var(--app-accent-primary))); color:var(--app-text-inverse); border-radius:10px; padding:8px 12px;">覆盖导入</button>
             </div>
         `;
 
@@ -868,6 +873,14 @@ export class VariablePanel {
                 : (typeof normalized.action.value === 'object' ? JSON.stringify(normalized.action.value) : String(normalized.action.value));
         if (fields.actionDelta) fields.actionDelta.value = Number.isFinite(Number(normalized.action.value)) ? Number(normalized.action.value) : 1;
         if (fields.actionPrompt) fields.actionPrompt.value = normalized.action.prompt || '';
+        if (fields.actionPresetHost && this.presetServices) {
+            const presetId = normalized.action.presetId || '';
+            fields.actionPresetHost.innerHTML = renderAgentPresetSourceControl({
+                scope: 'variable-rule', kind: 'variable_ai_evaluate', mode: normalized.action.promptSource, presetId,
+                view: presetId ? this.presetServices.describePreset(presetId) : null, limitValue: '1024', showActions: false,
+            });
+            bindAgentPresetSourceControls(fields.actionPresetHost, { services: this.presetServices });
+        }
         if (fields.actionMode) fields.actionMode.value = normalized.action.mode || 'delta';
         refreshCustomSelectButton(fields.actionModeBtn, fields.actionMode, '增量');
         if (fields.actionMessage) fields.actionMessage.value = normalized.action.message || '';
@@ -1000,6 +1013,8 @@ export class VariablePanel {
         } else if (actionType === 'ai_evaluate') {
             action.prompt = String(fields.actionPrompt?.value || '').trim();
             action.mode = String(fields.actionMode?.value || 'delta');
+            const presetControl = fields.actionPresetHost?.querySelector('[data-agent-preset-source]');
+            if (presetControl) Object.assign(action, (({ mode, presetId }) => ({ promptSource: mode, presetId }))(readAgentPresetSource(presetControl)));
         } else if (actionType === 'notify') {
             action.message = String(fields.actionMessage?.value || '').trim();
             action.style = String(fields.actionMessageStyle?.value || 'info');
@@ -1515,6 +1530,8 @@ export class VariablePanel {
 	                depth: Number.isFinite(Number(action.depth)) ? Math.max(0, Math.trunc(Number(action.depth))) : 0,
 	                order: Number.isFinite(Number(action.order)) ? Number(action.order) : 3500,
 	                mode: String(action.mode || 'delta'),
+                promptSource: action.promptSource === 'preset' ? 'preset' : 'prompt',
+                presetId: String(action.presetId || '').trim(),
             },
         };
     }

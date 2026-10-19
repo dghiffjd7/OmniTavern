@@ -67,6 +67,8 @@ const buildDelta = ({
   source = 'provider-tool-call-delta',
   raw = null,
   providerContinuation = null,
+  geminiStream = '',
+  argumentPatches = null,
   now = Date.now,
 } = {}) => {
   const delta = {
@@ -94,7 +96,46 @@ const buildDelta = ({
       writable: false,
     });
   }
+  // Vertex 分段参数（streamFunctionCallArguments）专用，不改其他服务商的 delta 形状
+  if (geminiStream) {
+    Object.defineProperty(delta, 'geminiStream', { enumerable: false, value: geminiStream });
+    Object.defineProperty(delta, 'argumentPatches', { enumerable: false, value: Array.isArray(argumentPatches) ? clone(argumentPatches) : [] });
+  }
   return delta;
+};
+
+// partialArgs 的 jsonPath（如 $.content、$.items[0].name）拆成路径；危险键不写入
+const parseGeminiArgumentPath = (jsonPath = '') => {
+  const text = String(jsonPath || '').trim();
+  if (!text.startsWith('$')) return [];
+  const path = [];
+  const pattern = /\.([^.[\]]+)|\[(\d+)\]|\['([^']*)'\]|\["([^"]*)"\]/gu;
+  let match;
+  let consumed = 1;
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index !== consumed) return [];
+    consumed = pattern.lastIndex;
+    path.push(match[2] !== undefined ? Number(match[2]) : (match[1] ?? match[3] ?? match[4]));
+  }
+  if (consumed !== text.length) return [];
+  return path.some(key => ['__proto__', 'constructor', 'prototype'].includes(key)) ? [] : path;
+};
+
+// 字符串值是分段片段，接在已有内容后面；数字、布尔与 null 直接设值
+const applyGeminiArgumentPatch = (target, patch = {}) => {
+  const path = parseGeminiArgumentPath(patch.jsonPath);
+  if (!path.length || !isPlainObject(target)) return;
+  let cursor = target;
+  for (let index = 0; index < path.length - 1; index += 1) {
+    const key = path[index];
+    if (!cursor[key] || typeof cursor[key] !== 'object') cursor[key] = typeof path[index + 1] === 'number' ? [] : {};
+    cursor = cursor[key];
+  }
+  const last = path[path.length - 1];
+  if (Object.hasOwn(patch, 'stringValue')) cursor[last] = `${typeof cursor[last] === 'string' ? cursor[last] : ''}${String(patch.stringValue ?? '')}`;
+  else if (Object.hasOwn(patch, 'numberValue')) cursor[last] = Number(patch.numberValue);
+  else if (Object.hasOwn(patch, 'boolValue')) cursor[last] = patch.boolValue === true;
+  else if (Object.hasOwn(patch, 'nullValue')) cursor[last] = null;
 };
 
 const extractOpenAIToolDeltas = (data = {}, context = {}) => {
@@ -327,6 +368,42 @@ const extractGeminiToolDeltas = (data = {}, context = {}) => {
   });
   return calls.map(({ part, content }, index) => {
       const call = part.functionCall;
+      // Vertex 分段参数：开始（只有名称与 id）→ partialArgs 片段 → 空 functionCall 结束
+      if (Array.isArray(call.partialArgs)) {
+        return buildDelta({
+          provider: context.provider,
+          model: context.model,
+          phase: PROVIDER_TOOL_CALL_DELTA_PHASES.argumentsDelta,
+          geminiStream: 'patch',
+          argumentPatches: call.partialArgs.filter(isPlainObject),
+          raw: part,
+          now: context.now,
+        });
+      }
+      if (call.willContinue === true && trim(call.name)) {
+        return buildDelta({
+          provider: context.provider,
+          model: context.model,
+          phase: PROVIDER_TOOL_CALL_DELTA_PHASES.start,
+          geminiStream: 'start',
+          id: call.id,
+          toolCallId: call.id,
+          toolName: call.name,
+          providerContinuation: { api: 'gemini_generate_content', assistantContent: content },
+          raw: part,
+          now: context.now,
+        });
+      }
+      if (!trim(call.name) && !Object.hasOwn(call, 'args')) {
+        return buildDelta({
+          provider: context.provider,
+          model: context.model,
+          phase: PROVIDER_TOOL_CALL_DELTA_PHASES.complete,
+          geminiStream: 'end',
+          raw: part,
+          now: context.now,
+        });
+      }
       return buildDelta({
         provider: context.provider,
         model: context.model,
@@ -372,6 +449,8 @@ export const createProviderToolCallDeltaAccumulator = ({
   const openAIResponseOutput = new Map();
   const anthropicAssistantContent = new Map();
   const anthropicPartialJson = new Map();
+  // Vertex 分段参数：片段不带 id／名称，接到最近一个尚未结束的调用上
+  let openGeminiKey = '';
 
   const collectOpenAIResponseOutput = (data = {}) => {
     const responseOutput = Array.isArray(data?.output)
@@ -530,6 +609,25 @@ export const createProviderToolCallDeltaAccumulator = ({
     });
     const completed = [];
     deltas.forEach((delta) => {
+      if (delta.geminiStream) {
+        if (delta.geminiStream === 'start') {
+          const state = updateState(getState(delta), delta);
+          state.arguments = {};
+          openGeminiKey = state.key;
+          return;
+        }
+        const state = openGeminiKey ? states.get(openGeminiKey) : null;
+        if (!state) return;
+        if (delta.geminiStream === 'patch') {
+          if (!isPlainObject(state.arguments)) state.arguments = {};
+          delta.argumentPatches.forEach(patch => applyGeminiArgumentPatch(state.arguments, patch));
+          return;
+        }
+        openGeminiKey = '';
+        const item = completeState(state);
+        if (item) completed.push(item);
+        return;
+      }
       if (delta.phase === PROVIDER_TOOL_CALL_DELTA_PHASES.complete && delta.all) {
         Array.from(states.values()).forEach((state) => {
           const item = completeState(state);
@@ -560,6 +658,7 @@ export const createProviderToolCallDeltaAccumulator = ({
       openAIResponseOutput.clear();
       anthropicAssistantContent.clear();
       anthropicPartialJson.clear();
+      openGeminiKey = '';
     },
     getSnapshot: () => Array.from(states.values()).map(state => ({ ...state })),
     push,

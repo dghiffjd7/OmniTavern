@@ -45,7 +45,7 @@ export const createSessionSummaryCompactionRuntime = ({
     };
   };
 
-  return async (sid, { force = false, place = '', signal = null, detailed = false, expectedAdapterKind = '' } = {}) => {
+  const compact = async (sid, { force = false, place = '', signal = null, detailed = false, expectedAdapterKind = '' } = {}) => {
     const result = (status, reason = '', error = '') => detailed ? { status, reason, error } : status === 'succeeded';
     const skipped = reason => result('skipped', reason);
     const sessionId = String(sid || '').trim();
@@ -185,5 +185,80 @@ export const createSessionSummaryCompactionRuntime = ({
         }
       }, Number(delayMs || 0));
     });
+  };
+
+  // 「套用预设」的试运行／预览：与正式压缩同一份摘要数据和模型选项，用调用方给的 taskPreset 组请求。
+  // 不写入、不记运行、不动失败重试记录；previewOnly 只组请求不发送（不要求已配置模型）。
+  compact.dryRun = async (sid, { place = '', signal = null, previewOnly = false, taskPreset = null } = {}) => {
+    const sessionId = String(sid || '').trim();
+    if (!sessionId) return { ok: false, reason: 'missing_session' };
+    if (typeof backgroundChat !== 'function') return { ok: false, reason: 'model_unavailable' };
+    if (!previewOnly && !getIsConfigured()) return { ok: false, reason: 'model_unavailable' };
+    const resolvedPlace = String(place || getDefaultPlace?.() || 'chat').trim().toLowerCase() || 'chat';
+    try {
+      const adapter = await createAdapter?.({ sessionId, place: resolvedPlace }) || createLegacyAdapter(sessionId);
+      if (!adapter?.getItems) return { ok: false, reason: 'adapter_unavailable' };
+      const items = await adapter.getItems();
+      const list = Array.isArray(items) ? items : [];
+      if (!list.length) return { ok: false, reason: 'no_items' };
+      const compactedText = String(await adapter.getCompactedText?.() || '').trim();
+      const requestOptions = await resolveRequestOptions({ sessionId, place: resolvedPlace });
+      let preview = null;
+      const startedAt = Date.now();
+      const raw = await requestCompactionRaw({
+        items: list,
+        compactedText,
+        context: buildSessionContext(sessionId),
+        buildMessages,
+        backgroundChat: previewOnly
+          ? async (messages, options) => { preview = await backgroundChat(messages, { ...options, previewOnly: true }); return ''; }
+          : backgroundChat,
+        options: {
+          presetContext: { sessionId, uiMode: resolvedPlace === 'writing' ? 'rp' : 'chat' },
+          ...(requestOptions || {}),
+          temperature: 0.2,
+          ...(signal ? { signal } : {}),
+        },
+        taskPreset,
+      });
+      signal?.throwIfAborted?.();
+      return { ok: true, raw: String(raw || ''), preview, itemCount: list.length, latencyMs: Date.now() - startedAt };
+    } catch (error) {
+      if (signal?.aborted || error?.name === 'AbortError') return { ok: false, reason: 'cancelled' };
+      return { ok: false, reason: 'request_failed', error: String(error?.message || error) };
+    }
+  };
+
+  return compact;
+};
+
+const SUMMARY_DRY_RUN_MESSAGES = {
+  missing_session: '请先打开一个会话',
+  no_items: '这个会话还没有可合并的摘要',
+  model_unavailable: '还没有配置可用的模型',
+  adapter_unavailable: '当前记忆模式不能压缩',
+  cancelled: '已停止',
+};
+
+// 记忆卡「套用预设」的预览／试运行：按当前会话解析所选预设，调 dryRun，结果翻成卡片显示的文字。
+export const createSummaryCompactionPresetHandler = ({
+  getSessionId = () => '',
+  getPlace = () => '',
+  resolvePreset = () => ({ ok: false }),
+  dryRun = async () => ({ ok: false, reason: 'model_unavailable' }),
+  describeTrial = raw => ({ ok: Boolean(raw), text: String(raw || ''), message: '' }),
+} = {}) => {
+  const run = async ({ presetId = '', previewOnly = false, signal = null } = {}) => {
+    const sessionId = String(getSessionId() || '').trim();
+    const taskPreset = resolvePreset(presetId, sessionId);
+    if (!taskPreset?.ok) return { ok: false, message: '所选预设已不存在' };
+    const result = await dryRun(sessionId, { place: getPlace(), previewOnly, signal, taskPreset });
+    if (!result?.ok) return { ok: false, message: result?.error || SUMMARY_DRY_RUN_MESSAGES[result?.reason] || '试运行失败' };
+    if (previewOnly) return result.preview?.messages ? { ok: true, messages: result.preview.messages } : { ok: false, message: '无法预览' };
+    return { ...describeTrial(result.raw), latencyMs: result.latencyMs };
+  };
+  return {
+    preview: ({ presetId } = {}) => run({ presetId, previewOnly: true }),
+    trial: ({ presetId, signal } = {}) => run({ presetId, signal }),
   };
 };

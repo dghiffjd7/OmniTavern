@@ -58,6 +58,9 @@ export const HOPSCOTCH_CUSTOM_HOUSE_DEFAULTS = Object.freeze({
   contextTokenBudget: 10000,
   output: Object.freeze({ mode: 'context', injectIntoBody: false }),
   maxTokens: 8192,
+  // 「套用预设」：按所选预设组请求（预设删除后退回提示词）
+  promptSource: 'prompt',
+  presetId: '',
 });
 // 旧版默认值（未经用户改动）读取时迁移为新默认：输出 512 → 8192，输入预算 2000 → 10000。
 const LEGACY_CUSTOM_HOUSE_DEFAULTS = Object.freeze({ maxTokens: 512, contextTokenBudget: 2000 });
@@ -97,6 +100,8 @@ export const normalizeCustomHouseConfig = (config = {}) => {
       injectIntoBody: outputMode === 'context' && outputSrc.injectIntoBody === true,
     },
     maxTokens: clampInt(Number(src.maxTokens) === LEGACY_CUSTOM_HOUSE_DEFAULTS.maxTokens ? d.maxTokens : src.maxTokens, d.maxTokens, 16, 8192),
+    promptSource: trim(src.promptSource) === 'preset' ? 'preset' : 'prompt',
+    presetId: trim(src.presetId),
   };
 };
 
@@ -124,6 +129,8 @@ const normalizeHouse = (house = {}, rowIndex = 0, houseIndex = 0, allocateMember
     modelMode: src.config?.modelMode === 'profile' ? 'profile' : 'follow_current',
     modelProfileId: src.config?.modelMode === 'profile' ? trim(src.config.modelProfileId) : '',
     modelOverride: trim(src.config?.modelOverride),
+    // 图片提示拖出成单独的房子时可「套用预设」（融合在正文里时不适用）
+    ...(kind === 'image_prompt' ? { promptSource: src.config?.promptSource === 'preset' ? 'preset' : 'prompt', presetId: trim(src.config?.presetId) } : {}),
   };
   if (kind === 'variable_rules') out.config = { phase: src.config?.phase === 'before' ? 'before' : 'after' };
   return out;

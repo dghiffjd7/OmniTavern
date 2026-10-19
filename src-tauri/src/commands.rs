@@ -195,8 +195,21 @@ fn sanitize_download_name(input: &str) -> String {
         out
     };
     const MAX_LEN: usize = 80;
-    if cleaned.len() > MAX_LEN {
-        cleaned = cleaned.chars().take(MAX_LEN).collect();
+    if cleaned.chars().count() > MAX_LEN {
+        // 截短时保留扩展名，只截前面的主名（按字符截，中文不会被截半）
+        let ext = cleaned
+            .rfind('.')
+            .map(|index| cleaned[index..].to_string())
+            .filter(|ext| {
+                (2..=6).contains(&ext.len()) && ext[1..].chars().all(|c| c.is_ascii_alphanumeric())
+            })
+            .unwrap_or_default();
+        let stem_len = cleaned.len() - ext.len();
+        let stem: String = cleaned[..stem_len]
+            .chars()
+            .take(MAX_LEN - ext.chars().count())
+            .collect();
+        cleaned = format!("{stem}{ext}");
     }
     cleaned
 }
@@ -1126,13 +1139,24 @@ fn publish_image_to_gallery_bytes(
     Ok(format!("Pictures/{}", file_name))
 }
 
-fn clear_data_dir(dir: &Path) -> Result<(), String> {
+/// 清空资料目录。keep 指定的目录（以及通往它的上层目录）保留，其余照删：
+/// 手机上缓存目录可能就在资料目录里，分块上传的资料包要留到导入完成。
+fn clear_data_dir(dir: &Path, keep: Option<&Path>) -> Result<(), String> {
     if !dir.exists() {
         return Ok(());
     }
     for entry in fs::read_dir(dir).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
         let path = entry.path();
+        if let Some(keep) = keep {
+            if path == keep {
+                continue;
+            }
+            if path.is_dir() && keep.starts_with(&path) {
+                clear_data_dir(&path, Some(keep))?;
+                continue;
+            }
+        }
         if path.is_dir() {
             fs::remove_dir_all(&path).map_err(|e| e.to_string())?;
         } else {
@@ -1284,6 +1308,10 @@ fn add_dir_to_zip<W: Write + Seek>(
             return Ok(0);
         }
     }
+    // 女仆文件库是可再生成的工作文件（可达数百 MB），不进备份；索引会在下次启动时与实际文件对账
+    if dir == base.join(crate::maid_files::MAID_FILES_DIR_NAME) {
+        return Ok(0);
+    }
     if dir.is_dir() {
         let rel = dir
             .strip_prefix(base)
@@ -1329,17 +1357,40 @@ fn add_dir_to_zip<W: Write + Seek>(
     Ok(1)
 }
 
+const DATA_BUNDLE_FORMAT: &str = "tauri-chat-app-backup-v1";
+
+// 完整资料包的根目录必须有 bundle.json，且 format 为本 APP 的备份格式
+fn validate_data_bundle_archive<R: Read + Seek>(archive: &mut ZipArchive<R>) -> Result<(), String> {
+    let descriptor = archive
+        .by_name("bundle.json")
+        .map_err(|_| "not_a_data_bundle: missing bundle.json".to_string())?;
+    let (bytes, exceeded) =
+        read_to_end_limited(descriptor, 1024 * 1024).map_err(|e| e.to_string())?;
+    if exceeded {
+        return Err("not_a_data_bundle: bundle.json too large".to_string());
+    }
+    let value: Value = serde_json::from_slice(&bytes)
+        .map_err(|_| "not_a_data_bundle: invalid bundle.json".to_string())?;
+    if value.get("format").and_then(|v| v.as_str()) != Some(DATA_BUNDLE_FORMAT) {
+        return Err("not_a_data_bundle: unknown format".to_string());
+    }
+    Ok(())
+}
+
 fn import_bundle_from_reader<R: Read + Seek>(
     data_dir: &Path,
     memory_db: &MemoryDb,
     reader: R,
     mode: &str,
+    keep: Option<&Path>,
 ) -> Result<DataBundleImportResult, String> {
+    // 先打开并核对是本 APP 的完整资料包，再清空资料目录：认不出的 zip 不能把资料清掉
+    let mut archive = ZipArchive::new(reader).map_err(|e| e.to_string())?;
+    validate_data_bundle_archive(&mut archive)?;
     memory_db.close_all();
     if mode != "merge" {
-        clear_data_dir(data_dir)?;
+        clear_data_dir(data_dir, keep)?;
     }
-    let mut archive = ZipArchive::new(reader).map_err(|e| e.to_string())?;
     let mut files = 0usize;
     let mut skipped = 0usize;
     for i in 0..archive.len() {
@@ -1390,15 +1441,25 @@ fn import_bundle_from_reader<R: Read + Seek>(
             .map(is_app_settings_store_file_name)
             .unwrap_or(false)
         {
-            let mut raw = String::new();
-            if let Err(err) = file.read_to_string(&mut raw) {
-                skipped += 1;
-                eprintln!(
-                    "[import_bundle] read app settings failed: {} ({})",
-                    name, err
-                );
-                continue;
-            }
+            let declared = file.size();
+            let raw = match read_to_end_limited(&mut file, declared)
+                .map_err(|e| e.to_string())
+                .and_then(|(buf, exceeded)| {
+                    if exceeded {
+                        return Err("entry larger than declared size".to_string());
+                    }
+                    String::from_utf8(buf).map_err(|e| e.to_string())
+                }) {
+                Ok(raw) => raw,
+                Err(err) => {
+                    skipped += 1;
+                    eprintln!(
+                        "[import_bundle] read app settings failed: {} ({})",
+                        name, err
+                    );
+                    continue;
+                }
+            };
             let value: Value = match serde_json::from_str(&raw) {
                 Ok(value) => value,
                 Err(err) => {
@@ -1441,8 +1502,11 @@ fn import_bundle_from_reader<R: Read + Seek>(
                 continue;
             }
         };
-        if let Err(err) = std::io::copy(&mut file, &mut outfile) {
+        let declared = file.size();
+        if let Err(err) = copy_within_declared_size(&mut file, declared, &mut outfile) {
             skipped += 1;
+            drop(outfile);
+            let _ = fs::remove_file(&out_path);
             eprintln!("[import_bundle] write failed: {} ({})", name, err);
             continue;
         }
@@ -2263,7 +2327,8 @@ pub async fn export_sticker_zip(
     if entries.is_empty() {
         return Err("no zip entries".to_string());
     }
-    let safe_name = sanitize_segment(file_name.as_deref().unwrap_or("sticker_slices.zip"));
+    // 这是给用户看的下载文件名（安卓不选路径时直接用它存进「下载」），保留中文；sanitize_segment 只留 ASCII
+    let safe_name = sanitize_download_name(file_name.as_deref().unwrap_or("sticker_slices.zip"));
     let target_path = path.unwrap_or_default();
     let data_dir = get_data_dir(&app)?;
     let mut publish_download = false;
@@ -2487,14 +2552,21 @@ pub async fn import_data_bundle(
 ) -> Result<DataBundleImportResult, String> {
     let mode = mode.unwrap_or_else(|| "replace".to_string()).to_lowercase();
     let data_dir = get_data_dir(&app)?;
+    // 前端分块上传到临时目录的资料包：直接从文件边读边导入，清空资料目录时保留临时目录
+    if let Ok(upload_dir) = import_upload_dir(&app) {
+        if let Ok(target) = resolve_import_upload_path(&upload_dir, &path) {
+            let file = fs::File::open(&target).map_err(|e| e.to_string())?;
+            return import_bundle_from_reader(&data_dir, &state, file, &mode, Some(&upload_dir));
+        }
+    }
     let path_buf = PathBuf::from(path);
     if mode != "merge" && path_buf.starts_with(&data_dir) {
         let bytes = fs::read(&path_buf).map_err(|e| e.to_string())?;
         let cursor = std::io::Cursor::new(bytes);
-        return import_bundle_from_reader(&data_dir, &state, cursor, &mode);
+        return import_bundle_from_reader(&data_dir, &state, cursor, &mode, None);
     }
     let file = fs::File::open(&path_buf).map_err(|e| e.to_string())?;
-    import_bundle_from_reader(&data_dir, &state, file, &mode)
+    import_bundle_from_reader(&data_dir, &state, file, &mode, None)
 }
 
 /// 导入本地资料包（base64/dataURL）
@@ -2509,7 +2581,88 @@ pub async fn import_data_bundle_bytes(
     let data_dir = get_data_dir(&app)?;
     let bytes = decode_base64_payload(&data)?;
     let cursor = std::io::Cursor::new(bytes);
-    import_bundle_from_reader(&data_dir, &state, cursor, &mode)
+    import_bundle_from_reader(&data_dir, &state, cursor, &mode, None)
+}
+
+/// 大资料包不能一次传进来（前端会撞上数组／字符串长度上限）：前端分块写进这个临时目录，再按路径导入。
+const IMPORT_UPLOAD_DIR_NAME: &str = "import-upload";
+
+fn import_upload_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| e.to_string())?
+        .join(IMPORT_UPLOAD_DIR_NAME);
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+/// 只接受临时上传目录里由 import_upload_begin 建立的文件，避免借此读写别处的文件。
+fn resolve_import_upload_path(upload_dir: &Path, path: &str) -> Result<PathBuf, String> {
+    let candidate = PathBuf::from(path.trim());
+    let name = candidate
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_string();
+    if !name.starts_with("upload-") || !name.ends_with(".zip") {
+        return Err("invalid upload path".to_string());
+    }
+    let parent = candidate
+        .parent()
+        .ok_or_else(|| "invalid upload path".to_string())?;
+    let dir = fs::canonicalize(upload_dir).map_err(|e| e.to_string())?;
+    let parent = fs::canonicalize(parent).map_err(|_| "invalid upload path".to_string())?;
+    if parent != dir {
+        return Err("invalid upload path".to_string());
+    }
+    Ok(dir.join(name))
+}
+
+fn append_import_upload_chunk(path: &Path, data: &str) -> Result<u64, String> {
+    let bytes = decode_base64_payload(data)?;
+    let mut file = OpenOptions::new()
+        .append(true)
+        .open(path)
+        .map_err(|e| e.to_string())?;
+    file.write_all(&bytes).map_err(|e| e.to_string())?;
+    file.metadata().map(|meta| meta.len()).map_err(|e| e.to_string())
+}
+
+/// 开始一次分块上传：清掉上次没完成的上传，建立空文件并返回路径
+#[tauri::command]
+pub async fn import_upload_begin(app: AppHandle) -> Result<String, String> {
+    let dir = import_upload_dir(&app)?;
+    if let Ok(entries) = fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|value| value.as_nanos())
+        .unwrap_or(0);
+    let path = dir.join(format!("upload-{nanos}.zip"));
+    fs::File::create(&path).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// 追加一块（base64），返回目前的文件大小
+#[tauri::command]
+pub async fn import_upload_append(app: AppHandle, path: String, data: String) -> Result<u64, String> {
+    let dir = import_upload_dir(&app)?;
+    let target = resolve_import_upload_path(&dir, &path)?;
+    append_import_upload_chunk(&target, &data)
+}
+
+/// 删掉临时上传文件（导入完成、失败或取消后都会调用）
+#[tauri::command]
+pub async fn import_upload_discard(app: AppHandle, path: String) -> Result<(), String> {
+    let dir = import_upload_dir(&app)?;
+    if let Ok(target) = resolve_import_upload_path(&dir, &path) {
+        let _ = fs::remove_file(target);
+    }
+    Ok(())
 }
 
 /// 保存配置
@@ -2889,7 +3042,7 @@ pub async fn delete_persona_card(app: AppHandle, id: String) -> Result<bool, Str
 
 static KV_WRITE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-fn write_file_atomically(file: &Path, contents: &[u8]) -> Result<(), String> {
+pub(crate) fn write_file_atomically(file: &Path, contents: &[u8]) -> Result<(), String> {
     let parent = file
         .parent()
         .ok_or_else(|| format!("KV 路径缺少父目录: {file:?}"))?;
@@ -3663,6 +3816,14 @@ pub async fn delete_raw_reply(
     Ok(())
 }
 
+fn read_zip_text_limited<R: Read>(reader: R, limit: u64, label: &str) -> Result<String, String> {
+    let (buf, exceeded) = read_to_end_limited(reader, limit).map_err(|e| e.to_string())?;
+    if exceeded {
+        return Err(format!("zip entry too large: {label}"));
+    }
+    String::from_utf8(buf).map_err(|e| format!("{label} is not valid UTF-8: {e}"))
+}
+
 fn read_plugin_zip_bytes(bytes: Vec<u8>) -> Result<serde_json::Value, String> {
     if bytes.is_empty() {
         return Err("zip bytes empty".to_string());
@@ -3687,12 +3848,10 @@ fn read_plugin_zip_bytes(bytes: Vec<u8>) -> Result<serde_json::Value, String> {
     let manifest_path = manifest_name.ok_or_else(|| "manifest.json not found".to_string())?;
 
     let manifest_text = {
-        let mut file = archive
+        let file = archive
             .by_name(&manifest_path)
             .map_err(|e| format!("read manifest failed: {e}"))?;
-        let mut text = String::new();
-        file.read_to_string(&mut text).map_err(|e| e.to_string())?;
-        text
+        read_zip_text_limited(file, PLUGIN_ZIP_MANIFEST_MAX_BYTES, "manifest.json")?
     };
 
     let manifest_json: serde_json::Value =
@@ -3732,12 +3891,10 @@ fn read_plugin_zip_bytes(bytes: Vec<u8>) -> Result<serde_json::Value, String> {
     let main_path = format!("{}{}", base_dir, normalize_path(main_raw));
 
     let main_text = {
-        let mut file = archive
+        let file = archive
             .by_name(&main_path)
             .map_err(|e| format!("main file not found: {e}"))?;
-        let mut text = String::new();
-        file.read_to_string(&mut text).map_err(|e| e.to_string())?;
-        text
+        read_zip_text_limited(file, PLUGIN_ZIP_MAIN_MAX_BYTES, &main_path)?
     };
 
     Ok(serde_json::json!({
@@ -3764,6 +3921,31 @@ pub struct ZipEntryPayload {
 
 const ZIP_ENTRY_MAX_TOTAL_BYTES: usize = 30 * 1024 * 1024;
 const ZIP_ENTRY_MAX_FILE_BYTES: usize = 12 * 1024 * 1024;
+const ZIP_ENTRY_MAX_COUNT: usize = 5000;
+const PLUGIN_ZIP_MANIFEST_MAX_BYTES: u64 = 1024 * 1024;
+const PLUGIN_ZIP_MAIN_MAX_BYTES: u64 = 12 * 1024 * 1024;
+
+// 边解压边计数：最多读 limit+1 字节，多出来就说明超限，不会先把整个条目解压进内存（防压缩炸弹）
+fn read_to_end_limited<R: Read>(reader: R, limit: u64) -> std::io::Result<(Vec<u8>, bool)> {
+    let mut buf = Vec::new();
+    reader.take(limit.saturating_add(1)).read_to_end(&mut buf)?;
+    let exceeded = buf.len() as u64 > limit;
+    Ok((buf, exceeded))
+}
+
+// 写盘量不超过条目声明的解压后大小：解压结果比声明大（伪造大小）即放弃该条目
+fn copy_within_declared_size<R: Read, W: Write>(
+    reader: R,
+    declared: u64,
+    writer: &mut W,
+) -> Result<u64, String> {
+    let copied = std::io::copy(&mut reader.take(declared.saturating_add(1)), writer)
+        .map_err(|e| e.to_string())?;
+    if copied > declared {
+        return Err(format!("entry larger than declared size ({declared} bytes)"));
+    }
+    Ok(copied)
+}
 
 fn is_text_zip_entry_name(name: &str) -> bool {
     let lower = name.to_lowercase();
@@ -3777,6 +3959,9 @@ fn is_text_zip_entry_name(name: &str) -> bool {
 
 fn read_zip_entry_payloads<R: Read + Seek>(reader: R) -> Result<Vec<ZipEntryPayload>, String> {
     let mut archive = ZipArchive::new(reader).map_err(|e| e.to_string())?;
+    if archive.len() > ZIP_ENTRY_MAX_COUNT {
+        return Err(format!("zip has too many entries: {}", archive.len()));
+    }
     let mut out: Vec<ZipEntryPayload> = Vec::new();
     let mut total: usize = 0;
     for i in 0..archive.len() {
@@ -3785,15 +3970,17 @@ fn read_zip_entry_payloads<R: Read + Seek>(reader: R) -> Result<Vec<ZipEntryPayl
             continue;
         }
         let name = file.name().replace('\\', "/");
-        let mut buf: Vec<u8> = Vec::new();
-        file.read_to_end(&mut buf).map_err(|e| e.to_string())?;
-        if buf.len() > ZIP_ENTRY_MAX_FILE_BYTES {
-            return Err(format!("zip entry too large: {}", name));
-        }
-        total = total.saturating_add(buf.len());
-        if total > ZIP_ENTRY_MAX_TOTAL_BYTES {
+        // 单条目上限与剩余总量取小，超出即停止解压
+        let limit = ZIP_ENTRY_MAX_FILE_BYTES.min(ZIP_ENTRY_MAX_TOTAL_BYTES - total);
+        let (buf, exceeded) =
+            read_to_end_limited(&mut file, limit as u64).map_err(|e| e.to_string())?;
+        if exceeded {
+            if buf.len() > ZIP_ENTRY_MAX_FILE_BYTES {
+                return Err(format!("zip entry too large: {}", name));
+            }
             return Err("zip too large".to_string());
         }
+        total += buf.len();
         if is_text_zip_entry_name(&name) {
             if let Ok(text) = String::from_utf8(buf.clone()) {
                 out.push(ZipEntryPayload {
@@ -5191,6 +5378,61 @@ mod tests {
     }
 
     #[test]
+    fn sanitize_download_name_keeps_the_extension_when_shortening() {
+        assert_eq!(sanitize_download_name("星见雅_20261016-173512.png"), "星见雅_20261016-173512.png");
+        let long = format!("{}.png", "a".repeat(120));
+        let short = sanitize_download_name(&long);
+        assert_eq!(short.chars().count(), 80);
+        assert!(short.ends_with(".png"), "{short}");
+        let cjk = format!("{}.jpeg", "图".repeat(100));
+        let cjk_short = sanitize_download_name(&cjk);
+        assert_eq!(cjk_short.chars().count(), 80);
+        assert!(cjk_short.ends_with(".jpeg"));
+        assert_eq!(sanitize_download_name(&"b".repeat(90)).chars().count(), 80);
+        assert_eq!(sanitize_download_name("a/b:c.png"), "a_b_c.png");
+        assert_eq!(sanitize_download_name("仪玄.aicpack"), "仪玄.aicpack");
+    }
+
+    #[test]
+    fn data_bundle_zip_import_requires_the_backup_descriptor() {
+        let valid = build_test_zip(&[
+            ("bundle.json", Some(br#"{"format":"tauri-chat-app-backup-v1"}"#)),
+            ("chat_index.json", Some(b"{}")),
+        ]);
+        assert!(validate_data_bundle_archive(&mut ZipArchive::new(Cursor::new(valid)).unwrap()).is_ok());
+        for bad in [
+            build_test_zip(&[("photos/a.png", Some(b"x"))]),
+            build_test_zip(&[("bundle.json", Some(br#"{"format":"other"}"#))]),
+            build_test_zip(&[("bundle.json", Some(b"{broken"))]),
+            build_test_zip(&[("manifest.json", Some(br#"{"format":"chatapp.custom-bundle.v1"}"#))]),
+        ] {
+            let error = validate_data_bundle_archive(&mut ZipArchive::new(Cursor::new(bad)).unwrap()).err().unwrap();
+            assert!(error.starts_with("not_a_data_bundle"), "{error}");
+        }
+    }
+
+    #[test]
+    fn data_bundle_zip_skips_the_maid_file_library() {
+        let data_dir = unique_temp_data_dir("bundle-skip-maid-files");
+        write_json(&data_dir.join("chat_index.json"), serde_json::json!({ "ok": true }));
+        let blobs = data_dir.join(crate::maid_files::MAID_FILES_DIR_NAME).join("blobs");
+        fs::create_dir_all(&blobs).unwrap();
+        fs::write(blobs.join("ab".repeat(32)), b"attachment bytes").unwrap();
+        let cursor = Cursor::new(Vec::new());
+        let mut writer = ZipWriter::new(cursor);
+        let options = FileOptions::default().compression_method(CompressionMethod::Deflated);
+        assert_eq!(
+            add_dir_to_zip(&mut writer, &data_dir, &data_dir, options, None).unwrap(),
+            1
+        );
+        let bytes = writer.finish().unwrap().into_inner();
+        let archive = ZipArchive::new(Cursor::new(bytes)).unwrap();
+        let names: Vec<String> = archive.file_names().map(|name| name.to_string()).collect();
+        assert_eq!(names, vec!["chat_index.json".to_string()]);
+        let _ = fs::remove_dir_all(data_dir);
+    }
+
+    #[test]
     fn atomic_kv_write_replaces_existing_file_and_removes_temp_file() {
         let data_dir = unique_temp_data_dir("atomic-kv-write");
         let file = data_dir.join("state.json");
@@ -5214,6 +5456,52 @@ mod tests {
             .count();
         assert_eq!(leftovers, 0);
         let _ = fs::remove_dir_all(data_dir);
+    }
+
+    #[test]
+    fn clear_data_dir_keeps_the_upload_dir_inside_the_data_dir() {
+        let data_dir = unique_temp_data_dir("clear-keep");
+        let upload_dir = data_dir.join("cache").join(IMPORT_UPLOAD_DIR_NAME);
+        fs::create_dir_all(&upload_dir).unwrap();
+        fs::write(upload_dir.join("upload-1.zip"), b"zip").unwrap();
+        fs::write(data_dir.join("cache").join("other.bin"), b"x").unwrap();
+        fs::write(data_dir.join("chat_store_v1.json"), b"{}").unwrap();
+        fs::create_dir_all(data_dir.join("attachments")).unwrap();
+
+        clear_data_dir(&data_dir, Some(&upload_dir)).unwrap();
+
+        assert!(upload_dir.join("upload-1.zip").exists());
+        assert!(!data_dir.join("cache").join("other.bin").exists());
+        assert!(!data_dir.join("chat_store_v1.json").exists());
+        assert!(!data_dir.join("attachments").exists());
+
+        clear_data_dir(&data_dir, None).unwrap();
+        assert!(!data_dir.join("cache").exists());
+        let _ = fs::remove_dir_all(&data_dir);
+    }
+
+    #[test]
+    fn import_upload_accepts_only_files_created_in_the_upload_dir_and_appends_chunks() {
+        let root = unique_temp_data_dir("import-upload");
+        let upload_dir = root.join(IMPORT_UPLOAD_DIR_NAME);
+        fs::create_dir_all(&upload_dir).unwrap();
+        let path = upload_dir.join("upload-42.zip");
+        fs::File::create(&path).unwrap();
+        let path_text = path.to_string_lossy().to_string();
+
+        let target = resolve_import_upload_path(&upload_dir, &path_text).unwrap();
+        assert_eq!(append_import_upload_chunk(&target, &BASE64_ENGINE.encode(b"PK\x03")).unwrap(), 3);
+        assert_eq!(append_import_upload_chunk(&target, "data:application/zip;base64,AAEC").unwrap(), 6);
+        assert_eq!(fs::read(&path).unwrap(), vec![b'P', b'K', 3, 0, 1, 2]);
+
+        fs::write(root.join("upload-1.zip"), b"x").unwrap();
+        let outside = root.join("upload-1.zip").to_string_lossy().to_string();
+        assert!(resolve_import_upload_path(&upload_dir, &outside).is_err());
+        let wrong_name = upload_dir.join("chat_store_v1.json").to_string_lossy().to_string();
+        assert!(resolve_import_upload_path(&upload_dir, &wrong_name).is_err());
+        let traversal = upload_dir.join("..").join("upload-1.zip").to_string_lossy().to_string();
+        assert!(resolve_import_upload_path(&upload_dir, &traversal).is_err());
+        let _ = fs::remove_dir_all(&root);
     }
 
     fn build_test_zip(entries: &[(&str, Option<&[u8]>)]) -> Vec<u8> {
@@ -5478,5 +5766,58 @@ mod tests {
         assert!(entries[0].text.is_none());
         let expected_broken = BASE64_ENGINE.encode([0xff, 0xfe, 0xfd]);
         assert_eq!(entries[0].base64.as_deref(), Some(expected_broken.as_str()));
+    }
+
+    #[test]
+    fn read_zip_entry_payloads_stops_decompressing_an_oversized_entry() {
+        // 高压缩比的大条目（压缩炸弹的形态）：读到上限就停，报条目过大
+        let big = vec![0u8; ZIP_ENTRY_MAX_FILE_BYTES + 1];
+        let zip_bytes = build_test_zip(&[("bomb.bin", Some(&big))]);
+        let error = read_zip_entry_payloads(Cursor::new(zip_bytes)).err().unwrap();
+        assert_eq!(error, "zip entry too large: bomb.bin");
+    }
+
+    #[test]
+    fn read_zip_entry_payloads_enforces_total_and_entry_count_limits() {
+        let chunk = vec![7u8; 11 * 1024 * 1024];
+        let zip_bytes = build_test_zip(&[
+            ("a.bin", Some(&chunk)),
+            ("b.bin", Some(&chunk)),
+            ("c.bin", Some(&chunk)),
+        ]);
+        let error = read_zip_entry_payloads(Cursor::new(zip_bytes)).err().unwrap();
+        assert_eq!(error, "zip too large");
+
+        let names: Vec<String> = (0..=ZIP_ENTRY_MAX_COUNT).map(|i| format!("f{i}.txt")).collect();
+        let entries: Vec<(&str, Option<&[u8]>)> = names
+            .iter()
+            .map(|name| (name.as_str(), Some(&b"x"[..])))
+            .collect();
+        let zip_bytes = build_test_zip(&entries);
+        let error = read_zip_entry_payloads(Cursor::new(zip_bytes)).err().unwrap();
+        assert!(error.starts_with("zip has too many entries"), "{error}");
+    }
+
+    #[test]
+    fn read_plugin_zip_rejects_an_oversized_main_script() {
+        let main = vec![b'a'; PLUGIN_ZIP_MAIN_MAX_BYTES as usize + 1];
+        let zip_bytes = build_test_zip(&[
+            ("plugin/manifest.json", Some(br#"{"main":"index.js"}"#)),
+            ("plugin/index.js", Some(&main)),
+        ]);
+        let error = read_plugin_zip_bytes(zip_bytes).err().unwrap();
+        assert_eq!(error, "zip entry too large: plugin/index.js");
+    }
+
+    #[test]
+    fn zip_bundle_entry_copy_refuses_output_beyond_the_declared_size() {
+        let mut out = Vec::new();
+        assert_eq!(copy_within_declared_size(&b"abcd"[..], 4, &mut out).unwrap(), 4);
+        assert_eq!(out, b"abcd");
+
+        let mut out = Vec::new();
+        let error = copy_within_declared_size(&b"abcdefgh"[..], 4, &mut out).err().unwrap();
+        assert!(error.contains("larger than declared"), "{error}");
+        assert_eq!(out.len(), 5, "stops one byte past the declared size instead of copying everything");
     }
 }

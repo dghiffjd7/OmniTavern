@@ -1,4 +1,5 @@
 import { stickerPackStore } from '../storage/sticker-pack-store.js';
+import { pickAgentCenterProfilesForPresets } from '../storage/agent-center-settings-store.js';
 import { customReactionAssets, customReactionImportWarning } from './chat/custom-reaction-assets.js';
 import { BUILTIN_PHONE_FORMAT_WORLDBOOK_ID } from '../storage/builtin-worldbooks.js';
 import { logger } from '../utils/logger.js';
@@ -449,6 +450,13 @@ export class ExperiencePackTransfer extends CharacterCardTransfer {
             </label>
           </div>
           <label style="display:flex; align-items:flex-start; gap:10px; cursor:pointer;">
+            <input type="checkbox" id="xp-export-agents" checked style="width:18px; height:18px; margin-top:2px;">
+            <div>
+              <div style="font-weight:800; color:var(--app-text-primary);">Agent 配置</div>
+              <div style="font-size:12px; color:var(--app-text-muted);">修改文本、输入助手、文本建议、格式修复、小管家（不含模型设置档）</div>
+            </div>
+          </label>
+          <label style="display:flex; align-items:flex-start; gap:10px; cursor:pointer;">
             <input type="checkbox" id="xp-export-memory-data" style="width:18px; height:18px; margin-top:2px;">
             <div>
               <div style="font-weight:800; color:var(--app-text-primary);">记忆数据</div>
@@ -521,6 +529,7 @@ export class ExperiencePackTransfer extends CharacterCardTransfer {
           includeStickers: roomToggle?.checked === true && stickersToggle?.checked === true,
           includeMemoryTemplate: roomToggle?.checked === true && memoryTemplateToggle?.checked === true,
           hideServiceAddresses: roomToggle?.checked === true && hideAddressesToggle?.checked === true,
+          includeAgents: body.querySelector('#xp-export-agents')?.checked === true,
           includeMemoryData: memoryDataToggle?.checked === true,
           includeVariableState: variableStateToggle?.checked === true,
           includeChatHistory: chatToggle?.checked === true,
@@ -633,6 +642,8 @@ export class ExperiencePackTransfer extends CharacterCardTransfer {
         const resolved = store.getResolvedActive?.(type, { sessionId: sid, uiMode: 'chat' }) || null;
         if (!resolved?.preset) return;
         presets[type] = {
+          // 预设正文里没有自己的 ID：另记一份，导入时据此对应 AC 提示词档
+          id: String(resolved.presetId || '').trim(),
           name: String(resolved.preset?.name || type),
           source: String(resolved.source || 'global'),
           data: cloneJson(resolved.preset, {}),
@@ -644,15 +655,31 @@ export class ExperiencePackTransfer extends CharacterCardTransfer {
     return { presets };
   }
 
-  collectAgentCenterSettingsBundle() {
+  // 只带这个聊天室所用预设的 AC 提示词档（卡片开关、全局提示词库等本机设置不带）
+  collectAgentCenterSettingsBundle(presets = {}) {
     try {
       const actions = this.appBridge?.debugUiRegistry?.actions || {};
       const settings = typeof actions.getAgentCenterSettings === 'function'
         ? actions.getAgentCenterSettings()
         : null;
-      return settings && typeof settings === 'object' ? cloneJson(settings, null) : null;
+      if (!settings || typeof settings !== 'object') return null;
+      const presetIds = Object.fromEntries(Object.entries(presets || {})
+        .map(([type, item]) => [type, String(item?.id || item?.data?.id || '').trim()])
+        .filter(([, id]) => id));
+      return cloneJson(pickAgentCenterProfilesForPresets(settings, presetIds), null);
     } catch (err) {
       logger.warn('collect agent center settings failed', err);
+      return null;
+    }
+  }
+
+  // 这个联系人的聊天 Agent 配置（模型改为跟随当前、不含隐私同意；设定与卡片开关不带）
+  collectAgentWorkflowBundle(sessionId) {
+    try {
+      const built = this.appBridge?.debugUiRegistry?.actions?.exportContactAgentWorkflow?.({ sessionId });
+      return built?.ok ? cloneJson(built.package, null) : null;
+    } catch (err) {
+      logger.warn('collect agent workflow for experience pack failed', err);
       return null;
     }
   }
@@ -754,11 +781,12 @@ export class ExperiencePackTransfer extends CharacterCardTransfer {
     delete rawSettings.personaLockId;
     const wallpaper = await this.collectWallpaperBundle(sid, rawSettings, assets);
     if (rawSettings.wallpaper) rawSettings.wallpaper = null;
+    const presets = this.collectResolvedPresetBundle(sid);
     return {
       sessionSettings: rawSettings,
       wallpaper,
-      presets: this.collectResolvedPresetBundle(sid),
-      agentCenterSettings: this.collectAgentCenterSettingsBundle(),
+      presets,
+      agentCenterSettings: this.collectAgentCenterSettingsBundle(presets.presets),
       connection: await this.collectConnectionProfileBundle(sid, {
         hideServiceAddresses: options.hideServiceAddresses === true,
       }),
@@ -823,6 +851,7 @@ export class ExperiencePackTransfer extends CharacterCardTransfer {
     const variableState = options.includeVariableState ? this.collectVariableState(sid) : null;
     const regex = this.collectRegexBundle(sid, world.worldIds);
     const room = options.includeRoom ? await this.collectRoomBundle(sid, options, assets) : null;
+    const agentWorkflow = options.includeAgents ? this.collectAgentWorkflowBundle(sid) : null;
     const memoryData = options.includeMemoryData
       ? await this.buildMemorySnapshot(sid, { isGroup: false })
       : null;
@@ -843,6 +872,7 @@ export class ExperiencePackTransfer extends CharacterCardTransfer {
       memoryData,
       variableState,
       chat,
+      agentWorkflow,
       options,
       format: EXPERIENCE_PACK_FORMAT,
       formatVersion: EXPERIENCE_PACK_VERSION,
@@ -858,6 +888,7 @@ export class ExperiencePackTransfer extends CharacterCardTransfer {
       room,
       memoryData,
       chat,
+      agentWorkflow,
       archiveEntryNameForId: archiveId => `chat/archives/${slugifySegment(archiveId, 'archive')}.json`,
     }).map(entry => ({
       name: entry.name,
@@ -943,6 +974,7 @@ export class ExperiencePackTransfer extends CharacterCardTransfer {
       roomStickers: this.readJsonEntry(entryMap, 'room/stickers.json', []),
       memoryTemplate: this.readJsonEntry(entryMap, 'memory/template.json', null),
       memoryData: this.readJsonEntry(entryMap, 'memory/data.json', null),
+      agentWorkflow: this.readJsonEntry(entryMap, 'agents/workflow.json', null),
       personaCard: this.readJsonEntry(entryMap, 'persona/original-card.json', null),
       chatSession: sessionJson,
       chatCurrent: this.readJsonEntry(entryMap, 'chat/current.json', []),
@@ -1001,6 +1033,15 @@ export class ExperiencePackTransfer extends CharacterCardTransfer {
           <label style="display:flex; align-items:center; gap:10px; cursor:pointer; padding-left:28px; font-size:13px;">
             <input type="checkbox" id="xp-import-memory-template" checked style="width:16px; height:16px;">
             <span>记忆模板</span>
+          </label>
+          ` : ''}
+          ${layers.agents ? `
+          <label style="display:flex; align-items:flex-start; gap:10px; cursor:pointer;">
+            <input type="checkbox" id="xp-import-agents" checked style="width:18px; height:18px; margin-top:2px;">
+            <div>
+              <div style="font-weight:800; color:var(--app-text-primary);">Agent 配置</div>
+              <div style="font-size:12px; color:var(--app-text-muted);">只用于这个联系人；模型跟随当前</div>
+            </div>
           </label>
           ` : ''}
           ${layers.memory_data ? `
@@ -1080,6 +1121,7 @@ export class ExperiencePackTransfer extends CharacterCardTransfer {
           includeRoom: roomToggle ? roomToggle.checked === true : false,
           includeStickers: stickersToggle ? stickersToggle.checked === true : false,
           includeMemoryTemplate: memoryTemplateToggle ? memoryTemplateToggle.checked === true : false,
+          includeAgents: modal.body.querySelector('#xp-import-agents')?.checked === true,
           includeMemoryData,
           includeVariableState,
           includeChatHistory,
@@ -1335,9 +1377,14 @@ export class ExperiencePackTransfer extends CharacterCardTransfer {
     }
     if (packageData?.roomAgentCenterSettings) {
       try {
+        // 包内原预设 ID → 导入后的新预设 ID，按 ID 找到对应的提示词档
+        const sourcePresetIds = Object.fromEntries(Object.entries(roomPresets?.presets || {})
+          .map(([type, item]) => [type, String(item?.id || item?.data?.id || '').trim()])
+          .filter(([, id]) => id));
         await this.appBridge?.debugUiRegistry?.actions?.importAgentCenterSettings?.({
           settings: packageData.roomAgentCenterSettings,
           presetIdMap: restoredPresetIds,
+          sourcePresetIds,
         });
       } catch (err) {
         logger.warn('import agent center settings from experience pack failed', err);
@@ -1382,6 +1429,22 @@ export class ExperiencePackTransfer extends CharacterCardTransfer {
     }
 
     return settings;
+  }
+
+  // 联系人的 Agent 配置写到新联系人的「当前聊天」范围；失败只提示，不影响其余内容
+  async importAgentWorkflow(packageData, sessionId) {
+    try {
+      const result = await this.appBridge?.debugUiRegistry?.actions?.importContactAgentWorkflow?.({
+        workflow: packageData.agentWorkflow,
+        sessionId,
+      });
+      if (result && result.ok === false) {
+        window.toastr?.warning?.(`体验包已导入，但 Agent 配置未导入：${result.message || result.reason || '未知错误'}`);
+      }
+    } catch (err) {
+      logger.warn('import agent workflow from experience pack failed', err);
+      window.toastr?.warning?.('体验包已导入，但 Agent 配置未导入');
+    }
   }
 
   async importStickerPacks(packageData, sessionId) {
@@ -1564,6 +1627,9 @@ export class ExperiencePackTransfer extends CharacterCardTransfer {
     });
     this.chatStore?.setSessionSettings?.(newSessionId, sessionSettings);
 
+    if (options.includeAgents && packageData?.agentWorkflow) {
+      await this.importAgentWorkflow(packageData, newSessionId);
+    }
     if (options.includeVariableState) {
       this.importVariableState(packageData, newSessionId);
     }

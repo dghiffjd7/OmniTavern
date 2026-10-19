@@ -6,7 +6,9 @@ import {
   dismissGuidedActionObstructions,
   isGuidedActionElementVisible,
   isGuidedActionOutputOk,
+  listGuidedActionEntrySteps,
   prepareGuidedActionEntryNavigation,
+  selectGuidedActionRoute,
 } from '../../src/scripts/ui/app-guided-action-runtime-utils.js';
 import { listAppFeatures } from '../../src/scripts/agent/app-feature-catalog.js';
 
@@ -57,12 +59,69 @@ import { listAppFeatures } from '../../src/scripts/agent/app-feature-catalog.js'
   const firstRunFeatures = listAppFeatures().filter(feature => feature.firstRunGuide);
   const missing = firstRunFeatures.flatMap((feature) => {
     const guide = buildGuidedActionGuide(feature);
-    return guide.stepDetails
+    return (guide.routes || [guide]).flatMap(route => route.stepDetails)
       .filter(step => step.selectors.length === 0)
       .map(step => `${feature.id}:${step.label}`);
   });
   assert.deepEqual(missing, [], `first-run guide steps missing UI selectors: ${missing.join(', ')}`);
   console.log('ok - every first-run guide follows current UI routes with resolvable selectors');
+}
+
+{
+  // 同一功能有多个入口（AC：设置菜单，或聊天室/动态页右上角的 A）：首次引导从用户当前看得到的入口走
+  const feature = listAppFeatures().find(item => item.id === 'agent.center.open');
+  const guide = buildGuidedActionGuide(feature);
+  assert.deepEqual(guide.steps, ['设置', 'Agent Center']);
+  assert.deepEqual(guide.routes.map(route => route.steps), [['设置', 'Agent Center'], ['右上角 A 按钮']]);
+  assert.ok(guide.routes[1].stepDetails[0].selectors.some(selector => selector.includes('agent-center-entry')));
+  assert.match(guide.message, /设置 -> Agent Center/);
+  assert.match(guide.message, /右上角 A 按钮/);
+  assert.deepEqual(listGuidedActionEntrySteps(guide).map(step => step.label), ['设置', '右上角 A 按钮']);
+
+  const inRoom = selectGuidedActionRoute(guide, step => step.label === '右上角 A 按钮');
+  assert.deepEqual(inRoom.steps, ['右上角 A 按钮']);
+  assert.equal(inRoom.stepDetails[0].label, '右上角 A 按钮');
+  assert.equal(inRoom.pathText, '右上角 A 按钮');
+  assert.equal(inRoom.guideId, 'agent.center.open.guide');
+
+  const inList = selectGuidedActionRoute(guide, step => step.label === '设置');
+  assert.deepEqual(inList.steps, ['设置', 'Agent Center']);
+  const nowhere = selectGuidedActionRoute(guide, () => false);
+  assert.deepEqual(nowhere.steps, ['设置', 'Agent Center'], 'no visible entry falls back to the main route (entry navigation)');
+
+  const single = buildGuidedActionGuide({ id: 'x', title: 'X', firstRunGuide: 'x.guide', uiPath: ['设置', '设定'] });
+  assert.equal(single.routes, undefined);
+  assert.deepEqual(listGuidedActionEntrySteps(single).map(step => step.label), ['设置']);
+  assert.equal(selectGuidedActionRoute(single, () => true), single);
+  console.log('ok - first-run guides start from whichever entry of the feature is visible');
+}
+
+{
+  // 写作房间：右上角菜单有「设定」「API设定」，头像打开用户/角色卡切换；引导从这些入口走，不退出写作模式
+  const byId = id => buildGuidedActionGuide(listAppFeatures().find(item => item.id === id));
+  const apiGuide = byId('config.api.open');
+  assert.deepEqual(apiGuide.routes.map(route => route.steps), [
+    ['设置', 'API / 模型配置'],
+    ['写作房间右上角菜单', 'API / 模型配置'],
+  ]);
+  const memoryGuide = byId('memory.open');
+  assert.deepEqual(memoryGuide.routes.map(route => route.steps), [
+    ['设置', '设定', '记忆表格'],
+    ['写作房间右上角菜单', '设定', '记忆表格'],
+  ]);
+  const writingMenu = apiGuide.routes[1].stepDetails[0].selectors;
+  assert.ok(writingMenu.length && writingMenu.every(selector => selector.includes('[data-ui-mode="rp"]')),
+    'the writing-room menu entry only matches in writing mode (the chat-mode room menu has no settings/API items)');
+  assert.ok(apiGuide.routes[1].stepDetails[1].selectors.includes('#rp-chatroom-menu button[data-action="config"]'));
+  assert.ok(memoryGuide.routes[1].stepDetails[1].selectors.includes('#rp-chatroom-menu button[data-action="settings"]'));
+  for (const id of ['persona.create', 'persona.switch', 'user.create', 'user.switch']) {
+    const guide = byId(id);
+    assert.ok(
+      guide.stepDetails[0].selectors.includes('body[data-ui-mode="rp"] #current-chat-avatar-button'),
+      `${id} starts from the writing-room avatar, which opens the user/character switcher`,
+    );
+  }
+  console.log('ok - writing-room first-run guides start from the room menu or avatar');
 }
 
 {
@@ -173,6 +232,36 @@ import { listAppFeatures } from '../../src/scripts/agent/app-feature-catalog.js'
   assert.equal(second.guided, false);
   assert.equal(shown.length, 1);
   console.log('ok - guided action runtime guides first run and skips completed guides');
+}
+
+{
+  // 引导按当前看得到的入口选了路线（聊天室里的 A）时，交给女仆的结果只写这条路线，回复才和高亮一致
+  const feature = {
+    id: 'agent.center.open',
+    title: '打开 Agent Center',
+    firstRunGuide: 'agent.center.open.guide',
+    uiPath: ['设置', 'Agent Center'],
+    uiPathAlternatives: [['右上角 A 按钮']],
+  };
+  const makeRuntime = showGuide => createAppGuidedActionRuntime({
+    guideStore: { isCompleted: () => false, markCompleted() {} },
+    getFeature: () => feature,
+    showGuide,
+  });
+  const execute = async () => ({ status: 'succeeded', result: { ok: true } });
+  const inRoom = await makeRuntime(guide => selectGuidedActionRoute(guide, step => step.label === '右上角 A 按钮'))
+    .run({ plan: { featureId: feature.id }, execute });
+  assert.equal(inRoom.guide.pathText, '右上角 A 按钮');
+  assert.deepEqual(inRoom.guide.steps, ['右上角 A 按钮']);
+  assert.equal(inRoom.guide.routes, undefined);
+  assert.match(inRoom.message, /「右上角 A 按钮」/);
+  assert.doesNotMatch(inRoom.message, /设置/);
+
+  // 只弹提示、没有逐步引导时（showGuide 不回报路线），仍给出全部入口
+  const toastOnly = await makeRuntime(() => undefined).run({ plan: { featureId: feature.id }, execute });
+  assert.equal(toastOnly.guide.pathText, '设置 -> Agent Center');
+  assert.match(toastOnly.message, /设置 -> Agent Center.*右上角 A 按钮/);
+  console.log('ok - guided action result reports the route the guide actually walked');
 }
 
 {
@@ -305,6 +394,31 @@ import { listAppFeatures } from '../../src/scripts/agent/app-feature-catalog.js'
   assert.equal(result.route, 'chat_list');
   assert.deepEqual(calls, ['hide', 'exit', 'switch:chat:false']);
   console.log('ok - guided action entry navigation exits a room before opening the chat list shell');
+}
+
+{
+  const calls = [];
+  let roomVisible = false;
+  const result = await prepareGuidedActionEntryNavigation({
+    guide: { stepDetails: [{ label: '顶部 +' }] },
+    isTargetVisible: () => false,
+    isWritingMode: () => true,
+    exitWritingMode: () => {
+      calls.push('exit-writing');
+      roomVisible = true; // 回到聊天模式时可能恢复到上次的聊天室
+    },
+    isChatRoomVisible: () => roomVisible,
+    hideMenus: () => calls.push('hide'),
+    exitChatRoom: () => {
+      calls.push('exit');
+      roomVisible = false;
+    },
+    switchPage: (page, options) => calls.push(`switch:${page}:${options?.animate}`),
+  });
+  assert.equal(result.navigated, true);
+  assert.equal(result.route, 'chat_list');
+  assert.deepEqual(calls, ['hide', 'exit-writing', 'exit', 'switch:chat:false']);
+  console.log('ok - guided action entry navigation leaves writing mode like the mode ball instead of hiding the writing room');
 }
 
 {

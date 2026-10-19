@@ -15,6 +15,16 @@ const STYLE_ID = 'maid-command-input-runtime-style';
 const FIELD_MIN_HEIGHT = 32;
 const FIELD_MAX_HEIGHT = 76;
 const DEFAULT_MAX_IMAGE_ATTACHMENTS = 4;
+export const MAID_ATTACHMENT_ACCEPT = [
+  'image/*', 'text/*', '.json', 'application/json', '.js', 'text/javascript', 'application/javascript', '.charx',
+  '.txt', '.md', '.csv', '.tsv', '.log', '.yaml', '.yml', '.xml', '.html', '.srt', '.ini', '.toml',
+  '.zip', 'application/zip', 'application/x-zip-compressed',
+  '.docx', '.xlsx', '.pptx',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/octet-stream',
+].join(',');
 const SHEET_MEDIA_QUERY = '(max-width: 760px) and (pointer: coarse)';
 const SHEET_SNAPS = Object.freeze(['peek', 'half', 'full']);
 const REPORT_TONES = new Set(['success', 'error', 'info']);
@@ -788,6 +798,8 @@ export const createMaidCommandInputRuntime = ({
   onCancelActive = null,
   onSettings = null,
   onAttachFiles = null,
+  // 没发送就移除、或关闭时丢弃的附件交回，由 APP 释放缓存的原文件
+  onDiscardAttachments = null,
   onToggleSelection = null,
   onPreviewImage = null,
   onOpenStateChange = null,
@@ -996,17 +1008,23 @@ export const createMaidCommandInputRuntime = ({
   const addFiles = async (files = [], { source = 'picker' } = {}) => {
     const list = Array.from(files || []);
     if (!list.length || typeof onAttachFiles !== 'function') return [];
-    const remaining = getMaxImages() - imageAttachments.length;
-    if (remaining <= 0) return [];
-    const result = await onAttachFiles(list.slice(0, remaining), { source });
+    // 名额交给附件构建判断：先分类再占位，不支持的文件不占名额，放不下的会提示
+    const remaining = Math.max(0, getMaxImages() - imageAttachments.length);
+    const result = await onAttachFiles(list, { source, maxCount: remaining });
     const attachments = normalizeIncomingAttachments(result);
     appendAttachments(attachments);
     return attachments;
   };
 
+  const discardAttachments = (list = []) => {
+    if (!list.length) return;
+    try { onDiscardAttachments?.(list); } catch {}
+  };
+
   const removeAttachment = (id = '') => {
     const target = trim(id);
     if (!target) return;
+    discardAttachments(imageAttachments.filter(item => trim(item.id) === target));
     imageAttachments = imageAttachments.filter(item => trim(item.id) !== target);
     renderAttachments();
   };
@@ -1734,7 +1752,8 @@ export const createMaidCommandInputRuntime = ({
     fileInputEl = documentRef.createElement?.('input');
     if (fileInputEl) {
       fileInputEl.type = 'file';
-      fileInputEl.accept = 'image/*,.json,application/json,.js,text/javascript,application/javascript,.charx';
+      // Android 会丢掉它不认识的扩展名，所以同时列出 MIME；octet-stream 让 .charx 等未登记类型也能选，选中后按内容识别
+      fileInputEl.accept = MAID_ATTACHMENT_ACCEPT;
       fileInputEl.multiple = true;
       fileInputEl.style.display = 'none';
     }
@@ -1975,6 +1994,7 @@ export const createMaidCommandInputRuntime = ({
       restoreResultOnNextOpen = true;
     } else if (!preserve) {
       clearResult();
+      discardAttachments(imageAttachments.slice());
       clearAttachments();
     }
     unbindOutsidePointer();
@@ -2158,6 +2178,13 @@ export const createMaidCommandInputRuntime = ({
     getLayout: () => ({ layout, snap: layout === 'sheet' ? sheetSnap : '' }),
     setSheetSnap,
     addFiles,
+    // 直接加入已登记的附件（例如女仆产出的文件「附加给女仆」）；已在附件条上的跳过，返回实际加入数
+    addAttachments: (list = []) => {
+      const existing = new Set(imageAttachments.map(item => trim(item.id)));
+      const before = imageAttachments.length;
+      appendAttachments(normalizeIncomingAttachments(list).filter(item => !existing.has(trim(item.id))));
+      return imageAttachments.length - before;
+    },
     clearAttachments,
     getAttachments: () => imageAttachments.slice(),
     getResultMessages: () => resultMessages.map(item => ({ ...item })),

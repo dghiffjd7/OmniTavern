@@ -41,9 +41,10 @@ const {
 } = await import('../../src/scripts/plugins/script-runtime.js');
 const { appSettings } = await import('../../src/scripts/storage/app-settings.js');
 const { buildTavernConnectionSettings } = await import('../../src/scripts/plugins/tavern-connection-settings.js');
+const { toScriptPreset } = await import('../../src/scripts/plugins/preset-script-api.js');
 globalThis.setTimeout = realSetTimeout;
 
-const createWorkerHarness = ({ chatMessages = [], characterRegexes = [], fetchImpl, importScriptsImpl } = {}) => {
+const createWorkerHarness = ({ chatMessages = [], characterRegexes = [], fetchImpl, importScriptsImpl, rpc = null } = {}) => {
   const messages = [];
   const networkCalls = { xhr: 0, webSocket: 0, importScripts: 0 };
   let sandbox = null;
@@ -112,8 +113,9 @@ const createWorkerHarness = ({ chatMessages = [], characterRegexes = [], fetchIm
           sandbox.self.onmessage({ data: { type: 'rpc_result', id: msg.id, result: characterRegexes } });
         });
       } else if (msg?.type === 'rpc') {
+        const custom = rpc?.(msg);
         queueMicrotask(() => {
-          sandbox.self.onmessage({ data: { type: 'rpc_result', id: msg.id, result: true } });
+          sandbox.self.onmessage({ data: { type: 'rpc_result', id: msg.id, result: custom === undefined ? true : custom } });
         });
       }
     },
@@ -172,6 +174,45 @@ const flushTimers = () => new Promise(resolve => setTimeout(resolve, 0));
   assert.match(html, /<svg[^>]*><path/);
   assert.match(html, /<textarea[^>]*>initial &lt;text&gt;\n中文<\/textarea>/, 'textarea live value must become native textarea content');
   console.log('ok - scoped preset APIs allow local names; script data persists without delayed clearing; subscriptions and SVG work');
+}
+
+{
+  // 酒馆原始事件名与 tavern_events 常量都对到内部事件；处理函数拿到展开的参数；脚本载入后各收到一次 APP_READY
+  const { sandbox } = createWorkerHarness();
+  const script = `
+    globalThis.__events = [];
+    eventOn('chat_id_changed', id => globalThis.__events.push('raw-chat:' + id));
+    eventOn(tavern_events.CHAT_CHANGED, id => globalThis.__events.push('const-chat:' + id));
+    eventOn('message_swiped', id => globalThis.__events.push('raw-swipe:' + id));
+    eventOn(tavern_events.MESSAGE_SWIPED, id => globalThis.__events.push('const-swipe:' + id));
+    eventOn(tavern_events.APP_READY, () => globalThis.__events.push('ready'));
+    eventOn('app_ready', () => globalThis.__events.push('raw-ready'));
+    const removed = () => globalThis.__events.push('removed');
+    eventOn('chat_id_changed', removed);
+    eventRemoveListener('chat_id_changed', removed);
+  `;
+  await sandbox.self.onmessage({ data: { type: 'sync', context: { sessionId: 'rp:events' }, scripts: [{ id: 'ev', enabled: true, content: script }] } });
+  await flushTimers();
+  await sandbox.self.onmessage({ data: { type: 'dispatch', event: 'chat.changed', id: 'c', payload: { args: ['rp:events'] }, allowMutate: false } });
+  await sandbox.self.onmessage({ data: { type: 'dispatch', event: 'message.swiped', id: 's', payload: { args: [3] }, allowMutate: false } });
+  await flushTimers();
+  assert.deepEqual(Array.from(sandbox.__events).sort(), [
+    'const-chat:rp:events', 'const-swipe:3', 'raw-chat:rp:events', 'raw-ready', 'raw-swipe:3', 'ready',
+  ].sort());
+  assert.equal(sandbox.tavern_events.CHAT_CHANGED, 'chat.changed');
+  console.log('ok - worker maps raw tavern event names, spreads args and fires APP_READY once per script load');
+}
+
+{
+  // 宿主在进房、切换回复时发出事件；iframe 运行环境也带 tavern_events 常量与原始名对照
+  const { readFileSync } = await import('node:fs');
+  const app = readFileSync(new URL('../../src/scripts/ui/app.js', import.meta.url), 'utf8');
+  assert.match(app, /dispatchEvent\?\.\('chat\.changed', \{ sessionId: sid, args: \[sid\] \}/);
+  assert.match(app, /dispatchEvent\?\.\('message\.swiped', \{ sessionId: sid, messageId: msgId, args: \[floor\] \}/);
+  const runtimeSource = readFileSync(new URL('../../src/scripts/plugins/script-runtime.js', import.meta.url), 'utf8');
+  assert.match(runtimeSource, /Object\.assign\(window\.tavern_events, \$\{JSON\.stringify\(TAVERN_EVENT_TYPES\)\}\)/);
+  assert.match(runtimeSource, /window\.eventOn = eventOnCompat;/);
+  console.log('ok - host dispatches chat.changed and message.swiped; iframe runtime shares event constants');
 }
 
 {
@@ -1335,6 +1376,148 @@ console.log('ok - script runtime recognizes actual ESM import and export syntax'
     false,
   );
   console.log('ok - worker exposes generateRaw and forwards role prompts plus custom API settings');
+}
+
+{
+  // 酒馆助手正则接口的 type（新写法）与 scope（旧写法）：预设正则从预设脚本接口读、经 regex.replacePreset 写，只同步开关；
+  // 其他类型不再误读、误写角色正则（Izumi 悬浮窗的正则联动传 {type:'preset', name}）。
+  const savedRegexes = [
+    { id: 'a', script_name: '摘要美化', enabled: true, __chatappSetId: 'set-p' },
+    { id: 'b', script_name: '摘要纯文本', enabled: false, __chatappSetId: 'set-p' },
+  ];
+  const inUseRegexes = savedRegexes.map(rule => (rule.id === 'b' ? { ...rule, enabled: true } : rule));
+  const rpcCalls = [];
+  const { sandbox, messages } = createWorkerHarness({
+    characterRegexes: [{ id: 'c1', script_name: '摘要美化', enabled: true, __chatappSetId: 'set-c' }],
+    rpc: (msg) => {
+      if (msg.method === 'regex.replacePreset') {
+        rpcCalls.push([msg.params.name, msg.params.regexes.map(rule => rule.id + ':' + rule.script_name + ':' + rule.enabled)]);
+        return { context: { savedPresetRegexes: savedRegexes.map(rule => ({ ...rule, enabled: rule.id === 'b' })) } };
+      }
+      return undefined;
+    },
+  });
+  const script = `
+    const read = rows => rows.map(rule => rule.script_name + ':' + rule.enabled);
+    globalThis.__regexRead = {
+      inUse: read(getTavernRegexes({ type: 'preset', name: 'in_use' })),
+      defaultName: read(getTavernRegexes({ type: 'preset' })),
+      saved: read(getTavernRegexes({ type: 'preset', name: 'Izumi 1002' })),
+      legacyScope: read(getTavernRegexes({ scope: 'preset', name: 'Izumi 1002' })),
+      character: read(getTavernRegexes({ type: 'character' })),
+      global: read(getTavernRegexes({ type: 'global' })),
+      otherPreset: read(getTavernRegexes({ type: 'preset', name: '别的预设' })),
+    };
+    const next = getTavernRegexes({ type: 'preset', name: 'Izumi 1002' }).map(rule => ({ ...rule, enabled: rule.id === 'b' }));
+    globalThis.__regexReplace = Promise.all([
+      replaceTavernRegexes(next, { type: 'preset', name: 'Izumi 1002' }),
+      replaceTavernRegexes(next, { type: 'global' }),
+    ]);
+  `;
+  await sandbox.self.onmessage({ data: { type: 'sync', settings: { allowNetwork: false, allowModifyVariables: true },
+    context: { sessionId: 'rp:s1', presetName: 'Izumi 1002', openaiPresetId: 'p1', activePreset: { prompts: [] },
+      savedPreset: { prompts: [] }, presetRegexes: inUseRegexes, savedPresetRegexes: savedRegexes },
+    scripts: [{ id: 'preset-regex', name: 'preset regex', enabled: true, content: script }] } });
+  await flushTimers();
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.__regexRead)), {
+    inUse: ['摘要美化:true', '摘要纯文本:true'],
+    defaultName: ['摘要美化:true', '摘要纯文本:true'],
+    saved: ['摘要美化:true', '摘要纯文本:false'],
+    legacyScope: ['摘要美化:true', '摘要纯文本:false'],
+    character: ['摘要美化:true'],
+    global: [],
+    otherPreset: [],
+  });
+  assert.deepEqual(Array.from(await sandbox.__regexReplace), [true, false]);
+  // 只送开关清单（大预设不整份往返），写入后用外层回传的上下文更新同步读取
+  assert.deepEqual(rpcCalls, [['Izumi 1002', ['a:摘要美化:false', 'b:摘要纯文本:true']]]);
+  const after = vm.runInContext("getTavernRegexes({ type: 'preset', name: 'Izumi 1002' }).map(rule => rule.id + ':' + rule.enabled)", sandbox);
+  assert.deepEqual(Array.from(after), ['a:false', 'b:true']);
+  assert.equal(messages.some(msg => msg.type === 'rpc' && msg.method === 'regex.replaceCharacter'), false, 'preset/global writes never touch character regexes');
+  console.log('ok - tavern regex APIs read and toggle preset regexes through the preset script API');
+}
+
+{
+  // 脚本的 globalThis 是包住 self 的 Proxy：原生全局方法以它为 this 调用会报 Illegal invocation
+  // （Izumi 悬浮窗 createLifecycle 用 globalThis.setTimeout.bind(globalThis)，计时器全挂，按下处理到不了 setPointerCapture）。
+  const { sandbox } = createWorkerHarness();
+  // vm 里 worker 代码的 self 是 context 的全局对象（不是外面的 sandbox）；像浏览器一样只认它
+  const realGlobal = vm.runInContext('globalThis', sandbox);
+  const brandChecked = (name, impl) => function (...args) {
+    if (this !== undefined && this !== realGlobal) throw new TypeError('Illegal invocation: ' + name);
+    return impl(...args);
+  };
+  sandbox.setTimeout = brandChecked('setTimeout', setTimeout);
+  sandbox.atob = brandChecked('atob', value => Buffer.from(String(value), 'base64').toString('binary'));
+  const script = `
+    const timers = { setTimeout: globalThis.setTimeout.bind(globalThis) };
+    globalThis.__brandResult = [
+      globalThis.atob('YQ=='),
+      timers.setTimeout(() => {}, 0) != null,
+      globalThis.setTimeout === globalThis.setTimeout,
+    ];
+  `;
+  await sandbox.self.onmessage({ data: { type: 'sync', settings: { allowNetwork: false }, context: { sessionId: 's1' },
+    scripts: [{ id: 'global-methods', name: 'global methods', enabled: true, content: script }] } });
+  await flushTimers();
+  assert.deepEqual(Array.from(sandbox.__brandResult || []), ['a', true, true]);
+  console.log('ok - native global methods read through the script globalThis keep the real global as this');
+}
+
+{
+  // 指针捕获：鼠标没有隐式捕获，拖动时移出元素后外层只能把 move/up 转给 document；
+  // 脚本 setPointerCapture 后要改派回被捕获的元素，up/cancel 后自动释放（Izumi 悬浮窗电脑上拖拽掉线、粘手）。
+  const { sandbox, messages } = createWorkerHarness();
+  const script = `
+    const log = globalThis.__pointerLog = [];
+    const box = document.createElement('div');
+    box.id = 'drag-box';
+    box.textContent = 'drag';
+    box.addEventListener('pointerdown', (event) => {
+      box.setPointerCapture(event.pointerId);
+      log.push('down:' + box.hasPointerCapture(event.pointerId));
+    });
+    ['pointermove', 'pointerup', 'pointercancel', 'lostpointercapture'].forEach((type) => {
+      box.addEventListener(type, (event) => log.push(type + ':' + event.pointerId + ':' + (event.clientX ?? '') + ':' + (event.target === box)));
+    });
+    document.body.appendChild(box);
+    const other = document.createElement('div');
+    other.id = 'other-box';
+    other.addEventListener('pointermove', () => log.push('other-move'));
+    document.body.appendChild(other);
+    globalThis.__pointerBox = box;
+  `;
+  await sandbox.self.onmessage({ data: { type: 'sync', settings: { allowNetwork: false }, context: { sessionId: 's1' },
+    scripts: [{ id: 'pointer-capture', name: 'pointer capture', enabled: true, content: script }] } });
+  await flushTimers();
+  const html = messages.filter(msg => msg.type === 'ui_update').at(-1).payload.roots.join('');
+  const boxId = html.match(/id="drag-box"[^>]*data-chatapp-virtual-node-id="([^"]+)"|data-chatapp-virtual-node-id="([^"]+)"[^>]*id="drag-box"/)?.slice(1).find(Boolean);
+  const otherId = html.match(/id="other-box"[^>]*data-chatapp-virtual-node-id="([^"]+)"|data-chatapp-virtual-node-id="([^"]+)"[^>]*id="other-box"/)?.slice(1).find(Boolean);
+  assert.ok(boxId && otherId, 'missing mirrored pointer test nodes');
+  const send = (eventType, event, target = {}) => sandbox.self.onmessage({ data: { type: 'ui_event', eventType, ...target,
+    event: { bubbles: true, cancelable: true, pointerType: 'mouse', isPrimary: true, ...event } } });
+  await send('pointerdown', { pointerId: 1, button: 0, buttons: 1, clientX: 10 }, { nodeId: boxId });
+  await send('pointermove', { pointerId: 1, buttons: 1, clientX: 120 }, { targetType: 'document' });
+  await send('pointermove', { pointerId: 1, buttons: 1, clientX: 140 }, { nodeId: otherId });
+  await send('pointerup', { pointerId: 1, button: 0, buttons: 0, clientX: 150 }, { targetType: 'document' });
+  assert.equal(sandbox.__pointerBox.hasPointerCapture(1), false, 'pointerup releases the capture');
+  await send('pointermove', { pointerId: 1, buttons: 0, clientX: 160 }, { targetType: 'document' });
+  assert.deepEqual(Array.from(sandbox.__pointerLog), [
+    'down:true',
+    'pointermove:1:120:true',
+    'pointermove:1:140:true',
+    'pointerup:1:150:true',
+    'lostpointercapture:1::true',
+  ]);
+
+  // 外层失焦时补发的 pointercancel 不带 pointerId：被捕获的元素也要收到取消并释放
+  sandbox.__pointerLog.length = 0;
+  await send('pointerdown', { pointerId: 1, button: 0, buttons: 1, clientX: 10 }, { nodeId: boxId });
+  await sandbox.self.onmessage({ data: { type: 'ui_event', targetType: 'document', eventType: 'pointercancel',
+    event: { type: 'pointercancel', bubbles: true, cancelable: false, buttons: 0 } } });
+  assert.equal(sandbox.__pointerBox.hasPointerCapture(1), false);
+  assert.deepEqual(Array.from(sandbox.__pointerLog), ['down:true', 'pointercancel:1::true', 'lostpointercapture:1::true']);
+  console.log('ok - script pointer capture retargets forwarded pointer events until release');
 }
 
 {

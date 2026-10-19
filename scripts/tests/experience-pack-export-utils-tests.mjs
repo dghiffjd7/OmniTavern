@@ -231,6 +231,7 @@ const {
     memoryData: { rows: [] },
     variableState: { values: {} },
     chat: { currentMessages: [] },
+    agentWorkflow: { format: 'omnitavern.agent-workflow' },
     options: { hideServiceAddresses: true },
     exportedAt: '2026-05-08T13:50:00.000Z',
   });
@@ -252,6 +253,7 @@ const {
       memory_data: true,
       variable_state: true,
       chat_history: true,
+      agents: true,
     },
     options: {
       hideServiceAddresses: true,
@@ -285,6 +287,7 @@ const {
         memory_data: false,
         variable_state: false,
         chat_history: false,
+        agents: false,
       },
       options: {
         hideServiceAddresses: false,
@@ -361,6 +364,7 @@ const {
         messages: [{ id: 'old-1' }],
       }],
     },
+    agentWorkflow: { format: 'omnitavern.agent-workflow' },
     archiveEntryNameForId: archiveId => `chat/archives/${String(archiveId).replace('/', '_')}.json`,
   });
 
@@ -377,6 +381,7 @@ const {
     'room/connection-profile.json',
     'room/stickers.json',
     'memory/template.json',
+    'agents/workflow.json',
     'memory/data.json',
     'chat/session.json',
     'chat/current.json',

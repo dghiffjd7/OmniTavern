@@ -6,6 +6,7 @@ import {
   getAgentCenterGlobalSemanticPromptLibrary,
   lazyMigratePresetProfileToAgentCenterSettings,
   mergeImportedAgentCenterSettings,
+  pickAgentCenterProfilesForPresets,
   migratePresetStateToAgentCenterSettings,
   removeAgentCenterGlobalSemanticPromptBlock,
   reorderAgentCenterGlobalSemanticPromptBlocks,
@@ -323,6 +324,58 @@ const { getCanonicalBuiltinPromptDefaults } = await import('../../src/scripts/st
   assert.equal(merged.profiles['sysprompt:newSysp'].agents.summary_agent.prompts.summary.rules, 'imported summary');
   assert.equal(merged.profiles['sysprompt:oldSysp'], undefined);
   console.log('ok - imported agent center settings remap profile ids');
+}
+
+{
+  // 体验包带来的只是这个聊天室预设的提示词档：按原预设 ID 对应到新预设；其他预设的档、对方的卡片开关、全局提示词库与迁移记录都不导入
+  const local = {
+    cards: { image_director: { enabled: false } },
+    global: { semanticPromptLibrary: { version: 1, blocks: [{ id: 'mine', name: '我的块', text: '保留', enabled: true }] } },
+    migrations: { presetPromptV1: 111 },
+  };
+  const imported = {
+    cards: { image_director: { enabled: true } },
+    global: { semanticPromptLibrary: { version: 1, blocks: [] } },
+    migrations: { presetPromptV1: 999, somethingElse: 1 },
+    profiles: {
+      'sysprompt:roomSysp': { profileType: 'sysprompt', presetId: 'roomSysp', agents: { summary_agent: { prompts: { summary: { rules: 'room summary' } } } } },
+      'sysprompt:otherSysp': { profileType: 'sysprompt', presetId: 'otherSysp', agents: { summary_agent: { prompts: { summary: { rules: 'other summary' } } } } },
+    },
+  };
+  const merged = mergeImportedAgentCenterSettings(local, imported, {
+    presetIdMap: { sysprompt: 'newSysp' },
+    sourcePresetIds: { sysprompt: 'roomSysp' },
+    now: () => 5000,
+  });
+  assert.equal(merged.profiles['sysprompt:newSysp'].agents.summary_agent.prompts.summary.rules, 'room summary');
+  assert.equal(merged.profiles['sysprompt:otherSysp'].agents.summary_agent.prompts.summary.rules, 'other summary', 'other profiles keep their own preset id instead of collapsing onto the room preset');
+  assert.equal(merged.cards.image_director.enabled, false, 'the importer keeps its own card switches');
+  assert.deepEqual(merged.global.semanticPromptLibrary.blocks.map(block => block.id), ['mine'], 'the importer keeps its own global prompt library');
+  assert.equal(merged.migrations.presetPromptV1, 111);
+  assert.equal(merged.migrations.somethingElse, undefined);
+  assert.equal(merged.migrations.importedAgentCenterSettingsAt, 5000);
+
+  const ambiguous = mergeImportedAgentCenterSettings({}, imported, { presetIdMap: { sysprompt: 'newSysp' }, now: () => 5000 });
+  assert.equal(ambiguous.profiles['sysprompt:newSysp'], undefined, 'an old pack with several profiles of one type is not guessed onto the new preset');
+  assert.equal(ambiguous.profiles['sysprompt:roomSysp'].agents.summary_agent.prompts.summary.rules, 'room summary');
+  console.log('ok - imported agent center settings map the room preset profile by id and keep local switches and library');
+}
+
+{
+  const settings = {
+    cards: { image_director: { enabled: true } },
+    global: { semanticPromptLibrary: { version: 1, blocks: [{ id: 'g', name: 'g', text: 'g', enabled: true }] } },
+    profiles: {
+      'sysprompt:room': { profileType: 'sysprompt', presetId: 'room', agents: {} },
+      'sysprompt:other': { profileType: 'sysprompt', presetId: 'other', agents: {} },
+      'openai:roomOai': { profileType: 'openai', presetId: 'roomOai', agents: {} },
+    },
+  };
+  const picked = pickAgentCenterProfilesForPresets(settings, { sysprompt: 'room', openai: 'roomOai' });
+  assert.deepEqual(Object.keys(picked.profiles).sort(), ['openai:roomOai', 'sysprompt:room']);
+  assert.equal(picked.cards, undefined);
+  assert.equal(picked.global, undefined);
+  console.log('ok - experience packs export only the room preset profiles');
 }
 
 /* 注入整合语义澄清（2026-07-16）：chip 只管预览展示；此前 presetInjectDefaultOffV1

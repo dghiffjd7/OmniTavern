@@ -9,7 +9,7 @@ const smoke = async () => {
   host.innerHTML = '<div class="chat-input-wrap"><textarea class="chat-input" rows="3" aria-label="测试输入"></textarea></div>';
   document.body.append(host);
   const input = host.querySelector('textarea');
-  let requests = 0, inputEvents = 0, capturedContext;
+  let requests = 0, inputEvents = 0, capturedContext, undoSupported = false;
   let settings = { enabled: false, modelMode: 'profile', modelProfileId: 'mock' };
   let key = 'chat:a';
   const controller = bindInputSuggestionComposer({
@@ -46,7 +46,7 @@ const smoke = async () => {
     check(input.value === '今天想去公公园散步。', 'accepted text was not inserted at cursor');
     check(inputEvents > beforeEvents, 'acceptance must trigger existing input/draft listeners');
     check(host.querySelector('.input-suggestion-mirror').hidden, 'accepted ghost should disappear');
-    const undoSupported = document.execCommand('undo');
+    undoSupported = document.execCommand('undo');
     check(undoSupported && input.value === '今天想去公', 'acceptance must support native undo');
     controller.cancel();
 
@@ -106,8 +106,60 @@ const smoke = async () => {
     settings = { ...settings, enabled: false };
     type('关闭以后'); await pause();
     check(host.querySelector('.input-suggestion-accept').hidden, 'disabled suggestion remains visible');
-    return { passed: true, requests, undoSupported, modelRequests: 0 };
   } finally { controller.dispose(); host.remove(); }
+
+  // 长建议：输入框跟着灰字长高（不超过最大高度），再长可在框内滚到灰字末尾；点输入框不取消，光标离开末尾才取消。
+  const longHost = document.createElement('div');
+  longHost.style.cssText = 'position:fixed;z-index:2147483647;top:20%;left:16px;width:320px;background:var(--app-surface-card);padding:24px;box-sizing:border-box;';
+  longHost.innerHTML = '<div class="chat-input-wrap"><textarea class="chat-input" rows="1" aria-label="长建议测试"></textarea></div>';
+  document.body.append(longHost);
+  const longInput = longHost.querySelector('textarea');
+  // 与 APP 一致：自动长高先于输入建议绑定
+  const autosize = () => { longInput.style.height = 'auto'; longInput.style.height = `${longInput.scrollHeight}px`; };
+  longInput.addEventListener('input', autosize);
+  let longSuggestion = '';
+  const longController = bindInputSuggestionComposer({
+    input: longInput, getSettings: () => ({ enabled: true, modelMode: 'profile', modelProfileId: 'mock' }), getContext: () => ({ key: 'long' }),
+    request: async () => longSuggestion, runtimeOptions: { delayMs: 10 },
+  });
+  const mirror = () => longHost.querySelector('.input-suggestion-mirror');
+  const ghostEndVisible = () => {
+    const text = longHost.querySelector('.input-suggestion-text .input-suggestion-remaining').firstChild;
+    const range = document.createRange(); range.setStart(text, text.length - 1); range.setEnd(text, text.length);
+    const last = range.getBoundingClientRect(), box = mirror().getBoundingClientRect();
+    return last.bottom <= box.bottom + 1 && last.top >= box.top - 1;
+  };
+  const typeLong = value => { longInput.value = value; longInput.focus(); longInput.setSelectionRange(value.length, value.length); longInput.dispatchEvent(new Event('input', { bubbles: true })); };
+  const nextSelection = () => new Promise(resolve => setTimeout(resolve, 30));
+  try {
+    longSuggestion = '和朋友一起去河边散步吧，顺便看看新开的咖啡店。';
+    typeLong('明天下午'); const baseHeight = longInput.offsetHeight; await pause();
+    check(!mirror().hidden && longInput.offsetHeight > baseHeight, 'input should grow to show a multi-line ghost');
+    check(ghostEndVisible(), 'grown input should show the whole ghost');
+    longInput.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'touch' }));
+    longInput.setSelectionRange(longInput.value.length, longInput.value.length); await nextSelection();
+    check(!mirror().hidden, 'tapping the input with the caret still at the end must keep the suggestion');
+    longInput.setSelectionRange(1, 1); await nextSelection();
+    check(longHost.querySelector('.input-suggestion-accept').hidden, 'moving the caret away must dismiss the suggestion');
+    check(longInput.style.minHeight === '' && longInput.style.paddingBottom === '', 'dismissal must restore the input box');
+
+    const maxHeight = parseFloat(getComputedStyle(longInput).maxHeight);
+    const cap = Math.max(maxHeight, Math.round((visualViewport?.height || innerHeight) * 0.4));
+    longSuggestion = '春夏秋冬山河湖海清风明月'.repeat(5);
+    typeLong('明天下午'); await pause();
+    check(longInput.offsetHeight > maxHeight + 10 && longInput.offsetHeight <= cap + 1 && ghostEndVisible(), 'a suggestion may grow past the typing max height to show in full');
+    // 草稿本身已超过上限：框长到上限后，可滚到灰字末尾
+    longSuggestion = '春夏秋冬山河湖海清风明月'.repeat(2);
+    typeLong('今天'.repeat(150)); await pause();
+    check(Math.abs(longInput.offsetHeight - cap) <= 1, 'growth must stop at the cap');
+    longInput.scrollTop = longInput.scrollHeight; longInput.dispatchEvent(new Event('scroll')); await pause();
+    check(ghostEndVisible(), 'scrolling the input must reveal the end of the ghost after a long draft');
+    longSuggestion = '春夏秋冬山河湖海清风明月'.repeat(5);
+    typeLong('明天下午'); await pause();
+    typeLong('明天下午好');
+    check(longInput.offsetHeight < maxHeight - 10 && longInput.style.minHeight === '', 'typing during a grown suggestion must leave autosize at the natural height');
+    return { passed: true, requests, undoSupported, modelRequests: 0 };
+  } finally { longController.dispose(); longHost.remove(); }
 };
 
 try {

@@ -61,6 +61,10 @@ const bodyRow = (fused = []) => ({ id: 'rb', houses: [{ id: 'body', kind: 'body'
   const follow = normalizeCustomHouseConfig({ modelMode: 'main', modelProfileId: 'p1' });
   assert.equal(follow.modelMode, 'follow_current', '未知模式回落 follow_current');
   assert.equal(follow.modelProfileId, '', 'follow_current 不保留模型档');
+  assert.deepEqual([cfg.promptSource, cfg.presetId], ['prompt', ''], '默认用提示词');
+  const preset = normalizeCustomHouseConfig({ promptSource: 'preset', presetId: ' p9 ' });
+  assert.deepEqual([preset.promptSource, preset.presetId], ['preset', 'p9']);
+  assert.equal(normalizeCustomHouseConfig({ promptSource: 'weird' }).promptSource, 'prompt');
   console.log('ok - custom house config normalizes with defaults and enum fallbacks');
 }
 

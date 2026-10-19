@@ -14,6 +14,55 @@ export const buildHopscotchImagePromptMessages = ({ imageSettings = {}, imageIns
   { role:'user', content:`${userInput}\n\n${body}` },
 ];
 
+// 图片提示房子卡片「套用预设」的预览／试运行：用最近一轮的输入与正文，按卡片当前（未保存）的模型设置组请求；不写入。
+export const createImagePromptHousePresetHandler = ({
+  getSessionId = () => '', getMessages = () => [], resolvePreset = () => ({ ok: false }),
+  backgroundChat = null, getRuntimeConfigByProfileId = null,
+} = {}) => {
+  const prepare = async ({ presetId = '', context = {} } = {}) => {
+    const sessionId = String(getSessionId() || '').trim();
+    if (!sessionId) return { error: '请先打开一个会话' };
+    if (typeof backgroundChat !== 'function') return { error: '还没有配置可用的模型' };
+    const taskPreset = resolvePreset(presetId, sessionId);
+    if (!taskPreset?.ok) return { error: '所选预设已不存在' };
+    const all = (getMessages(sessionId) || []).filter(m => m && (m.role === 'user' || m.role === 'assistant'));
+    let lastUser = -1;
+    all.forEach((m, i) => { if (m.role === 'user') lastUser = i; });
+    const body = String(all.slice(lastUser + 1).find(m => m.role === 'assistant')?.content || '');
+    if (!body.trim()) return { error: '还没有可以配图的正文' };
+    const userInput = lastUser >= 0 ? String(all[lastUser].content || '') : '';
+    const rendered = taskPreset.render([{ role: 'user', content: `${userInput}\n\n${body}`, source: '本轮输入与正文' }]);
+    if (!rendered?.ok || !rendered.messages.length) return { error: '这个预设组不出请求' };
+    const cfg = context?.config || {};
+    const options = { maxTokens: 4096, tools: [], presetContext: { sessionId, uiMode: 'rp', presetId: taskPreset.id } };
+    if (cfg.modelMode === 'profile' && cfg.modelProfileId) {
+      const config = await getRuntimeConfigByProfileId?.(cfg.modelProfileId);
+      if (!config) return { error: '指定的模型配置不存在' };
+      options.runtimeConfigOverride = cfg.modelOverride ? { ...config, model: cfg.modelOverride } : config;
+    }
+    return { messages: rendered.messages.map(({ role, content }) => ({ role, content })), options };
+  };
+  return {
+    preview: async (input = {}) => {
+      const prepared = await prepare(input);
+      if (prepared.error) return { ok: false, message: prepared.error };
+      const result = await backgroundChat(prepared.messages, { ...prepared.options, previewOnly: true });
+      return { ok: true, messages: result?.messages || prepared.messages };
+    },
+    trial: async ({ signal = null, ...input } = {}) => {
+      const prepared = await prepare(input);
+      if (prepared.error) return { ok: false, message: prepared.error };
+      const startedAt = Date.now();
+      const text = textOf(await backgroundChat(prepared.messages, { ...prepared.options, ...(signal ? { signal } : {}) })).trim();
+      if (!text) return { ok: false, message: '模型返回为空' };
+      const prompts = extractAutoImagePrompts(text, { max: 10, maxLength: 2000 });
+      return prompts.length
+        ? { ok: true, text, message: t('读到 {count} 条图片提示', { count: prompts.length }), latencyMs: Date.now() - startedAt }
+        : { ok: false, text, message: t('没读到 {tag}：请确认预设要求把图片提示写在这个标签里', { tag: `<${AUTO_IMAGE_PROMPT_TAG}>` }), latencyMs: Date.now() - startedAt };
+    },
+  };
+};
+
 // 每轮一份依赖快照；只负责正文之外的请求和变量落地，不操作 UI 或重新进入发送链。
 export const createHopscotchSidecarExecutors = ({
   sessionId, userInput = '', board, getTurnContext, runtimeConfig,
@@ -21,6 +70,8 @@ export const createHopscotchSidecarExecutors = ({
   isVariableEnabled, applyVariables, checkpointVariables, ruleEngine, useGlobalVariables = false,
   promptSources = [], imageSettings = {}, renderMacros = value => value,
   imageEligibility = () => ({ ok: true }),
+  // 「套用预设」：按预设 id 解析（agent-task-preset.js 的 resolve 结果）
+  resolveTaskPreset = null,
 } = {}) => {
   const scope = getScope();
   const rules = cloneData(ruleEngine?.getRules(sessionId) || []);
@@ -47,7 +98,7 @@ export const createHopscotchSidecarExecutors = ({
     };
     return { messageId, message: cloneData(message), source, canCommit };
   };
-  const request = async (house, messages, signal) => {
+  const request = async (house, messages, signal, { presetId = '' } = {}) => {
     if (!current(signal)) abort();
     const cfg = house.config || {};
     let config = runtimeConfig ? { ...runtimeConfig } : null;
@@ -60,7 +111,7 @@ export const createHopscotchSidecarExecutors = ({
     let usage = null;
     const startedAt = Date.now();
     const response = await backgroundChat(messages, {
-      signal, maxTokens: 4096, tools: [], presetContext: { sessionId, uiMode: 'rp' },
+      signal, maxTokens: 4096, tools: [], presetContext: { sessionId, uiMode: 'rp', ...(presetId ? { presetId } : {}) },
       ...(config ? { runtimeConfigOverride: config } : {}), onProviderUsage: value => { usage = value; },
     });
     if (!current(signal)) abort();
@@ -73,7 +124,13 @@ export const createHopscotchSidecarExecutors = ({
       if (!body) return { status: 'skipped', reason: 'body_message_missing' };
       const eligibility = imageEligibility({ sessionId, messageId: body.messageId });
       if (!eligibility.ok) return { status: 'skipped', reason: eligibility.reason || 'cadence' };
-      const result = await request(house, buildHopscotchImagePromptMessages({ imageInstruction, userInput, body:body.source, renderMacros }), signal);
+      // 套用预设：本轮输入与正文放在预设的聊天记录位置，<image_prompt> 要求由预设写；预设没了退回内建规则。
+      const taskPreset = house.config?.promptSource === 'preset' && house.config?.presetId ? resolveTaskPreset?.(house.config.presetId) : null;
+      const rendered = taskPreset?.ok ? taskPreset.render([{ role: 'user', content: `${userInput}\n\n${body.source}`, source: '本轮输入与正文' }]) : null;
+      const messages = rendered?.ok
+        ? rendered.messages.map(({ role, content }) => ({ role, content }))
+        : buildHopscotchImagePromptMessages({ imageInstruction, userInput, body:body.source, renderMacros });
+      const result = await request(house, messages, signal, rendered?.ok ? { presetId: taskPreset.id } : {});
       if (!body.canCommit()) abort();
       const prompts = extractAutoImagePrompts(result.text, { max: imageSettings.maxCount || 10, maxLength: imageSettings.maxLength || 2000 });
       if (!prompts.length) {

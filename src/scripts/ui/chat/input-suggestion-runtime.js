@@ -1,4 +1,5 @@
-import { buildConfigurableInputMessages } from '../../agent/agent-request-builder.js';
+import { buildConfigurableInputMessages, buildConfigurableInputParts } from '../../agent/agent-request-builder.js';
+import { applyAgentConfigTaskPreset } from './agent-task-preset.js';
 import { allowsAgentInvocation } from '../../agent/agent-invocation.js';
 import { agentRequestTimeoutMs, applyAgentTimeout, buildAgentGenerationOptions } from '../../agent/agent-generation-settings.js';
 
@@ -45,8 +46,12 @@ export const createInputSuggestionRequest = ({ getProfileConfig, createClient, r
   const agentConfig = { ...settings, id: 'text_completion' };
   const modelConfig = applyAgentTimeout({ ...config, ...(settings.modelOverride ? { model: settings.modelOverride } : {}) }, agentConfig);
   const client = createClient(modelConfig);
-  const params = buildAgentGenerationOptions({ maxTokens: settings.maxTokens || 96, temperature: 0.3 }, modelConfig, agentConfig);
-  return client.chat(buildInputSuggestionMessages({ ...snapshot, referenceContext }), { signal, requestContext: snapshot.requestContext,
+  // 套用预设时任务由预设代替、温度等取自预设；输出上限仍按文本建议自己的设置。
+  const parts = buildConfigurableInputParts({ ...snapshot, referenceContext });
+  const request = applyAgentConfigTaskPreset({ config: agentConfig, parts, sessionId: snapshot.agentContext?.sessionId || '', request: {
+    messages: parts.map(({ role, content }) => ({ role, content })), params: { maxTokens: settings.maxTokens || 96, temperature: 0.3 } } });
+  const params = buildAgentGenerationOptions(request.params, modelConfig, agentConfig);
+  return client.chat(request.messages, { signal, requestContext: snapshot.requestContext,
     ...params, tools: [], toolChoice: 'none',
     requestParamConstraints: { maxOutputTokens: params.maxTokens, tools: 'none' } });
 };

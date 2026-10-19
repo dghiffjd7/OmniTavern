@@ -51,6 +51,9 @@ export const normalizeAgentConfiguration = (value = {}, id = value.id) => ({
     start: String(value.target?.start ?? ''), end: String(value.target?.end ?? ''),
     pattern: String(value.target?.pattern ?? ''), flags: text(value.target?.flags), group: integer(value.target?.group, 1, 1, 20) },
   inputConsent: value.inputConsent === true,
+  // 「套用预设」：任务内容改由所选预设组请求（预设删除后退回提示词）
+  promptSource: value.promptSource === 'preset' ? 'preset' : 'prompt',
+  presetId: text(value.presetId),
   ...normalizeAgentGenerationSettings(value, id),
   ...(id === 'archive_naming' ? {
     invocationMode: 'auto', triggerMode: 'auto',
@@ -59,15 +62,16 @@ export const normalizeAgentConfiguration = (value = {}, id = value.id) => ({
   updatedAt: Number(value.updatedAt) || 0,
   ...(id === 'reply_check' ? { repairProfiles: normalizeFormatRepairProfiles(value.repairProfiles, value), repairCheckType: value.repairCheckType === 'tableEdit' ? 'tableEdit' : 'custom' } : {}),
 });
+const normalizeEntry = (entry, id) => ({ updatedAt: Number(entry.updatedAt) || 0,
+  ...(entry.deleted === true ? { deleted: true } : entry.follow === true ? { follow: true }
+    : { config: normalizeAgentConfiguration(entry.config || {}, id) }) });
 const normalizeState = raw => {
   const scopes = {};
   if (plain(raw?.scopes)) for (const [key, entries] of Object.entries(raw.scopes)) {
     if (!plain(entries)) continue;
     scopes[key] = {};
     for (const [id, entry] of Object.entries(entries)) if (storedId(id) && plain(entry)) {
-      scopes[key][id] = { updatedAt: Number(entry.updatedAt) || 0,
-        ...(entry.deleted === true ? { deleted: true } : entry.follow === true ? { follow: true }
-          : { config: normalizeAgentConfiguration(entry.config || {}, id) }) };
+      scopes[key][id] = normalizeEntry(entry, id);
     }
   }
   return { version: 1, updatedAt: Number(raw?.updatedAt) || 0, scopes };
@@ -130,7 +134,10 @@ export const createAgentConfigStore = ({ storage = globalThis.localStorage, load
         entries[BODY_SELECTOR_ID] = { updatedAt: timestamp, config: normalizeAgentConfiguration({ target: options.bodyRule }, BODY_SELECTOR_ID) };
       }
       if (Object.keys(entries).length > 66) return { ok: false, reason: 'agent_limit' };
-      const next = { ...state, updatedAt: timestamp, scopes: { ...state.scopes, [key]: entries } };
+      // 范围里的条目删光就移除这个范围（撤销导入后与原来一致）
+      const scopes = { ...state.scopes, [key]: entries };
+      if (!Object.keys(entries).length) delete scopes[key];
+      const next = { ...state, updatedAt: timestamp, scopes };
       // A newly shared Agent also joins every local scope that inherits it. Check
       // the combined count so a valid default workflow always fits its 8 houses.
       const globalKey = agentConfigScopeKey(context, 'global');
@@ -175,6 +182,9 @@ export const createAgentConfigStore = ({ storage = globalThis.localStorage, load
     reset: options => commit(options, timestamp => options.scope === 'global' ? null : { follow: true, updatedAt: timestamp }),
     remove: options => commit(options, timestamp => CONFIGURABLE_AGENT_IDS.includes(options.id)
       ? { error: 'builtin_agent' } : { deleted: true, updatedAt: timestamp }),
+    // 撤销导入用：取出／放回某个 Agent 在该范围的原始条目（null＝原本没有，放回时移除）
+    readEntry: ({ id, context, scope } = {}) => clone(state.scopes[agentConfigScopeKey(context, scope === 'global' ? 'global' : 'local')]?.[text(id)] ?? null),
+    restoreEntry: options => commit(options, () => (plain(options.entry) ? normalizeEntry(options.entry, text(options.id)) : null)),
     exportState: () => clone(state),
   };
 };
