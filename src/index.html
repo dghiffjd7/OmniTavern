@@ -1029,10 +1029,17 @@
         <div class="app-update-card" data-app-update-card>
           <div class="app-update-copy">
             <span class="app-update-label">版本</span>
-            <strong class="app-update-version" data-app-update-version data-i18n-skip="true">—</strong>
+            <span class="app-update-version-row">
+              <strong class="app-update-version" data-app-update-version data-i18n-skip="true">—</strong>
+              <button type="button" class="app-update-notes" data-app-update-notes hidden>更新内容</button>
+            </span>
             <small class="app-update-status" data-app-update-status></small>
           </div>
           <button type="button" class="app-update-action" data-app-update-action>检查更新</button>
+          <div class="app-update-progress-inline" data-app-update-progress role="progressbar" aria-valuemin="0" aria-valuemax="100" hidden>
+            <span class="app-update-progress-track"><span class="app-update-progress-fill"></span></span>
+            <span class="app-update-progress-percent" data-app-update-percent data-i18n-skip="true"></span>
+          </div>
         </div>
 
         <footer class="developer-profile-footer">

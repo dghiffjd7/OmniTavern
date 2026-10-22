@@ -202,6 +202,131 @@ try {
   }
 
   {
+    // 超过 load_kv 上限：原生端修不了（旧版没有这个命令、或失败）时照旧挡住写入，并能查到被挡住。
+    const scopeId = 'persona:oversized';
+    const sessionId = 'session-oversized';
+    const calls = [];
+    installTauri(async (cmd, args) => {
+      calls.push(cmd);
+      if (cmd === 'load_kv') return { _tooLarge: true, size: 32_873_620 };
+      if (cmd === 'compact_oversized_turn_checkpoint') throw new Error('command not found');
+      if (cmd === 'save_kv') throw new Error('must remain blocked');
+      return null;
+    });
+    const store = new TurnCheckpointStore({ scopeId });
+    const state = await store.getSessionState(sessionId);
+
+    assert.deepEqual(state.checkpoints, {});
+    assert.equal(store.isPersistenceBlocked(sessionId), true);
+    await assert.rejects(
+      store.setPointer(sessionId, { sessionId, tailAssistantMessageId: 'assistant-x' }),
+      error => error?.code === 'turn_checkpoint_store_read_unavailable',
+    );
+    assert.equal(calls.includes('save_kv'), false);
+
+    installTauri(async cmd => (cmd === 'load_kv' ? makeState('session-ok', 'ok') : null));
+    const readable = new TurnCheckpointStore({ scopeId: 'persona:readable' });
+    await readable.getSessionState('session-ok');
+    assert.equal(readable.isPersistenceBlocked('session-ok'), false);
+    console.log('ok - oversized turn checkpoint KV stays blocked and reports it when native compaction is unavailable');
+  }
+
+  {
+    // 超过上限：原生端备份后去掉请求提示词与原始输出，重新读取就能照常使用。
+    const scopeId = 'persona:compact-oversized';
+    const sessionId = 'session-compact-oversized';
+    const key = buildTurnCheckpointStoreKey(scopeId, sessionId);
+    const calls = [];
+    let compacted = false;
+    installTauri(async (cmd, args) => {
+      calls.push(cmd);
+      if (cmd === 'load_kv') return compacted ? makeState(sessionId, 'slim') : { _tooLarge: true, size: 32_873_620 };
+      if (cmd === 'compact_oversized_turn_checkpoint') {
+        assert.equal(args?.name, key);
+        compacted = true;
+        return { compacted: true, before: 32_873_620, after: 9_000_000 };
+      }
+      return null;
+    });
+    const store = new TurnCheckpointStore({ scopeId });
+    const state = await store.getSessionState(sessionId);
+
+    assert.deepEqual(calls.slice(0, 3), ['load_kv', 'compact_oversized_turn_checkpoint', 'load_kv']);
+    assert.equal(state.pointer.tailAssistantMessageId, 'assistant-slim');
+    assert.equal(store.isPersistenceBlocked(sessionId), false);
+    await store.setPointer(sessionId, { sessionId, tailAssistantMessageId: 'assistant-slim' });
+    assert.equal(calls.includes('save_kv'), true);
+    console.log('ok - oversized turn checkpoint KV is compacted natively, then loads and accepts writes');
+  }
+
+  {
+    // 检查点一律不带缩进写入；原生端拒绝写入超过读取上限的文件时，去掉除还原目标外的写表记录后重写一次。
+    const scopeId = 'persona:too-large';
+    const sessionId = 'session-too-large';
+    const saves = [];
+    let rejectSaves = 0;
+    installTauri(async (cmd, args) => {
+      if (cmd === 'load_kv') return {};
+      if (cmd === 'save_kv') {
+        saves.push(JSON.parse(JSON.stringify(args)));
+        if (rejectSaves > 0) {
+          rejectSaves -= 1;
+          throw 'kv_too_large:31457281';
+        }
+      }
+      return null;
+    });
+    const store = new TurnCheckpointStore({ scopeId });
+    const entry = { actions: [{ action: 'insert' }], rollback: { tables: [] } };
+    const upsert = id => store.upsertCheckpoint(sessionId, {
+      sessionId,
+      assistantMessageId: id,
+      aiFloor: Number(id.split('-')[1]),
+      branches: [{ swipeIndex: 0, memorySnapshotId: `mem_${id}`, memoryUpdateEntry: entry }],
+    });
+    await upsert('asst-1');
+    await store.setPointer(sessionId, { sessionId, tailAssistantMessageId: 'asst-1' });
+    await upsert('asst-2');
+    rejectSaves = 1;
+    await upsert('asst-3');
+
+    assert.equal(saves.every(args => args.compact === true), true, 'checkpoint writes skip indentation');
+    const written = saves[saves.length - 1].data.checkpoints;
+    assert.equal(saves.length, 5, 'one rejected write is retried once');
+    assert.equal(written['asst-2'].branches[0].memoryUpdateEntry, null);
+    assert.equal(written['asst-3'].branches[0].memoryUpdateEntry, null);
+    assert.equal(written['asst-3'].branches[0].memorySnapshotId, 'mem_asst-3');
+    assert.deepEqual(written['asst-1'].branches[0].memoryUpdateEntry.actions, entry.actions, 'restore target keeps its write record');
+
+    rejectSaves = 2;
+    await upsert('asst-4');
+    assert.equal(saves.length, 7, 'a write still too large after slimming is given up without throwing');
+    console.log('ok - checkpoint writes are compact and shrink to fit when the native side refuses an oversized file');
+  }
+
+  {
+    // 回归：同一会话两处同时读取，另一处刚修好时原生端回「已不超限」，这里也要重新读取，不能当成修不了而挡住写入。
+    const scopeId = 'persona:compacted-elsewhere';
+    const sessionId = 'session-compacted-elsewhere';
+    let loads = 0;
+    installTauri(async cmd => {
+      if (cmd === 'load_kv') {
+        loads += 1;
+        return loads === 1 ? { _tooLarge: true, size: 32_873_620 } : makeState(sessionId, 'slim');
+      }
+      if (cmd === 'compact_oversized_turn_checkpoint') return { compacted: false, reason: 'not_oversized', size: 9_000_000 };
+      return null;
+    });
+    const store = new TurnCheckpointStore({ scopeId });
+    const state = await store.getSessionState(sessionId);
+
+    assert.equal(loads, 2);
+    assert.equal(state.pointer.tailAssistantMessageId, 'assistant-slim');
+    assert.equal(store.isPersistenceBlocked(sessionId), false);
+    console.log('ok - oversized turn checkpoint already compacted by another reader is reloaded instead of blocked');
+  }
+
+  {
     const scopeId = 'persona:unreadable-clear';
     const sessionId = 'session-unreadable-clear';
     const key = buildTurnCheckpointStoreKey(scopeId, sessionId);

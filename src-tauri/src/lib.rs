@@ -65,6 +65,7 @@ pub fn run() {
             commands::delete_persona_card,
             commands::save_kv,
             commands::load_kv,
+            commands::compact_oversized_turn_checkpoint,
             commands::delete_worldinfo_legacy_store,
             commands::list_contacts_by_scopes,
             commands::cleanup_persona_scoped_data,

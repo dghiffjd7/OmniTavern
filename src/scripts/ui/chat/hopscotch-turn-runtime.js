@@ -437,6 +437,16 @@ export const projectHouseStateToLane = (laneRuntime, state) => {
 };
 
 // ---------- 运行时 ----------
+// 正文成功、除生图外的房子都已结束、只剩生图在排队或进行：普通发送的这一轮可先让出会话（发送键解锁），
+// 图片在后台继续回填，与非跳房子流程「回复完先解锁、图片随后补上」一致。
+const TERMINAL_HOUSE_STATUSES = new Set(['succeeded', 'failed', 'cancelled', 'skipped']);
+export const isOnlyImageGenerationLeft = (states = []) => {
+  const list = Array.isArray(states) ? states : [];
+  if (list.find(state => state.kind === 'body')?.status !== 'succeeded') return false;
+  const pending = list.filter(state => !TERMINAL_HOUSE_STATUSES.has(state.status));
+  return pending.length > 0 && pending.every(state => state.kind === 'image_generation');
+};
+
 export const createHopscotchTurnRuntime = ({
   getSettings = () => ({}),
   boardStore = null,
@@ -450,6 +460,7 @@ export const createHopscotchTurnRuntime = ({
   logger = console,
 } = {}) => {
   const activeTurns = new Map(); // sessionId -> turn
+  const backgroundTurns = new Set(); // 只剩生图、已让出会话的 turn（图片仍在后台回填）
   const latestTurns = new Map();
   const maintainingTurns = new Set(); // 整轮已收尾、内部维护仍在后台的 turn（换作用域时一并取消）
   const listeners = new Set();
@@ -500,11 +511,25 @@ export const createHopscotchTurnRuntime = ({
   };
 
   const isSessionBusy = sessionId => activeTurns.has(trim(sessionId));
+  const listBackgroundTurns = sid => [...backgroundTurns].filter(turn => turn.sessionId === sid);
   const abortSessionTurn = (sessionId, reason = 'user') => {
-    const turn = activeTurns.get(trim(sessionId));
-    if (!turn) return false;
-    turn.abort(reason);
-    return true;
+    const sid = trim(sessionId);
+    const turn = activeTurns.get(sid);
+    if (turn) {
+      turn.abort(reason);
+      return true;
+    }
+    // 还没开始下一轮时，停止会停掉上一轮的后台生图
+    const background = listBackgroundTurns(sid);
+    background.forEach(item => item.abort(reason));
+    return background.length > 0;
+  };
+  // 重新生成／续写某条回复前，取消它还在后台生成的图片，免得旧图回填到新内容上
+  const abortImageTurnForMessage = (sessionId, messageId, reason = 'superseded') => {
+    const mid = trim(messageId);
+    const matched = mid ? listBackgroundTurns(trim(sessionId)).filter(turn => turn.getBodyMessageId() === mid) : [];
+    matched.forEach(turn => turn.abort(reason));
+    return matched.length > 0;
   };
 
   const prepareTurn = ({
@@ -517,6 +542,8 @@ export const createHopscotchTurnRuntime = ({
     title = '',
     parentSignal = null,
     executorContext = {}, executionPlan = null,
+    // 普通发送：只剩生图时先让出会话。重新生成／续写要等图片落地后提交，不提前让出
+    releaseSessionForImages = false,
   } = {}) => {
     const sid = trim(sessionId);
     if (!sid || !rpUiMode || previewOnly || !isEnabled()) return null;
@@ -556,6 +583,7 @@ export const createHopscotchTurnRuntime = ({
       return run?.id ? run.id === turnRunId : run?.generationId === generationId;
     };
     let orchestrator;
+    let checkRelease = () => {};
     try {
       orchestrator = createCreativeTurnOrchestrator({
         board,
@@ -575,6 +603,7 @@ export const createHopscotchTurnRuntime = ({
             }
           }
           notify(sid);
+          checkRelease();
         },
       });
     } catch (err) {
@@ -626,9 +655,23 @@ export const createHopscotchTurnRuntime = ({
         bodyHandle.resolve({ status, reason: trim(result.reason), error: trim(result.error), artifact: status === 'succeeded' ? { kind: 'body', messageId: turnContext.body.messageId } : null });
       },
       abort: (reason = 'user') => { if (!controller.signal.aborted) controller.abort(createAbortError(String(reason || 'aborted'))); },
+      getBodyMessageId: () => trim(turnContext.body?.messageId),
       result: null,
       turnPromise: null,
+      // 发送键解锁的时刻：整轮终态，或普通发送只剩生图时
+      sendUnlockPromise: null,
     };
+    let resolveSendUnlock = () => {};
+    turn.sendUnlockPromise = new Promise((resolve) => { resolveSendUnlock = resolve; });
+    if (releaseSessionForImages) {
+      checkRelease = () => {
+        if (activeTurns.get(sid) !== turn || !isOnlyImageGenerationLeft(orchestrator.listHouseStates())) return;
+        activeTurns.delete(sid);
+        backgroundTurns.add(turn);
+        resolveSendUnlock();
+        notify(sid);
+      };
+    }
     startLane();
     activeTurns.set(sid, turn);
     latestTurns.set(sid, turn);
@@ -650,6 +693,8 @@ export const createHopscotchTurnRuntime = ({
       .finally(() => {
         bodyHandle.releaseWithoutStart('turn_finished');
         if (activeTurns.get(sid) === turn) activeTurns.delete(sid);
+        backgroundTurns.delete(turn);
+        resolveSendUnlock();
         parentSignal?.removeEventListener('abort', onParentAbort);
         notify(sid);
         // 发送键随整轮解锁；后台维护（摘要压缩）跑完前仍占着会话工作租约，删会话/换作用域会取消它。
@@ -668,13 +713,16 @@ export const createHopscotchTurnRuntime = ({
     resolveBoard,
     isSessionBusy,
     abortSessionTurn,
+    abortImageTurnForMessage,
     prepareTurn,
     subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },
     getLatestTurn: sid => latestTurns.get(trim(sid)) || null,
     clearScope: () => {
       activeTurns.forEach(turn => turn.abort('scope_changed'));
+      backgroundTurns.forEach(turn => turn.abort('scope_changed'));
       maintainingTurns.forEach(turn => turn.abort('scope_changed'));
       activeTurns.clear();
+      backgroundTurns.clear();
       maintainingTurns.clear();
       latestTurns.clear();
     },

@@ -169,3 +169,22 @@ const setup = (message = assistant(), options = {}) => {
   await assert.rejects(setup(branch).open(), /没有保存原文/);
   console.log('ok - unmapped selections explain whether the text repeats, was rewritten for display or the branch lacks its original');
 }
+{
+  // 回归（0.7.7）：构思里只是提到 <image_prompt>（没闭合）时，后面的正文仍可快速编辑；真正的标签换成图片后也一样
+  const plan = '构思：适当位置输出 `<image_prompt>` 。\n\n';
+  const tag = '<image_prompt>1girl, smile</image_prompt>';
+  const original = `${plan}第一段保持。\n\n第二段正文。\n\n${tag}\n第三段保持。`;
+  const shown = `${plan}第一段保持。\n\n第二段正文。\n\n[img-existing]\n第三段保持。`;
+  const f = setup({ id:'a1', role:'assistant', type:'text', status:'sent', rawOriginal:original, rawSource:shown, raw:shown, content:shown,
+    meta:{ autoImagePromptRawContent:original } });
+  const draft = await f.open();
+  assert.equal(draft.text, selectedText);
+  await draft.save('改过的正文。');
+  const saved = f.store.findMessage('a1', f.context.sessionId);
+  assert.equal(saved.rawOriginal, original.replace(selectedText, '改过的正文。'));
+  assert.equal(saved.raw, shown.replace(selectedText, '改过的正文。'));
+  assert.equal(saved.meta.autoImagePromptRawContent, original.replace(selectedText, '改过的正文。'));
+  await assert.rejects(setup({ id:'a1', role:'assistant', type:'text', status:'sent', raw:shown, content:shown })
+    .runtime.open({ messageId:'a1', selectedText:'输出 <image_prompt> 。' }), /无法准确对应/, '选区跨过标签本身仍不能改');
+  console.log('ok - a mere mention of <image_prompt> does not hide the text after it, but the tag itself stays protected');
+}

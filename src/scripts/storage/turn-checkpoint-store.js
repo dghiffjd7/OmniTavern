@@ -52,6 +52,26 @@ const loadKvWithRetry = async key => {
   throw lastError || new Error('turn checkpoint load_kv failed');
 };
 
+// 检查点只给程序读，不带缩进写入（带缩进要多占约三成）。
+const saveCheckpointKv = ({ name, data }) => safeInvoke('save_kv', { name, data, compact: true });
+// 原生端拒绝写入超过 load_kv 上限的文件（写了也读不回来），保留上一版。
+const isKvTooLargeError = err => String(err?.message || err || '').startsWith('kv_too_large');
+
+// 超过 load_kv 上限的旧检查点（以前每轮都存整段请求提示词）：请原生端备份原文件后去掉请求提示词与原始输出，再重新读取。
+// 同一会话另一处读取可能已先修好（这里拿到「已不超限」），所以一律重新读取；仍超限、或旧版原生端没有这个命令时，由调用方挡住写入。
+const compactOversizedCheckpointKv = async (key, kv) => {
+  try {
+    const result = await safeInvoke('compact_oversized_turn_checkpoint', { name: key });
+    if (result?.compacted) {
+      logger.info('oversized turn checkpoint compacted', { key, before: result.before, after: result.after });
+    }
+    return await loadKvWithRetry(key);
+  } catch (err) {
+    logger.warn('oversized turn checkpoint compaction failed; writes stay blocked', { key, error: err });
+    return kv;
+  }
+};
+
 const scheduleIdle = runner => {
   if (typeof runner !== 'function') return;
   try {
@@ -162,6 +182,15 @@ const clone = value => {
   }
 };
 
+// 写表记录的请求提示词、原始输出只给「最近写表」窗口看，以消息自带的那份为准，检查点不存：
+// 每轮都存会把会话检查点撑过 load_kv 的 30 MiB 上限，之后整份读不回来。
+const omitMemoryEntryDisplayText = entry => {
+  if (!isPlainRecord(entry)) return entry;
+  delete entry.requestPrompt;
+  delete entry.raw;
+  return entry;
+};
+
 export const normalizeCheckpointPointer = (raw = {}, fallback = {}) => {
   const src = raw && typeof raw === 'object' ? raw : {};
   const swipeIndexRaw = Math.trunc(Number(src.tailSwipeIndex ?? src.swipeIndex ?? fallback.tailSwipeIndex ?? 0));
@@ -203,7 +232,7 @@ export const normalizeCheckpointBranch = (raw = {}, fallback = {}) => {
     messageContent: clampText(src.messageContent ?? src.content ?? fallback.messageContent ?? ''),
     messageRaw: clampText(src.messageRaw ?? src.raw ?? fallback.messageRaw ?? ''),
     memorySnapshotId: String(src.memorySnapshotId || fallback.memorySnapshotId || '').trim(),
-    memoryUpdateEntry: clone(src.memoryUpdateEntry ?? fallback.memoryUpdateEntry ?? null),
+    memoryUpdateEntry: omitMemoryEntryDisplayText(clone(src.memoryUpdateEntry ?? fallback.memoryUpdateEntry ?? null)),
     // C 计划 M1：变量快照与记忆快照平行，指向 variable-snapshot-store；旧 branch 无此字段 → 空，向后兼容。
     variableSnapshotId: String(src.variableSnapshotId || fallback.variableSnapshotId || '').trim(),
     variableUpdateEntry: clone(src.variableUpdateEntry ?? fallback.variableUpdateEntry ?? null),
@@ -317,7 +346,7 @@ export const migrateTurnCheckpointLocalMirrors = async () => {
     } else if (isPlainRecord(kv) && !Object.keys(kv).length) {
       const sessionId = String(localState.sessionId || '').trim();
       try {
-        await safeInvoke('save_kv', {
+        await saveCheckpointKv({
           name: key,
           data: normalizeSessionState(sessionId, localState),
         });
@@ -420,14 +449,15 @@ export class TurnCheckpointStore {
 
     if (expectsKv) {
       try {
-        const kv = await loadKvWithRetry(key);
+        let kv = await loadKvWithRetry(key);
+        if (kv?._tooLarge) kv = await compactOversizedCheckpointKv(key, kv);
         if (hasCheckpointStateShape(kv)) {
           const localIsNewer = hasCheckpointStateShape(localPayload)
             && Number(localPayload.updatedAt || 0) > Number(kv.updatedAt || 0);
           if (localIsNewer) {
             try {
               payload = normalizeSessionState(sid, localPayload);
-              await safeInvoke('save_kv', { name: key, data: payload });
+              await saveCheckpointKv({ name: key, data: payload });
               try { globalThis?.localStorage?.removeItem?.(key); } catch {}
             } catch (err) {
               payload = localPayload;
@@ -448,7 +478,7 @@ export class TurnCheckpointStore {
           if (hasCheckpointStateShape(localPayload)) {
             payload = normalizeSessionState(sid, localPayload);
             try {
-              await safeInvoke('save_kv', { name: key, data: payload });
+              await saveCheckpointKv({ name: key, data: payload });
               try { globalThis?.localStorage?.removeItem?.(key); } catch {}
             } catch (err) {
               this.persistenceBlocked.add(sid);
@@ -479,6 +509,10 @@ export class TurnCheckpointStore {
     return next;
   }
 
+  isPersistenceBlocked(sessionId = '') {
+    return this.persistenceBlocked.has(String(sessionId || '').trim());
+  }
+
   _assertSessionWritable(sessionId = '') {
     const sid = String(sessionId || '').trim();
     if (!this.persistenceBlocked.has(sid)) return;
@@ -487,25 +521,46 @@ export class TurnCheckpointStore {
     throw error;
   }
 
-  _compactOldBranches(state) {
+  // 最近几轮之外只留编号：正文与变量记录检查点里没人读；写表记录只在消息没有自带时当还原备用，
+  // 所以当前对话末尾与各存档末尾（还原目标）照留。否则多次重开、存档后检查点只增不减。
+  _compactOldBranches(state, keepRecent = COMPACT_RECENT_TURNS) {
     const checkpoints = state?.checkpoints;
     if (!checkpoints || typeof checkpoints !== 'object') return;
     const entries = Object.entries(checkpoints);
-    if (entries.length <= COMPACT_RECENT_TURNS) return;
+    if (entries.length <= keepRecent) return;
+    const restoreTargets = new Set(
+      [state.pointer, ...Object.values(state.archivePointers || {})]
+        .map(pointer => String(pointer?.tailAssistantMessageId || '').trim())
+        .filter(Boolean),
+    );
     const sorted = entries
       .map(([id, cp]) => ({
         id,
         order: Number(cp.aiFloor || cp.turnIndex || 0) || (Number(cp.createdAt || 0) / 1e10),
       }))
       .sort((a, b) => b.order - a.order);
-    for (let i = COMPACT_RECENT_TURNS; i < sorted.length; i += 1) {
+    for (let i = keepRecent; i < sorted.length; i += 1) {
       const cp = checkpoints[sorted[i].id];
       if (!cp || !Array.isArray(cp.branches)) continue;
+      const keepRecords = restoreTargets.has(sorted[i].id);
       for (const branch of cp.branches) {
         if (!branch) continue;
         if (branch.messageContent) branch.messageContent = '';
         if (branch.messageRaw) branch.messageRaw = '';
+        if (keepRecords) continue;
+        branch.memoryUpdateEntry = null;
+        branch.variableUpdateEntry = null;
       }
+    }
+  }
+
+  async _saveWithinLoadLimit(key, state) {
+    try {
+      await saveCheckpointKv({ name: key, data: state });
+    } catch (err) {
+      if (!isKvTooLargeError(err)) throw err;
+      this._compactOldBranches(state, 0);
+      await saveCheckpointKv({ name: key, data: state });
     }
   }
 
@@ -519,7 +574,7 @@ export class TurnCheckpointStore {
     const key = this._getStoreKey(sid);
     if (typeof getTauriInvoker() === 'function') {
       try {
-        await safeInvoke('save_kv', { name: key, data: state });
+        await this._saveWithinLoadLimit(key, state);
         try { globalThis?.localStorage?.removeItem?.(key); } catch {}
         return true;
       } catch (err) {
@@ -705,7 +760,7 @@ export class TurnCheckpointStore {
     const key = this._getStoreKey(sid);
     if (typeof getTauriInvoker() === 'function') {
       try {
-        await safeInvoke('save_kv', { name: key, data: normalizeSessionState(sid, {}) });
+        await saveCheckpointKv({ name: key, data: normalizeSessionState(sid, {}) });
       } catch (err) {
         logger.debug('turn checkpoint store clear save_kv failed; existing state retained', err);
         return false;
@@ -762,14 +817,14 @@ export class TurnCheckpointStore {
     const fromKey = this._getStoreKey(from);
     if (typeof getTauriInvoker() === 'function') {
       try {
-        await safeInvoke('save_kv', { name: nextKey, data: nextState });
+        await saveCheckpointKv({ name: nextKey, data: nextState });
       } catch (err) {
         writeLocalRecoveryJson(nextKey, nextState);
         logger.debug('turn checkpoint store rename destination save failed; source retained', err);
         return false;
       }
       try {
-        await safeInvoke('save_kv', { name: fromKey, data: normalizeSessionState(from, {}) });
+        await saveCheckpointKv({ name: fromKey, data: normalizeSessionState(from, {}) });
       } catch (err) {
         try { globalThis?.localStorage?.removeItem?.(nextKey); } catch {}
         this.cache.set(to, nextState);

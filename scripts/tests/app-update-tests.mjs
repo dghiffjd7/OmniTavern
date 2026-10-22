@@ -252,6 +252,61 @@ test('ui projection toggles the badge class and fills the about card', () => {
   assert.equal(classes.has('has-app-update'), false);
 });
 
+test('the installed version changelog can be reopened from the about card', async () => {
+  const upgraded = makeRuntime({
+    current: '0.7.4',
+    settings: { lastSeenAppVersion: '0.7.4', appUpdate: { lastCheckedAt: 100000 } },
+    changelog: '## v0.7.4\n\n- 自动更新\n\n## v0.7.3\n\n- 旧内容\n',
+  });
+  await upgraded.runtime.start();
+  assert.equal(upgraded.calls.choose.length, 0, 'already seen: no launch dialog');
+  assert.equal(upgraded.runtime.getView().changelogAvailable, true);
+  assert.equal(await upgraded.runtime.showChangelog(), true);
+  assert.equal(upgraded.calls.choose.length, 1);
+  assert.match(upgraded.calls.choose[0].title, /v0\.7\.4 更新内容/);
+  assert.equal(upgraded.calls.choose[0].message, '• 自动更新');
+  const preview = makeRuntime({ current: '0.7.5-diagnose-1', settings: { appUpdate: { lastCheckedAt: 100000 } }, changelog: '## v0.7.4\n\n- 自动更新\n' });
+  await preview.runtime.start();
+  assert.equal(preview.runtime.getView().changelogAvailable, false, 'no section for this version: the button stays hidden');
+  assert.equal(await preview.runtime.showChangelog(), false);
+  assert.equal(preview.calls.choose.length, 0);
+});
+
+test('while the update downloads the about card shows progress instead of the button', () => {
+  const style = new Map();
+  const classes = new Set();
+  const nodes = {
+    '[data-app-update-version]': { textContent: '' },
+    '[data-app-update-status]': { textContent: '' },
+    '[data-app-update-action]': { textContent: '', disabled: false, hidden: false },
+    '[data-app-update-notes]': { hidden: true },
+    '[data-app-update-progress]': { hidden: true, style: { setProperty: (key, value) => style.set(key, value) }, classList: { toggle: (name, on) => (on ? classes.add(name) : classes.delete(name)) }, setAttribute() {}, removeAttribute() {} },
+    '[data-app-update-percent]': { textContent: '' },
+  };
+  const documentRef = {
+    body: { classList: { toggle() {} } },
+    querySelector: selector => (selector === '[data-app-update-card]' ? { classList: { toggle() {} }, querySelector: inner => nodes[inner] } : null),
+  };
+  const render = view => renderAppUpdateUi({ documentRef, view: { currentVersion: '0.7.3', hasUpdate: true, latestVersion: '0.7.4', ...view } });
+  render({ installing: true, progress: { version: '0.7.4', stage: 'downloading', downloaded: 42, total: 100, percent: 42 } });
+  assert.equal(nodes['[data-app-update-action]'].hidden, true);
+  assert.equal(nodes['[data-app-update-action]'].disabled, true);
+  assert.equal(nodes['[data-app-update-progress]'].hidden, false);
+  assert.equal(nodes['[data-app-update-percent]'].textContent, '42%');
+  assert.equal(style.get('--aup-progress'), '0.42');
+  assert.equal(classes.has('is-indeterminate'), false);
+  render({ installing: true, progress: { version: '0.7.4', stage: 'preparing' } });
+  assert.equal(classes.has('is-indeterminate'), true, 'unknown size: sliding bar');
+  assert.equal(nodes['[data-app-update-percent]'].textContent, '');
+  render({ installing: false, progress: null, changelogAvailable: true });
+  assert.equal(nodes['[data-app-update-progress]'].hidden, true);
+  assert.equal(nodes['[data-app-update-action]'].hidden, false);
+  assert.equal(nodes['[data-app-update-action]'].disabled, false);
+  assert.equal(nodes['[data-app-update-notes]'].hidden, false);
+  render({ changelogAvailable: false });
+  assert.equal(nodes['[data-app-update-notes]'].hidden, true);
+});
+
 let failed = 0;
 for (const { name, fn } of tests) {
   try {

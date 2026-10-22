@@ -33,15 +33,35 @@ const mergeRanges = (ranges, length) => {
   return merged;
 };
 
+// 正文或构思里常只是提到功能标签（如「末尾输出 tableEdit 标签」），外层又可能不是合法标签（如 plan~）。
+// 没闭合的功能标签在标签栈里只排除标签本身，实际范围交给 extractFormatFunctionBlocks；
+// 其中没闭合的生图标签（image_prompt）显示时是普通文字，也只排除标签本身，后文照常可对应。
+const FUNCTION_TAG_NAMES = new Set(['image_prompt', 'tableedit', 'update', 'updatevariable', 'variableupdate']);
+const tagOnly = block => ({ start: block.start, end: block.start + block.openTag.length });
+const isFunctionTagOpen = open => FUNCTION_TAG_NAMES.has(open.name);
+// Markdown 行内代码（反引号）里写的标签显示为文字，不当成标签
+const inlineCodeRanges = source => [...source.matchAll(/(?<!`)(`+)(?!`)[^\n]*?[^`\n]\1(?!`)/g)]
+  .map(match => ({ start: match.index, end: match.index + match[0].length }));
+
 export const collectRenderedAgentExcludedRanges = (raw, extraRanges = []) => {
-  const source = String(raw ?? ''), ranges = [...(Array.isArray(extraRanges) ? extraRanges : []), ...extractFormatFunctionBlocks(source)];
+  const source = String(raw ?? '');
+  const codeSpans = inlineCodeRanges(source);
+  const inCode = at => codeSpans.some(range => at >= range.start && at < range.end);
+  const functionRanges = extractFormatFunctionBlocks(source)
+    .filter(block => !inCode(block.start))
+    .map(block => (block.kind === 'image_prompt' && !block.valid ? tagOnly(block) : block));
+  const ranges = [...(Array.isArray(extraRanges) ? extraRanges : []), ...functionRanges];
   const stack = [];
   for (const token of tagTokens(source)) {
+    if (inCode(token.start)) continue;
     if (!token.name) { ranges.push(token); continue; }
     if (token.closing) {
       const index = stack.map(t => t.name).lastIndexOf(token.name);
       if (index >= 0) {
-        for (const open of stack.slice(index)) if (open.blocked) ranges.push({ start: open.start, end: token.end });
+        for (const open of stack.slice(index)) {
+          if (!open.blocked) continue;
+          ranges.push(open !== stack[index] && isFunctionTagOpen(open) ? { start: open.start, end: open.end } : { start: open.start, end: token.end });
+        }
         stack.length = index;
       }
     } else {
@@ -53,7 +73,7 @@ export const collectRenderedAgentExcludedRanges = (raw, extraRanges = []) => {
       else stack.push({ ...token, blocked });
     }
   }
-  for (const open of stack) if (open.blocked) ranges.push({ start: open.start, end: source.length });
+  for (const open of stack) if (open.blocked) ranges.push(isFunctionTagOpen(open) ? { start: open.start, end: open.end } : { start: open.start, end: source.length });
   return mergeRanges(ranges, source.length);
 };
 

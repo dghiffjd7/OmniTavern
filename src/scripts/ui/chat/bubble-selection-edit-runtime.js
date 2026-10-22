@@ -1,5 +1,5 @@
 import { collectRenderedAgentExcludedRanges, resolveRenderedAgentTarget, spliceRenderedAgentTarget } from '../../agent/agent-rendered-target.js';
-import { extractFormatFunctionBlocks } from './format-repair-side-effect-utils.js';
+import { extractFormatFunctionBlocks, FORMAT_FUNCTION_BLOCK_KINDS } from './format-repair-side-effect-utils.js';
 import { resolveActiveSwipeMessageCore } from './swipe-ui-utils.js';
 import { translateUiText as t } from '../../i18n/index.js';
 
@@ -51,7 +51,9 @@ const mapText = (source, selection, boundaries, collapseSpaces = false) => {
 };
 const replaceText = (target, text, boundaries, ops = null) => {
   const next = spliceRenderedAgentTarget(target, text, { ops });
-  const functions = source => extractFormatFunctionBlocks(source).map(block => block.raw);
+  // 没闭合的 <image_prompt> 只是文字里提到标签：只保护标签本身，后文照常可改
+  const functions = source => extractFormatFunctionBlocks(source)
+    .map(block => (block.kind === FORMAT_FUNCTION_BLOCK_KINDS.imagePrompt && !block.valid ? block.openTag : block.raw));
   const thoughts = source => collectRenderedAgentExcludedRanges(source, reasoningRanges(source, boundaries))
     .map(range => source.slice(range.start, range.end));
   if (key(functions(target.source)) !== key(functions(next)) || key(thoughts(target.source)) !== key(thoughts(next))) {

@@ -9,6 +9,7 @@ import {
   buildFormatFunctionSideEffectPlan,
   extractFormatFunctionBlocks,
   replaceReusedFormatFunctionBlocks,
+  resolveReusedImagePromptReplacements,
   validateFormatRepairFunctionPayloads,
 } from '../../src/scripts/ui/chat/format-repair-side-effect-utils.js';
 
@@ -219,7 +220,45 @@ test('app edit writeback generates images from the placeholders the edit put int
   await run();
   const empty = scheduled[1].source.meta.autoImagePromptPlaceholders;
   assert.ok(Array.isArray(empty) && empty.length === 0, 'no placeholder in the body means nothing to generate');
-  assert.match(app, /currentImageTokens\[Math\.max\(0, Number\(entry\?\.before\?\.ordinal \|\| entry\?\.after\?\.ordinal \|\| 1\) - 1\)\]/);
+  assert.match(app, /resolveReusedImagePromptReplacements\(\{/);
+});
+
+test('edit save keeps each unchanged image tag on its own image; a mere mention of <image_prompt> stays text', () => {
+  // 回归（0.7.7）：构思里提到 <image_prompt>（没闭合）会被当成第 1 个生图块。
+  // 没改到它时整段被换成图片；按标签序号取图时真正的标签取到空，图片消失。
+  const kind = FORMAT_FUNCTION_BLOCK_KINDS.imagePrompt;
+  const mention = '构思：适当位置输出 `<image_prompt>` 。\n';
+  const tag = '<image_prompt>1girl, smile</image_prompt>';
+  const original = `${mention}正文一。\n${tag}\n正文二。`;
+  const placeholders = [{ prompt: '1girl, smile', pendingToken: '[img-图片生成中]' }];
+  const save = (candidateText, options) => {
+    const plan = buildFormatFunctionSideEffectPlan({ originalText: original, candidateText });
+    const replacements = resolveReusedImagePromptReplacements({ plan, ...options });
+    return replaceReusedFormatFunctionBlocks(candidateText, plan, kind, entry => replacements.get(entry));
+  };
+  const editAfterTag = `${mention}正文一。\n${tag}\n正文二改。`;
+  assert.equal(save(editAfterTag, { imageTokens: ['[img-a.png]'], placeholders }), `${mention}正文一。\n[img-a.png]\n正文二改。`,
+    '提到标签的那句原样保留，真正的标签换回原来的图');
+  const editBeforeTag = `${mention}正文一改。\n${tag}\n正文二。`;
+  assert.equal(save(editBeforeTag, { imageTokens: ['[img-a.png]'], placeholders }), `${mention}正文一改。\n[img-a.png]\n正文二。`);
+
+  // 生图记录里存着标签原文：图片 token 已不在正文里（之前存坏了）也能找回；前面混进别的图时也不会拿错
+  const assets = [
+    { token: '[img-old.png]', prompt: 'style, old', generationParams: { imagePromptDocument: { blocks: [{ kind: 'scene', text: 'old prompt' }] } } },
+    { token: '[img-b.png]', prompt: 'style, 1girl, smile', generationParams: { imagePromptDocument: { blocks: [{ kind: 'quality', text: 'best' }, { kind: 'scene', text: '1girl,  smile' }] } } },
+  ];
+  assert.equal(save(editAfterTag, { imageTokens: ['[img-old.png]'], generatedInlineImages: assets }), `${mention}正文一。\n[img-b.png]\n正文二改。`);
+  assert.equal(save(editAfterTag, { imageTokens: [], generatedInlineImages: assets }), `${mention}正文一。\n[img-b.png]\n正文二改。`);
+
+  // 同样的提示词按正文顺序各配各的；还在生成的占位照旧留着
+  const twice = '<image_prompt>same</image_prompt>\n中\n<image_prompt>same</image_prompt>';
+  const plan = buildFormatFunctionSideEffectPlan({ originalText: twice, candidateText: `前\n${twice}` });
+  const replacements = resolveReusedImagePromptReplacements({ plan, imageTokens: ['[img-1.png]', '[img-图片生成中 2]'],
+    placeholders: [{ prompt: 'same', pendingToken: '[img-图片生成中]' }, { prompt: 'same', pendingToken: '[img-图片生成中 2]' }] });
+  assert.equal(replaceReusedFormatFunctionBlocks(`前\n${twice}`, plan, kind, entry => replacements.get(entry)), '前\n[img-1.png]\n中\n[img-图片生成中 2]');
+
+  // 没有占位记录的旧消息：按闭合标签的序号取图（提到标签的那句不算）
+  assert.equal(save(editAfterTag, { imageTokens: ['[img-a.png]'] }), `${mention}正文一。\n[img-a.png]\n正文二改。`);
 });
 
 let failed = 0;

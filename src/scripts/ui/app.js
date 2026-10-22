@@ -446,6 +446,7 @@ import {
   buildFormatFunctionExecutionLedger,
   buildFormatFunctionSideEffectPlan,
   replaceReusedFormatFunctionBlocks,
+  resolveReusedImagePromptReplacements,
   validateFormatRepairFunctionPayloads,
 } from './chat/format-repair-side-effect-utils.js';
 import {
@@ -735,6 +736,7 @@ import {
   normalizeCheckpointSwipeState as normalizeCheckpointSwipeStateCore,
   resolveAssistantFloorForCheckpoint as resolveAssistantFloorForCheckpointCore,
   resolveTurnIndexForAssistant as resolveTurnIndexForAssistantCore,
+  withMessageMemoryUpdateEntry,
 } from './chat/turn-checkpoint-message-runtime-utils.js';
 import {
   buildProtocolSystemMetaMessage,
@@ -25361,6 +25363,8 @@ const initApp = async () => {
     const sid = String(sessionId || '').trim();
     if (!sid || !isTurnCheckpointSessionEnabled(sid)) return [];
     const state = await turnCheckpointStore.getSessionState(sid);
+    // 检查点读不到时拿到的是空状态，据此会把这个会话的快照全判成没人引用、满 30 天后被删掉：这时不标记也不清理。
+    if (turnCheckpointStore.isPersistenceBlocked(sid)) return [];
     const reachable = new Set(collectCheckpointSnapshotIds(state));
     const baselineId = String(state?.baselineSnapshotId || '').trim();
     if (baselineId) reachable.add(baselineId);
@@ -25767,7 +25771,7 @@ const initApp = async () => {
       (activeSwipeIndex === 0 ? tailMessage?.meta?.memoryTableSnapshot || null : null);
     let applied = await restoreCheckpointBranchMemoryState(
       sid,
-      { ...(inlineBranch || {}), ...(checkpointBranch || {}) },
+      withMessageMemoryUpdateEntry({ ...(inlineBranch || {}), ...(checkpointBranch || {}) }, inlineBranch),
       { isGroup, fallbackSnapshot },
     );
     if (!applied && !checkpoint && !fallbackSnapshot) {
@@ -25781,7 +25785,13 @@ const initApp = async () => {
           ? refreshedCheckpoint.branches.find(branch => Number(branch?.swipeIndex) === activeSwipeIndex)
           : null;
         if (refreshedBranch?.memorySnapshotId) {
-          applied = await restoreCheckpointBranchMemoryState(sid, refreshedBranch, { isGroup });
+          const refreshedInline = normalizeCheckpointSwipeState(chatStore.findMessage(messageId, sid) || tailMessage)
+            .swipes[activeSwipeIndex];
+          applied = await restoreCheckpointBranchMemoryState(
+            sid,
+            withMessageMemoryUpdateEntry(refreshedBranch, refreshedInline),
+            { isGroup },
+          );
         }
       } catch (err) {
         logger.warn('backfill tail turn checkpoint from current memory state failed', err);
@@ -26012,13 +26022,13 @@ const initApp = async () => {
           }
           const applied = await restoreCheckpointBranchMemoryState(
             sid,
-            {
+            withMessageMemoryUpdateEntry({
               ...(inlineBranch || {}),
               ...(checkpointBranch || {}),
               memorySnapshotId: String(
                 checkpointBranch?.memorySnapshotId || inlineBranch?.memorySnapshotId || fallbackSnapshotId || ''
               ).trim(),
-            },
+            }, inlineBranch),
             { isGroup, fallbackSnapshot: fallbackLoadedSnapshot },
           );
           if (applied) {
@@ -31753,6 +31763,10 @@ const initApp = async () => {
         }
       }
     };
+    // 重新生成／续写这条回复：先取消它还在后台生成的图片（只剩生图时上一轮已让出会话）
+    if (rpUiMode && !previewOnly && (swipeTarget || continueTarget)) {
+      hopscotchTurnRuntime?.abortImageTurnForMessage?.(sessionId, swipeTarget?.msgId || continueTarget?.messageId);
+    }
     if (rpUiMode && !previewOnly && hopscotchTurnRuntime) {
       hopscotchTurn = hopscotchTurnRuntime.prepareTurn({
         sessionId,
@@ -31764,6 +31778,7 @@ const initApp = async () => {
         generationId,
         title: continueTarget ? t('续写流程') : (swipeTarget ? t('重新生成流程') : t('跳房子流程')),
         parentSignal: abortSignal,
+        releaseSessionForImages: !swipeTarget && !continueTarget,
         executorContext: {
           runtimeConfig: { ...config },
           useGlobalVariables: sharedVariables,
@@ -32212,7 +32227,8 @@ const initApp = async () => {
         setActiveGeneration: next => {
           activeGeneration = next;
         },
-        // 板模式（用户板）：正文落地后继续输入可编辑，但发送键等整轮终态后再解锁（§16.1）
+        // 板模式（用户板）：正文落地后继续输入可编辑，但发送键等整轮终态后再解锁（§16.1）；
+        // 普通发送只剩生图时提前解锁（2026-10-20 用户定），图片在后台回填、进度看小球。
         setSendingState: value => {
           if (value === false && hopscotchTurn) return;
           ui.setSendingState(value);
@@ -32220,7 +32236,7 @@ const initApp = async () => {
         recordTraceEvent: recordSendFlowTraceEvent,
       });
       if (hopscotchTurn) {
-        Promise.resolve(hopscotchTurn.turnPromise).catch(() => {}).finally(() => {
+        Promise.resolve(hopscotchTurn.sendUnlockPromise || hopscotchTurn.turnPromise).catch(() => {}).finally(() => {
           if (isSessionActive(sessionId) && (!activeGeneration || activeGeneration.id === generationId)) ui.setSendingState(false);
         });
       }
@@ -33393,22 +33409,17 @@ const initApp = async () => {
       const existingImagePlaceholders = Array.isArray(currentStoredMeta.autoImagePromptPlaceholders)
         ? currentStoredMeta.autoImagePromptPlaceholders
         : [];
+      const reusedImageReplacements = resolveReusedImagePromptReplacements({
+        plan: functionSideEffectPlan,
+        imageTokens: currentImageTokens,
+        placeholders: existingImagePlaceholders,
+        generatedInlineImages,
+      });
       const renderSource = replaceReusedFormatFunctionBlocks(
         next,
         functionSideEffectPlan,
         FORMAT_FUNCTION_BLOCK_KINDS.imagePrompt,
-        (entry) => {
-          const prompt = String(entry?.after?.payload || '').trim();
-          const asset = generatedInlineImages.find(item => String(item?.prompt || '').trim() === prompt);
-          if (asset?.token) return asset.token;
-          const placeholder = existingImagePlaceholders.find(item =>
-            String(item?.prompt || '').trim() === prompt
-          );
-          if (placeholder?.pendingToken && currentImageTokens.includes(placeholder.pendingToken)) {
-            return placeholder.pendingToken;
-          }
-          return currentImageTokens[Math.max(0, Number(entry?.before?.ordinal || entry?.after?.ordinal || 1) - 1)] || '';
-        },
+        entry => reusedImageReplacements.get(entry) ?? '',
       );
       const cleanedForRender = stripTableEditBlocks(stripUpdateVariableBlocks(renderSource));
       const hadUpdateVariableTag = /<\s*(update(?:variable)?|variableupdate)\b/i.test(next);

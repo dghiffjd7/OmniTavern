@@ -1,5 +1,6 @@
 import { splitDanglingBlockTail } from '../../utils/dangling-block-utils.js';
 import { parseTableEditActions } from '../../memory/memory-edit-parser.js';
+import { normalizeAutoImagePromptTextKey } from './auto-image-prompt-utils.js';
 
 export const FORMAT_FUNCTION_BLOCK_KINDS = Object.freeze({
   imagePrompt: 'image_prompt',
@@ -292,6 +293,56 @@ export const replaceReusedFormatFunctionBlocks = (
     output = `${output.slice(0, entry.after.start)}${replacement}${output.slice(entry.after.end)}`;
   });
   return output;
+};
+
+// 编辑保存时，没改的生图标签换回它原来的图（Map：reuse entry → 替换文字）。
+// - 没闭合的 <image_prompt>（正文或构思里只是提到这个标签）不是生图块，原文照留。
+// - 先按生图记录里存的标签原文（imagePromptDocument 的 scene）找图；再按「第几个占位」对应正文里第几张图
+//   （占位只放在正文里闭合的标签上，思维链、代码块里的不放，所以不能按标签序号数）；都没有才按闭合标签的序号。
+export const resolveReusedImagePromptReplacements = ({
+  plan = null,
+  imageTokens = [],
+  placeholders = [],
+  generatedInlineImages = [],
+} = {}) => {
+  const kind = FORMAT_FUNCTION_BLOCK_KINDS.imagePrompt;
+  const tokens = (Array.isArray(imageTokens) ? imageTokens : []).map(String);
+  const sceneOf = asset => (asset?.generationParams?.imagePromptDocument?.blocks || [])
+    .find(block => block?.kind === 'scene')?.text;
+  const assets = (Array.isArray(generatedInlineImages) ? generatedInlineImages : [])
+    .filter(asset => asset?.token)
+    .map(asset => ({
+      token: String(asset.token),
+      keys: [asset.prompt, sceneOf(asset)].map(normalizeAutoImagePromptTextKey).filter(Boolean),
+      at: Number(asset.createdAt) || 0,
+    }));
+  const slots = (Array.isArray(placeholders) ? placeholders : []).map(item => normalizeAutoImagePromptTextKey(item?.prompt));
+  const validBefore = (Array.isArray(plan?.beforeBlocks) ? plan.beforeBlocks : [])
+    .filter(block => block.kind === kind && block.valid);
+  const usedTokens = new Set();
+  const usedSlots = new Set();
+  const replacements = new Map();
+  (Array.isArray(plan?.reuseEntries) ? plan.reuseEntries : [])
+    .filter(entry => entry.kind === kind && entry.after)
+    .sort((left, right) => left.after.start - right.after.start)
+    .forEach((entry) => {
+      if (!entry.before?.valid || !entry.after.valid) {
+        replacements.set(entry, entry.after.raw);
+        return;
+      }
+      const key = normalizeAutoImagePromptTextKey(entry.after.payload);
+      const slot = slots.findIndex((slotKey, index) => !usedSlots.has(index) && slotKey === key);
+      if (slot >= 0) usedSlots.add(slot);
+      const matches = assets.filter(asset => asset.keys.includes(key) && !usedTokens.has(asset.token));
+      const asset = matches.find(item => tokens.includes(item.token))
+        || matches.sort((left, right) => right.at - left.at)[0];
+      const token = asset?.token
+        || (slot >= 0 ? tokens[slot] : tokens[validBefore.findIndex(block => block.start === entry.before.start)])
+        || '';
+      if (token) usedTokens.add(token);
+      replacements.set(entry, token);
+    });
+  return replacements;
 };
 
 export const fingerprintFormatFunctionPayload = (value = '') => {

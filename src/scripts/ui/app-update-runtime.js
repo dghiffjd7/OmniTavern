@@ -8,7 +8,7 @@ import {
   resolveLaunchChangelog,
   shouldCheckForAppUpdate,
 } from '../utils/app-update-utils.js';
-import { createAppUpdateProgressCard } from './app-update-progress-card.js';
+import { createAppUpdateProgressCard, resolveAppUpdateProgressDisplay } from './app-update-progress-card.js';
 
 export const APP_UPDATE_RELEASES_URL = 'https://api.github.com/repos/dghiffjd7/OmniTavern/releases?per_page=15';
 export const APP_UPDATE_RELEASES_PAGE = 'https://github.com/dghiffjd7/OmniTavern/releases/latest';
@@ -43,6 +43,8 @@ export const createAppUpdateRuntime = ({
   logger = console,
 } = {}) => {
   let currentVersion = '';
+  // 当前版本在 CHANGELOG 里的一节；有内容时「关于」卡片可再打开
+  let changelogSection = '';
   let checking = null;
   let installing = null;
   // 桌面安装进度：{ version, stage: preparing | downloading | installing, downloaded, total, percent }
@@ -63,6 +65,7 @@ export const createAppUpdateRuntime = ({
       checking: Boolean(checking),
       installing: Boolean(installing),
       progress: progress ? { ...progress } : null,
+      changelogAvailable: Boolean(changelogSection),
       lastCheckedAt: Number(state.lastCheckedAt || 0) || 0,
       ...resolveAppUpdateState({ currentVersion, latest, state }),
     };
@@ -160,15 +163,19 @@ export const createAppUpdateRuntime = ({
     return checking;
   };
 
-  const showLaunchChangelog = async (version) => {
+  const readChangelogSection = async (version) => {
     let section = '';
     try { section = extractChangelogSection(await loadChangelog(), version); } catch {}
     const cached = readState().latest;
     if (!section && cached?.version === version) section = trim(cached.notes);
-    if (!section) return false;
+    return section;
+  };
+
+  const showChangelog = async ({ title = '' } = {}) => {
+    if (!changelogSection) return false;
     await choose({
-      title: t('已更新到 v{version}', { version }),
-      message: markdownToPlainText(section),
+      title: title || t('v{version} 更新内容', { version: currentVersion }),
+      message: markdownToPlainText(changelogSection),
       actions: [{ id: 'ok', label: t('知道了'), primary: true }],
     });
     return true;
@@ -183,8 +190,9 @@ export const createAppUpdateRuntime = ({
     if (!currentVersion) return getView();
     const launch = resolveLaunchChangelog({ currentVersion, lastSeenVersion: getSettings()?.lastSeenAppVersion });
     if (launch.recordVersion) updateSettings({ lastSeenAppVersion: launch.recordVersion });
+    changelogSection = await readChangelogSection(currentVersion);
     notify();
-    if (launch.show) await showLaunchChangelog(currentVersion);
+    if (launch.show) await showChangelog({ title: t('已更新到 v{version}', { version: currentVersion }) });
     if (shouldCheckForAppUpdate({ lastCheckedAt: readState().lastCheckedAt, now: now(), intervalMs: checkIntervalMs })) {
       await checkNow({ prompt: true });
     } else {
@@ -198,6 +206,7 @@ export const createAppUpdateRuntime = ({
     start,
     checkNow,
     runUpdate: () => runUpdate(),
+    showChangelog: () => showChangelog(),
     getView,
     getCurrentVersion: () => currentVersion,
   };
@@ -213,12 +222,11 @@ export const renderAppUpdateUi = ({ documentRef = globalThis.document, view = {}
   const actionEl = card.querySelector('[data-app-update-action]');
   card.classList.toggle('has-update', Boolean(view.hasUpdate));
   if (versionEl) versionEl.textContent = view.currentVersion ? `v${view.currentVersion}` : '—';
+  // 桌面下载／安装期间：按钮换成进度条（百分比在进度条旁），状态只写阶段
+  const display = resolveAppUpdateProgressDisplay(view.progress);
   if (statusEl) {
-    const progress = view.progress;
-    statusEl.textContent = progress?.stage === 'installing'
-      ? t('下载完成，正在启动安装…')
-      : progress?.stage === 'downloading' && progress.percent != null
-      ? t('正在下载更新 {percent}%', { percent: progress.percent })
+    statusEl.textContent = display
+      ? display.title
       : view.installing
       ? t('正在下载更新，安装完成后会自动重启。')
       : view.hasUpdate
@@ -228,7 +236,23 @@ export const renderAppUpdateUi = ({ documentRef = globalThis.document, view = {}
   if (actionEl) {
     actionEl.textContent = view.hasUpdate ? t('更新') : t('检查更新');
     actionEl.disabled = Boolean(view.checking || view.installing) || !view.currentVersion;
+    actionEl.hidden = Boolean(display);
   }
+  const progressEl = card.querySelector('[data-app-update-progress]');
+  if (progressEl) {
+    progressEl.hidden = !display;
+    if (display) {
+      progressEl.classList.toggle('is-indeterminate', display.indeterminate);
+      progressEl.style.setProperty('--aup-progress', String((display.percent ?? 0) / 100));
+      progressEl.setAttribute('aria-label', display.title);
+      if (display.percent == null) progressEl.removeAttribute('aria-valuenow');
+      else progressEl.setAttribute('aria-valuenow', String(display.percent));
+    }
+  }
+  const percentEl = card.querySelector('[data-app-update-percent]');
+  if (percentEl) percentEl.textContent = display?.percent == null ? '' : `${display.percent}%`;
+  const notesEl = card.querySelector('[data-app-update-notes]');
+  if (notesEl) notesEl.hidden = !view.changelogAvailable;
 };
 
 export const bindAppUpdateUi = ({ documentRef = globalThis.document, runtime = null } = {}) => {
@@ -239,6 +263,9 @@ export const bindAppUpdateUi = ({ documentRef = globalThis.document, runtime = n
     if (view.checking || view.installing) return;
     if (view.hasUpdate) void runtime.runUpdate();
     else void runtime?.checkNow?.({ prompt: true, manual: true });
+  });
+  documentRef?.querySelector?.('[data-app-update-notes]')?.addEventListener?.('click', () => {
+    void runtime?.showChangelog?.();
   });
   return (view) => {
     renderAppUpdateUi({ documentRef, view });

@@ -3086,11 +3086,16 @@ pub(crate) fn write_file_atomically(file: &Path, contents: &[u8]) -> Result<(), 
 
 /// 通用 KV 持久化（前端清缓存后仍可讀）
 #[tauri::command]
-pub async fn save_kv(app: AppHandle, name: String, data: Value) -> Result<(), String> {
+pub async fn save_kv(
+    app: AppHandle,
+    name: String,
+    data: Value,
+    compact: Option<bool>,
+) -> Result<(), String> {
     let data_dir = get_data_dir(&app)?;
     fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
     let file = data_dir.join(format!("{name}.json"));
-    let json = serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?;
+    let json = serialize_kv_json(&data, compact.unwrap_or(false), KV_LOAD_MAX_BYTES)?;
 
     // 先在同目录完整写入并同步临时文件，再原子替换权威副本。
     write_file_atomically(&file, json.as_bytes())?;
@@ -3121,10 +3126,9 @@ pub async fn load_kv(app: AppHandle, name: String) -> Result<Value, String> {
         return Ok(serde_json::json!({}));
     }
 
-    let max_len: u64 = 30 * 1024 * 1024; // 30 MiB safety cap
     if let Ok(meta) = fs::metadata(&file) {
         let len = meta.len();
-        if len > max_len {
+        if len > KV_LOAD_MAX_BYTES {
             eprintln!("[load_kv] 文件过大，跳过加载: {:?}, {} bytes", file, len);
             return Ok(serde_json::json!({ "_tooLarge": true, "size": len }));
         }
@@ -3150,6 +3154,101 @@ pub async fn load_kv(app: AppHandle, name: String) -> Result<Value, String> {
     }
 
     Ok(data)
+}
+
+// load_kv 的读取上限；compact_oversized_turn_checkpoint 只在超过它时动手。
+const KV_LOAD_MAX_BYTES: u64 = 30 * 1024 * 1024; // 30 MiB safety cap
+
+/// save_kv 的序列化：compact 时不带缩进（回合检查点这类只给程序读的大文件）。
+/// 超过 load_kv 上限的不写——写了下次也读不回来，宁可保留上一版。
+fn serialize_kv_json(data: &Value, compact: bool, max_bytes: u64) -> Result<String, String> {
+    let json = if compact {
+        serde_json::to_string(data)
+    } else {
+        serde_json::to_string_pretty(data)
+    }
+    .map_err(|e| e.to_string())?;
+    if json.len() as u64 > max_bytes {
+        return Err(format!("kv_too_large:{}", json.len()));
+    }
+    Ok(json)
+}
+
+fn is_turn_checkpoint_kv_name(name: &str) -> bool {
+    name.starts_with("turn_checkpoint_v1__") && !name.contains('/') && !name.contains('\\') && !name.contains("..")
+}
+
+/// 去掉回合检查点每个分支写表记录里的请求提示词与原始输出（与前端 normalizeCheckpointBranch 一致），返回去掉的字段数。
+fn strip_turn_checkpoint_display_text(data: &mut Value) -> usize {
+    let mut removed = 0;
+    let checkpoints = match data.get_mut("checkpoints").and_then(Value::as_object_mut) {
+        Some(value) => value,
+        None => return 0,
+    };
+    for checkpoint in checkpoints.values_mut() {
+        let branches = match checkpoint.get_mut("branches").and_then(Value::as_array_mut) {
+            Some(value) => value,
+            None => continue,
+        };
+        for branch in branches.iter_mut() {
+            if let Some(entry) = branch.get_mut("memoryUpdateEntry").and_then(Value::as_object_mut) {
+                for key in ["requestPrompt", "raw"] {
+                    if entry.remove(key).is_some() {
+                        removed += 1;
+                    }
+                }
+            }
+        }
+    }
+    removed
+}
+
+// 同一会话可能有两处同时在读、同时请求修复：排队处理，后到的看到已不超限就直接返回，不会拿修好的文件覆盖备份。
+static TURN_CHECKPOINT_COMPACTION_LOCK: Mutex<()> = Mutex::new(());
+
+fn compact_oversized_turn_checkpoint_file(data_dir: &Path, name: &str, max_bytes: u64) -> Result<Value, String> {
+    if !is_turn_checkpoint_kv_name(name) {
+        return Err("not a turn checkpoint store".to_string());
+    }
+    let _guard = TURN_CHECKPOINT_COMPACTION_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let file = data_dir.join(format!("{name}.json"));
+    let before = match fs::metadata(&file) {
+        Ok(meta) => meta.len(),
+        Err(_) => return Ok(serde_json::json!({ "compacted": false, "reason": "missing" })),
+    };
+    if before <= max_bytes {
+        return Ok(serde_json::json!({ "compacted": false, "reason": "not_oversized", "size": before }));
+    }
+    let mut data: Value = {
+        let json = fs::read_to_string(&file).map_err(|e| e.to_string())?;
+        serde_json::from_str(&json).map_err(|e| e.to_string())?
+    };
+    let removed = strip_turn_checkpoint_display_text(&mut data);
+    // 检查点改为不带缩进写入：就算没有可去掉的，只靠去掉缩进也可能回到上限以内。
+    let json = serde_json::to_string(&data).map_err(|e| e.to_string())?;
+    if json.len() as u64 >= before {
+        return Ok(serde_json::json!({ "compacted": false, "reason": "nothing_to_strip", "size": before }));
+    }
+    fs::copy(&file, data_dir.join(format!("{name}.json.bak"))).map_err(|e| e.to_string())?;
+    write_file_atomically(&file, json.as_bytes())?;
+    eprintln!(
+        "[compact_oversized_turn_checkpoint] {:?}: {} -> {} bytes, removed {} fields",
+        file,
+        before,
+        json.len(),
+        removed
+    );
+    Ok(serde_json::json!({ "compacted": true, "before": before, "after": json.len(), "removed": removed }))
+}
+
+/// 超过 load_kv 上限的回合检查点：以前每轮都把整段请求提示词、正文原文存进写表记录，单个会话会超过 30 MiB，
+/// 之后整份读不回来。先把原文件备份成同名 .bak，再去掉这两项写回，前端随后重新读取。
+#[tauri::command]
+pub async fn compact_oversized_turn_checkpoint(app: AppHandle, name: String) -> Result<Value, String> {
+    let data_dir = get_data_dir(&app)?;
+    compact_oversized_turn_checkpoint_file(&data_dir, &name, KV_LOAD_MAX_BYTES)
 }
 
 /// 删除已完成 sidecar 迁移后的旧世界书聚合 KV。
@@ -5819,5 +5918,109 @@ mod tests {
         let error = copy_within_declared_size(&b"abcdefgh"[..], 4, &mut out).err().unwrap();
         assert!(error.contains("larger than declared"), "{error}");
         assert_eq!(out.len(), 5, "stops one byte past the declared size instead of copying everything");
+    }
+
+    #[test]
+    fn turn_checkpoint_compaction_strips_only_write_record_display_text() {
+        let mut data = serde_json::json!({
+            "version": 1,
+            "pointer": { "tailAssistantMessageId": "a2" },
+            "checkpoints": {
+                "a1": { "branches": [
+                    {
+                        "swipeIndex": 0,
+                        "messageRaw": "正文",
+                        "memorySnapshotId": "mem_1",
+                        "memoryUpdateEntry": {
+                            "requestPrompt": "system:\n整段正文请求",
+                            "raw": "正文原文",
+                            "tableEditRaw": "insertRow",
+                            "actions": [{ "action": "insert" }],
+                            "rollback": { "tables": [] }
+                        }
+                    },
+                    { "swipeIndex": 1, "memoryUpdateEntry": null }
+                ] },
+                "a2": { "branches": [] }
+            }
+        });
+        assert_eq!(strip_turn_checkpoint_display_text(&mut data), 2);
+        let branch = &data["checkpoints"]["a1"]["branches"][0];
+        let entry = &branch["memoryUpdateEntry"];
+        assert!(entry.get("requestPrompt").is_none() && entry.get("raw").is_none());
+        assert_eq!(entry["tableEditRaw"], "insertRow");
+        assert_eq!(entry["actions"], serde_json::json!([{ "action": "insert" }]));
+        assert_eq!(entry["rollback"], serde_json::json!({ "tables": [] }));
+        assert_eq!(branch["messageRaw"], "正文");
+        assert_eq!(branch["memorySnapshotId"], "mem_1");
+        assert_eq!(data["pointer"]["tailAssistantMessageId"], "a2");
+        assert_eq!(strip_turn_checkpoint_display_text(&mut data), 0, "nothing left on a second pass");
+        assert_eq!(strip_turn_checkpoint_display_text(&mut serde_json::json!({ "_tooLarge": true })), 0);
+    }
+
+    #[test]
+    fn oversized_turn_checkpoint_compaction_runs_once_and_keeps_the_original_backup() {
+        let dir = unique_temp_data_dir("ckpt-compact");
+        let name = "turn_checkpoint_v1__rp_test_abc__persona_test";
+        let file = dir.join(format!("{name}.json"));
+        let original = serde_json::to_string_pretty(&serde_json::json!({
+            "checkpoints": { "a1": { "branches": [{ "memoryUpdateEntry": {
+                "requestPrompt": "x".repeat(4000),
+                "raw": "y".repeat(500),
+                "rollback": { "tables": [] }
+            } }] } }
+        }))
+        .unwrap();
+        fs::write(&file, &original).unwrap();
+        // 回归：两处同时请求修复时，第二次曾把修好的文件复制进 .bak，原文件备份就没了。
+        let results: Vec<Value> = std::thread::scope(|scope| {
+            let first = scope.spawn(|| compact_oversized_turn_checkpoint_file(&dir, name, 1024));
+            let second = scope.spawn(|| compact_oversized_turn_checkpoint_file(&dir, name, 1024));
+            vec![first.join().unwrap().unwrap(), second.join().unwrap().unwrap()]
+        });
+        assert_eq!(results.iter().filter(|r| r["compacted"] == true).count(), 1, "{results:?}");
+        assert_eq!(fs::read_to_string(dir.join(format!("{name}.json.bak"))).unwrap(), original);
+        let written = fs::read_to_string(&file).unwrap();
+        assert!(!written.contains('\n'), "compacted checkpoint is written without indentation");
+        let compacted: Value = serde_json::from_str(&written).unwrap();
+        let entry = &compacted["checkpoints"]["a1"]["branches"][0]["memoryUpdateEntry"];
+        assert!(entry.get("requestPrompt").is_none() && entry.get("raw").is_none());
+        assert_eq!(entry["rollback"], serde_json::json!({ "tables": [] }));
+        assert_eq!(compact_oversized_turn_checkpoint_file(&dir, name, 1024).unwrap()["reason"], "not_oversized");
+        assert!(compact_oversized_turn_checkpoint_file(&dir, "chat_store_v1__persona_test", 1024).is_err());
+
+        // 没有可去掉的、只是缩进让它超限：去掉缩进写回就能读。
+        let pretty_only = "turn_checkpoint_v1__rp_pretty_abc__persona_test";
+        let rows: Vec<Value> = (0..40).map(|i| serde_json::json!({ "swipeIndex": i, "memorySnapshotId": "mem_x" })).collect();
+        let pretty = serde_json::to_string_pretty(&serde_json::json!({ "checkpoints": { "a1": { "branches": rows } } })).unwrap();
+        fs::write(dir.join(format!("{pretty_only}.json")), &pretty).unwrap();
+        let max = (pretty.len() - 1) as u64;
+        let result = compact_oversized_turn_checkpoint_file(&dir, pretty_only, max).unwrap();
+        assert_eq!(result["compacted"], true, "{result:?}");
+        assert!((fs::metadata(dir.join(format!("{pretty_only}.json"))).unwrap().len()) <= max);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn save_kv_serialization_skips_indentation_on_request_and_refuses_unreadable_sizes() {
+        let data = serde_json::json!({ "checkpoints": { "a1": { "branches": [{ "swipeIndex": 0 }] } } });
+        let pretty = serialize_kv_json(&data, false, KV_LOAD_MAX_BYTES).unwrap();
+        let compact = serialize_kv_json(&data, true, KV_LOAD_MAX_BYTES).unwrap();
+        assert!(pretty.contains("\n  "));
+        assert!(!compact.contains('\n'));
+        assert_eq!(serde_json::from_str::<Value>(&compact).unwrap(), data);
+        // 回归：写入不设上限、读取卡 30 MiB，超过上限的文件写得进去、读不回来。
+        let error = serialize_kv_json(&data, true, (compact.len() - 1) as u64).unwrap_err();
+        assert!(error.starts_with("kv_too_large:"), "{error}");
+        assert!(serialize_kv_json(&data, true, compact.len() as u64).is_ok());
+    }
+
+    #[test]
+    fn turn_checkpoint_compaction_only_accepts_checkpoint_store_names() {
+        assert!(is_turn_checkpoint_kv_name("turn_checkpoint_v1__rp_persona_1_abc__persona_1"));
+        assert!(!is_turn_checkpoint_kv_name("chat_store_v1__persona_1"));
+        assert!(!is_turn_checkpoint_kv_name("turn_checkpoint_v1__../app_settings_v1"));
+        assert!(!is_turn_checkpoint_kv_name("turn_checkpoint_v1__a\\..\\b"));
+        assert!(!is_turn_checkpoint_kv_name("turn_checkpoint_v1__a/b"));
     }
 }

@@ -329,9 +329,33 @@ body.developer-profile-open {
   letter-spacing: 0.08em;
 }
 
+.app-update-version-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+}
+
 .app-update-version {
   color: var(--app-text-primary);
   font-size: 14px;
+}
+
+/* 再次打开当前版本的更新内容 */
+.app-update-notes {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--app-accent-strong);
+  font-size: 11px;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--app-accent-strong) 40%, transparent);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.app-update-notes[hidden] {
+  display: none;
 }
 
 .app-update-status {
@@ -359,9 +383,78 @@ body.developer-profile-open {
   color: var(--app-accent-strong);
 }
 
-.app-update-action:disabled {
-  opacity: 0.6;
-  cursor: default;
+.app-update-card .app-update-action:disabled {
+  border-color: var(--app-border-subtle);
+  color: var(--app-text-muted);
+  background: transparent;
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.app-update-action[hidden] {
+  display: none;
+}
+
+/* 桌面下载／安装期间取代按钮的进度条 */
+.app-update-progress-inline {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(168px, 42%);
+}
+
+.app-update-progress-inline[hidden] {
+  display: none;
+}
+
+.app-update-progress-track {
+  position: relative;
+  flex: 1 1 auto;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--app-accent-primary) 12%, var(--app-surface-subtle));
+}
+
+.app-update-progress-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(var(--aup-progress, 0) * 100%);
+  min-width: 6px;
+  border-radius: inherit;
+  background: var(--app-accent-primary);
+  transition: width 0.35s ease;
+}
+
+.app-update-progress-inline.is-indeterminate .app-update-progress-fill {
+  width: 38%;
+  min-width: 0;
+  transition: none;
+  animation: appUpdateInlineSlide 1.3s ease-in-out infinite;
+}
+
+.app-update-progress-percent {
+  flex: none;
+  min-width: 3.2ch;
+  color: var(--app-accent-strong);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+@keyframes appUpdateInlineSlide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(270%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-update-progress-inline.is-indeterminate .app-update-progress-fill { animation: none; }
+}
+
+body[data-reduced-motion='on'] .app-update-progress-inline.is-indeterminate .app-update-progress-fill {
+  animation: none;
 }
 
 /* 有新版本时在设置入口与「关于」上挂小红点（跳过的版本不显示） */

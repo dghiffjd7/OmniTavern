@@ -152,6 +152,94 @@ const makeDeps = (overrides = {}) => {
 }
 
 {
+  // 只剩生图时（普通发送）先让出会话：发送键解锁、可以开下一轮；图片在后台继续，整轮照常收尾。
+  // 重新生成／续写不提前解锁；对那条回复重新生成时取消它的后台生图；没有新一轮时，停止仍能停掉后台生图。
+  const board = () => ({ rows: [
+    { id: 'r1', houses: [{ id: 'body', kind: 'body', fused: ['image_prompt'] }] },
+    { id: 'r2', houses: [{ id: 'memory', kind: 'memory_table' }] },
+    { id: 'r3', houses: [{ id: 'image', kind: 'image_generation' }] },
+  ] });
+  const gate = () => { let open; const promise = new Promise(resolve => { open = resolve; }); return { promise, open }; };
+  const setup = async () => {
+    const store = createHopscotchBoardStore({ storage: memoryStorage(), scopeId: 'p' });
+    await store.setGlobalBoard(board());
+    const memoryGate = gate();
+    const imageGates = [];
+    const { deps } = makeDeps({
+      memory: { runMemoryUpdateAfterChat: async () => { await memoryGate.promise; return { ok: true }; }, runTimelineRepair: async () => ({}), abortMemoryUpdate: () => {} },
+      image: { run: ({ signal }) => new Promise((resolve) => {
+        const g = gate(); imageGates.push(g);
+        g.promise.then(() => resolve({ status: 'succeeded' }));
+        signal?.addEventListener('abort', () => resolve({ status: 'cancelled', reason: 'user_cancelled' }), { once: true });
+      }) },
+    });
+    const runtime = createHopscotchTurnRuntime({ getSettings: () => ({ creativeHopscotchEnabled: true }), boardStore: store, resolveWritingSettings: writingSettings, laneRuntime: fakeLane(), createExecutors: info => createHopscotchExecutors({ ...info, ...deps, logger: { warn() {} } }) });
+    const start = async (options = {}) => {
+      const turn = runtime.prepareTurn({ sessionId: 'rp:a', rpUiMode: true, text: 'x', generationId: options.generationId || 1, ...options });
+      await turn.waitForBodyStart();
+      turn.setBodyContext({ buildMemoryContext: () => ({ meta: {} }) });
+      turn.resolveBody({ status: 'succeeded', messageId: options.messageId || 'm1' });
+      return turn;
+    };
+    return { runtime, memoryGate, imageGates, start };
+  };
+  const settle = async () => { for (let i = 0; i < 8; i += 1) await tick(); };
+
+  const a = await setup();
+  const turn = await a.start({ releaseSessionForImages: true });
+  let unlocked = false;
+  turn.sendUnlockPromise.then(() => { unlocked = true; });
+  await settle();
+  assert.equal(unlocked, false, '记忆还在跑：不解锁');
+  assert.equal(a.runtime.isSessionBusy('rp:a'), true);
+  a.memoryGate.open();
+  await settle();
+  assert.equal(unlocked, true, '只剩生图：发送解锁');
+  assert.equal(a.runtime.isSessionBusy('rp:a'), false);
+  const next = a.runtime.prepareTurn({ sessionId: 'rp:a', rpUiMode: true, text: 'y', generationId: 2 });
+  assert.ok(next, '生图期间可以开始下一轮');
+  next.abort('test');
+  a.imageGates[0].open();
+  const result = await turn.turnPromise;
+  assert.equal(result.houses.image.status, 'succeeded', '图片在后台照常完成');
+
+  const b = await setup();
+  const swipe = await b.start({ releaseSessionForImages: false });
+  let swipeUnlocked = false;
+  swipe.sendUnlockPromise.then(() => { swipeUnlocked = true; });
+  b.memoryGate.open();
+  await settle();
+  assert.equal(swipeUnlocked, false, '重新生成／续写要等图片落地');
+  assert.equal(b.runtime.isSessionBusy('rp:a'), true);
+  b.imageGates[0].open();
+  await swipe.turnPromise;
+  await settle();
+  assert.equal(swipeUnlocked, true);
+
+  const c = await setup();
+  const first = await c.start({ releaseSessionForImages: true, messageId: 'm1' });
+  c.memoryGate.open();
+  await settle();
+  assert.equal(c.runtime.abortImageTurnForMessage('rp:a', 'm2'), false, '别的回复不受影响');
+  assert.equal(c.runtime.abortImageTurnForMessage('rp:a', 'm1'), true, '重新生成这条回复：取消它的后台生图');
+  assert.equal((await first.turnPromise).houses.image.status, 'cancelled');
+
+  const d = await setup();
+  const lone = await d.start({ releaseSessionForImages: true });
+  d.memoryGate.open();
+  await settle();
+  assert.equal(d.runtime.abortSessionTurn('rp:a', 'user'), true, '没有新一轮时，停止会停掉后台生图');
+  assert.equal((await lone.turnPromise).houses.image.status, 'cancelled');
+  // app.js 接线：只有普通发送提前让出；发送键等 sendUnlockPromise；重新生成／续写前取消那条回复的后台生图
+  const { readFileSync } = await import('node:fs');
+  const app = readFileSync(new URL('../../src/scripts/ui/app.js', import.meta.url), 'utf8');
+  assert.match(app, /releaseSessionForImages: !swipeTarget && !continueTarget,/);
+  assert.match(app, /Promise\.resolve\(hopscotchTurn\.sendUnlockPromise \|\| hopscotchTurn\.turnPromise\)/);
+  assert.ok(app.indexOf('abortImageTurnForMessage?.(sessionId, swipeTarget?.msgId || continueTarget?.messageId)') < app.indexOf('hopscotchTurn = hopscotchTurnRuntime.prepareTurn('));
+  console.log('ok - only image generation left: the session is released for the next send, images finish in the background');
+}
+
+{
   // 取消：前置行进行中中止 → 正文不启动，waitForBodyStart 返回 proceed:false，泳道 cancelRun
   const store = createHopscotchBoardStore({ storage: memoryStorage(), scopeId: 'p' });
   await store.setGlobalBoard(userBoard());

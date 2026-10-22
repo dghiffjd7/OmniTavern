@@ -66,6 +66,13 @@ export const normalizeCheckpointSwipeState = (
   };
 };
 
+// 检查点里的写表记录不带请求提示词和原始输出（见 turn-checkpoint-store.js），还原时以消息自带的写表记录为准。
+export const withMessageMemoryUpdateEntry = (branch, messageBranch) => {
+  const base = branch && typeof branch === 'object' ? branch : {};
+  const entry = messageBranch?.memoryUpdateEntry;
+  return entry ? { ...base, memoryUpdateEntry: entry } : base;
+};
+
 export const findPreviousUserMessageIdForAssistant = (messages, assistantMessageId) => {
   const aid = String(assistantMessageId || '').trim();
   if (!aid) return '';

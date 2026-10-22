@@ -100,4 +100,20 @@ assert.throws(() => spliceRenderedAgentTarget(partial, 'Combined.'), /段落无�
   assert.equal(projected('段一。\n\n  拉拉\n', '\n  拉拉\n\n').text, '  拉拉', '首尾空行不纳入');
   assert.equal(write('纯文字一行。', '纯文字一行', '改过的一行'), '改过的一行。', '严格对应的选区仍走原写回逻辑');
 }
+{
+  // 回归（0.7.7）：只是在文字里提到 <image_prompt>（没闭合）时，显示是普通文字，后文不能被当成隐藏
+  const mention = '构思：在适当位置输出 <image_prompt> 。\n\n正文第一句。\n\n<image_prompt>1girl</image_prompt>\n正文第二句。';
+  assert.equal(resolveRenderedAgentTarget(mention, '正文第一句。').ok, true);
+  assert.equal(resolveRenderedAgentTarget(mention, '正文第二句。').ok, true);
+  assert.equal(resolveRenderedAgentTarget(mention, '1girl').ok, false, '闭合的生图标签仍然隐藏');
+  assert.equal(resolveRenderedAgentTarget('前文 `<image_prompt>` 之后\n<div>块内 <image_prompt> 提到</div>\n结尾一句。', '结尾一句。').ok, true, '在其他标签里提到也不会吞掉后文');
+  assert.equal(resolveRenderedAgentTarget('<think>unfinished secret', 'unfinished secret').ok, false, '没闭合的思考块仍然隐藏到结尾');
+  const tableMention = '<plan~>末尾记得输出 <tableEdit> 和 <UpdateVariable> 。</plan~>\n正文一句。\n<tableEdit>insertRow(0, {})</tableEdit>';
+  assert.equal(resolveRenderedAgentTarget(tableMention, '正文一句。').ok, true, '提到记忆表格、变量标签也不会吞掉后文');
+  assert.equal(resolveRenderedAgentTarget(tableMention, 'insertRow(0, {})').ok, false, '闭合的表格指令仍然隐藏');
+  const codeMention = '<plan~>折叠用 `<details><summary>标题</summary>` 包起来。</plan~>\n正文一句。\n<details><summary>摘要</summary>隐藏内容</details>\n结尾一句。';
+  assert.equal(resolveRenderedAgentTarget(codeMention, '正文一句。').ok, true, '行内代码里写的标签是文字，不会吞掉后文');
+  assert.equal(resolveRenderedAgentTarget(codeMention, '结尾一句。').ok, true);
+  assert.equal(resolveRenderedAgentTarget(codeMention, '隐藏内容').ok, false, '真正的折叠块仍然隐藏');
+}
 console.log('agent rendered target tests passed');

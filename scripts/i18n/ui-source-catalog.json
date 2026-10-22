@@ -16695,6 +16695,12 @@
     ]
   },
   {
+    "source": "更新内容",
+    "references": [
+      "src/index.html#html-text"
+    ]
+  },
+  {
     "source": "更新配置",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
@@ -43525,8 +43531,7 @@
   {
     "source": "下载完成，正在启动安装…",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual",
-      "src/scripts/ui/app-update-runtime.js#ui-call"
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -54368,8 +54373,7 @@
   {
     "source": "正在下载更新 {percent}%",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual",
-      "src/scripts/ui/app-update-runtime.js#ui-call"
+      "scripts/i18n/manual-ui-source-keys.json#manual"
     ]
   },
   {
@@ -60050,6 +60054,12 @@
     "source": "updatePresetWith 需要更新函数",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "v{version} 更新内容",
+    "references": [
+      "src/scripts/ui/app-update-runtime.js#ui-call"
     ]
   },
   {

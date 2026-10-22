@@ -174,6 +174,8 @@
   "已是最新正式版": "You're on the latest release",
   "已是最新版本 v{version}": "You're up to date (v{version})",
   "已更新到 v{version}": "Updated to v{version}",
+  "更新内容": "What's new",
+  "v{version} 更新内容": "What's new in v{version}",
   "当前版本 v{version}。": "Current version: v{version}.",
   "新版本 v{version} 可以更新": "v{version} is available",
   "无法打开下载链接，请稍后再试": "Couldn't open the download link. Please try again later.",
