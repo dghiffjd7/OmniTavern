@@ -283,3 +283,51 @@ const createStorage = () => {
   assert.deepEqual(reloaded.getGenerationSettings(), { reasoningMode: 'on', reasoningEffort: 'medium' }, 'load 合并列表必须保留 generation');
   console.log('ok - MaidSettingsStore normalizes and persists the react step limit across reloads');
 }
+
+// 内置能力开关：默认关闭；版本核对、变更记录、保存失败回退、通知、重载后保留
+{
+  const storage = createStorage();
+  const kv = new Map();
+  let now = 1000;
+  const store = new MaidSettingsStore({
+    storage,
+    loadKv: async key => kv.get(key) ?? null,
+    saveKv: async (key, value) => { kv.set(key, JSON.parse(JSON.stringify(value))); },
+    now: () => now,
+  });
+  await store.load();
+  assert.deepEqual(store.getBuiltinCapability('random'), { enabled: false, lastUsedAt: 0, revision: 0 });
+  assert.equal(store.getBuiltinCapability('weather'), null, 'only known capabilities exist');
+
+  const events = [];
+  const unsubscribe = store.subscribeCapabilities((id, capability) => events.push([id, capability.enabled]));
+  const stale = await store.setBuiltinCapabilityEnabled('random', true, { source: 'maid_request', expectedRevision: 3 });
+  assert.deepEqual([stale.ok, stale.reason], [false, 'revision_changed'], 'a confirmation for another revision does not write');
+  now = 2000;
+  const enabled = await store.setBuiltinCapabilityEnabled('random', true, { source: 'maid_request', expectedRevision: 0 });
+  assert.deepEqual([enabled.ok, enabled.changed, enabled.capability.revision], [true, true, 1]);
+  assert.deepEqual(events, [['random', true]]);
+  const same = await store.setBuiltinCapabilityEnabled('random', true);
+  assert.deepEqual([same.ok, same.changed, events.length], [true, false, 1], 'no-op changes do not bump the revision or notify');
+  now = 3000;
+  await store.markBuiltinCapabilityUsed('random');
+  assert.equal(store.getBuiltinCapability('random').lastUsedAt, 3000);
+  assert.equal(store.getBuiltinCapability('random').revision, 1, 'using a capability does not change its revision');
+  assert.equal(events.length, 2, 'using a capability notifies so the skills page can show the last use');
+  unsubscribe();
+  await store.setBuiltinCapabilityEnabled('random', false);
+  assert.equal(events.length, 2, 'unsubscribed listeners are not called');
+  assert.deepEqual(store.getCapabilityLog().map(item => [item.id, item.enabled, item.source]), [['random', true, 'maid_request'], ['random', false, 'settings']]);
+
+  const reloaded = new MaidSettingsStore({ storage, loadKv: async key => kv.get(key) ?? null, saveKv: async () => {}, now: () => 4000 });
+  await reloaded.load();
+  assert.deepEqual(reloaded.getBuiltinCapability('random'), { enabled: false, lastUsedAt: 3000, revision: 2 }, 'load keeps the capability field');
+  assert.equal(reloaded.getCapabilityLog().length, 2);
+
+  const brokenStorage = { getItem: () => null, setItem: () => { throw new Error('quota'); }, removeItem() {} };
+  const failing = new MaidSettingsStore({ storage: brokenStorage, loadKv: async () => null, saveKv: async () => { throw new Error('disk'); }, now: () => 5000 });
+  await failing.load();
+  const failed = await failing.setBuiltinCapabilityEnabled('random', true);
+  assert.deepEqual([failed.ok, failed.reason, failing.getBuiltinCapability('random').enabled, failing.getCapabilityLog().length], [false, 'save_failed', false, 0], 'a failed save rolls back');
+  console.log('ok - built-in capability switches persist with revisions, a change log and notifications');
+}

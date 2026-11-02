@@ -1222,6 +1222,10 @@ const PANEL_CSS = `
     background: rgba(244,63,94,0.10);
     color: #be123c;
 }
+.agent-center-activity-clear {
+    margin-left: auto;
+    color: var(--app-text-muted);
+}
 .agent-center-card {
     border: 1px solid var(--app-border-default);
     border-radius: 16px;
@@ -1577,6 +1581,23 @@ const PANEL_CSS = `
 .agent-center-usage-tile > b { color: var(--app-text-primary); font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.3; }
 .agent-center-usage-tile > small { color: var(--app-text-secondary); font-size: 11px; }
 .agent-center-usage-kinds { margin: 0; }
+.agent-center-outcomes { display: grid; gap: 10px; }
+.agent-center-outcome-tile.is-good > b { color: var(--app-success-text, #059669); }
+.agent-center-outcome-tile.is-warn > b { color: var(--app-warning-text, #b45309); }
+.agent-center-outcome-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.agent-center-outcome-row { display: grid; gap: 6px; padding: 9px 12px; border: 1px solid var(--app-border-subtle); border-radius: 12px; background: var(--app-surface-card); }
+.agent-center-outcome-row-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.agent-center-outcome-row-head b { font-size: 13px; font-weight: 750; overflow-wrap: anywhere; }
+.agent-center-outcome-row-head span { flex: 0 0 auto; color: var(--app-text-muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.agent-center-outcome-bar { display: flex; height: 6px; overflow: hidden; border-radius: 999px; background: var(--app-surface-subtle); }
+.agent-center-outcome-bar > i { display: block; height: 100%; }
+.agent-center-outcome-bar > .is-verified, .agent-center-outcome-legend .is-verified { background: var(--app-success-text, #059669); }
+.agent-center-outcome-bar > .is-succeeded, .agent-center-outcome-legend .is-succeeded { background: color-mix(in srgb, var(--app-success-text, #059669) 45%, transparent); }
+.agent-center-outcome-bar > .is-verification-failed, .agent-center-outcome-legend .is-verification-failed { background: var(--app-warning-text, #b45309); }
+.agent-center-outcome-bar > .is-failed, .agent-center-outcome-legend .is-failed { background: var(--app-danger-text, #dc2626); }
+.agent-center-outcome-bar > .is-denied, .agent-center-outcome-legend .is-denied { background: var(--app-text-muted); }
+.agent-center-outcome-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0; color: var(--app-text-muted); font-size: 11px; }
+.agent-center-outcome-legend i { display: inline-block; width: 8px; height: 8px; margin-right: 4px; border-radius: 2px; vertical-align: 0; }
 .agent-center-resource-list { display: grid; gap: 18px; }
 .agent-center-resource-section { display: grid; gap: 10px; }
 .agent-center-resource-section-title { color: var(--app-text-muted); font-size: 12px; font-weight: 750; letter-spacing: .04em; }
@@ -2558,6 +2579,8 @@ const RESOURCE_ICON_BY_ID = Object.freeze({
     contact_profiles: '<circle cx="12" cy="9" r="3.5"/><path d="M5 20c1.5-3.5 4-5 7-5s5.5 1.5 7 5"/>',
     image_templates: '<rect x="3" y="4" width="18" height="16" rx="3"/><path d="m4 17 5-5 4 4 3-3 4 4"/><circle cx="16" cy="9" r="1.4"/>',
     regex_postprocess: '<path d="M4 7h10M4 12h16M4 17h7"/><circle cx="17" cy="7" r="2"/><circle cx="14" cy="17" r="2"/>',
+    agent_directory: '<rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><path d="M17 14v6M14 17h6"/>',
+    mcp_servers: '<path d="M9 2v5M15 2v5"/><path d="M6 7h12v4a6 6 0 0 1-12 0Z"/><path d="M12 17v5"/>',
 });
 
 const renderEmpty = message => `<div class="agent-center-empty" data-i18n-skip>${escapeHtml(translateUiText(message))}</div>`;
@@ -2594,6 +2617,38 @@ const buildRunUsageChips = (usage = null) => {
 };
 
 // 活动页顶部的只读用量画像摘要（overall + 主要任务类型），不含任何自动决策。
+// 工具成效（只读）：女仆每个动作最后做成了没有。「命中候选」只说明选对了能力，这里看结果。
+const OUTCOME_SEGMENTS = [['verified', 'is-verified', '已验证'], ['succeeded', 'is-succeeded', '完成（无需验证）'], ['verificationFailed', 'is-verification-failed', '验证没通过'], ['failed', 'is-failed', '失败'], ['denied', 'is-denied', '被拒绝']];
+const renderToolOutcomeSummary = (profile = null) => {
+    const overall = profile?.overall;
+    if (!overall || !Number(overall.executions)) return '';
+    const issues = Number(overall.verificationFailed) + Number(overall.failed);
+    const tile = (label, value, sub = '', tone = '') => `<div class="agent-center-usage-tile agent-center-outcome-tile${tone ? ` ${tone}` : ''}"><span>${escapeHtml(label)}</span><b data-i18n-skip>${escapeHtml(value)}</b>${sub ? `<small data-i18n-skip>${escapeHtml(sub)}</small>` : ''}</div>`;
+    const bar = item => `<div class="agent-center-outcome-bar" aria-hidden="true">${OUTCOME_SEGMENTS.map(([key, className]) => (Number(item[key]) ? `<i class="${className}" style="flex:${Number(item[key])}"></i>` : '')).join('')}</div>`;
+    const rows = (Array.isArray(profile.byTool) ? profile.byTool : []).slice(0, 5).map(item => `
+            <li class="agent-center-outcome-row">
+                <div class="agent-center-outcome-row-head"><b data-i18n-skip>${escapeHtml(translateUiText(item.label || displayToolName(item.toolName)))}</b><span data-i18n-skip>${escapeHtml(formatMeta([
+                    t('{count} 次', { count: Number(item.executions) }),
+                    item.verified ? t('已验证 {count}', { count: Number(item.verified) }) : '',
+                    item.verificationFailed ? t('验证没通过 {count}', { count: Number(item.verificationFailed) }) : '',
+                    item.failed ? t('失败 {count}', { count: Number(item.failed) }) : '',
+                    item.denied ? t('被拒绝 {count}', { count: Number(item.denied) }) : '',
+                ]))}</span></div>
+                ${bar(item)}
+            </li>`).join('');
+    return `
+        <div class="agent-center-usage-summary agent-center-outcomes">
+            <div class="agent-center-usage-summary-title">${escapeHtml(t('工具成效（女仆动作 · 只读）'))}</div>
+            <div class="agent-center-usage-tiles">
+                ${tile(t('动作'), String(Number(overall.executions)), overall.cancelled ? t('取消 {count}', { count: Number(overall.cancelled) }) : '')}
+                ${tile(t('已验证'), String(Number(overall.verified)), t('写入后读回确认'), 'is-good')}
+                ${tile(t('需要留意'), String(issues), formatMeta([overall.verificationFailed ? t('验证没通过 {count}', { count: Number(overall.verificationFailed) }) : '', overall.failed ? t('失败 {count}', { count: Number(overall.failed) }) : '']), issues ? 'is-warn' : '')}
+            </div>
+            <ul class="agent-center-outcome-list">${rows}</ul>
+            <p class="agent-center-outcome-legend">${OUTCOME_SEGMENTS.map(([, className, label]) => `<span><i class="${className}"></i>${escapeHtml(t(label))}</span>`).join('')}</p>
+        </div>`;
+};
+
 const renderUsageProfileSummary = (profile = null) => {
     const overall = profile?.overall;
     if (!overall || !Number(overall.runCount)) return '';
@@ -2880,6 +2935,8 @@ const AGENT_KIND_LABELS = Object.freeze({
     phone_format: '手机格式',
     chat_guide: '聊天提示',
     group_chat: '群聊提示',
+    memory_audit: '记忆检查',
+    prompt_audit: '提示词检查',
 });
 
 const AGENT_FEATURE_LABELS = Object.freeze({
@@ -2900,6 +2957,8 @@ const displayRunStatusLabel = run => {
     const decision = trim(run?.reviewDecision || run?.metadata?.reviewDecision);
     if (run?.status === 'cancelled' && (decision === 'rejected' || decision === 'user_rejected')) return '已打回';
     if (run?.status === 'succeeded' && (decision === 'executed' || decision === 'user_executed')) return '已执行';
+    if (run?.status === 'succeeded' && trim(run?.outcome || run?.metadata?.outcome) === 'issues_found') return '检出问题';
+    if (run?.status === 'cancelled' && trim(run?.cancelReason) === 'review_expired') return '已过期';
     return displayStatusLabel(run?.status);
 };
 const displayRiskLabel = risk => RISK_LABELS[trim(risk).toLowerCase()] || trim(risk, '风险未知');
@@ -3269,12 +3328,15 @@ export class AgentCenterPanel {
         markFailureSeen = () => {},
         getHopscotchPanel = () => null,
         resolveSessionLabel = sessionId => sessionId,
+        // 提示词管家卡片（prompt-steward-card.js），放在「提示词」页最上方
+        promptSteward = null,
         // Agent「套用预设」与预设分类服务（app 装配的 agent-preset-services）；没有时不显示「提示词 | 套用预设」。
         presetServices = null,
     } = {}) {
         this.presetServices = presetServices;
         this.getActions = getActions;
         this.resolveSessionLabel = resolveSessionLabel;
+        this.promptSteward = promptSteward;
         this.confirm = confirm;
         this.choice = choice;
         this.promptText = promptText;
@@ -4737,7 +4799,7 @@ export class AgentCenterPanel {
     }
 
     renderPromptModules() {
-        return this.renderCardList(this.getPromptModuleCards(), '还没有可管理的提示词/协议模块。');
+        return `${this.promptSteward?.renderHtml?.() || ''}${this.renderCardList(this.getPromptModuleCards(), '还没有可管理的提示词/协议模块。')}`;
     }
 
     renderDiagnostics() {
@@ -5735,6 +5797,52 @@ export class AgentCenterPanel {
         await this.refresh();
     }
 
+    async handleAgentRunDelete(runId = '') {
+        const id = trim(runId);
+        if (!id) return;
+        const run = (this.view.activity?.runs || []).find(item => item.id === id);
+        const maidNote = run?.kind === 'maid_assistant'
+            ? `\n\n${t('这是女仆记录：删掉后，女仆找不回这次任务里生成或找来的图片。')}`
+            : '';
+        const ok = await this.confirm({
+            title: t('删除活动记录'),
+            message: `${t('确定删除「{title}」这条活动记录吗？', { title: run?.title || run?.kind || id })}${maidNote}`,
+            confirmText: t('删除'),
+            danger: true,
+        });
+        if (!ok) return;
+        await this.callAction('removeAgentRuns', [id], null);
+        await this.refresh();
+    }
+
+    // 清空当前筛选（状态、女仆、聊天室范围）下所有已结束的记录，不只是页面上显示的前 50 条；运行中和待确认的保留
+    async handleActivityClear() {
+        const status = normalizeActivityStatus(this.activityStatus);
+        const kind = String(this.activityKind || '').trim();
+        const surface = normalizeSurface(this.surface);
+        const view = await this.callAction('listAgentRunView', {
+            limit: 500,
+            ...(status ? { status } : {}),
+            ...(kind ? { kind } : {}),
+            ...(surface ? { surface } : {}),
+        }, null);
+        const finished = (view?.runs || []).filter(run => !run.isActive);
+        if (!finished.length) return;
+        const maidCount = finished.filter(run => run.kind === 'maid_assistant').length;
+        const maidNote = maidCount
+            ? `\n\n${t('其中 {count} 条是女仆记录：删掉后，女仆找不回那些任务里生成或找来的图片。', { count: maidCount })}`
+            : '';
+        const ok = await this.confirm({
+            title: t('清空活动记录'),
+            message: `${t('确定清空当前筛选里已结束的 {count} 条活动记录吗？运行中和待确认的会保留。', { count: finished.length })}${maidNote}`,
+            confirmText: t('清空'),
+            danger: true,
+        });
+        if (!ok) return;
+        await this.callAction('removeAgentRuns', finished.map(run => run.id), null);
+        await this.refresh();
+    }
+
     renderActivity() {
         const activity = this.view.activity || {};
         const runs = activity.runs || [];
@@ -5771,6 +5879,8 @@ export class AgentCenterPanel {
                 class="agent-center-filter${activeKind === 'maid_assistant' ? ' is-active' : ''}"
                 data-activity-kind="${activeKind === 'maid_assistant' ? '' : 'maid_assistant'}"
             >${escapeHtml(translateUiText(`女仆 ${maidRunCount}`))}</button>
+        ` : ''}${runs.some(run => !run.isActive) ? `
+            <button type="button" class="agent-center-filter agent-center-activity-clear" data-activity-clear>${escapeHtml(translateUiText('清空'))}</button>
         ` : ''}</div>`;
         const intro = activeStatus === 'failure'
             ? renderNotice({
@@ -5780,7 +5890,7 @@ export class AgentCenterPanel {
                 actionAttr: 'data-failure-read-action="mark"',
             })
             : '';
-        const usageSummary = renderUsageProfileSummary(activity.usageProfile);
+        const usageSummary = `${renderUsageProfileSummary(activity.usageProfile)}${renderToolOutcomeSummary(activity.toolOutcomes)}`;
         if (!runs.length) {
             return `${filterHtml}${usageSummary}${intro}${renderEmpty(activeStatus ? `没有${activityStatusLabel(activeStatus)} Agent 活动` : '还没有 Agent 活动记录。AI 检查、候选和后台任务会显示在这里。')}`;
         }
@@ -5796,7 +5906,7 @@ export class AgentCenterPanel {
         const statusGlyph = status => ({ succeeded: '✓', failed: '✕', cancelled: '–', waiting_permission: '!', running: '…', queued: '…' })[trim(status)] ?? '·';
         let lastDay = null;
         return `${filterHtml}${usageSummary}${intro}<div class="agent-center-list agent-center-activity-list">${runs.map(run => {
-            const failureDetail = trim(run.errorMessage || run.cancelReason || run.lastStep?.errorMessage);
+            const failureDetail = trim(run.errorMessage || (run.cancelReason === 'review_expired' ? '' : run.cancelReason) || run.lastStep?.errorMessage);
             const at = Number(run.updatedAt || run.finishedAt || run.createdAt || 0);
             const day = dayLabel(at);
             const dayHeader = day !== lastDay ? `<div class="agent-center-activity-day">${escapeHtml(day)}</div>` : '';
@@ -5830,6 +5940,7 @@ export class AgentCenterPanel {
                     run.failureCode ? { label: `原因：${run.failureCode}` } : null,
                     run.lastStep ? { label: `最近：${displayAgentKind(run.lastStep.type)}` } : null,
                 ])}
+                ${run.isActive ? '' : `<div class="agent-center-card-actions"><button type="button" class="agent-center-card-action is-danger" data-agent-run-delete="${escapeHtml(run.id)}">${escapeHtml(translateUiText('删除这条记录'))}</button></div>`}
                 </details>
                 ${renderChatFormatReview(run.review)}
                 ${run.status === 'waiting_permission' ? `
@@ -7564,6 +7675,10 @@ export class AgentCenterPanel {
                     button.dataset.runId || '',
                 ));
             });
+            this.contentElement.querySelectorAll('[data-agent-run-delete]').forEach((button) => {
+                button.addEventListener('click', () => this.handleAgentRunDelete(button.dataset.agentRunDelete || ''));
+            });
+            this.contentElement.querySelector('[data-activity-clear]')?.addEventListener('click', () => this.handleActivityClear());
         }
         if (this.activeTab === 'resources') {
             this.contentElement.querySelectorAll('[data-resource-open]').forEach((button) => {
@@ -7578,6 +7693,7 @@ export class AgentCenterPanel {
         if (this.activeTab === 'global_prompts') {
             this.bindGlobalPromptLibraryEvents();
         }
+        if (this.activeTab === 'prompts') this.promptSteward?.bind?.(this.contentElement);
         if (['agents', 'prompts', 'diagnostics'].includes(this.activeTab)) {
             this.bindAgentCardEvents();
             if (!retainedLayer) restoreAgentEditorDrafts(this.contentElement, editorDrafts);

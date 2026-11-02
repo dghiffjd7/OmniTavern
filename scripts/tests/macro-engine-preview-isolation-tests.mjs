@@ -42,6 +42,7 @@ const makeStore = () => {
   const output = engine.process('{{incvar::seed}}{{getvar::seed}}', {
     sessionId: 'rp:s1',
     uiMode: 'rp',
+    useGlobalVariables: true,
     macroVariableState: new Map(),
   });
   assert.equal(output, '99');

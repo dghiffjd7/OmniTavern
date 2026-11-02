@@ -30,6 +30,8 @@ const FORMAT_SOURCE_LABELS = Object.freeze({
 
 const CODE_VIEWER_OVERLAY_PADDING = 'calc(14px + env(safe-area-inset-top, 0px)) 14px calc(14px + env(safe-area-inset-bottom, 0px)) 14px';
 const CODE_VIEWER_MAXIMIZED_PADDING = 'env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px)';
+// 最大化时铺满卡片色；系统深色时状态栏图标是白色，状态栏那一截垫遮罩（同聊天页）
+const CODE_VIEWER_MAXIMIZED_BACKGROUND = 'linear-gradient(180deg, var(--app-statusbar-scrim, transparent) calc(env(safe-area-inset-top, 0px) / 2), transparent env(safe-area-inset-top, 0px)), var(--app-surface-card)';
 const CODE_VIEWER_MAXIMIZE_ICON = `<svg class="code-viewer-maximize-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
   <g class="code-viewer-maximize-expand">
     <path class="code-viewer-maximize-depth" d="M9 4.5H6.25A1.75 1.75 0 0 0 4.5 6.25V9M15 4.5h2.75a1.75 1.75 0 0 1 1.75 1.75V9M4.5 15v2.75a1.75 1.75 0 0 0 1.75 1.75H9M19.5 15v2.75a1.75 1.75 0 0 1-1.75 1.75H15"/>
@@ -101,7 +103,7 @@ export const createCodeViewerUiRuntime = ({
     overlay.__chatappMaximized = maximized;
     overlay.dataset.maximized = maximized ? '1' : '0';
     overlay.style.padding = maximized ? CODE_VIEWER_MAXIMIZED_PADDING : CODE_VIEWER_OVERLAY_PADDING;
-    overlay.style.background = maximized ? 'var(--app-surface-card)' : 'rgba(0,0,0,0.38)';
+    overlay.style.background = maximized ? CODE_VIEWER_MAXIMIZED_BACKGROUND : 'rgba(0,0,0,0.38)';
     if (panel) {
       panel.style.height = '100%';
       panel.style.maxHeight = '100%';

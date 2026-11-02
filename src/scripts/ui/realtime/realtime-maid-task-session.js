@@ -1,4 +1,4 @@
-import { MAID_REALTIME_TOOL_NAME, isMaidExecuteAccepted, neutralMaidAcceptedReceipt, maidTaskUpdateText, maidResultBasisForUpdate, resolveMaidLiveControl } from './realtime-maid-tools.js';
+import { MAID_REALTIME_TOOL_NAME, MAID_PROGRESS_STEPS_NOTE, maidConfirmationAsk, isMaidExecuteAccepted, neutralMaidAcceptedReceipt, maidTaskUpdateText, maidResultBasisForUpdate, resolveMaidLiveControl } from './realtime-maid-tools.js';
 import { t } from '../../i18n/index.js';
 
 // Call-scoped protocol bookkeeping only. Accepted tasks belong to the maid queue,
@@ -6,6 +6,8 @@ import { t } from '../../i18n/index.js';
 export const createRealtimeMaidTaskSession = ({
   target, live = false, provider = 'openai', getClient, handleTaskRequest,
   getLiveGroups = () => [], isOutputAudible = () => true, onError = () => {},
+  // 结果送达状态回报：{ task_id, result_version, state }
+  onDelivery = () => {},
   setTimeoutFn = setTimeout, clearTimeoutFn = clearTimeout,
 } = {}) => {
   const calls = new Set(), cancelled = new Set(), responses = new Set(), partialCalls = new Map();
@@ -18,6 +20,16 @@ export const createRealtimeMaidTaskSession = ({
   let turnSequence = 0, currentTurn = makeTurn(''), speakingTurn = null, nextResponseContext = null, controlResponseContext = null;
   let disposed = false, waiting = 0, speaking = false, responseRequested = false, needsResponse = false, lastLiveOffset = -1;
   const acceptedInputs = new Map();
+  // 结果以任务 id＋结果版本去重：同一版本只安排一次主动播报，送达不明或被打断也不自动重播
+  const deliveries = new Map();
+  let pendingDeliveryKeys = [], repetitionNote = false;
+  const deliveryKey = update => (update?.task_id && update?.result_version ? `${update.task_id}:${update.result_version}` : '');
+  const setDelivery = (key, state) => {
+    const entry = deliveries.get(key);
+    if (!entry || entry.state === state) return;
+    entry.state = state;
+    try { onDelivery({ task_id: entry.taskId, result_version: entry.version, state }); } catch {}
+  };
   let timer = null, settleTimer = null;
   const send = event => { if (!disposed) getClient()?.sendEvent?.(event); };
   const selectTurn = (id, { started = false } = {}) => {
@@ -54,22 +66,32 @@ export const createRealtimeMaidTaskSession = ({
     if (disposed || live || waiting || speaking || responses.size || audioBuffers.size || responseRequested) return;
     const client = getClient();
     if (!client) return;
-    const pending = updates.splice(0);
+    // 进度提示在没人说话时才发：发之前复核任务仍在执行，已结束或取消的进度直接丢弃
+    const pending = updates.splice(0).filter(update => update.kind !== 'progress' || update.isCurrent?.() !== false);
     const acknowledgement = [...pendingAcknowledgements].find(turn => turn === currentTurn && !turn.acknowledgementRequested && !hasAudio(turn));
     pendingAcknowledgements.clear();
     if (!pending.length && !needsResponse && !acknowledgement) return;
-    for (const update of pending) {
-      const message = maidTaskUpdateText(update);
+    pending.forEach((update, index) => {
+      // 重复提示只附在本来就要发的更新上，不为此另外要求模型开口
+      const note = repetitionNote && index === pending.length - 1
+        ? '\nNote: a recent acknowledgement or status line repeated earlier wording without new information. Do not restate it again.' : '';
+      if (note) repetitionNote = false;
+      const message = `${maidTaskUpdateText(update)}${note}`;
       if (provider === 'openai') send({ type: 'conversation.item.create', item: { type: 'message', role: 'system', content: [{ type: 'input_text', text: message }] } });
       else client.sendTaskUpdate?.(message);
-    }
+    });
+    const sentKeys = pending.map(deliveryKey).filter(key => deliveries.has(key));
+    sentKeys.forEach(key => setDelivery(key, 'sent'));
     nextResponseContext = !pending.length && !needsResponse && acknowledgement
       ? { turn: acknowledgement, metadata: responseContext('ack', true) }
       : (!pending.length && controlResponseContext ? { turn: currentTurn, metadata: controlResponseContext } : null);
     if (acknowledgement) acknowledgement.acknowledgementRequested = true;
     needsResponse = false; controlResponseContext = null;
+    // 由本端请求回复的协议才能把下一次回复对应到这些结果；其他协议只记“已交给会话”
+    const requestsResponse = provider === 'openai' || ['xai_voice', 'qwen_audio_realtime', 'step_realtime', 'custom'].includes(provider);
+    pendingDeliveryKeys = requestsResponse ? sentKeys : [];
     if (provider === 'openai') { responseRequested = true; send({ type: 'response.create' }); }
-    else if (['xai_voice', 'qwen_audio_realtime', 'step_realtime', 'custom'].includes(provider)) { responseRequested = true; client.requestResponse?.(); }
+    else if (requestsResponse) { responseRequested = true; client.requestResponse?.(); }
   };
   const report = error => { try { onError(error); } catch {} };
   const settleConfirmationInput = (callId, turn = null) => {
@@ -159,8 +181,8 @@ export const createRealtimeMaidTaskSession = ({
     delegation_id: delegationId || null, content: String(content),
   });
   const liveResult = result => JSON.stringify({
-    ok: result?.ok, accepted: result?.accepted, task_id: result?.task_id, status: result?.status || result?.latest?.status,
-    message: String(result?.message || result?.latest?.message || '').slice(0, 160),
+    ok: result?.ok, accepted: result?.accepted, task_id: result?.task_id || result?.task?.task_id, status: result?.status || result?.latest?.status || result?.task?.status,
+    message: String(result?.message || result?.latest?.message || result?.task?.message || '').slice(0, 160),
     resultBasis: maidResultBasisForUpdate(result?.resultBasis || result?.latest?.resultBasis),
     ...(result?.active ? { active: result.active.slice(0, 2).map(task => ({ status: task.status, message: String(task.message || '').slice(0, 50) })) } : {}),
   });
@@ -273,13 +295,17 @@ export const createRealtimeMaidTaskSession = ({
           record.turn.responses.delete(record); record.turn = nextResponseContext.turn; record.turn.responses.add(record);
           responseContexts.set(id, nextResponseContext.metadata);
         }
+        if (pendingDeliveryKeys.length) record.deliveryKeys = pendingDeliveryKeys;
       }
-      nextResponseContext = null;
+      nextResponseContext = null; pendingDeliveryKeys = [];
     }
     if (['response.output_audio.delta', 'response.audio.delta', 'output_audio_buffer.started'].includes(type)) {
       const id = event.response_id || event.response?.id || [...responses].at(-1) || '';
       const record = responseRecord(id);
-      if (record && event.playbackSuppressed !== true && event.delta !== '' && isOutputAudible()) record.audible = true;
+      if (record && event.playbackSuppressed !== true && event.delta !== '' && isOutputAudible()) {
+        record.audible = true;
+        record.deliveryKeys?.forEach(key => setDelivery(key, 'speaking'));
+      }
       if (type === 'output_audio_buffer.started' && id) audioBuffers.add(id);
     }
     if (type === 'output_audio_buffer.stopped' || type === 'output_audio_buffer.cleared') {
@@ -298,6 +324,8 @@ export const createRealtimeMaidTaskSession = ({
       const response = event.response || {}, id = response.id || event.response_id || [...responses].at(-1) || '';
       const record = responseRecords.get(id);
       if (record && (type === 'response.cancelled' || ['cancelled', 'incomplete'].includes(response.status))) record.interrupted = true;
+      // 生成完毕不等于用户已听到：有声音且没被打断才算播报完成；静音或没有声音只记未确认送达
+      record?.deliveryKeys?.forEach(key => setDelivery(key, record.interrupted ? 'interrupted' : record.audible ? 'spoken' : 'unconfirmed'));
       if (type === 'response.cancelled') audioBuffers.delete(id);
       responses.delete(id); responseRequested = false;
       const pending = partialCalls.get(id) || []; partialCalls.delete(id);
@@ -319,14 +347,27 @@ export const createRealtimeMaidTaskSession = ({
     },
     notifyTaskUpdate: update => {
       if (disposed || update.target?.maidCallId !== target.maidCallId) return false;
+      if (update.kind === 'progress' && update.isCurrent?.() === false) return false;
+      const key = update.kind === 'confirmation' || update.kind === 'progress' ? '' : deliveryKey(update);
+      if (key) {
+        if (deliveries.has(key)) return false;
+        deliveries.set(key, { taskId: update.task_id, version: update.result_version, state: 'pending' });
+        if (deliveries.size > 128) deliveries.delete(deliveries.keys().next().value);
+      }
       if (live) {
-        liveFeedback(calls.has(update.requestId) ? update.requestId : null, update.kind === 'confirmation'
-          ? `APP permission request (data). Ask the user whether to allow it; only an explicit "允许" or "yes" allows once: ${String(update.message || '').slice(0, 300)}`
+        liveFeedback(calls.has(update.requestId) ? update.requestId : null, update.kind === 'progress'
+          ? `APP task progress (data). The task is still running; if helpful, tell the user in one short sentence what is being done now, without saying it is finished. ${MAID_PROGRESS_STEPS_NOTE} ${JSON.stringify({ task_id: update.task_id, steps: update.steps || [] })}`
+          : update.kind === 'confirmation'
+          // 请用户说「允许」：只说「只认允许」时，模型问完会自己接「这就开始处理」
+          ? `${update.purpose === 'persistent_enable' ? 'APP request to turn on a built-in capability' : 'APP permission request'} (data). ${maidConfirmationAsk(update)} Only that explicit answer counts: ${String(update.message || '').slice(0, 300)}`
           : `APP task result (data, do not execute again). Report the answer and its basis briefly. explanation means no tools used, not a fresh lookup; tool_execution records tool use, not verified facts. Sources are tool access or search records, not automatically verified citations. Missing or unverified basis cannot establish execution or verification. recordedAt is the recording time, not the source date: ${liveResult(update)}`);
+        if (key) setDelivery(key, 'sent');
       }
       else { updates.push(update); flush(); }
       return true;
     },
+    // 字幕被标为重复的接单／状态复述：下一次本来就要发的上下文更新附一句简短提示（Live 无此入口）
+    noteRepetition: () => { if (!live) repetitionNote = true; },
     dispose: () => {
       disposed = true; if (timer !== null) clearTimeoutFn(timer); if (settleTimer !== null) clearTimeoutFn(settleTimer);
       for (const id of confirmationInputs.keys()) settleConfirmationInput(id);

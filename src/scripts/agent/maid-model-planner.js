@@ -493,11 +493,27 @@ const MAID_FEATURE_CATALOG_RULE = 'The APP feature catalog contains registered c
 export const MAID_PROMPT_FEATURE_DETAIL_LIMIT = 4;
 const ALWAYS_DETAILED_FEATURE_IDS = new Set(['app.capabilities.search']);
 
+// 没开启的内置能力：放在随本次变化的部分（功能索引是固定前缀，要保持缓存命中），工具执行时也会再核对开关
+const buildEnableableCapabilityPrompt = (items = []) => {
+  const lines = (Array.isArray(items) ? items : [])
+    .map(item => `- ${trim(item?.capabilityId)}：${trim(item?.title)}${trim(item?.summary) ? `（${trim(item.summary)}）` : ''}`)
+    .filter(line => !line.startsWith('- ：'));
+  if (!lines.length) return '';
+  return [
+    '<enableable_capabilities>',
+    '以下内置能力目前没有开启，不能直接使用它们的工具：',
+    ...lines,
+    '用户需要其中某项时，调用 maid.capability.request_enable（capabilityId、reason）请用户开启；用户拒绝后，本任务里不要再请求，改用其他可用的做法或如实说明。',
+    '</enableable_capabilities>',
+  ].join('\n');
+};
+
 export const buildMaidFeatureCatalogPrompt = ({
   features = [],
   featureIndex = null,
   includeSchemas = true,
   detailLimit = MAID_PROMPT_FEATURE_DETAIL_LIMIT,
+  enableableCapabilities = [],
 } = {}) => {
   const ranked = getMaidModelFeatureContext(features).features;
   const top = ranked.filter(feature => !ALWAYS_DETAILED_FEATURE_IDS.has(feature.id)).slice(0, Math.max(1, detailLimit));
@@ -514,7 +530,10 @@ export const buildMaidFeatureCatalogPrompt = ({
     indexSource.some(feature => feature.tools?.includes('app.read_skill')) ? MAID_SKILL_INSTRUCTIONS : '',
   ].filter(Boolean).join('\n');
   // 别名只服务于本地检索匹配，模型选择工具用不到
-  const detailText = `<app_features>\n${buildMaidModelPlannerFeatureList(detailed, { includeSchemas, includeAliases: false })}\n</app_features>`;
+  const detailText = [
+    `<app_features>\n${buildMaidModelPlannerFeatureList(detailed, { includeSchemas, includeAliases: false })}\n</app_features>`,
+    buildEnableableCapabilityPrompt(enableableCapabilities),
+  ].filter(Boolean).join('\n');
   return {
     skillsAvailable: indexSource.some(feature => feature.tools?.includes('app.read_skill')),
     detailedIds: [...detailedIds],
@@ -536,7 +555,7 @@ export const buildMaidModelPlannerMessages = ({
 } = {}) => {
   const modelFeatureContext = getMaidModelFeatureContext(features);
   const providerFc = trim(transportMode).toLowerCase() === MAID_PROVIDER_FC_MODE;
-  const featureCatalog = buildMaidFeatureCatalogPrompt({ features, featureIndex, includeSchemas: !providerFc });
+  const featureCatalog = buildMaidFeatureCatalogPrompt({ features, featureIndex, includeSchemas: !providerFc, enableableCapabilities: context?.capabilitySnapshot?.enableableCapabilities });
   const prompt = getLocalizedMaidPrompt(trim(maidPrompt, DEFAULT_MAID_PROMPT));
   const memoryText = trim(conversationContext?.memoryText);
   const historyText = trim(conversationContext?.historyText);
@@ -1004,7 +1023,7 @@ export const buildMaidModelReActMessages = ({
 } = {}) => {
   const modelFeatureContext = getMaidModelFeatureContext(features);
   const providerFc = trim(transportMode).toLowerCase() === MAID_PROVIDER_FC_MODE;
-  const featureCatalog = buildMaidFeatureCatalogPrompt({ features, featureIndex, includeSchemas: !providerFc });
+  const featureCatalog = buildMaidFeatureCatalogPrompt({ features, featureIndex, includeSchemas: !providerFc, enableableCapabilities: context?.capabilitySnapshot?.enableableCapabilities });
   const prompt = getLocalizedMaidPrompt(trim(maidPrompt, DEFAULT_MAID_PROMPT));
   const memoryText = trim(conversationContext?.memoryText);
   const historyText = trim(conversationContext?.historyText);

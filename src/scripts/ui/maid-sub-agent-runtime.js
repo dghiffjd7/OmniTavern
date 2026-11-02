@@ -1,4 +1,4 @@
-import { MAID_SUB_AGENT_SKILLS } from '../storage/maid-settings-store.js';
+import { MAID_SUB_AGENT_SKILLS, MAID_SUB_AGENT_DEFAULT_OUTPUT_TOKENS } from '../storage/maid-settings-store.js';
 
 // Owns model delegation, its confirmation and fallback; app.js only supplies dependencies.
 export const createMaidSubAgentRuntime = ({
@@ -25,6 +25,7 @@ export const createMaidSubAgentRuntime = ({
       skills: cap.capabilityTags,
       modelProfileId: cap.modelProfileRef,
       modelOverride: cap.modelOverride,
+      budgets: cap.budgets || {},
     }));
     let sub = subAgentId ? subAgents.find(item => item.id === subAgentId) : null;
     if (!sub && !subAgentId && subAgents.length === 1) sub = subAgents[0];
@@ -86,7 +87,7 @@ export const createMaidSubAgentRuntime = ({
         ? { ok: false, reason: 'sub_agent_profile_missing', message: `Sub-agent「${sub?.name || ''}」绑定的连线配置已不存在。` }
         : { ok: false, reason: 'maid_api_not_configured', message: '女仆 API 未配置。' };
     }
-    const runChat = async (targetClient, targetConfig) => {
+    const runChat = async (targetClient, targetConfig, { signal = context?.signal || null, maxTokens = MAID_SUB_AGENT_DEFAULT_OUTPUT_TOKENS } = {}) => {
       let sources = [];
       const generation = await runAdHocWebSearchChat({
         client: targetClient,
@@ -95,9 +96,9 @@ export const createMaidSubAgentRuntime = ({
         sessionId: String(sessionId || `maid-generation:${purposeLabel}`).slice(0, 240),
         requestOptions: {
           temperature: 0.7,
-          maxTokens: 2400,
-          max_tokens: 2400,
-          ...(context?.signal ? { signal: context.signal } : {}),
+          maxTokens,
+          max_tokens: maxTokens,
+          ...(signal ? { signal } : {}),
         },
         messages: [{ role: 'user', content: prompt }],
         onStatus: status => {
@@ -115,8 +116,25 @@ export const createMaidSubAgentRuntime = ({
         webSearchReason: String(generation.reason || ''),
       };
     };
+    // 委派预算：时间上限到了就中止这次委派（按失败处理：回退主模型一次）；输出上限作为本次请求的 max_tokens
+    const timeLimitMs = delegated ? Number(sub?.budgets?.timeMs) || 0 : 0;
+    const maxOutputTokens = delegated ? Number(sub?.budgets?.tokens) || MAID_SUB_AGENT_DEFAULT_OUTPUT_TOKENS : MAID_SUB_AGENT_DEFAULT_OUTPUT_TOKENS;
+    const budgetController = timeLimitMs && typeof AbortController === 'function' ? new AbortController() : null;
+    let timeExceeded = false;
+    const onParentAbort = () => budgetController?.abort();
+    context?.signal?.addEventListener?.('abort', onParentAbort, { once: true });
+    const budgetTimer = budgetController ? setTimeout(() => { timeExceeded = true; budgetController.abort(); }, timeLimitMs) : null;
+    const startedAt = Date.now();
+    const budgetReport = () => (delegated || timeExceeded ? {
+      budget: { timeLimitMs: timeLimitMs || null, maxOutputTokens, elapsedMs: Date.now() - startedAt, exceeded: timeExceeded ? 'time' : '' },
+    } : {});
+    const releaseBudget = () => {
+      if (budgetTimer) clearTimeout(budgetTimer);
+      context?.signal?.removeEventListener?.('abort', onParentAbort);
+    };
     try {
-      const generated = await runChat(client, clientConfig);
+      const generated = await runChat(client, clientConfig, { signal: budgetController?.signal || context?.signal || null, maxTokens: maxOutputTokens });
+      releaseBudget();
       if (!generated.text) throw new Error('empty response');
       return {
         ok: true,
@@ -124,11 +142,14 @@ export const createMaidSubAgentRuntime = ({
         delegated,
         modelUsed,
         subAgentName,
+        ...budgetReport(),
         ...(subAgents.length ? {} : { hint: 'no_sub_agent_configured', hintMessage: '提示：可在女仆设置的 API 分页配置 sub-agent 模型，这类生成任务可交给便宜模型执行。' }),
       };
     } catch (error) {
+      releaseBudget();
+      const report = budgetReport();
       if (delegated && runtime?.configured && runtime.client && !context?.signal?.aborted) {
-        // sub 档失败回退主模型一次
+        // sub 档失败（含超过时间上限）回退主模型一次
         try {
           const generated = await runChat(runtime.client, runtime.config || {});
           if (!generated.text) throw new Error('empty response');
@@ -137,14 +158,19 @@ export const createMaidSubAgentRuntime = ({
             ...generated,
             delegated: false,
             fallbackUsed: true,
+            ...(timeExceeded ? { fallbackReason: 'time_budget' } : {}),
             modelUsed: String(runtime.config?.model || ''),
             subAgentName: '',
+            ...report,
           };
         } catch (err2) {
-          return { ok: false, reason: 'generation_failed', message: err2?.message || '生成失败（含主模型回退）。' };
+          return { ok: false, reason: 'generation_failed', message: err2?.message || '生成失败（含主模型回退）。', ...report };
         }
       }
-      return { ok: false, reason: 'generation_failed', message: error?.message || '生成失败。' };
+      if (timeExceeded) {
+        return { ok: false, reason: 'sub_agent_time_budget', message: `Sub-agent「${subAgentName}」超过时间上限 ${Math.round(timeLimitMs / 1000)} 秒，已停止。`, ...report };
+      }
+      return { ok: false, reason: 'generation_failed', message: error?.message || '生成失败。', ...report };
     }
   };
   return generateWithSubAgent;

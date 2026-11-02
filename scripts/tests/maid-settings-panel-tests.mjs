@@ -425,6 +425,56 @@ const flushMicrotasks = () => new Promise(resolve => setTimeout(resolve, 0));
 }
 
 {
+  // 内置能力的开启／关闭按时间并入最近活动，开关变了即时更新
+  const documentRef = new FakeDocument();
+  const log = [{ id: 'random', enabled: true, source: 'maid_request', at: 1700000002000 }];
+  const listeners = new Set();
+  const panel = createMaidSettingsPanel({
+    documentRef,
+    settingsStore: {
+      getMaidPrompt: () => '',
+      getCapabilityLog: () => log.slice(),
+      subscribeCapabilities: (listener) => { listeners.add(listener); return () => listeners.delete(listener); },
+    },
+    listRuns: () => [
+      { id: 'run-old', status: 'succeeded', summary: '已完成。', updatedAt: 1700000001000, metadata: { goal: '较早的任务' } },
+      { id: 'run-new', status: 'succeeded', summary: '已完成。', updatedAt: 1700000003000, metadata: { goal: '较新的任务' } },
+    ],
+    logger: { warn() {} },
+  });
+  panel.show({ tab: 'activity' });
+  const { runListEl, runCountEl } = panel.getElements();
+  const findTitle = node => (String(node.className || '').includes('maid-settings-item-title') ? node
+    : (node.children || []).map(findTitle).find(Boolean));
+  const titles = () => runListEl.children.map(item => findTitle(item)?.textContent);
+  assert.deepEqual(titles(), ['较新的任务', '开启了「随机互动」', '较早的任务']);
+  assert.ok(findByText(runListEl, '女仆请求，已确认'));
+  assert.equal(runCountEl.textContent, '3');
+  log.push({ id: 'random', enabled: false, source: 'settings', at: 1700000004000 });
+  listeners.forEach(listener => listener());
+  assert.equal(titles()[0], '关闭了「随机互动」');
+  assert.ok(findByText(runListEl, '在设置里'));
+  console.log('ok - maid settings activity lists built-in capability changes by time');
+}
+
+{
+  // 「历史」分页：切过去会显示并刷新对话历史
+  const documentRef = new FakeDocument();
+  const calls = [];
+  const panel = createMaidSettingsPanel({
+    documentRef,
+    settingsStore: { getMaidPrompt: () => '' },
+    historyPanel: { mount: container => calls.push(['mount', container.tagName]), refresh: () => calls.push(['refresh']) },
+    logger: { warn() {} },
+  });
+  panel.show({ tab: 'history' });
+  const { tabButtons } = panel.getElements();
+  assert.equal(tabButtons.get('history').classList.contains('is-active'), true, 'the history tab can be selected');
+  assert.deepEqual(calls.slice(0, 2), [['mount', 'SECTION'], ['refresh']]);
+  console.log('ok - maid settings history tab mounts and refreshes the history panel');
+}
+
+{
   const documentRef = new FakeDocument();
   const completed = new Set();
   const started = [];

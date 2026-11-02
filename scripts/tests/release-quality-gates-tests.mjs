@@ -151,6 +151,8 @@ const splitScriptSteps = script =>
     'node scripts/tests/chat-store-format-repair-envelope-tests.mjs',
     'node scripts/tests/chat-store-scope-guard-tests.mjs',
     'node scripts/tests/chat-store-thread-reset-window-tests.mjs',
+    'node scripts/tests/chat-store-insert-after-tests.mjs',
+    'node scripts/tests/chat-store-compact-shards-tests.mjs',
     'node scripts/tests/kv-too-large-guard-tests.mjs',
     'node scripts/tests/preset-store-shard-load-tests.mjs',
     'node scripts/tests/worldinfo-store-read-safety-tests.mjs',

@@ -56,6 +56,7 @@ import { getLocalizedPromptText, getPromptLocale } from '../i18n/prompt-locale.j
 import { chatFcLocalCapabilityStore } from '../storage/chat-fc-local-capability-store.js';
 import { chatStructuredRouteEvidenceStore } from '../storage/chat-structured-route-evidence-store.js';
 import { renderTemplateMessages, templateSettings } from '../plugins/template-engine.js';
+import { applyPresetEntryDecisions } from '../plugins/preset-request-transport.js';
 import { getChatUI } from './chat-ui-runtime-utils.js';
 import { recordDebugTraceEvent } from './debug-ui-registry-utils.js';
 import {
@@ -204,6 +205,7 @@ import {
   buildMemoryPlanAudit,
   buildRequestInjectionAudit,
   estimatePromptMessagesTokens,
+  estimatePromptToolsTokens,
   promptMessagesContainNonTextContent,
 } from '../memory/memory-injection-audit-utils.js';
 import { isOutlineTableId } from '../memory/outline-section-utils.js';
@@ -3826,6 +3828,8 @@ class AppBridge {
     const previewSessionId = String(context?.session?.id || this.activeSessionId || 'default').trim() || 'default';
     const hadPreviousPromptCacheDebug = this.lastPromptCacheDebugBySession?.has?.(previewSessionId) === true;
     const previousPromptCacheDebug = this.lastPromptCacheDebugBySession?.get?.(previewSessionId);
+    // 出错时收尾本次 provider 调用与诊断。它们依赖 try 里才建立的状态（catch 看不到 try 内的声明），建好后再挂上
+    let finishGenerationOnError = null;
     try {
       if (!this.initialized) {
         await this.init();
@@ -4152,11 +4156,30 @@ class AppBridge {
       const deferPhoneTransportLayers = phoneStructuredRoutingRequested
         && appSettings.get().traditionalModelOutputProtocolEnabled !== true
         && String(presetContext?.uiMode || '').trim().toLowerCase() !== 'rp';
+      // 走预设请求通道的请求：提示词后处理和供应方兼容整理放到脚本处理之后（酒馆也是先合并、后整理），
+      // 预设脚本看到的是逐条目的消息；SPreset 的「强制提示词后处理」那时才生效
+      const creativeTarget = this.scriptRuntime?.resolveCreativeRequestPreset?.({
+        presetContext, context: nextContext, presetSnapshot: creativePresetSnapshot,
+        purpose: requestOverrides.purpose || 'reply',
+      });
+      const creativeSPreset = creativeTarget?.spreset;
+      const hasCreativeSPreset = Boolean(creativeSPreset && Object.keys(creativeSPreset).length);
+      const deferProviderNormalization = Boolean(creativeTarget);
+      // SPreset 条目条件：按预设的条件脚本决定本轮各条目开关，不写回预设
+      const presetEntryDecisions = hasCreativeSPreset
+        ? await this.scriptRuntime.evaluatePresetEntryConditions({
+            presetId: creativeTarget.presetId, preset: creativeTarget.preset, presetContext, config, preview: previewOnly,
+          })
+        : null;
+      this.lastDeferredProviderNormalizationMeta = null;
       let messages = this.buildMessages(promptInput, nextContext, {
         requestConfig: config,
         deferPhoneTransportLayers,
         transportAnchorNamespace: nativeRequestId,
+        deferProviderNormalization,
+        presetEntryDecisions,
       });
+      const deferredNormalizationMeta = this.lastDeferredProviderNormalizationMeta || {};
       if (!previewOnly && scriptRuntime && nextContext?.meta?.skipScripts !== true) {
         const beforePrompt = messages;
         const { result: updated } = await runRuntimeHookLifecycleEvent({
@@ -4237,7 +4260,7 @@ class AppBridge {
           logger.warn('template render (generate) failed', err);
         }
       }
-      messages = this.normalizeOutgoingProviderMessages(messages, config);
+      if (!deferProviderNormalization) messages = this.normalizeOutgoingProviderMessages(messages, config);
       const genOptions = { ...this.getGenerationOptions(presetContext, config), ...(requestOverrides.generationOptions || {}), requestContext };
       const withRuntimeParamConstraints = options => ({
         ...options,
@@ -4871,6 +4894,12 @@ class AppBridge {
         };
         syncGenerationUsageSnapshot();
       };
+      finishGenerationOnError = () => {
+        if (activeProviderCallId) {
+          finishProviderCall(abortController.signal.aborted ? 'cancelled' : 'failed');
+        }
+        completeGenerationDiagnostics({ stream: Boolean(config?.stream) });
+      };
       requestOptions.onProviderUsage = (usage) => {
         const completedAt = Date.now();
         generationUsage = usage && typeof usage === 'object' ? { ...usage } : null;
@@ -4987,7 +5016,7 @@ class AppBridge {
       });
       const creativeRequest = await this.scriptRuntime?.prepareCreativeRequest?.({
         messages, options: requestOptions, config, presetContext, context: nextContext,
-        presetSnapshot: creativePresetSnapshot, preview: previewOnly, client: generationClient,
+        presetSnapshot: creativePresetSnapshot, presetEntryDecisions, preview: previewOnly, client: generationClient,
         purpose: requestOverrides.purpose || 'reply',
       });
       if (creativeRequest) {
@@ -4995,6 +5024,11 @@ class AppBridge {
         requestOptions = creativeRequest.options;
         generationClient = creativeRequest.client;
         presetRequestSession = creativeRequest.session;
+      }
+      if (deferProviderNormalization) {
+        const forcedMode = creativeRequest?.promptPostProcessing;
+        messages = this.normalizeOutgoingProviderMessages(messages,
+          forcedMode ? { ...config, promptPostProcessing: forcedMode } : config, deferredNormalizationMeta);
       }
       // 防截断传输（设置档开关）：创意写作正文改走函数调用传回。放在预设请求通道之后，
       // 才能知道本轮是否自带工具或被预设接管；放在请求预览之前，预览也带上工具。
@@ -5045,7 +5079,13 @@ class AppBridge {
             : phoneProviderFcRequestOptions)
         : requestOptions;
       let responsePrefix = phoneProviderFcRoute.eligible ? '' : legacyResponsePrefix;
-      rawEstimatedPromptTokens = estimatePromptMessagesTokens(requestPayloadMessages, 'rough');
+      // 手机结构化路线的工具在发送时才由 provider FC 计划带上，其余路线就在请求选项里
+      const requestPayloadTools = phoneProviderFcRoute.eligible
+        && phoneStructuredRouteMode === CHAT_STRUCTURED_ROUTE_MODES.providerFc
+        ? phoneProviderFcRequestPlan?.requestOptions?.tools
+        : requestPayloadOptions.tools;
+      const rawEstimatedMessageTokens = estimatePromptMessagesTokens(requestPayloadMessages, 'rough');
+      rawEstimatedPromptTokens = rawEstimatedMessageTokens + estimatePromptToolsTokens(requestPayloadTools, 'rough');
       const structuredContractMessages = phoneProviderFcRoute.eligible
         ? requestPayloadMessages.filter((message) => {
             const content = typeof message?.content === 'string' ? message.content.trimStart() : '';
@@ -5078,7 +5118,7 @@ class AppBridge {
       );
       const semanticMessageEstimateTokens = Math.max(
         0,
-        rawEstimatedPromptTokens - structuredContractMessageEstimateTokens,
+        rawEstimatedMessageTokens - structuredContractMessageEstimateTokens,
       );
       // 带图/语音请求不进校准样本：估算把附件折成占位符，而 usage 含真实附件 token，
       // 比值会被顶到上限并经 EWMA 拉高系数，之后纯文本请求会被系统性高估。
@@ -5103,6 +5143,7 @@ class AppBridge {
         history: nextContext?.history,
         worldDebug: this.lastWorldInjectionDebug,
         messages: requestPayloadMessages,
+        tools: requestPayloadTools,
         budget: this.lastMemoryPlan?.budget,
         mode: this.lastMemoryPlan?.budget?.mode,
         tokenMode: requestTokenMode,
@@ -5645,7 +5686,8 @@ class AppBridge {
         const fallbackPreparedRequest = generationClient?.prepareChatRequest?.(messages, { ...requestOptions, stream: Boolean(config?.stream) }) || null;
         const fallbackRequestMessages = fallbackPreparedRequest?.messages || messages;
         responsePrefix = String(fallbackPreparedRequest?.responsePrefix || legacyResponsePrefix);
-        rawEstimatedPromptTokens = estimatePromptMessagesTokens(fallbackRequestMessages, 'rough');
+        rawEstimatedPromptTokens = estimatePromptMessagesTokens(fallbackRequestMessages, 'rough')
+          + estimatePromptToolsTokens(requestOptions.tools, 'rough');
         calibrationEligible = config?.webSearchEnabled !== true
           && !promptMessagesContainNonTextContent(fallbackRequestMessages);
         calibrationRecorded = false;
@@ -5657,6 +5699,7 @@ class AppBridge {
           history: nextContext?.history,
           worldDebug: this.lastWorldInjectionDebug,
           messages: fallbackRequestMessages,
+          tools: requestOptions.tools,
           budget: this.lastMemoryPlan?.budget,
           mode: this.lastMemoryPlan?.budget?.mode,
           tokenMode: requestTokenMode,
@@ -5791,10 +5834,7 @@ class AppBridge {
         return finalResponse;
       }
     } catch (error) {
-      if (activeProviderCallId) {
-        finishProviderCall(abortController.signal.aborted ? 'cancelled' : 'failed');
-      }
-      completeGenerationDiagnostics({ stream: Boolean(config?.stream) });
+      finishGenerationOnError?.();
       if (abortController.signal.aborted) {
         throw makeCancelledError('user');
       }
@@ -7037,7 +7077,10 @@ class AppBridge {
 	      return byId(100001) || byId(100000) || arr[0] || null;
 	    };
 	    const openaiOrderBlock = pickOpenAIOrderBlock();
-	    const openaiOrder = Array.isArray(openaiOrderBlock?.order) ? openaiOrderBlock.order : null;
+	    // SPreset 条目条件算出的本轮开关只用于这次请求
+	    const openaiOrder = Array.isArray(openaiOrderBlock?.order)
+	      ? applyPresetEntryDecisions(openaiOrderBlock.order, options?.presetEntryDecisions)
+	      : null;
 
 	    // 摘要提示词：移入“聊天提示词”区块管理，并固定在 ST IN_CHAT / SYSTEM / D1。
 	    const summaryPosition = (() => {
@@ -7118,9 +7161,13 @@ const stringifyMessageContent = (content) => {
         enabled: historyTimeEnabled,
         formatter: historyTimeFormatter,
       });
-      return this.normalizeOutgoingProviderMessages(datedMessages, requestConfig, {
-        syntheticAssistantDowngradeCount,
-      });
+      const normalizationMeta = { syntheticAssistantDowngradeCount };
+      // 走预设请求通道的请求：由调用方在脚本处理后再整理
+      if (options?.deferProviderNormalization === true) {
+        this.lastDeferredProviderNormalizationMeta = normalizationMeta;
+        return datedMessages;
+      }
+      return this.normalizeOutgoingProviderMessages(datedMessages, requestConfig, normalizationMeta);
     };
     const appendOutputFormatReminder = () => {
       const activeSyspromptPresetId = String(syspResolved?.presetId || '').trim();
@@ -8633,7 +8680,17 @@ const stringifyMessageContent = (content) => {
       for (const item of openaiOrder) {
         const identifier = item?.identifier;
         const enabled = item?.enabled !== false;
-        if (!identifier || !enabled) continue;
+        if (!identifier) continue;
+        if (!enabled) {
+          // 主提示词关了：挂在它前后的内容仍放在它的位置，不补到最末尾（会排到预设的结尾提示词之后）
+          if (identifier === 'main') {
+            appendWorldBucket('beforeScenario');
+            appendChatGuideBeforePrompt();
+            appendChatGuidePrompt();
+            appendWorldBucket('afterScenario');
+          }
+          continue;
+        }
 
 	        if (identifier === 'chatHistory') {
 	          insertMemoryPromptAt('after_persona');

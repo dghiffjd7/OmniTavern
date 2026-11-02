@@ -84,9 +84,42 @@ const hasExplicitMemoryExtractionSettings = (raw = {}) => {
   );
 };
 
+// 内置能力（女仆设置 → 技能 → 内置能力）：默认全部关闭。开关每改一次 revision +1，
+// 女仆请求开启的确认按这个版本核对，确认期间用户改过开关就不写，免得迟到的「允许」盖过用户刚做的选择。
+export const MAID_BUILTIN_CAPABILITY_IDS = Object.freeze(['random']);
+const CAPABILITY_LOG_LIMIT = 50;
+
+export const normalizeMaidBuiltinCapabilities = (raw = {}) => {
+  const src = isPlainObject(raw) ? raw : {};
+  return Object.fromEntries(MAID_BUILTIN_CAPABILITY_IDS.map((id) => {
+    const item = isPlainObject(src[id]) ? src[id] : {};
+    return [id, {
+      enabled: item.enabled === true,
+      lastUsedAt: Number(item.lastUsedAt) > 0 ? Number(item.lastUsedAt) : 0,
+      revision: Math.max(0, Math.trunc(Number(item.revision) || 0)),
+    }];
+  }));
+};
+
+// 开关变更记录：设置里手动切换（settings）或女仆请求后用户同意（maid_request）
+const normalizeCapabilityLog = raw => (Array.isArray(raw) ? raw : [])
+  .filter(isPlainObject)
+  .map(item => ({
+    id: trim(item.id),
+    enabled: item.enabled === true,
+    source: item.source === 'maid_request' ? 'maid_request' : 'settings',
+    at: Number(item.at) || 0,
+  }))
+  .filter(item => MAID_BUILTIN_CAPABILITY_IDS.includes(item.id) && item.at > 0)
+  .slice(-CAPABILITY_LOG_LIMIT);
+
+const hasCapabilitySettings = raw => Object.values(normalizeMaidBuiltinCapabilities(raw?.builtinCapabilities))
+  .some(item => item.enabled || item.revision > 0);
+
 const hasExplicitSettings = (raw = {}) => {
   const src = isPlainObject(raw) ? raw : {};
   return Boolean(
+    hasCapabilitySettings(src) ||
     trim(src.boundProfileId) ||
     trim(src.maidPrompt) ||
     trim(src.personaPrompt) ||
@@ -142,6 +175,8 @@ const toPersistedMaidSettingsState = (state = {}, { now = Date.now } = {}) => {
     subAgents: normalized.subAgents,
     subAgentRemindAt: normalized.subAgentRemindAt,
     maxReactSteps: normalized.maxReactSteps,
+    builtinCapabilities: normalized.builtinCapabilities,
+    capabilityLog: normalized.capabilityLog,
     memoryExtractionMode: normalized.memoryExtraction.mode,
     memoryExtractionProfileId: normalized.memoryExtraction.profileId,
     memoryExtractionModelOverride: normalized.memoryExtraction.modelOverride,
@@ -166,6 +201,12 @@ export const MAID_SUB_AGENT_SKILLS = Object.freeze([
 const SUB_AGENT_SKILL_ID_SET = new Set(MAID_SUB_AGENT_SKILLS.map(item => item.id));
 
 let subAgentSeq = 0;
+// 委派预算：时间上限（秒，0 = 不另设，跟随连线配置的超时）与输出上限（tokens，0 = 默认 2400）
+export const MAID_SUB_AGENT_DEFAULT_OUTPUT_TOKENS = 2400;
+const budgetNumber = (value, min, max) => {
+  const number = Math.trunc(Number(value));
+  return Number.isFinite(number) && number > 0 ? Math.min(max, Math.max(min, number)) : 0;
+};
 export const normalizeMaidSubAgent = (raw = {}, { now = Date.now } = {}) => {
   const src = isPlainObject(raw) ? raw : {};
   const modelProfileId = trim(src.modelProfileId);
@@ -182,6 +223,8 @@ export const normalizeMaidSubAgent = (raw = {}, { now = Date.now } = {}) => {
       .slice(0, 8),
     note: trim(src.note).slice(0, 200),
     enabled: src.enabled !== false,
+    timeLimitSeconds: budgetNumber(src.timeLimitSeconds, 5, 600),
+    maxOutputTokens: budgetNumber(src.maxOutputTokens, 256, 32000),
   };
 };
 
@@ -216,6 +259,8 @@ export const normalizeMaidSettingsState = (raw = {}, { now = Date.now } = {}) =>
       .slice(0, 12),
     subAgentRemindAt: Number(src.subAgentRemindAt || 0) || 0,
     maxReactSteps: normalizeMaidReactStepLimit(src.maxReactSteps),
+    builtinCapabilities: normalizeMaidBuiltinCapabilities(src.builtinCapabilities),
+    capabilityLog: normalizeCapabilityLog(src.capabilityLog),
     memoryExtraction: normalizeMaidMemoryExtractionSettings({
       mode: nestedMemoryExtraction.mode ?? src.memoryExtractionMode,
       profileId: nestedMemoryExtraction.profileId ?? src.memoryExtractionProfileId,
@@ -246,6 +291,7 @@ export class MaidSettingsStore {
     this.now = typeof now === 'function' ? now : Date.now;
     this.loaded = false;
     this.state = normalizeMaidSettingsState({}, { now: this.now });
+    this.capabilityListeners = new Set();
   }
 
   async load() {
@@ -322,6 +368,17 @@ export class MaidSettingsStore {
         localValue: localState.generation, kvValue: kvState?.generation,
         localHasValue: Object.hasOwn(localRaw, 'generation'),
         kvHasValue: Boolean(kvRaw && Object.hasOwn(kvRaw, 'generation')),
+      }),
+      // 新字段必须在这里合并，否则下次写入会被冲掉
+      builtinCapabilities: chooseFieldFromSources({ localRaw, kvRaw,
+        localValue: localState.builtinCapabilities, kvValue: kvState?.builtinCapabilities,
+        localHasValue: Object.hasOwn(localRaw, 'builtinCapabilities'),
+        kvHasValue: Boolean(kvRaw && Object.hasOwn(kvRaw, 'builtinCapabilities')),
+      }),
+      capabilityLog: chooseFieldFromSources({ localRaw, kvRaw,
+        localValue: localState.capabilityLog, kvValue: kvState?.capabilityLog,
+        localHasValue: Object.hasOwn(localRaw, 'capabilityLog'),
+        kvHasValue: Boolean(kvRaw && Object.hasOwn(kvRaw, 'capabilityLog')),
       }),
       boundModelOverride: (readTimestamp(kvRaw) >= readTimestamp(localRaw) ? kvState : localState)?.boundModelOverride
         || kvState?.boundModelOverride || localState.boundModelOverride || '',
@@ -422,6 +479,74 @@ export class MaidSettingsStore {
     this.state.voiceTaskExecutor = executor === 'maid' ? 'maid' : 'voice';
     await this.write();
     return this.getVoiceTaskExecutor();
+  }
+
+  getBuiltinCapabilities() {
+    this.ensureLoaded();
+    return normalizeMaidBuiltinCapabilities(this.state.builtinCapabilities);
+  }
+
+  getBuiltinCapability(id) {
+    return this.getBuiltinCapabilities()[trim(id)] || null;
+  }
+
+  getCapabilityLog() {
+    this.ensureLoaded();
+    return normalizeCapabilityLog(this.state.capabilityLog);
+  }
+
+  // expectedRevision：女仆请求开启时确认的那一版；不一致就不写。保存失败时内存状态退回原样。
+  async setBuiltinCapabilityEnabled(id, enabled, { source = 'settings', expectedRevision = null } = {}) {
+    this.ensureLoaded();
+    const key = trim(id);
+    const capabilities = normalizeMaidBuiltinCapabilities(this.state.builtinCapabilities);
+    const current = capabilities[key];
+    if (!current) return { ok: false, reason: 'unknown_capability' };
+    if (expectedRevision !== null && current.revision !== expectedRevision) {
+      return { ok: false, reason: 'revision_changed', capability: current };
+    }
+    const nextEnabled = enabled === true;
+    if (current.enabled === nextEnabled) return { ok: true, changed: false, capability: current };
+    const previous = { capabilities: this.state.builtinCapabilities, log: this.state.capabilityLog };
+    capabilities[key] = { ...current, enabled: nextEnabled, revision: current.revision + 1 };
+    this.state.builtinCapabilities = capabilities;
+    this.state.capabilityLog = [
+      ...normalizeCapabilityLog(this.state.capabilityLog),
+      { id: key, enabled: nextEnabled, source: source === 'maid_request' ? 'maid_request' : 'settings', at: safeNow(this.now) },
+    ].slice(-CAPABILITY_LOG_LIMIT);
+    if (!await this.write()) {
+      this.state.builtinCapabilities = previous.capabilities;
+      this.state.capabilityLog = previous.log;
+      return { ok: false, reason: 'save_failed', capability: current };
+    }
+    this.notifyCapabilityListeners(key, capabilities[key]);
+    return { ok: true, changed: true, capability: capabilities[key] };
+  }
+
+  notifyCapabilityListeners(key, capability) {
+    this.capabilityListeners.forEach((listener) => {
+      try { listener(key, capability); } catch {}
+    });
+  }
+
+  async markBuiltinCapabilityUsed(id) {
+    this.ensureLoaded();
+    const key = trim(id);
+    const capabilities = normalizeMaidBuiltinCapabilities(this.state.builtinCapabilities);
+    if (!capabilities[key]) return null;
+    capabilities[key] = { ...capabilities[key], lastUsedAt: safeNow(this.now) };
+    this.state.builtinCapabilities = capabilities;
+    await this.write();
+    // 只更新使用时间、不改版本：技能页刷新「上次使用」，等待中的开启确认不受影响
+    this.notifyCapabilityListeners(key, capabilities[key]);
+    return capabilities[key];
+  }
+
+  // 开关与使用时间变化通知：技能页刷新、取消失效的开启确认（按版本判断）
+  subscribeCapabilities(listener) {
+    if (typeof listener !== 'function') return () => {};
+    this.capabilityListeners.add(listener);
+    return () => this.capabilityListeners.delete(listener);
   }
 
   getGenerationSettings() {

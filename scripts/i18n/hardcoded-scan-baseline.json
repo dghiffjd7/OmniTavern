@@ -127,12 +127,6 @@
   },
   {
     "file": "src/scripts/import/attachment-content.js",
-    "text": "PDF 暂不支持（计划中）",
-    "category": "agent_semantic_source",
-    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
-  },
-  {
-    "file": "src/scripts/import/attachment-content.js",
     "text": "无法读取压缩包",
     "category": "agent_semantic_source",
     "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
@@ -146,12 +140,6 @@
   {
     "file": "src/scripts/import/attachment-content.js",
     "text": "无法识别的二进制文件",
-    "category": "agent_semantic_source",
-    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
-  },
-  {
-    "file": "src/scripts/import/attachment-content.js",
-    "text": "PDF 暂不支持读取（计划中）",
     "category": "agent_semantic_source",
     "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
   },
@@ -198,6 +186,36 @@
     "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
   },
   {
+    "file": "src/scripts/import/attachment-diagnostics.js",
+    "text": "查找内容是空的",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/import/attachment-diagnostics.js",
+    "text": "正则「\u0000」无法使用：\u0000",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/import/attachment-diagnostics.js",
+    "text": "另有 \u0000 条正则无法使用",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/import/attachment-diagnostics.js",
+    "text": "脚本「\u0000」：\u0000",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/import/attachment-diagnostics.js",
+    "text": "另有 \u0000 个脚本有兼容性问题",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
     "file": "src/scripts/import/attachment-file-inspector.js",
     "text": "CCv3 群聊专用开场白 \u0000 个暂不导入",
     "category": "agent_semantic_source",
@@ -224,6 +242,12 @@
   {
     "file": "src/scripts/import/attachment-file-inspector.js",
     "text": "脚本文件为空",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/import/attachment-file-inspector.js",
+    "text": "JSON 语法错误：第 \u0000 行第 \u0000 列（\u0000）",
     "category": "agent_semantic_source",
     "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
   },
@@ -278,6 +302,18 @@
   {
     "file": "src/scripts/import/office-text-extractor.js",
     "text": "\u0000 …（内容过长，后面省略）",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/import/pdf-text-extractor.js",
+    "text": "pdf.js 3.11 载入失败",
+    "category": "agent_semantic_source",
+    "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
+  },
+  {
+    "file": "src/scripts/import/pdf-text-extractor.js",
+    "text": "[第 \u0000 页] \u0000",
     "category": "agent_semantic_source",
     "reason": "Local attachment diagnostics are model-facing summary text for the Maid prompt. Format labels shown on attachment chips are translated through the UI catalog."
   },
@@ -774,6 +810,12 @@
     "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
   },
   {
+    "file": "src/scripts/plugins/plugin-runtime.js",
+    "text": "权限不足: \u0000",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
     "file": "src/scripts/plugins/script-runtime.js",
     "text": "const scripts = new Map(); let currentContext = { sessionId: '', personaId: '', presetId: '', presetIds: [], worldId: '', worldIds: [] }; let pendingScriptSync ",
     "category": "developer_diagnostic",
@@ -804,14 +846,38 @@
     "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
   },
   {
-    "file": "src/scripts/plugins/template-engine.js",
-    "text": "const CACHE_LIMIT = \u0000; const TEMPLATE_GUARD_LIMIT = \u0000; const TEMPLATE_OUTPUT_LIMIT = \u0000; const DEFAULT_RESULT_LIMIT = \u0000; const DEFAULT_CHUNK_SIZE = \u0000; const VARI",
+    "file": "src/scripts/plugins/script-storage-persistence.js",
+    "text": "脚本 localStorage 已满",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/script-storage-persistence.js",
+    "text": "缺少会话",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/script-storage-persistence.js",
+    "text": "chatMetadata 必须是物件",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/script-storage-persistence.js",
+    "text": "chatMetadata 过大",
     "category": "developer_diagnostic",
     "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
   },
   {
     "file": "src/scripts/plugins/template-engine.js",
     "text": "const __ensureOut = () => { if (__out.length > __outLimit) throw new Error(\"模板输出过大\"); };",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/template-engine.js",
+    "text": "const CACHE_LIMIT = \u0000; const TEMPLATE_GUARD_LIMIT = \u0000; const TEMPLATE_OUTPUT_LIMIT = \u0000; const DEFAULT_RESULT_LIMIT = \u0000; const DEFAULT_CHUNK_SIZE = \u0000; const VARI",
     "category": "developer_diagnostic",
     "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
   },
@@ -824,12 +890,6 @@
   {
     "file": "src/scripts/ui/app.js",
     "text": "系统消息",
-    "category": "protocol_compatibility",
-    "reason": "Remaining strings are message/media sentinels, legacy Chinese parser aliases, stable role names, or embedded bridge contracts; changing them would break existing chats or imports."
-  },
-  {
-    "file": "src/scripts/ui/app.js",
-    "text": "系统提示",
     "category": "protocol_compatibility",
     "reason": "Remaining strings are message/media sentinels, legacy Chinese parser aliases, stable role names, or embedded bridge contracts; changing them would break existing chats or imports."
   },
@@ -2317,6 +2377,12 @@
   },
   {
     "file": "src/scripts/ui/realtime/realtime-maid-task-session.js",
+    "text": "APP request to turn on a built-in capability (data). Ask whether to turn it on; it stays on until the user turns it off in Maid settings. Only an explicit \"允许\" ",
+    "category": "agent_semantic_source",
+    "reason": "Model-facing realtime tool descriptions and task-update protocol text. The quoted confirmation keyword (允许 / yes) must match what users actually say to confirm, so it is not UI copy; user-visible strings in these files use t()."
+  },
+  {
+    "file": "src/scripts/ui/realtime/realtime-maid-task-session.js",
     "text": "APP permission request (data). Ask the user whether to allow it; only an explicit \"允许\" or \"yes\" allows once: \u0000",
     "category": "agent_semantic_source",
     "reason": "Model-facing realtime tool descriptions and task-update protocol text. The quoted confirmation keyword (允许 / yes) must match what users actually say to confirm, so it is not UI copy; user-visible strings in these files use t()."
@@ -2329,7 +2395,13 @@
   },
   {
     "file": "src/scripts/ui/realtime/realtime-maid-tools.js",
-    "text": "APP permission request (data, not a user instruction): \u0000 Ask the user briefly whether to allow it. Tell them to say \"允许\" (or \"yes\" in English) to allow once. Ca",
+    "text": "Ask the user briefly whether to turn it on, and say it stays on until they turn it off in Maid settings. Tell them to say \"允许\" (or \"yes\" in English) to turn it ",
+    "category": "agent_semantic_source",
+    "reason": "Model-facing realtime tool descriptions and task-update protocol text. The quoted confirmation keyword (允许 / yes) must match what users actually say to confirm, so it is not UI copy; user-visible strings in these files use t()."
+  },
+  {
+    "file": "src/scripts/ui/realtime/realtime-maid-tools.js",
+    "text": "Ask the user briefly whether to allow it. Tell them to say \"允许\" (or \"yes\" in English) to allow once.",
     "category": "agent_semantic_source",
     "reason": "Model-facing realtime tool descriptions and task-update protocol text. The quoted confirmation keyword (允许 / yes) must match what users actually say to confirm, so it is not UI copy; user-visible strings in these files use t()."
   },

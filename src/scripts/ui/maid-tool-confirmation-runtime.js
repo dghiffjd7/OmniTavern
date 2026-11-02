@@ -1,7 +1,8 @@
 /* 女仆工具确认：原 app.js 的 requestMaidToolConfirmation 整块迁入，并新增卡内确认。
    - 能在运行卡里显示时（输入胶囊、执行流面板或语音托盘正在展示该 run），确认块直接出现在卡内；
    - 否则沿用原 appChoice 弹窗；卡内确认期间若所有承载面都关闭，自动改用弹窗，避免任务无人确认而挂起；
-   - 语音只能给出“允许一次”，“始终允许”只在按钮上提供。 */
+   - 语音只能给出“允许一次”，“始终允许”只在按钮上提供；
+   - purpose 区分用途：persistent_enable（内置能力持久开启）的“允许”就是开启本身，语音与回报措辞随之不同。 */
 
 import { t } from '../i18n/index.js';
 import { normalizeAppConfirmItems } from './app-confirm.js';
@@ -46,8 +47,11 @@ const describeRequest = (request = {}) => {
   // 这是对单次意图误差的放行，不该沉淀成永久规则。
   const escalated = request?.escalation === 'read_only_write';
   const alwaysConfirm = request?.allowAlways === false;
+  const purpose = trim(request?.details?.purpose);
   return {
     escalated,
+    purpose,
+    capabilityTitle: purpose === 'persistent_enable' ? trim(request?.details?.capabilityTitle) : '',
     alwaysConfirm,
     allowAlways: !escalated && !alwaysConfirm,
     danger: request?.danger !== false,
@@ -191,6 +195,8 @@ export const createMaidToolConfirmationRuntime = ({
       cancelLabel: info.cancelLabel,
       tone: info.tone,
       actionLabel: info.actionLabel,
+      purpose: info.purpose,
+      capabilityTitle: info.capabilityTitle,
     };
   };
 
@@ -245,13 +251,23 @@ export const createMaidToolConfirmationRuntime = ({
     resolveBound,
     hasInline: runId => Boolean(getInline(runId)),
     resolve: (id, action) => settle(entries.get(trim(id)), action),
-    // 语音确认只允许一次；只作用于指定 run 集合（当前通话接下的任务）里正在卡内等待的确认
+    // 语音确认只允许一次（持久开启的确认则是开启本身）；只作用于指定 run 集合（当前通话接下的任务）里正在卡内等待的确认
     confirmByVoice: (runIds = []) => {
       const allowed = new Set((Array.isArray(runIds) ? runIds : [runIds]).map(item => trim(item)).filter(Boolean));
       for (const entry of entries.values()) {
         if (entry.mode === 'inline' && allowed.has(entry.runId)) return settle(entry, 'allow_once');
       }
       return false;
+    },
+    // 确认依据的状态已变（如开关在设置里被改过）：取消仍在等待的旧确认，不让迟到答复覆盖用户刚做的选择
+    cancelWhere: (predicate) => {
+      let count = 0;
+      for (const entry of [...entries.values()]) {
+        let stale = false;
+        try { stale = !entry.settled && predicate(entry.request) === true; } catch {}
+        if (stale && settle(entry, 'deny')) count += 1;
+      }
+      return count;
     },
     // 承载面变化后调用：不再有任何可见位置显示的卡内确认改用弹窗
     ensureVisible: () => {

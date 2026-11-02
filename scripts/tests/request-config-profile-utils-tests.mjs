@@ -90,9 +90,19 @@ test('generation resolves request config before building provider messages', asy
   assert.ok(resolveIndex < buildIndex, 'request config must be resolved before buildMessages');
   assert.match(
     body,
-    /this\.buildMessages\(promptInput, nextContext,\s*\{\s*requestConfig: config,\s*deferPhoneTransportLayers,\s*transportAnchorNamespace: nativeRequestId,\s*\}\s*\)/,
+    /this\.buildMessages\(promptInput, nextContext,\s*\{\s*requestConfig: config,\s*deferPhoneTransportLayers,\s*transportAnchorNamespace: nativeRequestId,\s*deferProviderNormalization,\s*presetEntryDecisions,\s*\}\s*\)/,
   );
   assert.match(source, /buildMessages\(userMessage, context = \{\}, options = \{\}\)/);
+});
+
+test('preset-script requests let the scripts see per-entry messages and normalize for the provider afterwards', async () => {
+  const source = await readFile(fileURLToPath(new URL('../../src/scripts/ui/bridge.js', import.meta.url)), 'utf8');
+  const body = source.slice(source.search(/^  async generate\(/m), source.search(/^  async backgroundChat\(/m));
+  // 跟酒馆一样：凡是走预设请求通道的都先交给脚本、后整理，不只带 SPreset 的预设（Dream 的标签切分要看逐条目消息）
+  assert.match(body, /const deferProviderNormalization = Boolean\(creativeTarget\);/);
+  // SPreset 条目条件仍只在预设带 SPreset 设置时执行
+  assert.match(body, /const hasCreativeSPreset = Boolean\(creativeSPreset && Object\.keys\(creativeSPreset\)\.length\);/);
+  assert.match(body, /const presetEntryDecisions = hasCreativeSPreset\s*\?\s*await this\.scriptRuntime\.evaluatePresetEntryConditions\(/);
 });
 
 test('bridge preserves options until the provider applies profile rules to its final body', async () => {

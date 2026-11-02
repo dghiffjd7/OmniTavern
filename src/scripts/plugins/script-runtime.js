@@ -1,18 +1,25 @@
 import { appSettings } from '../storage/app-settings.js';
 import { logger } from '../utils/logger.js';
 import { emitDebugLog } from '../utils/debug-log.js';
+import { safeInvoke } from '../utils/tauri.js';
+import { t } from '../i18n/index.js';
 import { serializeForInlineScript } from '../utils/inline-script.js';
 import { buildMacroEngineRuntimeSource } from '../utils/macro-engine.js';
 import { createSillyTavernMacroApi } from '../utils/macro-compat-api.js';
 import { createPresetRequestWorker } from './preset-request-worker.js';
 import { toScriptPreset, fromScriptPreset, mergeScriptPresetChanges, patchScriptPresetRegexes, createPresetScriptApi } from './preset-script-api.js';
 import { runScriptGeneration } from './script-generation.js';
+import { createScriptWorldbookWriter } from './script-worldbook-write.js';
+import { createScriptStoragePersistence, SCRIPT_LOCAL_STORAGE_LIMIT } from './script-storage-persistence.js';
+import { fillDeclaredScriptButtons } from '../storage/script-store.js';
+import { extractScriptTree } from '../import/script-tree-utils.js';
 import { patchScriptUiChildren } from './script-ui-dom.js';
 import { buildTavernConnectionSettings, TAVERN_CONNECTION_SETTING_KEYS } from './tavern-connection-settings.js';
 import { resolveRequestConfigProfileId } from '../ui/chat/request-config-profile-utils.js';
 import {
   PresetRequestTransport, isCreativePresetRequest, makePresetRequestBody,
-  applyPresetRequestBody, createPresetGenerationClient,
+  applyPresetRequestBody, createPresetGenerationClient, resolveForcedPromptPostProcessing,
+  applyPresetEntryDecisions,
 } from './preset-request-transport.js';
 import {
   analyzeScriptCompatibility,
@@ -60,6 +67,8 @@ const TAVERN_EVENT_TYPES = Object.freeze({
   CHAT_COMPLETION_PROMPT_READY: 'chat_completion_prompt_ready',
   CHAT_COMPLETION_SETTINGS_READY: 'chat_completion_settings_ready',
   OAI_PRESET_CHANGED_AFTER: 'preset.changed',
+  GENERATION_STARTED: 'generation_started',
+  GENERATION_AFTER_COMMANDS: 'generation_after_commands',
 });
 // 卡里直接写酒馆原始事件名（字面量）时，对到同一组内部事件
 const TAVERN_EVENT_ALIASES = Object.freeze({
@@ -372,6 +381,7 @@ const presetRequestWorker = createPresetRequestWorker({
   getContext: () => currentContext,
   waitUntilReady: () => pendingScriptSync,
   dispatch: (event, payload) => dispatchEvent(event, payload, true),
+  substitute: text => getMacroCompatApi().substituteParams(text),
 });
 let compatFetchInstalled = false;
 
@@ -514,6 +524,7 @@ const runCompatCallback = (fn, ...args) => {
 };
 
 const makeCompatDollar = () => {
+  const isCompatCollection = value => Boolean(value) && typeof value === 'object' && value.__chatappJQuery === true;
   const normalizeNodes = (selector) => {
     if (selector == null) return [];
     if (selector === self || selector === self.window || selector === self.document) return [selector];
@@ -528,21 +539,157 @@ const makeCompatDollar = () => {
     return Array.from(self.document?.querySelectorAll?.(text) || []);
   };
   const normalizeInsertItems = (items = []) => items.flatMap((item) => {
+    if (isCompatCollection(item) || Array.isArray(item)) return normalizeNodes(item);
     if (item && typeof item === 'object') return [item];
     const text = String(item ?? '');
     if (!text) return [];
     return text.trim().startsWith('<') ? parseCompatHtml(text) : [makeCompatTextNode(text)];
   });
+  const uniqueNodes = list => Array.from(new Set(list.filter(Boolean)));
+  const matchesCompatSelector = (node, selector) => node?.nodeType === 1
+    && splitSelectorGroups(selector).some(group => node.matches?.(group));
+  const toCompatPredicate = (selector) => {
+    if (typeof selector === 'function') return (node, index) => Boolean(runCompatCallback(() => selector.call(node, index, node)));
+    if (typeof selector === 'string') return node => matchesCompatSelector(node, selector);
+    const allowed = new Set(normalizeNodes(selector));
+    return node => allowed.has(node);
+  };
+  // jQuery 式事件：每个节点每种事件只挂一个原生监听，按 jQuery 顺序派发——
+  // 先委托（从 target 往上找匹配的子元素），再直接绑定；命名空间 click.ns 用于解绑和触发。
+  const compatEventStore = new WeakMap();
+  const parseEventTypes = events => String(events || '').split(' ').map(item => item.trim()).filter(Boolean)
+    .map((token) => {
+      const [type, ...namespaces] = token.split('.');
+      return { type, namespaces: namespaces.filter(Boolean) };
+    });
+  const dispatchCompatJQueryEvent = (node, entry, event) => {
+    if (!event || typeof event !== 'object') return;
+    if (typeof event.isDefaultPrevented !== 'function') event.isDefaultPrevented = () => Boolean(event.defaultPrevented);
+    if (typeof event.isPropagationStopped !== 'function') event.isPropagationStopped = () => Boolean(event.__stopped);
+    const namespaces = Array.isArray(event.__chatappNamespaces) ? event.__chatappNamespaces : [];
+    const handlers = entry.handlers.filter(item => namespaces.every(ns => item.namespaces.includes(ns)));
+    const delegated = handlers.filter(item => item.selector);
+    const queue = [];
+    if (delegated.length) {
+      for (let current = event.target; current && current !== node; current = current.parentNode) {
+        const matched = delegated.filter(item => matchesCompatSelector(current, item.selector));
+        if (matched.length) queue.push({ elem: current, list: matched });
+      }
+    }
+    const direct = handlers.filter(item => !item.selector);
+    if (direct.length) queue.push({ elem: node, list: direct });
+    const extra = Array.isArray(event.__chatappTriggerArgs) ? event.__chatappTriggerArgs : [];
+    for (const { elem, list } of queue) {
+      if (event.__stopped) break;
+      for (const item of list) {
+        if (event.__immediateStopped) break;
+        if (item.once) removeCompatHandler(node, item);
+        try { event.currentTarget = elem; } catch {}
+        try { event.delegateTarget = node; } catch {}
+        try { event.data = item.data; } catch {}
+        const result = runCompatCallback(() => item.handler.call(elem, event, ...extra));
+        if (result === false) {
+          event.preventDefault?.();
+          event.stopPropagation?.();
+        }
+      }
+    }
+  };
+  const removeCompatHandler = (node, item) => {
+    const types = compatEventStore.get(node);
+    const entry = types?.get(item.type);
+    if (!entry) return;
+    entry.handlers = entry.handlers.filter(handler => handler !== item);
+    if (entry.handlers.length) return;
+    node.removeEventListener?.(item.type, entry.listener);
+    types.delete(item.type);
+  };
+  const addCompatHandler = (node, spec, selector, data, handler, once) => {
+    if (!node?.addEventListener || typeof handler !== 'function' || !spec.type) return;
+    let types = compatEventStore.get(node);
+    if (!types) {
+      types = new Map();
+      compatEventStore.set(node, types);
+    }
+    let entry = types.get(spec.type);
+    if (!entry) {
+      entry = { handlers: [] };
+      entry.listener = event => dispatchCompatJQueryEvent(node, entry, event);
+      types.set(spec.type, entry);
+      node.addEventListener(spec.type, entry.listener);
+    }
+    entry.handlers.push({ type: spec.type, namespaces: spec.namespaces, selector: selector || '', data, handler, once });
+  };
+  const removeCompatHandlers = (node, events, selector, handler) => {
+    const types = compatEventStore.get(node);
+    if (!types) return;
+    const specs = events ? parseEventTypes(events) : [{ type: '', namespaces: [] }];
+    Array.from(types.values()).forEach((entry) => {
+      entry.handlers.slice().forEach((item) => {
+        const hit = specs.some(spec => (!spec.type || spec.type === item.type)
+          && spec.namespaces.every(ns => item.namespaces.includes(ns)));
+        if (!hit) return;
+        if (selector && selector !== '**' && item.selector !== selector) return;
+        if (handler && item.handler !== handler) return;
+        removeCompatHandler(node, item);
+      });
+    });
+  };
   const makeCollection = (selector) => {
     const nodes = normalizeNodes(selector);
+    const bind = (once) => (events, selector, data, handler) => {
+      if (events && typeof events === 'object') {
+        Object.entries(events).forEach(([type, fn]) => bind(once)(type, selector, data, fn));
+        return api;
+      }
+      if (typeof selector === 'function') {
+        handler = selector;
+        selector = '';
+        data = undefined;
+      } else if (typeof data === 'function') {
+        handler = data;
+        data = undefined;
+        if (typeof selector !== 'string') {
+          data = selector;
+          selector = '';
+        }
+      }
+      const specs = parseEventTypes(events);
+      nodes.forEach(node => specs.forEach(spec => addCompatHandler(node, spec, selector, data, handler, once)));
+      return api;
+    };
     const api = {
+      __chatappJQuery: true,
+      jquery: '3.7.1-chatapp-compat',
       length: nodes.length,
       get: (index) => {
         if (index == null) return nodes.slice();
         const idx = Number(index);
         return Number.isFinite(idx) ? nodes[idx] : undefined;
       },
-      eq: (index) => makeCollection(nodes[Math.trunc(Number(index) || 0)]),
+      toArray: () => nodes.slice(),
+      eq: (index) => {
+        const idx = Math.trunc(Number(index) || 0);
+        return makeCollection(nodes[idx < 0 ? nodes.length + idx : idx]);
+      },
+      first: () => makeCollection(nodes.slice(0, 1)),
+      last: () => makeCollection(nodes.slice(-1)),
+      filter: (selector) => {
+        const test = toCompatPredicate(selector);
+        return makeCollection(nodes.filter((node, index) => test(node, index)));
+      },
+      is: (selector) => {
+        const test = toCompatPredicate(selector);
+        return nodes.some((node, index) => test(node, index));
+      },
+      add: (selector, context) => makeCollection(uniqueNodes(nodes.concat(normalizeNodes(
+        typeof selector === 'string' && context ? makeCollection(context).find(selector) : selector,
+      )))),
+      map: (cb) => makeCollection(nodes.flatMap((node, index) => {
+        const value = runCompatCallback(() => cb.call(node, index, node));
+        if (value == null) return [];
+        return Array.isArray(value) ? value : [value];
+      })),
       each: (cb) => {
         if (typeof cb === 'function') {
           for (let index = 0; index < nodes.length; index += 1) {
@@ -567,16 +714,29 @@ const makeCompatDollar = () => {
         if (typeof cb === 'function') runCompatCallback(cb);
         return api;
       },
-      on: (event, handler) => {
-        nodes.forEach(node => node?.addEventListener?.(event, handler));
+      on: bind(false),
+      one: bind(true),
+      off: (events, selector, handler) => {
+        if (typeof selector === 'function') {
+          handler = selector;
+          selector = '';
+        }
+        nodes.forEach(node => removeCompatHandlers(node, events, selector, handler));
         return api;
       },
-      off: (event, handler) => {
-        nodes.forEach(node => node?.removeEventListener?.(event, handler));
-        return api;
-      },
-      trigger: (event) => {
-        nodes.forEach(node => node?.dispatchEvent?.(event));
+      trigger: (event, extra) => {
+        nodes.forEach((node) => {
+          if (!node?.dispatchEvent) return;
+          let evt = event;
+          if (typeof event === 'string') {
+            const [spec] = parseEventTypes(event);
+            if (!spec?.type) return;
+            evt = makeCompatEvent(spec.type, { bubbles: true, cancelable: true });
+            evt.__chatappNamespaces = spec.namespaces;
+          }
+          if (evt && typeof evt === 'object' && extra !== undefined) evt.__chatappTriggerArgs = Array.isArray(extra) ? extra : [extra];
+          node.dispatchEvent(evt);
+        });
         return api;
       },
       html: (value) => {
@@ -601,6 +761,11 @@ const makeCompatDollar = () => {
         return api;
       },
       attr: (name, value) => {
+        if (name && typeof name === 'object') {
+          Object.entries(name).forEach(([key, item]) => api.attr(key, item));
+          return api;
+        }
+        if (value === null) return api.removeAttr(name);
         if (value === undefined) return nodes[0]?.getAttribute?.(name);
         nodes.forEach(node => node?.setAttribute?.(name, value));
         return api;
@@ -663,14 +828,28 @@ const makeCompatDollar = () => {
         nodes.forEach(node => node?.classList?.remove?.(...names));
         return api;
       },
-      toggleClass: (name) => {
-        nodes.forEach(node => node?.classList?.toggle?.(name));
+      hasClass: name => nodes.some(node => node?.classList?.contains?.(name)),
+      toggleClass: (name, state) => {
+        const names = String(name || '').split(' ').filter(Boolean);
+        nodes.forEach(node => names.forEach(item => node?.classList?.toggle?.(item, state === undefined ? undefined : Boolean(state))));
         return api;
       },
-      find: (selector) => makeCollection(nodes[0]?.querySelector?.(selector)),
-      closest: (selector) => makeCollection(nodes[0]?.closest?.(selector)),
-      parent: () => makeCollection(nodes[0]?.parentNode || makeCompatElement('div')),
-      children: () => makeCollection(nodes[0]?.children || []),
+      find: (selector) => {
+        if (typeof selector !== 'string') {
+          return makeCollection(normalizeNodes(selector).filter(item => nodes.some(node => node !== item && node?.contains?.(item))));
+        }
+        return makeCollection(uniqueNodes(nodes.flatMap(node => Array.from(node?.querySelectorAll?.(selector) || []))));
+      },
+      closest: (selector) => makeCollection(uniqueNodes(nodes.map(node => node?.closest?.(selector)))),
+      parent: (selector) => {
+        const parents = uniqueNodes(nodes.map(node => node?.parentNode));
+        if (!parents.length) return makeCollection(makeCompatElement('div'));
+        return makeCollection(selector ? parents.filter(node => matchesCompatSelector(node, selector)) : parents);
+      },
+      children: (selector) => {
+        const children = uniqueNodes(nodes.flatMap(node => Array.from(node?.children || [])));
+        return makeCollection(selector ? children.filter(node => matchesCompatSelector(node, selector)) : children);
+      },
       scrollTop: (value) => {
         if (value === undefined) return Number(nodes[0]?.scrollTop || 0);
         nodes.forEach(node => {
@@ -687,22 +866,162 @@ const makeCompatDollar = () => {
       },
       hide: () => api.css('display', 'none'),
       show: () => api.css('display', ''),
+      toggle: (state) => {
+        nodes.forEach((node) => {
+          if (!node?.style) return;
+          const visible = state === undefined ? node.style.display === 'none' : Boolean(state);
+          node.style.display = visible ? '' : 'none';
+        });
+        return api;
+      },
+      stop: () => api,
+      after: (...items) => {
+        nodes.forEach((node) => {
+          const parent = node?.parentNode;
+          if (!parent?.insertBefore) return;
+          const ref = node.nextSibling || null;
+          normalizeInsertItems(items).forEach(item => parent.insertBefore(item, ref));
+        });
+        return api;
+      },
+      before: (...items) => {
+        nodes.forEach((node) => {
+          const parent = node?.parentNode;
+          if (!parent?.insertBefore) return;
+          normalizeInsertItems(items).forEach(item => parent.insertBefore(item, node));
+        });
+        return api;
+      },
+      insertBefore: (target) => {
+        makeCollection(target).first().before(api);
+        return api;
+      },
+      insertAfter: (target) => {
+        makeCollection(target).first().after(api);
+        return api;
+      },
+      appendTo: (target) => {
+        makeCollection(target).first().append(api);
+        return api;
+      },
+      prependTo: (target) => {
+        makeCollection(target).first().prepend(api);
+        return api;
+      },
+      replaceWith: (content) => {
+        nodes.forEach((node) => {
+          const parent = node?.parentNode;
+          if (!parent?.insertBefore) return;
+          normalizeInsertItems([content]).forEach(item => parent.insertBefore(item, node));
+          parent.removeChild?.(node);
+        });
+        return api;
+      },
+      detach: () => api.remove(),
+      clone: () => makeCollection(nodes.flatMap((node) => {
+        if (node?.nodeType === 1) return parseCompatHtml(String(node.outerHTML || ''));
+        if (node?.nodeType === 3) return [makeCompatTextNode(String(node.textContent || ''))];
+        return [];
+      })),
     };
+    ['click', 'focus', 'blur', 'change', 'input', 'submit', 'keydown', 'keyup'].forEach((type) => {
+      api[type] = (...args) => {
+        if (args.length) return api.on(type, ...args);
+        nodes.forEach((node) => {
+          if (typeof node?.[type] === 'function') node[type]();
+          else node?.dispatchEvent?.(makeCompatEvent(type, { bubbles: true, cancelable: true }));
+        });
+        return api;
+      };
+    });
     nodes.forEach((node, index) => { api[index] = node; });
     return api;
   };
-  const fn = (selector) => {
+  const fn = (selector, context) => {
     if (typeof selector === 'function') {
       runCompatCallback(selector);
       return makeCollection(self.document || makeCompatElement('document'));
     }
+    if (typeof selector === 'string' && context && !selector.trim().startsWith('<')) return makeCollection(context).find(selector);
     return makeCollection(selector);
   };
   fn.ready = (cb) => { if (typeof cb === 'function') runCompatCallback(cb); };
+  fn.trim = value => String(value ?? '').trim();
+  fn.each = (target, cb) => {
+    if (typeof cb !== 'function' || !target) return target;
+    const keys = Array.isArray(target) || isCompatCollection(target)
+      ? Array.from({ length: target.length }, (_item, index) => index)
+      : Object.keys(target);
+    for (const key of keys) {
+      if (runCompatCallback(() => cb.call(target[key], key, target[key])) === false) break;
+    }
+    return target;
+  };
+  const isPlainCompatObject = (value) => {
+    if (!value || typeof value !== 'object') return false;
+    const proto = Object.getPrototypeOf(value);
+    return proto === null || Object.getPrototypeOf(proto) === null;
+  };
+  fn.extend = (...args) => {
+    const deep = args[0] === true;
+    if (deep) args.shift();
+    const target = args[0] && typeof args[0] === 'object' ? args[0] : {};
+    args.slice(1).forEach((source) => {
+      if (!source || typeof source !== 'object') return;
+      Object.keys(source).forEach((key) => {
+        const value = source[key];
+        if (deep && isPlainCompatObject(value)) target[key] = fn.extend(true, isPlainCompatObject(target[key]) ? target[key] : {}, value);
+        else if (value !== undefined) target[key] = value;
+      });
+    });
+    return target;
+  };
   return fn;
 };
 
+// 脚本的 localStorage：Worker 存活期间以这份为准；新 Worker 第一次 sync 由主线程带来已存的资料，
+// 写入合并成一批经 RPC 交主线程保存（script-storage-persistence），超过上限照浏览器丢 QuotaExceededError
 const compatLocalStorageState = new Map();
+const COMPAT_LOCAL_STORAGE_LIMIT = ${SCRIPT_LOCAL_STORAGE_LIMIT};
+let compatLocalStorageChars = 0;
+const compatLocalStoragePatch = { clear: false, set: new Map(), remove: new Set() };
+let compatLocalStorageTimer = null;
+
+const flushCompatLocalStorage = () => {
+  compatLocalStorageTimer = null;
+  const patch = {
+    clear: compatLocalStoragePatch.clear,
+    set: Object.fromEntries(compatLocalStoragePatch.set),
+    remove: Array.from(compatLocalStoragePatch.remove),
+  };
+  compatLocalStoragePatch.clear = false;
+  compatLocalStoragePatch.set.clear();
+  compatLocalStoragePatch.remove.clear();
+  if (!patch.clear && !patch.remove.length && !Object.keys(patch.set).length) return;
+  callRpc('storage.local.write', patch).catch((error) => {
+    console.warn('[localStorage] 保存失败', String(error?.message || error));
+  });
+};
+const scheduleCompatLocalStorageFlush = () => {
+  if (compatLocalStorageTimer == null) compatLocalStorageTimer = setTimeout(flushCompatLocalStorage, 200);
+};
+const seedCompatLocalStorage = (items) => {
+  compatLocalStorageState.clear();
+  compatLocalStorageChars = 0;
+  compatLocalStoragePatch.clear = false;
+  compatLocalStoragePatch.set.clear();
+  compatLocalStoragePatch.remove.clear();
+  for (const [key, value] of Object.entries(items || {})) {
+    if (typeof value !== 'string') continue;
+    compatLocalStorageState.set(key, value);
+    compatLocalStorageChars += key.length + value.length;
+  }
+};
+const makeCompatQuotaError = () => {
+  const message = '脚本 localStorage 已满';
+  if (typeof DOMException === 'function') return new DOMException(message, 'QuotaExceededError');
+  return Object.assign(new Error(message), { name: 'QuotaExceededError', code: 22 });
+};
 
 const makeCompatLocalStorage = () => ({
   get length() {
@@ -717,13 +1036,33 @@ const makeCompatLocalStorage = () => ({
     return compatLocalStorageState.has(name) ? compatLocalStorageState.get(name) : null;
   },
   setItem(key, value) {
-    compatLocalStorageState.set(String(key || ''), String(value ?? ''));
+    const name = String(key || '');
+    const text = String(value ?? '');
+    const previous = compatLocalStorageState.has(name) ? name.length + compatLocalStorageState.get(name).length : 0;
+    const nextChars = compatLocalStorageChars - previous + name.length + text.length;
+    if (nextChars > COMPAT_LOCAL_STORAGE_LIMIT) throw makeCompatQuotaError();
+    compatLocalStorageState.set(name, text);
+    compatLocalStorageChars = nextChars;
+    compatLocalStoragePatch.set.set(name, text);
+    compatLocalStoragePatch.remove.delete(name);
+    scheduleCompatLocalStorageFlush();
   },
   removeItem(key) {
-    compatLocalStorageState.delete(String(key || ''));
+    const name = String(key || '');
+    if (!compatLocalStorageState.has(name)) return;
+    compatLocalStorageChars -= name.length + compatLocalStorageState.get(name).length;
+    compatLocalStorageState.delete(name);
+    compatLocalStoragePatch.set.delete(name);
+    compatLocalStoragePatch.remove.add(name);
+    scheduleCompatLocalStorageFlush();
   },
   clear() {
     compatLocalStorageState.clear();
+    compatLocalStorageChars = 0;
+    compatLocalStoragePatch.clear = true;
+    compatLocalStoragePatch.set.clear();
+    compatLocalStoragePatch.remove.clear();
+    scheduleCompatLocalStorageFlush();
   },
 });
 
@@ -1062,6 +1401,72 @@ class CompatObserver {
   }
 }
 
+// MutationObserver 只报告子节点增删（childList）：变动时按观察范围收集记录，微任务里统一回调，
+// 让脚本能在浮窗挂上之后再补自己的界面（属性和文本变化不报告）。
+const compatMutationObservers = new Set();
+// 酒馆主输入框 #send_textarea 的镜像：平时跟随 APP 草稿，脚本写入时同步回 APP 输入框；
+// 生成前事件期间装着本轮发出的文字（同酒馆：此时输入框还没清空）。
+let compatSendTextareaValue = '';
+const queueCompatChildListMutation = (target, addedNodes = [], removedNodes = []) => {
+  if (!compatMutationObservers.size) return;
+  compatMutationObservers.forEach(observer => observer.queueChildList(target, addedNodes, removedNodes));
+};
+
+class CompatMutationObserver {
+  constructor(callback) {
+    this.callback = typeof callback === 'function' ? callback : null;
+    this.targets = new Map();
+    this.records = [];
+    this.scheduled = false;
+  }
+
+  observe(target, options = {}) {
+    if (!target || typeof target !== 'object') return;
+    this.targets.set(target, { childList: options?.childList === true, subtree: options?.subtree === true });
+    compatMutationObservers.add(this);
+  }
+
+  disconnect() {
+    this.targets.clear();
+    this.records = [];
+    compatMutationObservers.delete(this);
+  }
+
+  takeRecords() {
+    const records = this.records;
+    this.records = [];
+    return records;
+  }
+
+  queueChildList(target, addedNodes, removedNodes) {
+    let observed = false;
+    this.targets.forEach((options, root) => {
+      if (observed || !options.childList) return;
+      if (root === target) observed = true;
+      else if (options.subtree) {
+        for (let node = target?.parentNode; node; node = node.parentNode) {
+          if (node === root) {
+            observed = true;
+            break;
+          }
+        }
+      }
+    });
+    if (!observed) return;
+    this.records.push({
+      type: 'childList', target, addedNodes: addedNodes.slice(), removedNodes: removedNodes.slice(),
+      previousSibling: null, nextSibling: null, attributeName: null, attributeNamespace: null, oldValue: null,
+    });
+    if (this.scheduled) return;
+    this.scheduled = true;
+    queueMicrotask(() => {
+      this.scheduled = false;
+      const records = this.takeRecords();
+      if (records.length && this.callback) runCompatCallback(() => this.callback.call(this, records, this));
+    });
+  }
+}
+
 const getCompatElementChildren = (node) => Array.isArray(node?.children) ? node.children : [];
 
 const walkCompatTree = (root, includeRoot = false) => {
@@ -1254,6 +1659,8 @@ const unregisterCompatUiSubtree = (node) => {
 const getCompatIndexedSelectorCandidates = (root, selector = '') => {
   const text = String(selector || '').trim();
   if (!text || /[\\s>,+~]/.test(text)) return null;
+  // 索引只收已挂上页面的节点；还没挂上的子树（脚本常先组好弹窗再 appendChild）改走逐个比对
+  if (root !== self.document && !isCompatNodeConnected(root)) return null;
   const buckets = [];
   const withoutAttributes = text.replace(/\\[(?:[^\\]"']|"[^"]*"|'[^']*')*\\]/g, '');
   const idMatch = withoutAttributes.match(/#([^\\.\\[#:\\s]+)/);
@@ -1684,6 +2091,8 @@ function scheduleCompatUiFlush() {
 }
 
 function resetCompatDocumentForSync() {
+  // 脚本重载后旧实例的观察者作废
+  compatMutationObservers.clear();
   if (compatUiFlushTimer) {
     clearTimeout(compatUiFlushTimer);
     compatUiFlushTimer = 0;
@@ -1960,6 +2369,7 @@ const makeCompatElement = (tagName = 'div') => {
         childNodes.push(child);
         if (child.nodeType !== 3 && !element.children.includes(child)) element.children.push(child);
         registerCompatUiSubtree(child);
+        queueCompatChildListMutation(element, [child], []);
         scheduleCompatUiFlush();
       }
       return child;
@@ -1979,6 +2389,7 @@ const makeCompatElement = (tagName = 'div') => {
         else if (!element.children.includes(child)) element.children.push(child);
       }
       registerCompatUiSubtree(child);
+      queueCompatChildListMutation(element, [child], []);
       scheduleCompatUiFlush();
       return child;
     },
@@ -1991,6 +2402,7 @@ const makeCompatElement = (tagName = 'div') => {
         child.parentNode = null;
         child.parentElement = null;
       }
+      if (nodeIdx >= 0) queueCompatChildListMutation(element, [], [child]);
       scheduleCompatUiFlush();
       return child;
     },
@@ -2129,7 +2541,19 @@ const makeCompatElement = (tagName = 'div') => {
     },
   };
   element.classList = makeCompatDomTokenList(element);
+  let ownerDocumentValue = null;
   Object.defineProperties(element, {
+    // 和浏览器一样，解析出来或还没挂上的元素也属于当前文档
+    ownerDocument: {
+      enumerable: false,
+      configurable: true,
+      get() {
+        return ownerDocumentValue || self.document || null;
+      },
+      set(value) {
+        ownerDocumentValue = value || null;
+      },
+    },
     id: {
       enumerable: true,
       configurable: true,
@@ -2388,6 +2812,22 @@ const makeCompatDocument = () => {
   body.ownerDocument = document;
   head.ownerDocument = document;
   documentElement.ownerDocument = document;
+  const sendTextarea = document.createElement('textarea');
+  sendTextarea.setAttribute('id', 'send_textarea');
+  sendTextarea.setAttribute('data-chatapp-virtual', 'send-textarea');
+  sendTextarea.style.display = 'none';
+  Object.defineProperty(sendTextarea, 'value', {
+    enumerable: true,
+    configurable: true,
+    get() {
+      return compatSendTextareaValue;
+    },
+    set(value) {
+      compatSendTextareaValue = String(value ?? '');
+      callRpc('ui.setInputText', { text: compatSendTextareaValue, sessionId: currentContext.sessionId }).catch(() => {});
+    },
+  });
+  body.appendChild(sendTextarea);
   return document;
 };
 
@@ -2406,6 +2846,14 @@ const warnCompatPermissionDenied = (permission) => {
   if (deniedPermissionWarnings.has(name)) return;
   deniedPermissionWarnings.add(name);
   callRpc('log', { level: 'warn', args: ['脚本权限已禁用', name] }).catch(() => {});
+};
+
+// 提示文字由主线程翻译后显示
+const unsupportedDialogWarnings = new Set();
+const warnCompatDialogUnsupported = (kind) => {
+  if (unsupportedDialogWarnings.has(kind)) return;
+  unsupportedDialogWarnings.add(kind);
+  callRpc('ui.dialogUnsupported', { kind }).catch(() => {});
 };
 
 const normalizeCompatVariableScope = (option = { type: 'message' }) => {
@@ -2826,7 +3274,9 @@ const getActiveWorldbookIds = () => {
   return Array.from(new Set((worldId ? [worldId] : []).concat(worldIds).filter(Boolean)));
 };
 
-const getGlobalWorldbookNames = () => getWorldbookNamesFromContext();
+const getWorldbookNames = () => getWorldbookNamesFromContext();
+
+const getGlobalWorldbookNames = () => normalizeStringList(currentContext.globalWorldbookNames);
 
 const getCharWorldbookNames = () => {
   const active = getActiveWorldbookIds();
@@ -2854,6 +3304,36 @@ const getWorldbook = async (name) => {
   if (!world) return [];
   const entries = await callRpc('world.getBook', { world, sessionId: currentContext.sessionId });
   return Array.isArray(entries) ? entries.map(normalizeWorldbookEntry) : [];
+};
+
+// 写入后主窗口回传最新名单，脚本随后读 getWorldbookNames / getGlobalWorldbookNames 立即可见
+const applyWorldbookListing = (result) => {
+  if (Array.isArray(result?.names)) currentContext.worldbookNames = result.names.slice();
+  if (Array.isArray(result?.globalNames)) currentContext.globalWorldbookNames = result.globalNames.slice();
+  return result || {};
+};
+
+// 酒馆助手的世界书写入接口；主窗口每次都请用户确认，并只追加全局世界书
+const makeWorldbookWriteApi = (record) => {
+  const source = { scriptId: record.id, scriptName: record.name || '' };
+  const write = async params => applyWorldbookListing(await callRpc('world.write', {
+    ...params, ...source, sessionId: currentContext.sessionId,
+  }));
+  return {
+    createWorldbook: async (name, entries = []) => (await write({ mode: 'create', name, entries: clone(entries) })).created === true,
+    createOrReplaceWorldbook: async (name, entries = [], _options = {}) => (
+      (await write({ mode: 'replace', name, entries: clone(entries) })).created === true
+    ),
+    importRawWorldbook: async (filename, content) => {
+      await write({ mode: 'import', name: filename, content: String(content ?? '') });
+      return { ok: true, status: 200 };
+    },
+    rebindGlobalWorldbooks: async (names = []) => {
+      applyWorldbookListing(await callRpc('world.bindGlobal', {
+        names: Array.isArray(names) ? names.map(String) : [], ...source, sessionId: currentContext.sessionId,
+      }));
+    },
+  };
 };
 
 const getCurrentCharacterName = () => (
@@ -3112,11 +3592,67 @@ const buildCompatStContext = () => ({
   chatCompletionSettings: buildCompatChatCompletionSettings(),
   world_names: getWorldbookNamesFromContext(),
   selected_world_info: getActiveWorldbookIds(),
-  chat_metadata: {
-    ...(currentContext.chat_metadata && typeof currentContext.chat_metadata === 'object' ? currentContext.chat_metadata : {}),
-    world_info: getChatWorldbookName(),
-  },
+  chat_metadata: getCompatChatMetadata(),
 });
+
+// 酒馆 chatMetadata：每个会话一份，Worker 存活期间以这份为准（主线程只记最后保存的）。
+// 主线程送来资料前（loaded=false）读到空物件且不保存，免得空物件盖掉已存的资料；
+// 同一个 key 再送来不覆盖（脚本可能已改过），key 不同（例如删掉重建的同名会话）才重来。
+const compatChatMetadataBySession = new Map();
+const compatChatMetadataDirty = new Set();
+let compatChatMetadataTimer = null;
+
+const seedCompatChatMetadata = (context) => {
+  const sid = String(context?.chatMetadataSessionId || '');
+  if (!sid) return;
+  const key = String(context.chatMetadataKey || '');
+  const existing = compatChatMetadataBySession.get(sid);
+  if (existing?.loaded && existing.key === key) return;
+  const raw = context.chat_metadata;
+  const data = raw && typeof raw === 'object' && !Array.isArray(raw) ? clone(raw) : {};
+  compatChatMetadataBySession.set(sid, { key, data, loaded: true });
+};
+const getCompatChatMetadata = () => {
+  const sid = String(currentContext.sessionId || '');
+  let entry = compatChatMetadataBySession.get(sid);
+  if (!entry) {
+    entry = { key: '', data: {}, loaded: false };
+    compatChatMetadataBySession.set(sid, entry);
+  }
+  entry.data.world_info = getChatWorldbookName();
+  return entry.data;
+};
+const saveCompatChatMetadataFor = (sid) => {
+  const entry = compatChatMetadataBySession.get(sid);
+  if (!sid || !entry?.loaded) return Promise.resolve(false);
+  const data = clone(entry.data);
+  delete data.world_info;
+  return callRpc('chat.metadata.save', { sessionId: sid, data }).then((result) => {
+    if (result && typeof result === 'object' && result.key) entry.key = String(result.key);
+    return true;
+  }).catch((error) => {
+    console.warn('[chatMetadata] 保存失败', String(error?.message || error));
+    return false;
+  });
+};
+// 收下主线程随 context 送来的会话资料，大物件不留在 currentContext 里（getContext 会展开它）
+const takeCompatChatMetadata = (context) => {
+  seedCompatChatMetadata(context);
+  delete currentContext.chat_metadata;
+  delete currentContext.chatMetadataSessionId;
+  delete currentContext.chatMetadataKey;
+};
+const saveCompatChatMetadata = () => saveCompatChatMetadataFor(String(currentContext.sessionId || ''));
+const saveCompatChatMetadataDebounced = () => {
+  compatChatMetadataDirty.add(String(currentContext.sessionId || ''));
+  if (compatChatMetadataTimer != null) clearTimeout(compatChatMetadataTimer);
+  compatChatMetadataTimer = setTimeout(() => {
+    compatChatMetadataTimer = null;
+    const sessions = Array.from(compatChatMetadataDirty);
+    compatChatMetadataDirty.clear();
+    sessions.forEach((sid) => { saveCompatChatMetadataFor(sid); });
+  }, 1000);
+};
 
 const legacyMacros = new Map();
 let macroCompatApi = null;
@@ -3163,6 +3699,11 @@ const getContext = () => {
   return {
     ...currentContext,
     ...compatContext,
+    chatId: String(currentContext.sessionId || ''),
+    name1: String(currentContext.userName || ''),
+    chatMetadata: compatContext.chat_metadata,
+    saveMetadata: saveCompatChatMetadata,
+    saveMetadataDebounced: saveCompatChatMetadataDebounced,
     chat,
     messages: chat,
     currentMessageId: currentContext.currentMessageId || '',
@@ -3357,7 +3898,7 @@ const ensureCompatGlobals = () => {
     }, 16);
   }
   if (typeof self.cancelAnimationFrame !== 'function') self.cancelAnimationFrame = (id) => clearTimeout(id);
-  if (typeof self.MutationObserver !== 'function') self.MutationObserver = CompatObserver;
+  if (typeof self.MutationObserver !== 'function') self.MutationObserver = CompatMutationObserver;
   if (typeof self.ResizeObserver !== 'function') self.ResizeObserver = CompatObserver;
   if (typeof self.IntersectionObserver !== 'function') self.IntersectionObserver = CompatObserver;
   if (!self._) {
@@ -3421,7 +3962,11 @@ const ensureCompatGlobals = () => {
   if (typeof self.alert !== 'function') {
     self.alert = (message) => callRpc('ui.alert', { message: String(message || ''), sessionId: currentContext.sessionId });
   }
+  // Worker 不能同步弹出输入框或确认框：当作用户按了取消，各提示一次
+  if (typeof self.prompt !== 'function') self.prompt = () => { warnCompatDialogUnsupported('prompt'); return null; };
+  if (typeof self.confirm !== 'function') self.confirm = () => { warnCompatDialogUnsupported('confirm'); return false; };
   if (typeof self.getCurrentCharacterName !== 'function') self.getCurrentCharacterName = getCurrentCharacterName;
+  if (typeof self.getWorldbookNames !== 'function') self.getWorldbookNames = getWorldbookNames;
   if (typeof self.getGlobalWorldbookNames !== 'function') self.getGlobalWorldbookNames = getGlobalWorldbookNames;
   if (typeof self.getCharWorldbookNames !== 'function') self.getCharWorldbookNames = getCharWorldbookNames;
   if (typeof self.getChatWorldbookName !== 'function') self.getChatWorldbookName = getChatWorldbookName;
@@ -3460,6 +4005,7 @@ const ensureCompatGlobals = () => {
   helper.getTavernRegexes = helper.getTavernRegexes || getTavernRegexes;
   helper.replaceTavernRegexes = helper.replaceTavernRegexes || replaceTavernRegexes;
   helper.getWorldbook = helper.getWorldbook || getWorldbook;
+  helper.getWorldbookNames = helper.getWorldbookNames || getWorldbookNames;
   helper.getGlobalWorldbookNames = helper.getGlobalWorldbookNames || getGlobalWorldbookNames;
   helper.getCharWorldbookNames = helper.getCharWorldbookNames || getCharWorldbookNames;
   helper.getChatWorldbookName = helper.getChatWorldbookName || getChatWorldbookName;
@@ -4213,7 +4759,9 @@ const compileScript = (record) => {
     data: makeDataProxy(record.id, clone(record.data || {})),
   };
   const buttonNames = new Set();
-  const scriptButtons = [];
+  // 酒馆助手会绘制脚本配置里声明的按钮；脚本再追加同名按钮时不重复
+  const declaredButtons = record.button?.enabled !== false && Array.isArray(record.button?.buttons) ? record.button.buttons : [];
+  const scriptButtons = declaredButtons.map(button => clone(button));
   const scoped = {
     ...presetScriptApi,
     getScriptId: buttonApi.getScriptId,
@@ -4224,6 +4772,9 @@ const compileScript = (record) => {
       if (list?.length > 1) list.unshift(list.pop());
       return subscription;
     },
+    // 新注册的监听本来就排在最后
+    eventMakeLast: (name, callback) => eventOn(name, callback),
+    ...makeWorldbookWriteApi(record),
     getButtonEvent: name => {
       const event = 'script_button:' + record.id + ':' + name;
       if (!buttonNames.has(name)) {
@@ -4234,6 +4785,7 @@ const compileScript = (record) => {
       }
       return event;
     },
+    getScriptButtons: () => clone(record.button?.buttons || []),
     appendInexistentScriptButtons: buttons => {
       for (const button of buttons || []) if (!scriptButtons.some(item => item.name === button.name)) scriptButtons.push(clone(button));
       return buttonApi.replaceScriptButtons(record.id, scriptButtons);
@@ -4275,6 +4827,7 @@ const compileScript = (record) => {
     callRpc('log', { level: 'info', args: ['[MVU] 跳过 schemaOnly 脚本执行', record.name] }).catch(() => {});
     return { record, handlers, defaultHandler, api, script };
   }
+  if (scriptButtons.length) buttonApi.replaceScriptButtons(record.id, scriptButtons);
   try {
     const module = { exports: {} };
     const exports = module.exports;
@@ -4412,11 +4965,15 @@ const syncCompatVariablesFromEvent = (eventName, payload = {}) => {
 const dispatchEvent = async (eventName, payload, allowMutate = true) => {
   let data = payload;
   syncCompatVariablesFromEvent(eventName, payload);
+  const generationInput = (eventName === 'generation_started' || eventName === 'generation_after_commands')
+    && typeof payload?.input === 'string';
+  if (generationInput) compatSendTextareaValue = payload.input;
   await refreshSillyTavernChat();
   for (const entry of scripts.values()) {
     if (!entry?.record?.enabled) continue;
     data = await runHandlers(entry, eventName, data, allowMutate);
   }
+  if (generationInput && eventName === 'generation_after_commands' && payload.args?.[2] !== true) compatSendTextareaValue = '';
   return data;
 };
 
@@ -4460,7 +5017,10 @@ self.onmessage = async (e) => {
       }
       if (msg.context && typeof msg.context === 'object') {
         currentContext = { ...currentContext, ...msg.context };
+        compatSendTextareaValue = String(currentContext.input ?? '');
+        takeCompatChatMetadata(msg.context);
       }
+      if (msg.localStorage && typeof msg.localStorage === 'object') seedCompatLocalStorage(msg.localStorage);
       ensureCompatGlobals();
       await refreshSillyTavernChat();
       await refreshTavernRegexes();
@@ -4480,6 +5040,8 @@ self.onmessage = async (e) => {
   if (msg.type === 'context') {
     if (msg.context && typeof msg.context === 'object') {
       currentContext = { ...currentContext, ...msg.context };
+      if (Object.hasOwn(msg.context, 'input')) compatSendTextareaValue = String(msg.context.input ?? '');
+      takeCompatChatMetadata(msg.context);
     }
     if (msg.settings && typeof msg.settings === 'object') {
       currentSettings = { ...currentSettings, ...msg.settings };
@@ -5514,6 +6076,16 @@ export class ScriptRuntime {
     this.scriptPromptInjections = new Map();
     this.scriptDiagnosticSignatures = new Map();
     this.scriptDiagnosticRevisions = new Map();
+    // 脚本 localStorage 与 chatMetadata 的保存（资料在 Worker；新 Worker 才送一次 localStorage，会话资料按 key 只送一次）
+    this.scriptStorage = createScriptStoragePersistence({
+      loadKv: name => safeInvoke('load_kv', { name }),
+      saveKv: (name, data) => safeInvoke('save_kv', { name, data }),
+      getChatStore: () => this.chatStore,
+    });
+    this.localStorageSeeded = false;
+    this.chatMetadataSentKeys = new Map();
+    this.scriptSyncChain = Promise.resolve();
+    globalThis.addEventListener?.('pagehide', () => { this.scriptStorage.flushLocalStorage().catch(() => {}); });
     this.context = {
       sessionId: '',
       personaId: '',
@@ -6294,6 +6866,8 @@ export class ScriptRuntime {
   }
 
   startWorker() {
+    this.localStorageSeeded = false;
+    this.chatMetadataSentKeys.clear();
     try {
       const blob = new Blob([buildWorkerScript()], { type: 'application/javascript' });
       const url = URL.createObjectURL(blob);
@@ -6340,8 +6914,8 @@ export class ScriptRuntime {
     return this.chatStore.getSessionSettings(sessionId) || {};
   }
 
-  async prepareCreativeRequest({ messages, options, config, presetContext, context = {},
-    purpose = 'reply', presetSnapshot = null, preview = false, client }) {
+  // 本轮请求会进入预设请求通道时，返回所用预设及其 SPreset 设置（预设脚本已授权才有）；不进入时返回 null
+  resolveCreativeRequestPreset({ presetContext, context = {}, purpose = 'reply', presetSnapshot = null }) {
     if (!isCreativePresetRequest({ presetContext, context, purpose })
       || !this.isEnabled(presetContext.sessionId) || !this.worker
       || this.presets?.state?.enabled?.openai === false) return null;
@@ -6351,17 +6925,42 @@ export class ScriptRuntime {
     const once = this.oneTimeScripts.get(presetContext.sessionId);
     const authorized = (this.store?.getScripts?.('preset', presetId) || []).some(script =>
       (script.enabled === true && script.authorized === true) || once?.has(script.id));
-    const spreset = authorized ? preset.extensions?.SPreset : null;
+    return { presetId, preset, spreset: authorized ? preset.extensions?.SPreset || null : null };
+  }
+
+  // SPreset 条目条件：开了条件的条目交给 Worker 跑脚本，返回本轮的开关（标识 → 是否启用）；没有这类条目时返回 null
+  async evaluatePresetEntryConditions({ presetId, preset, presetContext, config, preview = false }) {
+    const entries = (preset?.prompts || []).filter(entry => entry?.spreset_condition_enabled === true);
+    if (!entries.length) return null;
+    const source = buildTavernConnectionSettings(config).chat_completion_source || String(config?.provider || '');
+    const { decisions, failures } = await this.presetRequestTransport.evaluateEntryConditions({
+      sessionId: presetContext.sessionId, presetId, entries: clonePlain(entries),
+      provider: { source, model: String(config?.model || '') }, generationType: 'normal',
+    });
+    for (const failure of failures) {
+      const message = `条目“${failure.name}”条件执行失败，本次不启用`;
+      emitDebugLog({ message: `${message}：${failure.error}`, type: 'warn', source: 'script' });
+      if (!preview) globalThis.window?.toastr?.warning?.(message, 'SPreset');
+    }
+    return decisions;
+  }
+
+  async prepareCreativeRequest({ messages, options, config, presetContext, context = {},
+    purpose = 'reply', presetSnapshot = null, presetEntryDecisions = null, preview = false, client }) {
+    const target = this.resolveCreativeRequestPreset({ presetContext, context, purpose, presetSnapshot });
+    if (!target) return null;
+    const { presetId, preset, spreset } = target;
     const session = await this.presetRequestTransport.prepare({
       body: makePresetRequestBody(messages, options, config, Boolean(config.stream)),
       stream: Boolean(config.stream), preview, sessionId: presetContext.sessionId, presetId,
-      preset: { prompts: preset.prompts || [], prompt_order: preset.prompt_order || [] },
+      preset: { prompts: preset.prompts || [], prompt_order: (preset.prompt_order || []).map(block => ({
+        ...block, order: applyPresetEntryDecisions(block.order, presetEntryDecisions) })) },
       spreset: spreset ? clonePlain(spreset) : null,
       provider: { provider: config.provider, model: config.model },
     }, { signal: options.signal });
     if (session.bypass) return { messages, options, client, session };
     const prepared = applyPresetRequestBody(session.body, options, config);
-    return { ...prepared, session,
+    return { ...prepared, session, promptPostProcessing: resolveForcedPromptPostProcessing(spreset),
       client: preview ? client : createPresetGenerationClient({ client, session, config }) };
   }
 
@@ -6526,6 +7125,7 @@ export class ScriptRuntime {
       worldId,
       worldIds,
       worldbookNames,
+      globalWorldbookNames: Array.isArray(this.bridge?.getGlobalWorldIds?.()) ? this.bridge.getGlobalWorldIds() : [],
       activePreset,
       savedPreset: inUseRegexes
         ? presetView(this.presets?.state?.presets?.openai?.[activeOpenAiPresetId] || activeOpenAiPreset) : null,
@@ -6705,7 +7305,23 @@ export class ScriptRuntime {
     return true;
   }
 
-  async syncScripts(contextOverride) {
+  // 依序执行：同步要先载入会话资料，重叠的两次同步不能颠倒顺序送进 Worker
+  syncScripts(contextOverride) {
+    this.scriptSyncChain = this.scriptSyncChain.catch(() => {}).then(() => this.syncScriptsNow(contextOverride));
+    return this.scriptSyncChain;
+  }
+
+  // 送进 Worker 的会话 chatMetadata：这个 Worker 还没收过这份（同 key）才带
+  async takeWorkerChatMetadata(sessionId) {
+    const sid = String(sessionId || '').trim();
+    if (!sid || !this.worker) return {};
+    const { key, data } = await this.scriptStorage.loadChatMetadata(sid);
+    if (this.chatMetadataSentKeys.get(sid) === key) return {};
+    this.chatMetadataSentKeys.set(sid, key);
+    return { chatMetadataSessionId: sid, chatMetadataKey: key, chat_metadata: data };
+  }
+
+  async syncScriptsNow(contextOverride) {
     const context = contextOverride
       ? { ...this.buildContext(contextOverride.sessionId), ...contextOverride }
       : this.buildContext();
@@ -6743,7 +7359,10 @@ export class ScriptRuntime {
     const diagnosticScriptIds = new Set();
     const push = (scope, scopeId) => {
       if (!this.store?.getScripts) return;
-      const list = this.store.getScripts(scope, scopeId);
+      const stored = this.store.getScripts(scope, scopeId);
+      const list = scope === 'preset'
+        ? fillDeclaredScriptButtons(stored, extractScriptTree(this.presets?.getPreset?.('openai', scopeId)))
+        : stored;
       list.forEach((s) => {
         if (!s || typeof s !== 'object') return;
         const id = String(s.id || '').trim();
@@ -6807,11 +7426,15 @@ export class ScriptRuntime {
       this.startWorker();
     }
     if (this.worker) {
-      this.worker.postMessage({
+      const metadataFields = await this.takeWorkerChatMetadata(this.context.sessionId);
+      const localStorageItems = this.localStorageSeeded ? null : await this.scriptStorage.getLocalStorageSnapshot();
+      this.localStorageSeeded = true;
+      this.worker?.postMessage({
         type: 'sync',
         scripts: workerScripts,
-        context: this.context,
+        context: { ...this.context, ...metadataFields },
         settings: runtimeSettings,
+        ...(localStorageItems ? { localStorage: localStorageItems } : {}),
       });
     } else if (!workerScripts.length) {
       this.clearWorkerUi();
@@ -6846,9 +7469,11 @@ export class ScriptRuntime {
       viewport: this.getViewportSnapshot(),
     };
     if (this.worker) {
-      this.worker.postMessage({
+      // 换会话时先载入那个会话的 chatMetadata，再让脚本收到 CHAT_CHANGED 等事件
+      const metadataFields = await this.takeWorkerChatMetadata(this.context.sessionId);
+      this.worker?.postMessage({
         type: 'context',
-        context: this.context,
+        context: { ...this.context, ...metadataFields },
         settings: runtimeSettings,
       });
     }
@@ -6860,6 +7485,36 @@ export class ScriptRuntime {
     } else if (presetChanged && this.worker && this.hasListener('preset.changed')) {
       await this.callWorker('dispatch', { event: 'preset.changed', payload: { args: [next.presetName] }, allowMutate: false });
     }
+  }
+
+  // 酒馆组提示词前依次派发 GENERATION_STARTED、GENERATION_AFTER_COMMANDS（参数 type, options, dryRun）并等监听处理完；
+  // 预设脚本常在这里读世界书、注入本轮规则，给足时间。监听出错只记日志，不拦生成。
+  async dispatchGenerationStart({ sessionId = '', type = 'normal', dryRun = false, input } = {}) {
+    const sid = String(sessionId || '').trim();
+    for (const event of ['generation_started', 'generation_after_commands']) {
+      if (!this.hasListener(event)) continue;
+      try {
+        const payload = { sessionId: sid, args: [type, {}, dryRun === true] };
+        if (typeof input === 'string') payload.input = input;
+        await this.dispatchEvent(event, payload, {
+          sessionId: sid,
+          allowMutate: false,
+          timeoutMs: 30000,
+        });
+      } catch (error) {
+        const message = `生成前脚本事件失败（${event}）：${error?.message || error}`;
+        logger.warn(message);
+        emitDebugLog({ message, type: 'warn', source: 'script' });
+      }
+    }
+  }
+
+  getScriptWorldbookWriter() {
+    this.scriptWorldbookWriter ||= createScriptWorldbookWriter({
+      bridge: this.bridge,
+      confirm: options => import('../ui/app-confirm.js').then(({ appConfirm }) => appConfirm(options)),
+    });
+    return this.scriptWorldbookWriter;
   }
 
   async dispatchEvent(event, payload = {}, options = {}) {
@@ -7024,6 +7679,14 @@ export class ScriptRuntime {
       }
       if (method === 'variables.getAll') return {};
       return false;
+    }
+    if (method === 'storage.local.write') return this.scriptStorage.applyLocalStorageWrite(params);
+    if (method === 'chat.metadata.save') {
+      // 只认 Worker 指明的会话：防抖保存到时可能已切到别的会话
+      const sid = String(params.sessionId || '').trim();
+      const key = await this.scriptStorage.saveChatMetadata(sid, params.data);
+      this.chatMetadataSentKeys.set(sid, key);
+      return { key };
     }
     const normalizeRpcVariableScope = (value) => {
       const raw = String(value || 'local').trim().toLowerCase();
@@ -7539,6 +8202,12 @@ export class ScriptRuntime {
       const content = String(params.content || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
       return typeof window?.confirm === 'function' ? window.confirm(content) : false;
     }
+    if (method === 'ui.dialogUnsupported') {
+      window?.toastr?.warning?.(params.kind === 'prompt'
+        ? t('脚本想弹出输入框，脚本沙箱不支持同步输入，已当作取消')
+        : t('脚本想弹出确认框，脚本沙箱不支持同步确认，已当作取消'));
+      return true;
+    }
     if (method === 'ui.alert') {
       const message = String(params.message || '');
       if (typeof window?.alert === 'function') window.alert(message);
@@ -7565,6 +8234,21 @@ export class ScriptRuntime {
       const entry = find();
       return String(entry?.content || '');
     }
+    if (method === 'ui.setInputText') {
+      const sid = String(params.sessionId || '').trim();
+      const current = String(this.chatStore?.getCurrent?.() || this.context.sessionId || '').trim();
+      if (sid && current && sid !== current) return false;
+      const ui = this.bridge?.getChatUI?.() || null;
+      const inputEl = ui?.inputEl || globalThis.document?.getElementById?.('composer-input') || null;
+      if (!inputEl) return false;
+      const text = String(params.text ?? '');
+      if (typeof ui?.setInputText === 'function') ui.setInputText(text);
+      else inputEl.value = text;
+      try { inputEl.dispatchEvent(new Event('input', { bubbles: true })); } catch {}
+      return true;
+    }
+    if (method === 'world.write') return this.getScriptWorldbookWriter().write(params);
+    if (method === 'world.bindGlobal') return this.getScriptWorldbookWriter().bindGlobal(params);
     if (method === 'world.list') {
       const names = Array.from(new Set([
         ...(Array.isArray(this.bridge?.worldStore?.list?.()) ? this.bridge.worldStore.list() : []),

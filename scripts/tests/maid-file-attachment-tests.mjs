@@ -81,7 +81,7 @@ const card = {
   assert.equal(inspectJson('other.json', { foo: 1 }).format, 'unknown_json');
   const broken = inspectAttachmentFile({ name: 'bad.json', bytes: new TextEncoder().encode('﻿{oops') });
   assert.equal(broken.format, 'invalid_json');
-  assert.match(broken.diagnostics[0], /JSON 解析失败/);
+  assert.match(broken.diagnostics[0], /JSON 语法错误：第 1 行第 2 列/);
 
   // 同一份 JSON 像脚本也像正则：列出候选
   const ambiguous = inspectJson('mixed.json', [{ type: 'script', name: 'x', content: '', findRegex: '/a/', replaceString: '' }]);

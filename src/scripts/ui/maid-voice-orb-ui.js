@@ -3,6 +3,7 @@ import { formatRealtimeUsageText } from './realtime/realtime-usage-utils.js';
 import { buildMaidVoiceTaskSummary } from './maid-run-card-model.js';
 import { MAID_RUN_ICONS } from './maid-run-card-dom.js';
 import { normalizeMaidResultBasis } from '../agent/maid-result-basis.js';
+import { renderMaidResultCard } from './maid-result-card-dom.js';
 
 export const formatMaidVoiceResultBasis = raw => {
   const basis = normalizeMaidResultBasis(raw);
@@ -34,7 +35,7 @@ const STYLE = `
 .maid-voice-ring[data-state="failed"]{border-color:rgb(var(--app-danger-rgb,220,38,38))}
 @keyframes maid-voice-ring-spin{to{transform:rotate(360deg)}}
 @keyframes maid-voice-ring-breathe{50%{box-shadow:0 0 0 4px rgba(var(--app-warning-rgb,217,119,6),.22)}}
-.maid-voice-orb-ui{position:fixed;z-index:26070;inset:0;pointer-events:none;font-size:12px;color:var(--app-text-primary)}
+.maid-voice-orb-ui{position:fixed;z-index:26085;inset:0;pointer-events:none;font-size:12px;color:var(--app-text-primary)}
 .maid-voice-orb-badge,.maid-voice-orb-controls{position:absolute;pointer-events:auto;background:var(--app-surface-card);border:1px solid var(--app-border-default);box-shadow:var(--app-shadow-md,0 10px 30px rgba(15,23,42,.14))}
 .maid-voice-orb-badge{display:flex;align-items:center;gap:7px;max-width:min(280px,calc(100vw - 24px));min-height:34px;box-sizing:border-box;border-radius:999px;padding:5px 12px 5px 7px;text-align:left;color:var(--app-text-primary);font:inherit;font-size:12.5px;font-weight:500;cursor:pointer;box-shadow:var(--app-shadow-sm,0 1px 4px rgba(15,23,42,.08))}
 .maid-voice-orb-badge[data-tone="warning"]{border-color:color-mix(in srgb,rgb(var(--app-warning-rgb,217,119,6)) 45%,var(--app-border-default))}
@@ -82,6 +83,8 @@ const STYLE = `
 .mvo-beat-line.is-past{background:var(--app-text-muted)}
 .mvo-task-say{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;font-size:12.5px;color:var(--app-text-secondary);overflow-wrap:anywhere}
 .mvo-task-basis{font-size:11.5px;color:var(--app-text-muted);font-variant-numeric:tabular-nums}
+.mvo-task-cards{display:grid;gap:8px;margin-top:8px}
+.mvo-task-basis.is-delivery{display:block;color:var(--app-warning-text)}
 .mvo-task-detail{border:0;background:transparent;padding:0;color:rgb(var(--app-accent-rgb,59,130,246));font-size:12px;cursor:pointer}
 .mvo-approval{margin:10px;padding:11px 12px;border-radius:12px;background:rgba(var(--app-warning-rgb,217,119,6),.11);display:flex;flex-direction:column;gap:8px}
 .mvo-approval-title{margin:0;font-size:13px;font-weight:600}
@@ -139,6 +142,8 @@ const beatsHtml = (summary) => {
 export const createMaidVoiceOrbUi = ({ documentRef = globalThis.document, windowLike = globalThis.window,
   modeSwitchEl, onToggleMute, onToggleOutputMute, onEnd, onStopTask, onOpenInput, onRetry,
   onApprovalDecision = null,
+  // 结果卡片动作（「再来一次」）：返回 { card } 时新卡排在同一任务下
+  onResultCardAction = null,
   setTimeoutFn = setTimeout, clearTimeoutFn = clearTimeout,
 } = {}) => {
   const button = modeSwitchEl?.querySelector?.('.mode-switch-btn');
@@ -185,6 +190,7 @@ export const createMaidVoiceOrbUi = ({ documentRef = globalThis.document, window
   const end = action('end', t('结束语音'), onEnd);
   let active = false, expanded = false, inputOpen = false, state = { status: 'idle' }, tasks = { active: [], latest: null, recent: [] }, warningText = '', latestText = '';
   let approval = null, dismissedApprovalId = '', failedSeenId = '', doneRingUntil = 0;
+  const animatedCardIds = new Set(), rerolledCards = new Map(); // 结果卡：已播过动画的、「再来一次」追加的（按任务）
   let finishTimer = null, ringTimer = null;
   let lastLevels = null, lastOutputAt = 0;
   const paintLevels = () => {
@@ -246,6 +252,8 @@ export const createMaidVoiceOrbUi = ({ documentRef = globalThis.document, window
     taskList.innerHTML = recent.map((task) => {
       const summary = summarizeTask(task);
       const basis = formatMaidVoiceResultBasis(task.resultBasis);
+      // 结果没确定播报出去时如实标出（不自动重播；可以问女仆再说一次）
+      const delivery = { interrupted: t('播报被打断'), unconfirmed: t('未确认已播报') }[task.delivery] || '';
       const running = ['queued', 'running'].includes(task.status);
       return `<li class="mvo-task" data-task-id="${escapeHtml(task.task_id)}">`
         + `<div class="mvo-task-ask"><q>${escapeHtml(task.request || '')}</q>`
@@ -254,9 +262,33 @@ export const createMaidVoiceOrbUi = ({ documentRef = globalThis.document, window
         + beatsHtml(summary)
         + `<div class="mvo-task-say"><span>${escapeHtml(summary.line)}</span><button type="button" class="mvo-task-detail" data-task-detail="1">${escapeHtml(t('查看详情'))}</button></div>`
         + (basis ? `<span class="mvo-task-basis">${escapeHtml(basis)}</span>` : '')
+        + (delivery ? `<span class="mvo-task-basis is-delivery">${escapeHtml(delivery)}</span>` : '')
         + '</li>';
     }).join('');
+    recent.forEach((task) => {
+      const cards = [...(task.cards || []), ...(rerolledCards.get(task.task_id) || [])];
+      const item = cards.length ? [...taskList.children].find(node => node.dataset?.taskId === task.task_id) : null;
+      if (!item) return;
+      const holder = documentRef.createElement('div');
+      holder.className = 'mvo-task-cards';
+      cards.forEach((card) => {
+        // 托盘每次更新都会重画：滚动动画只在卡片第一次出现时播放
+        const cardEl = renderMaidResultCard(documentRef, card, {
+          animate: !animatedCardIds.has(card.id),
+          onAction: typeof onResultCardAction === 'function' ? payload => rerollCard(task.task_id, payload) : null,
+        });
+        animatedCardIds.add(card.id);
+        if (cardEl) holder.appendChild(cardEl);
+      });
+      item.appendChild(holder);
+    });
     taskList.hidden = recent.length === 0;
+  };
+  const rerollCard = async (taskId, payload) => {
+    const outcome = await onResultCardAction(payload);
+    if (!outcome?.card) return;
+    rerolledCards.set(taskId, [...(rerolledCards.get(taskId) || []), outcome.card].slice(-4));
+    renderTasks();
   };
   const renderApproval = () => {
     approvalEl.hidden = !approval;

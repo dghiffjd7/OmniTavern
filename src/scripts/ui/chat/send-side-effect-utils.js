@@ -130,8 +130,11 @@ export const runAssistantGenerationRequest = async (
     consumePromptInjections = null,
     buildContext = null,
     appBridge = null,
+    beforeBuildContext = null,
   } = {},
 ) => {
+  // 酒馆在组提示词前派发生成开始事件并等脚本处理完；脚本这时注入的内容要赶上这一轮
+  if (typeof beforeBuildContext === 'function') await beforeBuildContext();
   const context = buildContext(text);
   if (typeof consumePromptInjections === 'function') {
     consumePromptInjections(sessionId);

@@ -9,6 +9,8 @@ import { bindMaidVoiceButton } from './maid-voice-button.js';
 import { t } from '../i18n/index.js';
 import { maidSkillMessage } from './maid-skill-messages.js';
 import { createMaidRunCardView, MAID_RUN_ICONS } from './maid-run-card-dom.js';
+import { renderMaidResultCard } from './maid-result-card-dom.js';
+import { normalizeMaidResultCards } from '../agent/maid-result-cards.js';
 import { createMaidTextApprovalReply, sameMaidTextApprovalScope } from './maid-text-approval-reply.js';
 
 const STYLE_ID = 'maid-command-input-runtime-style';
@@ -19,7 +21,7 @@ export const MAID_ATTACHMENT_ACCEPT = [
   'image/*', 'text/*', '.json', 'application/json', '.js', 'text/javascript', 'application/javascript', '.charx',
   '.txt', '.md', '.csv', '.tsv', '.log', '.yaml', '.yml', '.xml', '.html', '.srt', '.ini', '.toml',
   '.zip', 'application/zip', 'application/x-zip-compressed',
-  '.docx', '.xlsx', '.pptx',
+  '.docx', '.xlsx', '.pptx', '.pdf', 'application/pdf',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   'application/vnd.openxmlformats-officedocument.presentationml.presentation',
@@ -708,7 +710,8 @@ const injectStyle = (documentRef) => {
   transition: max-height 0.26s cubic-bezier(0.23, 1, 0.32, 1);
 }
 .maid-command-input[data-layout="sheet"][data-snap="peek"] .maid-command-input-result { max-height: 176px; }
-.maid-command-input[data-layout="sheet"][data-snap="half"] .maid-command-input-result { max-height: 52dvh; }
+/* 半屏按可见高度算：安卓弹出键盘时页面高度不变，52dvh 会把面板顶进状态栏 */
+.maid-command-input[data-layout="sheet"][data-snap="half"] .maid-command-input-result { max-height: calc((100dvh - var(--mci-keyboard-offset, 0px)) * 0.52); }
 .maid-command-input[data-layout="sheet"][data-snap="full"] .maid-command-input-result {
   max-height: calc(100dvh - 88px - env(safe-area-inset-top, 0px) - var(--mci-keyboard-offset, 0px));
 }
@@ -823,6 +826,8 @@ export const createMaidCommandInputRuntime = ({
   getPendingApproval = () => null,
   resolveBoundApproval = () => false,
   onTextApprovalReply = null,
+  // 结果卡片的动作（如「再来一次」）：由 APP 复核能力开关后返回 { card } 或 { message }
+  onResultCardAction = null,
 } = {}) => {
   let rootEl = null;
   let inputEl = null;
@@ -1197,6 +1202,20 @@ export const createMaidCommandInputRuntime = ({
     const liveRun = activeRunView();
     const buildResultItemContent = (bubble, item) => {
       const entering = bubble.classList?.contains?.('is-entering') ? ' is-entering' : '';
+      if (item.kind === 'card') {
+        bubble.className = `maid-command-input-result-item is-card${entering}`;
+        // 卡片画好后不再重画：滚动动画只在第一次出现时播放
+        if (bubble.dataset.cardId === item.card.id) return;
+        const cardEl = renderMaidResultCard(documentRef, item.card, {
+          animate: item.animate === true,
+          onAction: typeof onResultCardAction === 'function' ? handleResultCardAction : null,
+        });
+        item.animate = false;
+        bubble.innerHTML = '';
+        if (cardEl) bubble.appendChild(cardEl);
+        bubble.dataset.cardId = item.card.id;
+        return;
+      }
       if (item.kind === 'run') {
         bubble.className = `maid-command-input-result-item is-run${entering}`;
         const card = ensureRunCard(item.runId);
@@ -1421,6 +1440,19 @@ export const createMaidCommandInputRuntime = ({
     else resultMessages.push({ ...payload, id });
   };
 
+  // 结果卡片排在本次回复之后；「再来一次」产生的新卡追加在后面，旧卡不变
+  const appendResultCards = (cards = []) => {
+    const list = normalizeMaidResultCards(cards);
+    if (!list.length) return;
+    list.forEach(card => upsertResultItem(`card:${card.id}`, { kind: 'card', card, animate: true }));
+    renderResultMessages({ forceBottom: true });
+  };
+  const handleResultCardAction = async (payload) => {
+    const outcome = await onResultCardAction(payload);
+    if (outcome?.card) appendResultCards([outcome.card]);
+    else if (outcome?.message) setResult(outcome.message, 'info');
+  };
+
   /* 女仆执行流投影：一次任务一张运行卡，按 runId 原位更新、与汇报气泡按时间交错。
      返回 true 表示指令条已承载女仆流（执行流面板据此不再自开，避免双流）。 */
   const applyTraceView = (view = null) => {
@@ -1616,6 +1648,7 @@ export const createMaidCommandInputRuntime = ({
             cancelled ? 'info' : (ok ? 'success' : 'error'),
             { actions: result?.actions },
           );
+          appendResultCards(result?.cards);
           entry.resolve(result || { ok });
         } catch (error) {
           const cancelled = error?.name === 'AbortError' || submissionAbortController.signal.aborted;

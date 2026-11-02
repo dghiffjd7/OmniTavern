@@ -24,6 +24,9 @@ const createFakeDocument = () => ({
         this.children.push(child);
         return child;
       },
+      replaceChildren(...nodes) {
+        this.children = nodes;
+      },
       setAttribute(name, value) {
         this.attributes[name] = value;
       },
@@ -200,6 +203,69 @@ const createFakeDocument = () => ({
   assert.equal(rows[0].row.style.display, '');
   assert.equal(rows[1].row.style.display, 'none');
   console.log('ok - renderSessionArchivesSection filters archives by search query');
+}
+
+{
+  const documentRef = createFakeDocument();
+  const container = createContainer();
+  container.ownerDocument = documentRef;
+  const rows = [];
+  renderSessionArchivesSection({
+    container,
+    sessionId: 's1',
+    archiveSearchQuery: '',
+    chatStore: {
+      state: { sessions: { s1: { currentArchiveId: '' } } },
+      getArchives() {
+        return [
+          { id: 'a-1', name: '第一章', timestamp: 1700000000000, messageCount: 2 },
+          { id: 'a-2', name: '第二章', timestamp: 1700001000000, messageCount: 1 },
+        ];
+      },
+      async exportThreadMessages(_sid, archiveId) {
+        return archiveId === 'a-1'
+          ? [{ content: '前情提要：这一段文字足够长，用来确认片段会截断开头' }, { content: '船长在港口\n\n  等待信号灯亮起，之后的内容也很长很长很长很长，一直写到超过片段能显示的长度为止' }]
+          : [{ content: '无关的内容' }];
+      },
+    },
+    createArchiveRow: (payload) => {
+      const row = documentRef.createElement('div');
+      const info = documentRef.createElement('div');
+      rows.push({ payload, row, info });
+      return { row, info };
+    },
+  });
+  const input = container.children[0].children[0];
+  input.value = '港口';
+  input.oninput();
+  await new Promise(resolve => setTimeout(resolve, 0));
+
+  const hitEl = rows[0].info.children[0];
+  assert.equal(hitEl.className, 'session-archive-hit');
+  assert.equal(rows[0].row.title, undefined, 'the hit is shown under the name, not in a hover tooltip');
+  const [label, text] = hitEl.children;
+  assert.equal(label.textContent, '正文');
+  assert.equal(text.attributes['data-i18n-skip'], '', 'user content is never translated');
+  const [before, mark, after] = text.children;
+  assert.equal(mark.tagName, 'mark');
+  assert.equal(mark.textContent, '港口');
+  assert.ok(before.startsWith('…') && before.endsWith('船长在'), before);
+  assert.ok(after.startsWith(' 等待信号灯亮起') && after.endsWith('…'), 'whitespace is collapsed and the tail is cut');
+  assert.equal(rows[1].row.style.display, 'none');
+  assert.equal(rows[1].info.children.length, 0);
+
+  input.value = '第一';
+  input.oninput();
+  assert.equal(rows[0].row.style.display, '');
+  assert.equal(hitEl.style.display, 'none', 'a name-only match hides the body snippet');
+
+  input.value = '信号';
+  input.oninput();
+  assert.equal(rows[0].info.children.length, 1, 'the snippet element is reused');
+  assert.equal(hitEl.style.display, '');
+  assert.equal(text.children[1].textContent, '信号');
+  assert.equal(text.children.length, 3, 'old snippet nodes are replaced');
+  console.log('ok - archive body hits show a highlighted snippet under the archive name');
 }
 
 {

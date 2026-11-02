@@ -564,6 +564,16 @@ const api = {
     openModal: (config) => callRpc('ui.openModal', { config }),
     closeModal: (id) => callRpc('ui.closeModal', { id }),
   },
+  // 用户工具能力：宿主按权限逐项检查（input.write／model.call／network）
+  tool: {
+    getInput: () => callRpc('tool.input.get', {}),
+    setInput: (text) => callRpc('tool.input.set', { text: String(text ?? '') }),
+    insertInput: (text) => callRpc('tool.input.insert', { text: String(text ?? '') }),
+    send: (text) => callRpc('tool.send', { text: text === undefined ? undefined : String(text) }),
+    generate: (options) => callRpc('tool.model.generate', typeof options === 'string' ? { prompt: options } : (options || {})),
+    fetch: (url, options) => callRpc('tool.http', { url: String(url || ''), options: options || {} }),
+    notify: (text, level) => callRpc('tool.notify', { text: String(text ?? ''), level: String(level || 'info') }),
+  },
   logger: {
     log: (...args) => sendLog('log', args),
     info: (...args) => sendLog('info', args),
@@ -893,6 +903,8 @@ class PluginInstance {
     }
     if (msg.type === 'event_error') {
       logger.warn(`[plugin:${this.record.id}] event error`, msg.error);
+      // 工具动作要把错误讯息回报给用户（事件结果本身只带回原样的资料）
+      if (String(msg.event || '').startsWith('tool.action.')) this.lastToolActionError = String(msg.error?.message || '插件执行出错');
     }
   }
 
@@ -979,6 +991,27 @@ class PluginInstance {
         respond('rpc_error', { error: { message: '权限不足' } });
         return;
       }
+    }
+    if (method.startsWith('tool.')) {
+      const perm = method === 'tool.input.get' ? 'chat.read'
+        : (method === 'tool.input.set' || method === 'tool.input.insert' || method === 'tool.send') ? 'input.write'
+          : method === 'tool.model.generate' ? 'model.call'
+            : method === 'tool.http' ? 'network' : '';
+      if (perm && !hasPermission(perm)) {
+        respond('rpc_error', { error: { message: `权限不足: ${perm}` } });
+        return;
+      }
+      const handler = this.runtime?.toolBridge?.[method];
+      if (typeof handler !== 'function') {
+        respond('rpc_error', { error: { message: '这个功能现在不能用' } });
+        return;
+      }
+      try {
+        respond('rpc_result', { result: await handler(msg.params || {}, { pluginId: this.record.id, name: this.record.manifest?.name || '' }) });
+      } catch (err) {
+        respond('rpc_error', { error: { message: String(err?.message || err) } });
+      }
+      return;
     }
     if (!variableRuntimeEnabled && method.startsWith('variables.')) {
       const result = method === 'variables.getAll' ? {} : (method === 'variables.get' ? undefined : false);
@@ -1394,6 +1427,85 @@ export class PluginRuntime {
     this.uiManager = options.uiManager || null;
     this.instances = new Map();
     this.initialized = false;
+  }
+
+  /** 用户工具的宿主能力（tool.* RPC）：{ 'tool.input.get': fn(params, { pluginId }) , ... }。 */
+  setToolBridge(bridge = null) {
+    this.toolBridge = bridge && typeof bridge === 'object' ? bridge : null;
+  }
+
+  /** 运行中的插件在 manifest.actions 宣告的动作（供用户工具选用）。 */
+  listActions() {
+    const out = [];
+    for (const [pluginId, instance] of this.instances.entries()) {
+      if (instance.status !== 'running') continue;
+      const actions = Array.isArray(instance.record.manifest?.actions) ? instance.record.manifest.actions : [];
+      actions.slice(0, 20).forEach((action) => {
+        const id = String(action?.id || '').trim();
+        if (!/^[a-zA-Z0-9._-]{1,60}$/.test(id)) return;
+        out.push({
+          pluginId,
+          pluginName: String(instance.record.manifest?.name || pluginId),
+          id,
+          title: String(action?.title || id).slice(0, 40),
+          description: String(action?.description || '').slice(0, 200),
+          target: ['assistant', 'user', 'any', 'none'].includes(action?.target) ? action.target : 'none',
+        });
+      });
+    }
+    return out;
+  }
+
+  /** 执行插件的动作：送 tool.action.<id> 事件，插件用 api.events.on 处理并回传结果物件。 */
+  async runAction(pluginId, actionId, ctx = {}, { timeoutMs = 60000 } = {}) {
+    const instance = this.instances.get(String(pluginId || '').trim());
+    if (!instance || instance.status !== 'running') return { status: 'unavailable', message: '插件没有在运行' };
+    instance.lastToolActionError = '';
+    const res = await instance.request({ type: 'event', name: `tool.action.${actionId}`, data: { ctx } }, timeoutMs);
+    if (res?.error) return { status: 'failed', message: String(res.error.message || '插件执行出错') };
+    const data = res?.data;
+    // 没有监听处理（或处理时出错）时，事件原样回来（只有 ctx）
+    if (!data || typeof data !== 'object' || (Object.keys(data).length === 1 && 'ctx' in data)) {
+      if (instance.lastToolActionError) return { status: 'failed', message: instance.lastToolActionError };
+      return { status: 'unavailable', message: '插件没有处理这个动作' };
+    }
+    return data;
+  }
+
+  /**
+   * 一次性跑一段工具脚本：独立的插件 Worker（权限＝工具声明并确认过的能力），跑完就结束。
+   * code 是函数主体，拿到 ctx 与 api（api.tool.* 等），回传结果物件或字串。
+   * 包装里自己接住错误：监听里抛出的错误会被 Worker 吞掉，只送出 event_error。
+   */
+  async runEphemeral({ id, name = '', permissions = [], code = '', ctx = {}, timeoutMs = 60000 } = {}) {
+    const wrapped = `module.exports = async (api) => {
+  api.events.on('tool.action.run', async (payload) => {
+    const ctx = payload && payload.ctx ? payload.ctx : {};
+    try {
+      const result = await (async (ctx, api) => {\n${String(code || '')}\n})(ctx, api);
+      return { status: 'succeeded', result: result === undefined ? null : result };
+    } catch (err) {
+      return { status: 'failed', message: String((err && err.message) || err) };
+    }
+  });
+};`;
+    const record = {
+      id: String(id || 'tool-script'),
+      manifest: { id: String(id || 'tool-script'), name: String(name || 'tool script'), mode: permissions.includes('network') ? 'power' : 'safe', permissions },
+      code: wrapped,
+    };
+    const store = { resetFailures: async () => {}, recordFailure: async () => ({}), setEnabled: async () => {} };
+    const instance = new PluginInstance(record, store, this);
+    try {
+      await instance.start();
+      const res = await instance.request({ type: 'event', name: 'tool.action.run', data: { ctx } }, timeoutMs);
+      if (res?.error) return { status: 'failed', message: String(res.error.message || '脚本执行出错') };
+      return res?.data?.status ? res.data : { status: 'failed', message: '脚本没有执行完' };
+    } catch (err) {
+      return { status: 'failed', message: String(err?.message || err) };
+    } finally {
+      await instance.stop().catch(() => {});
+    }
   }
 
   setContext({ bridge, chatStore, contactsStore, ui, uiManager } = {}) {

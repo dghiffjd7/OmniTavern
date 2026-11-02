@@ -165,7 +165,8 @@ export class ContactDragManager {
      */
     handleDragStart(event) {
         if (this.usePointerDrag) return;
-        const contact = event.target.closest('.contact-item');
+        // 拖动选中的文字时 target 是文字节点（没有 closest），不是拖联系人
+        const contact = event.target?.closest?.('.contact-item');
         if (!contact) return;
 
         if (!this.beginDrag(contact)) return;

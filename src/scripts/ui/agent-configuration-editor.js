@@ -10,6 +10,7 @@ import { allowsAgentInvocation, getAgentInvocationMode, isInputAgent } from '../
 import { createAgentReferenceEditor, createAgentToolCapabilitiesEditor } from './agent-reference-editor.js';
 import { createAgentRunCards } from './agent-run-cards.js';
 import { createAgentGenerationEditor } from './agent-generation-editor.js';
+import { createFormatGuideAssistEditor } from './format-guide-assist-editor.js';
 import { bindAgentEditorMotion } from './agent-editor-motion.js';
 import { getBuiltinAgentTask, resolveBuiltinAgentTask } from '../agent/agent-builtin-defaults.js';
 import { getAgentPromptFields } from './chat/agent-prompt-fields.js';
@@ -75,7 +76,7 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
   repairProfileId = config.repairProfileId || '';
   context = saved.context; scope = saved.scope;
   let initial = '', preview = null, targetView = null, busy = false, alive = true, status = '', sourceRequest = 0, modelRequest = 0, selection = null, skipTargetToggle = false;
-  let referenceEditor = null, toolsEditor = null, runCards = null, motion = null, generationEditor = null, modelInfo = {};
+  let referenceEditor = null, toolsEditor = null, runCards = null, motion = null, generationEditor = null, modelInfo = {}, formatAssist = null, formatAssistSource = '';
   const stamp = () => JSON.stringify([config, bodyRule]);
   initial = stamp();
   if (id === 'reply_check' && (newRepairProfile || !repairProfileId)) {
@@ -165,7 +166,7 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
       ${!builtin ? `<div class="ac-field">${label('快捷图标', '用于 Agent Center 与聊天工具箱。')}<div class="ac-icons" role="group" aria-label="${e(t('快捷图标'))}">${Object.entries(AGENT_ICONS).map(([name, data]) => `<button type="button" data-ac="icon:${name}" aria-label="${e(t(data.label))}" title="${e(t(data.label))}" aria-pressed="${getAgentIconName(config) === name}">${agentIconMarkup(name)}</button>`).join('')}</div></div>` : ''}
       ${source.html}
       <div class="ac-task" data-agent-preset-prompt-part ${source.hide}><div class="ac-task-meta">${label('任务要求', builtin ? '这里显示实际使用的任务提示词，可直接修改；恢复默认后再保存即可使用内建任务。' : input ? '描述需要完成的输入辅助任务，以及语气、长度和保留的内容。' : config.outputMode === 'note' ? '描述希望检查、查找或分析的内容，以及结果的呈现方式。' : '描述要改进的内容与保留的事实。模型只提交修改建议。')}<div class="ac-task-tools">${builtin ? `<span class="ac-task-origin" data-ac-task-origin>${e(t(usesDefaultTask() ? '内建默认' : '已自定义'))}</span><button type="button" class="agent-center-icon-button" data-ac="task-default" aria-label="${e(t('恢复默认任务'))}" title="${e(t('恢复默认任务'))}" ${usesDefaultTask() ? 'disabled' : ''}><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M3 10a9 9 0 1 1 2 8M3 4v6h6"/></svg></button>` : `<span class="ac-task-count" data-ac-prompt-count aria-hidden="true">${e(t('{count} 字', { count: Array.from(config.prompt).length }))}</span>`}</div></div><textarea name="prompt" aria-label="${e(t('任务要求'))}" rows="7" data-i18n-skip="true" placeholder="${e(t(input ? '希望这个 Agent 如何帮助你输入？' : format ? '希望如何检查和修复回复格式？' : '希望这个 Agent 怎样处理正文？'))}">${e(taskValue())}</textarea></div>
-      ${format ? text('formatGuide', '格式要求', config.formatGuide, '写明必要的标签、字段和结构，例如 {tag} 的使用格式。创意写作启用前需填写。', true) : ''}
+      ${format ? `${text('formatGuide', '格式要求', config.formatGuide, '写明必要的标签、字段和结构，例如 {tag} 的使用格式。创意写作启用前需填写。', true)}<div data-ac-format-assist></div>` : ''}
       ${builtinInputs()}
       ${input && !builtinInput ? select('inputOutput', '结果形式', [['suggestion','续写建议'],['rewrite','修改草稿'],['note','资料与建议']], config.inputOutput, '续写插入光标处；修改通过差异预览确认；资料与建议在工具箱查看。') : ''}
       ${!input && !format ? select('outputMode', '结果形式', [['edit','修改正文'],['note','资料与建议']], config.outputMode || 'edit', '修改正文通过差异预览确认；资料与建议独立显示，适合点评、检查与查找资料。') : ''}
@@ -203,6 +204,17 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
     toolsEditor = toolHost ? createAgentToolCapabilitiesEditor({ host: toolHost, value: config.tools, actions, getOptions: options, state: toolState, onStatus: setStatus,
       onChange: value => { config.tools = value; updateMarker(); } }) : null;
     runCards = createAgentRunCards({ host: node.querySelector('[data-ac-runs]'), button, onStatus: setStatus, state: runState });
+    if (format) {
+      if (!formatAssist) {
+        formatAssist = createFormatGuideAssistEditor({ actions, getConfig: () => config, getSessionId: () => context.sessionId, documentRef: doc,
+          onApply: (guide, source) => { config.formatGuide = guide; config.formatGuideSource = source; formatAssistSource = JSON.stringify(source); render(); } });
+        formatAssistSource = JSON.stringify(config.formatGuideSource || null);
+      }
+      formatAssist.mount(node.querySelector('[data-ac-format-assist]'));
+      // 换了修复方案（草稿来源不同）时重新判断是否待复核
+      const source = JSON.stringify(config.formatGuideSource || null);
+      if (source !== formatAssistSource) { formatAssistSource = source; formatAssist.refreshStale(); }
+    }
     bindAgentPresetSourceControls(node, { services: presetServices });
     renderRuns();
     void refreshCurrentModel().catch(() => {});
@@ -479,6 +491,6 @@ export const createAgentConfigurationEditor = ({ actions, id, scope = 'local', c
         getFields:root=>getAgentPromptFields(root).map(field=>({...field,baseValue:readConfiguredPromptField(saved.config,field.id,config)})),saveField:savePromptField });
     },
     closePreview: () => preview?.close() || false,
-    dispose: () => { alive = false; sourceRequest++; modelRequest++; closeCustomSelectMenu(); preview?.dispose(); referenceEditor?.dispose(); toolsEditor?.dispose(); runCards?.dispose(); generationEditor?.dispose(); motion?.dispose(); doc.defaultView.removeEventListener('agent-text-edit-changed', renderRuns); doc.defaultView.removeEventListener('agent-input-changed', renderRuns); doc.defaultView.removeEventListener('agent-format-repair-changed', renderRuns); node.remove(); },
+    dispose: () => { alive = false; sourceRequest++; modelRequest++; closeCustomSelectMenu(); preview?.dispose(); formatAssist?.dispose(); referenceEditor?.dispose(); toolsEditor?.dispose(); runCards?.dispose(); generationEditor?.dispose(); motion?.dispose(); doc.defaultView.removeEventListener('agent-text-edit-changed', renderRuns); doc.defaultView.removeEventListener('agent-input-changed', renderRuns); doc.defaultView.removeEventListener('agent-format-repair-changed', renderRuns); node.remove(); },
   };
 };

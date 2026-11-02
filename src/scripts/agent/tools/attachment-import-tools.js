@@ -51,6 +51,7 @@ const previewAttachment = (entry, { listOffset = 0, listLimit = ARCHIVE_LIST_DEF
     label: entry.inspection?.label || '', title: entry.inspection?.title || '',
     counts: entry.inspection?.counts || {}, targets: entry.inspection?.targets || [],
     diagnostics: entry.inspection?.diagnostics || [], candidates: entry.inspection?.candidates || [],
+    ...(entry.inspection?.details?.jsonError?.excerpt ? { jsonError: entry.inspection.details.jsonError } : {}),
     imported: (entry.imports || []).map(item => ({ target: item.target, worldbookId: item.worldbookId || '' })),
     ...(entry.origin && entry.origin !== 'upload' ? { origin: entry.origin } : {}),
     ...(entry.entryPath ? { fromArchive: entry.parentId, entry: entry.entryPath } : {}),
@@ -324,7 +325,7 @@ export const createAttachmentImportAgentTools = ({
   const inspectTool = {
     name: 'attachment.inspect',
     title: 'Inspect file attachments',
-    description: 'Read the local parse result of a file in the Maid file library: format, name, counts, possible import targets, diagnostics, and a short list of worldbook entry titles / regex rule names. For a zip archive it lists the files inside (paged with listOffset / listLimit) and which of them can be imported. Text, Office documents and archive contents are read with attachment.read / attachment.search. Without attachmentId it lists recently sent files that are not imported yet; with list = "library" it lists the whole file library (uploads, files taken out of archives and files the Maid created), most recently used first.',
+    description: 'Read the local parse result of a file in the Maid file library: format, name, counts, possible import targets, diagnostics, and a short list of worldbook entry titles / regex rule names. For a zip archive it lists the files inside (paged with listOffset / listLimit) and which of them can be imported. Text, Office documents, PDF and archive contents are read with attachment.read / attachment.search. Without attachmentId it lists recently sent files that are not imported yet; with list = "library" it lists the whole file library (uploads, files taken out of archives and files the Maid created), most recently used first.',
     source: 'maid-app-content', permissions: [], riskLevel: 'low',
     capabilities: { read: true, write: false, network: false, cost: 'none', undo: 'none', modelContext: 'summary', confirmation: 'none' },
     schema: {

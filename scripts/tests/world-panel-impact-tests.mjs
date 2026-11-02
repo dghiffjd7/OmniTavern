@@ -25,7 +25,7 @@ try {
   {
     assert.equal(
       formatWorldScopeLabel({ scope: 'session', sessionId: 'chat:alice' }),
-      '当前会话「chat:alice」的角色/附加世界书',
+      '当前会话「chat:alice」用到的全局/角色/附加世界书',
     );
     assert.equal(
       formatWorldScopeLabel({ scope: 'session', sessionId: 'chat:alice', targetType: 'session_extra' }),

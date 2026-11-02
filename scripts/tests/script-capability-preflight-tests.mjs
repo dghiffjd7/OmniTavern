@@ -60,6 +60,33 @@ assert.equal(hostDomOnly.blocked, false);
 assert.equal(hostDomOnly.level, 'sandbox_limited');
 assert.deepEqual(hostDomOnly.reasons, ['host_dom_access']);
 
+// saveSettingsDebounced 由 SillyTavern.getContext() 提供，不代表是外部扩展；
+// 酒馆助手脚本经 context 呼叫（或解构）加上宿主 DOM，只算沙箱受限，不拦截
+for (const source of [`
+const topWin = window.top;
+const panel = topWin.document.createElement('div');
+function save() {
+  const ctx = SillyTavern.getContext();
+  if (typeof ctx.saveSettingsDebounced === 'function') ctx.saveSettingsDebounced();
+  else if (typeof topWin.saveSettingsDebounced === 'function') topWin.saveSettingsDebounced();
+}
+`, `
+const { saveSettingsDebounced } = SillyTavern.getContext();
+window.parent.document.body.append(document.createElement('div'));
+saveSettingsDebounced();
+`]) {
+  const contextSave = analyzeScriptCompatibility(source);
+  assert.equal(contextSave.blocked, false);
+  assert.equal(contextSave.level, 'sandbox_limited');
+  assert.equal(contextSave.signals.nativeExtensionApi, false);
+}
+const realExtension = analyzeScriptCompatibility(`
+const root = window.parent;
+root.document.body.append(panel);
+extension_settings.myExt = { on: true };
+`);
+assert.equal(realExtension.blocked, true, 'extension_settings still marks an external extension');
+
 const ordinaryNetworkScript = analyzeScriptCompatibility(`
 async function loadData() {
   return fetch('https://example.com/data.json');

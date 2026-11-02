@@ -1,5 +1,6 @@
 import { normalizeAgentReferenceConfig } from './agent-reference-context.js';
 import { normalizeAgentGenerationSettings } from './agent-generation-settings.js';
+import { normalizeFormatGuideSource } from './format-guide-assist.js';
 
 const clone = value => JSON.parse(JSON.stringify(value));
 const text = value => String(value ?? '').trim();
@@ -8,6 +9,7 @@ export const formatRepairProfileConfig = (value = {}) => ({
   modelMode: ['none', 'profile', 'follow_current'].includes(value.modelMode) ? value.modelMode : 'none',
   modelProfileId: text(value.modelProfileId), modelOverride: text(value.modelOverride),
   prompt: String(value.prompt ?? ''), formatGuide: String(value.formatGuide ?? ''),
+  formatGuideSource: normalizeFormatGuideSource(value.formatGuideSource),
   taskPromptMode: value.taskPromptMode === 'replace' ? 'replace' : 'append',
   blocks: (Array.isArray(value.blocks) ? value.blocks : []).slice(0, 12).map((block, index) => ({
     id: text(block.id) || `block-${index}`, name: text(block.name), text: String(block.text ?? ''),
@@ -56,7 +58,7 @@ export const resolveFormatRepairProfile = (config, profileId) => {
   const library = normalizeFormatRepairProfiles(config.repairProfiles, config);
   const id = profileId === undefined ? library.automaticId : profileId;
   const profile = library.items.find(item => item.id === id);
-  return { ...config, ...(profile ? clone(profile.config) : { modelMode: 'none', modelProfileId: '', formatGuide: '' }),
+  return { ...config, ...(profile ? clone(profile.config) : { modelMode: 'none', modelProfileId: '', formatGuide: '', formatGuideSource: null }),
     repairProfiles: library, repairProfileId: profile?.id || '', repairProfileName: profile?.name || '' };
 };
 export const saveFormatRepairProfileDraft = (config, { id, name, now = Date.now() } = {}) => {

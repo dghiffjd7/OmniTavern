@@ -669,9 +669,34 @@ const roleLabel = (message, index) => {
   };
 };
 
+// 请求带的工具定义（OpenAI／Responses／Anthropic／Gemini 格式）。有些预设（SPreset 工具绑定）把整段提示词放在工具说明里，
+// 完整 Prompt 要一起列出才看得到；没有名称的内建工具（如 googleSearch）不列
+const collectRequestToolDefinitions = (req) => {
+  const raw = [req?.wireRequest?.body?.tools, req?.requestOptions?.tools, req?.options?.tools].find(Array.isArray) || [];
+  const tools = [];
+  raw.forEach((tool) => {
+    if (!tool || typeof tool !== 'object') return;
+    const declarations = Array.isArray(tool.functionDeclarations)
+      ? tool.functionDeclarations
+      : [tool.function && typeof tool.function === 'object' ? tool.function : tool];
+    declarations.forEach((fn) => {
+      const name = String(fn?.name || '').trim();
+      if (!name) return;
+      const parameters = fn.parameters ?? fn.parametersJsonSchema ?? fn.input_schema;
+      let text = String(fn.description || '');
+      if (parameters && typeof parameters === 'object') {
+        try { text += `${text ? '\n\n' : ''}parameters:\n${JSON.stringify(parameters, null, 2)}`; } catch {}
+      }
+      tools.push({ role: 'tool_definition', label: `[tool definition] · ${name}`, text });
+    });
+  });
+  return tools;
+};
+
 export const buildFullPromptDocument = (request = null, { fallbackText = '' } = {}) => {
   const req = request && typeof request === 'object' ? request : {};
   const messages = Array.isArray(req.messages) ? req.messages : [];
+  const toolBlocks = collectRequestToolDefinitions(req);
   const globalPromptBlocks = Array.isArray(req.injectionAudit?.globalPrompt?.injected)
     ? req.injectionAudit.globalPrompt.injected
     : [];
@@ -705,6 +730,8 @@ export const buildFullPromptDocument = (request = null, { fallbackText = '' } = 
   if (!blocks.length && String(fallbackText || '').trim()) {
     blocks.push({ role: 'message', label: '[prompt]', text: String(fallbackText) });
   }
+  const messageCount = blocks.length;
+  blocks.unshift(...toolBlocks);
 
   const plain = blocks.map(block => `${block.label}\n${block.text}`).join('\n\n');
   const rows = [];
@@ -797,7 +824,7 @@ export const buildFullPromptDocument = (request = null, { fallbackText = '' } = 
         <div>
           <span class="prompt-overview-kicker">ASSEMBLED PROMPT · READ ONLY</span>
           <h2>完整 Prompt</h2>
-          <p>所有消息按实际发送顺序展开；行号仅用于浏览，不会进入请求。</p>
+          <p>${toolBlocks.length ? '工具定义列在最前，消息按实际发送顺序展开；行号仅用于浏览，不会进入请求。' : '所有消息按实际发送顺序展开；行号仅用于浏览，不会进入请求。'}</p>
         </div>
         <div class="prompt-full-stats">
           <span>${formatInt(rows.length)} 行</span>
@@ -828,6 +855,7 @@ export const buildFullPromptDocument = (request = null, { fallbackText = '' } = 
     plain,
     lineCount: rows.length,
     charCount: plain.length,
-    messageCount: blocks.length,
+    messageCount,
+    toolCount: toolBlocks.length,
   };
 };

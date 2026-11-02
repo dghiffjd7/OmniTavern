@@ -18,6 +18,8 @@ export const CUSTOM_AGENT_REFERENCE_TOOLS = Object.freeze({
   'web.fetch_url': { title: '读取网页', group: '联网', description: '读取用户提供或搜索结果中的公开网页正文。' },
   'web.research': { title: '搜索并核对资料', group: '联网', description: '结合搜索与网页阅读，整理带来源的资料。' },
   'web.search_images': { title: '搜索参考图片', group: '联网', description: '搜索公开图片的链接与出处。' },
+  // 只会调用用户已在女仆侧「始终允许」的 MCP 工具（见 mcp-tools.js），本身不另外确认
+  'mcp.lookup': { title: '查询外部服务', group: '联网', description: '用已设为始终允许的 MCP 工具查资料。' },
   'app.get_current_state': { title: '读取应用状态', group: '应用', description: '查看当前页面、会话与应用状态。' },
   'app.ui.inspect': { title: '查看当前界面', group: '应用', description: '读取当前可见面板的文字与结构。' },
   'app.search_feature': { title: '查找应用功能', group: '应用', description: '按需求搜索应用内建功能。' },

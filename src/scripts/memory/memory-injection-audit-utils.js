@@ -30,10 +30,22 @@ const stringifyPromptContent = (content) => {
 export const estimatePromptContentTokens = (content, tokenMode = 'rough') =>
   estimateTokens(stringifyPromptContent(content), tokenMode);
 
+// 工具定义与工具调用参数也是输入：供应方 usage 含这两部分，只算正文会少估，并把 token 校准系数顶高
+const estimateToolCallsTokens = (toolCalls, tokenMode) => (
+  Array.isArray(toolCalls) && toolCalls.length
+    ? estimateTokens(JSON.stringify(toolCalls.map(call => call?.function || call)), tokenMode)
+    : 0
+);
+
 export const estimatePromptMessagesTokens = (messages = [], tokenMode = 'rough') => (
   (Array.isArray(messages) ? messages : []).reduce((total, message) => (
     total + estimatePromptContentTokens(message?.content, tokenMode)
+      + estimateToolCallsTokens(message?.tool_calls, tokenMode)
   ), 0)
+);
+
+export const estimatePromptToolsTokens = (tools = [], tokenMode = 'rough') => (
+  Array.isArray(tools) && tools.length ? estimateTokens(JSON.stringify(tools), tokenMode) : 0
 );
 
 // 图片/语音等非文本 part 在估算里只折成占位符，真实 usage 却含附件 token；
@@ -177,6 +189,7 @@ export const buildRequestInjectionAudit = ({
   history = [],
   worldDebug = null,
   messages = [],
+  tools = [],
   budget = null,
   mode = 'token',
   tokenMode = 'rough',
@@ -244,7 +257,7 @@ export const buildRequestInjectionAudit = ({
     || segment.trimmedCount > 0
   ));
 
-  const totalEstimateTokens = estimatePromptMessagesTokens(messages, tokenMode);
+  const totalEstimateTokens = estimatePromptMessagesTokens(messages, tokenMode) + estimatePromptToolsTokens(tools, tokenMode);
   const knownTokens = segments.reduce((sum, segment) => sum + segment.usedTokens, 0);
   const otherTokens = Math.max(0, totalEstimateTokens - knownTokens);
   if (otherTokens > 0) {

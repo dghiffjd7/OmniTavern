@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
 import { buildMaidResultBasis, normalizeMaidResultBasis } from '../../src/scripts/agent/maid-result-basis.js';
+import { collectMaidResultCards } from '../../src/scripts/agent/maid-result-cards.js';
 import { MaidConversationStore, MAID_CONVERSATION_STORE_KEY, formatMaidHistoryContextText } from '../../src/scripts/storage/maid-conversation-store.js';
 
 const now = 1790632800000;
@@ -75,7 +76,7 @@ console.log('ok - result basis survives whitelist normalization, save, reload, e
   const hook = appSource.slice(start + marker.length, end).trim().replace(/;$/, '');
   const warnings = [];
   const record = runInNewContext(`(${hook})`, {
-    maidConversationStore: store, buildMaidResultBasis,
+    maidConversationStore: store, buildMaidResultBasis, collectMaidResultCards,
     projectMaidStructuredMemoriesFromResult: () => [],
     logger: { warn: (...args) => warnings.push(args) },
   });

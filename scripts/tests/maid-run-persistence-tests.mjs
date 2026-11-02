@@ -637,6 +637,7 @@ console.log('maid-run-persistence-tests passed');
     runs: {
       'run-stale': { id: 'run-stale', kind: 'maid_assistant', status: 'running', createdAt: 400, updatedAt: 500, steps: [], metadata: { goal: '遗留任务' } },
       'run-done': { id: 'run-done', kind: 'maid_assistant', status: 'succeeded', createdAt: 300, updatedAt: 400, steps: [], metadata: {} },
+      'run-review': { id: 'run-review', kind: 'chat_format_guardian', status: 'waiting_permission', createdAt: 450, updatedAt: 460, steps: [], metadata: {} },
     },
     events: [],
   };
@@ -655,6 +656,8 @@ console.log('maid-run-persistence-tests passed');
   assert.equal(stale.metadata.failureCode, 'app_restarted');
   const done = store.exportState({ includeNonExportable: true }).runs['run-done'];
   assert.equal(done.status, 'succeeded', '终态 run 不受影响');
+  const review = store.exportState({ includeNonExportable: true }).runs['run-review'];
+  assert.deepEqual([review.status, review.cancelReason], ['cancelled', 'review_expired'], '没处理的复核候选在重启后过期，不记为失败');
   delete globalThis.__TAURI_INVOKE__;
   console.log('ok - 僵尸 running run 启动时标记为可继续 interrupted');
 }

@@ -98,6 +98,26 @@ const inspectDocument = async ({ name, bytes, listing }) => {
   };
 };
 
+// PDF：pdf.js 按需载入（Node 测试不碰浏览器专用的旧版）；识别时只看页数与前几页，读取时再整份抽文字
+const loadPdfExtractor = async () => (await import('./pdf-text-extractor.js')).extractPdfText;
+
+const inspectPdf = async ({ name, bytes }) => {
+  const pdf = await (await loadPdfExtractor())(bytes, { maxPages: 3 });
+  if (!pdf.ok) return { unsupported: pdf.reason, message: pdf.message };
+  return {
+    inspection: {
+      format: 'document',
+      label: 'PDF',
+      title: name,
+      counts: { pages: pdf.pages },
+      details: { type: 'pdf' },
+      diagnostics: pdf.noTextLayer ? ['前几页没有文字层（可能是扫描件），读不到文字'] : [],
+      targets: [],
+      candidates: [],
+    },
+  };
+};
+
 const inspectText = ({ name, decoded }) => ({
   format: 'text',
   label: textKindOf(name),
@@ -116,7 +136,13 @@ const inspectText = ({ name, decoded }) => ({
 export const inspectAttachmentContent = async ({ name = '', mime = '', bytes }) => {
   const ext = extensionOf(name);
   const sniff = sniffAttachmentBytes(bytes);
-  if (sniff.kind === 'pdf') return { unsupported: 'pdf', message: 'PDF 暂不支持（计划中）' };
+  if (sniff.kind === 'pdf') {
+    try {
+      return await inspectPdf({ name, bytes });
+    } catch (error) {
+      return { unsupported: 'pdf_unreadable', message: trim(error?.message) || 'PDF 无法解析' };
+    }
+  }
   if (sniff.kind === 'zip') {
     let listing;
     try {
@@ -154,7 +180,17 @@ const failure = (reason, message, extra = {}) => ({ ok: false, reason, message, 
 
 const textFromBytes = async ({ name, bytes }) => {
   const sniff = sniffAttachmentBytes(bytes);
-  if (sniff.kind === 'pdf') return failure('pdf_not_supported', 'PDF 暂不支持读取（计划中）');
+  if (sniff.kind === 'pdf') {
+    let pdf;
+    try {
+      pdf = await (await loadPdfExtractor())(bytes);
+    } catch (error) {
+      return failure('pdf_unreadable', trim(error?.message) || 'PDF 无法解析');
+    }
+    if (!pdf.ok) return failure(pdf.reason, pdf.message);
+    if (pdf.noTextLayer) return failure('pdf_no_text', '这份 PDF 没有文字层（可能是扫描件），读不到文字');
+    return { ok: true, text: pdf.text, kind: 'PDF', pages: pdf.pages, truncated: pdf.truncated };
+  }
   if (sniff.kind === 'zip') {
     let listing;
     try { listing = listZipEntries(bytes); } catch (error) { return failure('archive_unreadable', trim(error?.message)); }

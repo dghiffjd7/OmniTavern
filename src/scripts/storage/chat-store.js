@@ -1020,6 +1020,38 @@ class ChatStoreV2 {
     return { partId, createdNewPart, threadDir: thread.threadDir };
   }
 
+  // 把消息插到 afterMessageId 所在分片、紧跟在它后面；它是线程最后一条或找不到时照常追加。
+  // 只改这一个分片（可能略超分片上限），其余分片不动。
+  async insertMessageAfter(sessionId, archiveId, afterMessageId, message, partId = '') {
+    const entry = this.ensureSession(sessionId);
+    if (!entry) return null;
+    const thread = this._normalizeThreadMeta(this._ensureThread(entry, archiveId));
+    if (!thread) return null;
+    const targetId = String(afterMessageId || '').trim();
+    const parts = Array.isArray(thread.parts) ? thread.parts : [];
+    const allIds = parts.map(p => p.id).reverse();
+    const ids = !targetId ? [] : (partId && allIds.includes(partId) ? [partId, ...allIds.filter(id => id !== partId)] : allIds);
+    for (const pid of ids) {
+      const existing = await this.readPart(entry, thread, pid, { hydrate: false });
+      const list = Array.isArray(existing) ? existing : [];
+      const idx = list.findIndex(m => String(m?.id || '') === targetId);
+      if (idx === -1) continue;
+      if (pid === parts[parts.length - 1]?.id && idx === list.length - 1) break;
+      const storedMessage = await this.prepareMessageForPersist(entry, thread, message);
+      list.splice(idx + 1, 0, storedMessage);
+      await this.writePart(entry, thread, pid, list);
+      const partMeta = parts.find(p => p.id === pid);
+      if (partMeta) {
+        partMeta.count = Number(partMeta.count || 0) + 1;
+        partMeta.chars = Number(partMeta.chars || 0) + estimateMessageChars(storedMessage);
+      }
+      thread.total = Number(thread.total || 0) + 1;
+      await this.writeIndex();
+      return { partId: pid, createdNewPart: false, threadDir: thread.threadDir };
+    }
+    return this.appendMessage(sessionId, archiveId, message);
+  }
+
   async updateMessage(sessionId, archiveId, messageId, updater, partId = '') {
     const entry = this.ensureSession(sessionId);
     if (!entry) return null;
@@ -1027,7 +1059,8 @@ class ChatStoreV2 {
     if (!thread) return null;
     const targetId = String(messageId || '').trim();
     if (!targetId) return null;
-    const ids = partId
+    // partId 只是提示：分片整理后旧编号已不在线程里，改为全线程查找
+    const ids = partId && (thread.parts || []).some(p => p.id === partId)
       ? [partId]
       : (Array.isArray(thread.parts) ? thread.parts.map(p => p.id).slice().reverse() : []);
     for (const pid of ids) {
@@ -1087,7 +1120,7 @@ class ChatStoreV2 {
     if (!thread) return false;
     const targetId = String(messageId || '').trim();
     if (!targetId) return false;
-    const ids = partId
+    const ids = partId && (thread.parts || []).some(p => p.id === partId)
       ? [partId]
       : (Array.isArray(thread.parts) ? thread.parts.map(p => p.id).slice().reverse() : []);
     for (const pid of ids) {
@@ -1128,6 +1161,103 @@ class ChatStoreV2 {
       await this._queue;
     } catch {}
     return this.writeIndex();
+  }
+
+  // 整理一条线程的分片：把删消息后变零碎的分片合并，不删、不改任何消息，并按实际内容修正计数。
+  // boundaryPartId（已载入内存的最早分片）前后分开合并、不跨界，内存里的载入状态才能对上。
+  // 顺序：用新编号写合并后的分片 → 写索引 → 最后删旧分片；中途失败时索引仍指向旧分片，最多多出没被引用的文件。
+  async compactThread(sessionId, archiveId = '', { boundaryPartId = '' } = {}) {
+    const entry = this.index.sessions[String(sessionId || '').trim()] || null;
+    const thread = this._normalizeThreadMeta(this.getThread(sessionId, archiveId));
+    if (!entry || !thread) return { status: 'missing' };
+    const oldParts = thread.parts.map(part => ({ ...part }));
+    const oldTotal = thread.total;
+    const base = { partsBefore: oldParts.length, partsAfter: oldParts.length };
+    const boundary = boundaryPartId ? oldParts.findIndex(part => part.id === boundaryPartId) : 0;
+    if (boundary < 0) return { ...base, status: 'skipped', reason: 'boundary_missing' };
+    const lists = [];
+    try {
+      for (const part of oldParts) {
+        const list = await this.readPart(entry, thread, part.id, { hydrate: false });
+        if (!list.length && Number(part.count || 0) > 0) return { ...base, status: 'skipped', reason: 'part_unreadable' };
+        lists.push(list);
+      }
+    } catch {
+      return { ...base, status: 'skipped', reason: 'part_unreadable' };
+    }
+    const pack = (messages) => {
+      const buckets = [];
+      let bucket = [];
+      let chars = 0;
+      for (const msg of messages) {
+        const msgChars = estimateMessageChars(msg);
+        if (bucket.length >= V2_PART_MESSAGE_LIMIT || (chars + msgChars > V2_PART_CHAR_LIMIT && bucket.length > 0)) {
+          buckets.push({ list: bucket, chars });
+          bucket = [];
+          chars = 0;
+        }
+        bucket.push(msg);
+        chars += msgChars;
+      }
+      if (bucket.length) buckets.push({ list: bucket, chars });
+      return buckets;
+    };
+    const segments = boundary > 0 ? [lists.slice(0, boundary), lists.slice(boundary)] : [lists];
+    const plan = segments.map(segment => pack(segment.flat()));
+    const actualTotal = lists.reduce((n, list) => n + list.length, 0);
+    if (plan.reduce((n, buckets) => n + buckets.length, 0) >= oldParts.length) {
+      let drift = thread.total !== actualTotal;
+      thread.parts.forEach((part, index) => {
+        const count = lists[index].length;
+        const chars = lists[index].reduce((n, msg) => n + estimateMessageChars(msg), 0);
+        if (part.count !== count || part.chars !== chars) drift = true;
+        part.count = count;
+        part.chars = chars;
+      });
+      thread.total = actualTotal;
+      if (!drift) return { ...base, status: 'unchanged' };
+      if (!(await this.writeIndex())) {
+        thread.parts = oldParts;
+        thread.total = oldTotal;
+        return { ...base, status: 'failed' };
+      }
+      return { ...base, status: 'counts_fixed' };
+    }
+
+    const usedIds = new Set(oldParts.map(part => part.id));
+    const nextId = () => {
+      let id = this._nextPartId(thread);
+      while (usedIds.has(id)) id = this._nextPartId(thread);
+      usedIds.add(id);
+      return id;
+    };
+    const newParts = [];
+    const partOf = new Map();
+    const loadedParts = [];
+    try {
+      for (let segmentIndex = 0; segmentIndex < plan.length; segmentIndex += 1) {
+        for (const bucket of plan[segmentIndex]) {
+          const id = nextId();
+          await this.writePart(entry, thread, id, bucket.list);
+          newParts.push({ id, count: bucket.list.length, chars: bucket.chars });
+          bucket.list.forEach(msg => partOf.set(String(msg?.id || ''), id));
+          if (boundaryPartId && segmentIndex === plan.length - 1) loadedParts.push(id);
+        }
+      }
+    } catch {
+      for (const part of newParts) await this.deletePart(entry, thread, part.id).catch(() => {});
+      return { ...base, status: 'failed' };
+    }
+    thread.parts = newParts;
+    thread.total = actualTotal;
+    if (!(await this.writeIndex())) {
+      thread.parts = oldParts;
+      thread.total = oldTotal;
+      for (const part of newParts) await this.deletePart(entry, thread, part.id).catch(() => {});
+      return { ...base, status: 'failed' };
+    }
+    for (const part of oldParts) await this.deletePart(entry, thread, part.id).catch(() => {});
+    return { status: 'compacted', partsBefore: oldParts.length, partsAfter: newParts.length, partOf, loadedParts };
   }
 
   async replaceThreadMessages(sessionId, archiveId, messages = []) {
@@ -2276,17 +2406,72 @@ export class ChatStore {
     }
 
     if (this._useV2) {
+      // 不能用内存里的消息整段重写线程：长对话只载入了最近几个分片，整段重写会删掉更早的历史。
+      // 落盘时插到内存里前一条消息的后面，和内存顺序一致。
       const aid = String(session.currentArchiveId || '').trim();
       const threadKey = this._getThreadKey(sid, aid);
-      this._getThreadState(threadKey, { reset: true });
-      const messagesSnapshot = session.messages.slice();
+      const afterId = String(session.messages[insertIndex - 1]?.id || '').trim();
+      const partHint = this._getThreadState(threadKey).messagePartMap.get(afterId) || '';
       const v2 = this._v2;
+      const token = this._scopeToken;
+      const scopeId = this.scopeId;
+      const messageSnapshot = { ...msg };
       v2.enqueue(async () => {
-        await v2.replaceThreadMessages(sid, aid, messagesSnapshot);
+        const res = await v2.insertMessageAfter(sid, aid, afterId, messageSnapshot, partHint);
+        if (this._isScopeStale(token, scopeId)) return;
+        if (this.state.sessions[sid]?._loadedThreadKey === threadKey && res?.partId) {
+          const threadState = this._getThreadState(threadKey);
+          if (res.createdNewPart && !threadState.loadedParts.includes(res.partId)) {
+            threadState.loadedParts.push(res.partId);
+          }
+          threadState.messagePartMap.set(String(msg?.id || ''), res.partId);
+        }
       });
     }
     this._persist();
     return msg;
+  }
+
+  // 「整理分片」：当前身份下所有会话（含存档）逐条线程合并零碎分片，不删、不改消息。
+  // 在 v2 队列里执行；已载入内存的线程按最早载入的分片分界，整理后把载入状态换成新编号。
+  async compactShards() {
+    const summary = { threads: 0, compacted: 0, countsFixed: 0, skipped: 0, failed: 0, partsBefore: 0, partsAfter: 0 };
+    if (!this._useV2) return summary;
+    const v2 = this._v2;
+    const token = this._scopeToken;
+    const scopeId = this.scopeId;
+    await v2.enqueue(async () => {
+      for (const [sid, entry] of Object.entries(v2.index.sessions || {})) {
+        for (const aid of ['', ...Object.keys(entry?.archives || {})]) {
+          if (this._isScopeStale(token, scopeId)) return;
+          const threadKey = this._getThreadKey(sid, aid);
+          if (this._isThreadResetPending(threadKey)) {
+            summary.skipped += 1;
+            continue;
+          }
+          const state = this._v2ThreadState.get(threadKey) || null;
+          const res = await v2.compactThread(sid, aid, { boundaryPartId: state?.loadedParts?.[0] || '' });
+          if (res.status === 'missing') continue;
+          summary.threads += 1;
+          summary.partsBefore += Number(res.partsBefore || 0);
+          summary.partsAfter += Number(res.partsAfter || 0);
+          if (res.status === 'compacted') {
+            summary.compacted += 1;
+            if (state) {
+              state.loadedParts = res.loadedParts;
+              for (const mid of Array.from(state.messagePartMap.keys())) {
+                const next = res.partOf.get(mid);
+                if (next) state.messagePartMap.set(mid, next);
+                else state.messagePartMap.delete(mid);
+              }
+            }
+          } else if (res.status === 'counts_fixed') summary.countsFixed += 1;
+          else if (res.status === 'skipped') summary.skipped += 1;
+          else if (res.status === 'failed') summary.failed += 1;
+        }
+      }
+    });
+    return summary;
   }
 
   markRead(id = this.currentId, messageId = '') {
@@ -2758,6 +2943,8 @@ export class ChatStore {
     this._invalidateSessionLoads(to);
     this.state.sessions[to] = this.state.sessions[from];
     delete this.state.sessions[from];
+    const metadataRef = this.state.sessions[to].scriptMetadataRef;
+    if (metadataRef && typeof metadataRef === 'object') this.state.sessions[to].scriptMetadataRef = { ...metadataRef, sessionId: to };
     if (this.currentId === from) {
       this.currentId = to;
       this.state.currentId = to;
@@ -2782,6 +2969,22 @@ export class ChatStore {
     if (!sid) return false;
     this._ensureSession(sid);
     this.state.sessions[sid].settings = settings;
+    this._persist();
+    return true;
+  }
+
+  // 酒馆脚本 chatMetadata 的存放位置（资料本身另存 KV，见 script-storage-persistence）
+  getScriptMetadataRef(id = this.currentId) {
+    const sid = String(id || '').trim();
+    const ref = sid ? this.state.sessions[sid]?.scriptMetadataRef : null;
+    return ref && typeof ref === 'object' ? { ...ref } : null;
+  }
+
+  setScriptMetadataRef(id = this.currentId, ref) {
+    const sid = String(id || '').trim();
+    if (!sid || !ref || typeof ref !== 'object') return false;
+    this._ensureSession(sid);
+    this.state.sessions[sid].scriptMetadataRef = { key: String(ref.key || ''), sessionId: String(ref.sessionId || sid) };
     this._persist();
     return true;
   }

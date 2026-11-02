@@ -338,3 +338,63 @@ console.log('maid-sub-agent-tests passed');
   assert.ok(statuses.some(status => status.tone === 'warning' && /改为不联网生成/.test(status.message)));
   console.log('ok - maid generation degrades to plain generation when native web search fails');
 }
+
+// 委派预算：时间上限到了就中止委派、回退主模型一次；输出上限作为这次请求的 max_tokens；用量写进结果
+{
+  const makeRuntime = ({ budgets = {}, slowSub = false } = {}) => {
+    const requests = [];
+    const createClient = config => ({ chat: (_messages, options) => {
+      requests.push({ model: config.model, maxTokens: options.maxTokens, max_tokens: options.max_tokens });
+      if (slowSub && config.model === 'sub-model') {
+        return new Promise((resolve, reject) => {
+          options.signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), { once: true });
+        });
+      }
+      return Promise.resolve(`from ${config.model}`);
+    } });
+    const generate = createMaidSubAgentRuntime({
+      resolveMaidRuntimeConfig: async () => ({ configured: true, client: createClient({ model: 'main-model' }), config: { model: 'main-model' } }),
+      listEnabledAgents: () => [{ id: 'sub', name: '快手', modelProfileRef: 'sub', capabilityTags: [], budgets }],
+      chatConfigManager: { getRuntimeConfigByProfileId: async () => ({ model: 'sub-model' }) },
+      createClient,
+      requestMaidToolConfirmation: async () => ({ decision: 'allow' }),
+      runAdHocWebSearchChat: async options => ({ output: await options.client.chat(options.messages, options.requestOptions), route: 'none', degraded: false, reason: '' }),
+      logger: { warn() {} },
+    });
+    return { generate, requests };
+  };
+
+  const capped = makeRuntime({ budgets: { tokens: 800, timeMs: null } });
+  const ok = await capped.generate({ subAgentId: 'sub', prompt: 'x' });
+  assert.deepEqual([ok.ok, ok.delegated, ok.text], [true, true, 'from sub-model']);
+  assert.deepEqual(capped.requests.map(item => [item.model, item.maxTokens, item.max_tokens]), [['sub-model', 800, 800]]);
+  assert.deepEqual([ok.budget.timeLimitMs, ok.budget.maxOutputTokens, ok.budget.exceeded], [null, 800, '']);
+  assert.ok(ok.budget.elapsedMs >= 0);
+
+  const plain = makeRuntime({});
+  const unlimited = await plain.generate({ subAgentId: 'sub', prompt: 'x' });
+  assert.equal(plain.requests[0].maxTokens, 2400, 'without a budget the output keeps the default 2400');
+  assert.equal(unlimited.budget.maxOutputTokens, 2400);
+
+  const slow = makeRuntime({ budgets: { timeMs: 30, tokens: null }, slowSub: true });
+  const timed = await slow.generate({ subAgentId: 'sub', prompt: 'x' });
+  assert.deepEqual([timed.ok, timed.delegated, timed.fallbackUsed, timed.fallbackReason, timed.text], [true, false, true, 'time_budget', 'from main-model']);
+  assert.equal(timed.budget.exceeded, 'time');
+  assert.equal(timed.budget.timeLimitMs, 30);
+  assert.deepEqual(slow.requests.map(item => [item.model, item.maxTokens]), [['sub-model', 2400], ['main-model', 2400]], 'the main-model fallback keeps the default output limit');
+
+  // 用户取消不算超时，也不回退
+  const cancelled = makeRuntime({ budgets: { timeMs: 5000 }, slowSub: true });
+  const controller = new AbortController();
+  const pending = cancelled.generate({ subAgentId: 'sub', prompt: 'x', context: { signal: controller.signal } });
+  setTimeout(() => controller.abort(), 10);
+  const aborted = await pending;
+  assert.equal(aborted.ok, false);
+  assert.notEqual(aborted.budget?.exceeded, 'time');
+  assert.equal(cancelled.requests.length, 1, 'no fallback after the user cancels');
+
+  const normalized = normalizeMaidSubAgent({ modelProfileId: 'p', timeLimitSeconds: 2, maxOutputTokens: 99999 });
+  assert.deepEqual([normalized.timeLimitSeconds, normalized.maxOutputTokens], [5, 32000], 'budgets are clamped');
+  assert.deepEqual([normalizeMaidSubAgent({ modelProfileId: 'p' }).timeLimitSeconds, normalizeMaidSubAgent({ modelProfileId: 'p', maxOutputTokens: '' }).maxOutputTokens], [0, 0]);
+  console.log('ok - delegation budgets cap output, stop at the time limit with one main-model fallback, and are recorded');
+}

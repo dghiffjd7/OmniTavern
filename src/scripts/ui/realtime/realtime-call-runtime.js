@@ -44,6 +44,8 @@ export const createRealtimeCallRuntime = ({
   commitAssistantMessage,
   commitLiveTranscript,
   handleMaidTaskRequest,
+  // 女仆任务结果的送达状态（见 realtime-maid-task-session.js）
+  onMaidTaskDelivery = null,
   onStateChange = null,
   onCaption = null,
   onAudioLevel = null,
@@ -224,6 +226,8 @@ export const createRealtimeCallRuntime = ({
       },
     });
     if (!committed) { const error = new Error(t('语音回复保存失败')); error.code = 'assistant_message_commit_failed'; throw error; }
+    // 没有新信息的接单／状态复述：计数供调试面板与批量测试统计，并在下一次上下文更新时提示一次
+    if (committed.repeated) { recordTimeline('maid.repeat'); maidTaskSession?.noteRepetition?.(); }
     record.committed = true;
     rememberTranscript(committed, record.contextGeneration);
     return true;
@@ -549,6 +553,7 @@ export const createRealtimeCallRuntime = ({
         target: { ...target }, live: isLive(), provider: connection.config.provider || 'openai',
         getClient: () => sessionClient, handleTaskRequest: handleMaidTaskRequest,
         isOutputAudible: () => !state.outputMuted,
+        onDelivery: delivery => { recordTimeline('app.task_delivery', delivery.state); onMaidTaskDelivery?.(delivery); },
         getLiveGroups: () => liveEvents?.getGroups() || [], onError,
       });
       emitState('connecting', { startedAt, elapsedMs: 0, provider: connection.config.provider || 'openai', openaiBackend: isLive() ? 'live' : 'realtime' });

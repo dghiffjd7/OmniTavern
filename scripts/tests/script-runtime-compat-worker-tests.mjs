@@ -42,6 +42,7 @@ const {
 const { appSettings } = await import('../../src/scripts/storage/app-settings.js');
 const { buildTavernConnectionSettings } = await import('../../src/scripts/plugins/tavern-connection-settings.js');
 const { toScriptPreset } = await import('../../src/scripts/plugins/preset-script-api.js');
+const { SCRIPT_COMPATIBILITY_VERSION } = await import('../../src/scripts/import/script-capability-preflight.js');
 globalThis.setTimeout = realSetTimeout;
 
 const createWorkerHarness = ({ chatMessages = [], characterRegexes = [], fetchImpl, importScriptsImpl, rpc = null } = {}) => {
@@ -273,6 +274,42 @@ const flushTimers = () => new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(bypass.client, request.client);
   assert.equal(await runtime.prepareCreativeRequest({ ...request, presetContext: { uiMode: 'chat' } }), null);
   assert.equal(preparations, 1, 'normal chat cannot enter the preset transport');
+  // 发送链据此在构建提示词前决定是否把提示词后处理推迟到预设脚本之后
+  const SPreset = { ForcedPostProcessing: { enabled: true, mode: '' } };
+  const presetSnapshot = { presetId: 'p', preset: { extensions: { SPreset } } };
+  runtime.store = { getScripts: () => [{ id: 'owner', enabled: true, authorized: true }] };
+  assert.deepEqual(runtime.resolveCreativeRequestPreset({ presetContext: request.presetContext, presetSnapshot }),
+    { presetId: 'p', preset: presetSnapshot.preset, spreset: SPreset });
+  runtime.presetRequestTransport.prepare = async () => ({ body: { messages: [{ role: 'user', content: 'prepared' }] } });
+  const forced = await runtime.prepareCreativeRequest({ ...request, presetSnapshot, preview: true });
+  assert.deepEqual(forced.messages, [{ role: 'user', content: 'prepared' }]);
+  assert.equal(forced.promptPostProcessing, 'none', 'SPreset forced post-processing travels with the prepared request');
+  runtime.store = { getScripts: () => [] };
+  assert.equal(runtime.resolveCreativeRequestPreset({ presetContext: request.presetContext, presetSnapshot }).spreset, null,
+    'unauthorized preset scripts carry no SPreset settings');
+  assert.equal(runtime.resolveCreativeRequestPreset({ presetContext: { uiMode: 'chat' } }), null);
+  // SPreset 条目条件：只把开了条件的条目交给 Worker；结果也套用到交给 Worker 的条目顺序（工具绑定按它判断）
+  let conditionPayload;
+  runtime.presetRequestTransport.evaluateEntryConditions = async payload => {
+    conditionPayload = payload;
+    return { decisions: { tail: true }, failures: [{ identifier: 'bad', name: 'bad', error: 'boom' }] };
+  };
+  const conditioned = {
+    prompts: [{ identifier: 'tail', spreset_condition_enabled: true, spreset_condition_script: '() => true' }, { identifier: 'plain' }],
+    prompt_order: [{ character_id: 100001, order: [{ identifier: 'tail', enabled: false }, { identifier: 'plain', enabled: true }] }],
+  };
+  assert.deepEqual(await runtime.evaluatePresetEntryConditions({ presetId: 'p', preset: conditioned,
+    presetContext: request.presetContext, config: { provider: 'gemini', model: 'gemini-4-argon' }, preview: true }), { tail: true });
+  assert.deepEqual(conditionPayload.provider, { source: 'makersuite', model: 'gemini-4-argon' }, 'scripts see SillyTavern source names');
+  assert.deepEqual(conditionPayload.entries.map(entry => entry.identifier), ['tail'], 'only entries with conditions run');
+  assert.equal(await runtime.evaluatePresetEntryConditions({ presetId: 'p', preset: { prompts: [{ identifier: 'plain' }] },
+    presetContext: request.presetContext, config: {} }), null);
+  let preparedPayload;
+  runtime.presetRequestTransport.prepare = async payload => { preparedPayload = payload; return { body: { messages: [] } }; };
+  await runtime.prepareCreativeRequest({ ...request, presetSnapshot: { presetId: 'p', preset: conditioned }, preview: true,
+    presetEntryDecisions: { tail: true } });
+  assert.deepEqual(preparedPayload.preset.prompt_order[0].order, [{ identifier: 'tail', enabled: true }, { identifier: 'plain', enabled: true }]);
+  assert.equal(conditioned.prompt_order[0].order[0].enabled, false, 'decisions never change the stored preset');
   runtime.presets = { state: { enabled: { openai: false } } };
   assert.equal(await runtime.prepareCreativeRequest(request), null);
   assert.equal(preparations, 1, 'disabling the preset also disables its request middleware');
@@ -677,7 +714,7 @@ console.log('ok - script runtime recognizes actual ESM import and export syntax'
   const runtime = new ScriptRuntime({ ready: Promise.resolve(), getScripts: () => [] });
   await runtime.ready;
   const storedCompatibility = {
-    version: 1,
+    version: SCRIPT_COMPATIBILITY_VERSION,
     level: 'module',
     blocked: false,
     reasons: ['top_level_await'],
@@ -1265,6 +1302,7 @@ console.log('ok - script runtime recognizes actual ESM import and export syntax'
         worldId: 'World',
         worldIds: ['World', 'Extra'],
         worldbookNames: ['World', 'Extra'],
+        globalWorldbookNames: ['World'],
         activePreset: {
           name: 'Preset',
           prompts: [{ id: 'rule', name: 'Rule', content: 'content', enabled: true, role: 'system' }],
@@ -2625,4 +2663,385 @@ console.log('ok - script runtime recognizes actual ESM import and export syntax'
   assert.equal(preset.chat_completion_source, 'claude', 'the stored preset is not modified');
   assert.equal(runtime.buildContext('rp:s1').model, 'xiaomi/mimo-v2.6-pro', 'script {{model}} follows the session API profile');
   console.log('ok - scripts read the session API profile as SillyTavern chat completion source and model');
+}
+
+{
+  const { sandbox, messages } = createWorkerHarness({
+    rpc: (msg) => {
+      if (msg.method === 'world.write') return { created: true, names: ['World', 'Extra', 'JX'], globalNames: ['World'] };
+      if (msg.method === 'world.bindGlobal') return { names: ['World', 'Extra', 'JX'], globalNames: ['World', 'JX'] };
+      return undefined;
+    },
+  });
+  const script = `
+    globalThis.__seen = [];
+    if (tavern_events.GENERATION_STARTED !== 'generation_started') throw new Error('missing GENERATION_STARTED');
+    if (tavern_events.GENERATION_AFTER_COMMANDS !== 'generation_after_commands') throw new Error('missing GENERATION_AFTER_COMMANDS');
+    const handle = eventMakeLast(tavern_events.GENERATION_AFTER_COMMANDS, async (type, params, dryRun) => {
+      await new Promise(resolve => setTimeout(resolve, 5));
+      injectPrompts([{ id: 'jx', position: 'in_chat', depth: 0, role: 'system', content: 'policy:' + type + ':' + dryRun, should_scan: false }], { once: false });
+      __seen.push(['after', type, typeof params, dryRun]);
+    });
+    if (typeof handle?.stop !== 'function') throw new Error('eventMakeLast should return a subscription');
+    eventOn(tavern_events.GENERATION_STARTED, (type) => { __seen.push(['started', type]); });
+    globalThis.__worldbooks = async () => {
+      if (getWorldbookNames().join() !== 'World,Extra') throw new Error('names ' + getWorldbookNames().join());
+      if (getGlobalWorldbookNames().join() !== 'World') throw new Error('globals ' + getGlobalWorldbookNames().join());
+      const created = await createWorldbook('JX', [{ name: 'a', content: 'a', strategy: { type: 'selective', keys: ['MODE_X'] } }]);
+      if (created !== true) throw new Error('create result ' + created);
+      if (!getWorldbookNames().includes('JX')) throw new Error('listing not refreshed');
+      await rebindGlobalWorldbooks(['World', 'JX']);
+      if (getGlobalWorldbookNames().join() !== 'World,JX') throw new Error('global listing not refreshed');
+      const replaced = await createOrReplaceWorldbook('JX', [], { render: 'immediate' });
+      if (replaced !== true) throw new Error('replace result ' + replaced);
+      const imported = await importRawWorldbook('JX.json', '{"entries":{}}');
+      if (!imported || imported.ok !== true) throw new Error('import result');
+    };
+  `;
+  await sandbox.self.onmessage({
+    data: {
+      type: 'sync',
+      settings: { allowNetwork: false },
+      context: { sessionId: 's1', worldId: 'World', worldIds: ['World'], worldbookNames: ['World', 'Extra'], globalWorldbookNames: ['World'] },
+      scripts: [{ id: 'jx187', name: '剑仙187', enabled: true, content: script }],
+    },
+  });
+  assert.equal(
+    messages.some(msg => msg.type === 'rpc' && msg.method === 'log' && msg.params?.args?.[0] === '脚本加载失败'),
+    false,
+    JSON.stringify(messages.filter(msg => msg.method === 'log').map(msg => msg.params?.args)),
+  );
+  assert.equal(messages.some(msg => msg.type === 'listener_add' && msg.event === 'generation_after_commands'), true);
+  assert.equal(messages.some(msg => msg.type === 'listener_add' && msg.event === 'generation_started'), true);
+  await sandbox.self.onmessage({ data: { type: 'dispatch', id: 'gen-start', event: 'generation_started', payload: { args: ['swipe', {}, true] }, allowMutate: false } });
+  await sandbox.self.onmessage({ data: { type: 'dispatch', id: 'gen-after', event: 'generation_after_commands', payload: { args: ['swipe', {}, true] }, allowMutate: false } });
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.__seen)), [['started', 'swipe'], ['after', 'swipe', 'object', true]]);
+  const injectIndex = messages.findIndex(msg => msg.type === 'rpc' && msg.method === 'prompt.injectPrompts');
+  const resultIndex = messages.findIndex(msg => msg.type === 'dispatch_result' && msg.id === 'gen-after');
+  assert.ok(injectIndex >= 0 && resultIndex > injectIndex, 'async handlers finish (and inject) before the dispatch resolves');
+  assert.equal(messages[injectIndex].params.injects[0].content, 'policy:swipe:true');
+
+  await sandbox.__worldbooks();
+  const write = messages.find(msg => msg.type === 'rpc' && msg.method === 'world.write');
+  assert.deepEqual(
+    [write.params.mode, write.params.name, write.params.scriptId, write.params.scriptName, write.params.entries[0].strategy.keys[0]],
+    ['create', 'JX', 'jx187', '剑仙187', 'MODE_X'],
+  );
+  const writes = messages.filter(msg => msg.type === 'rpc' && msg.method === 'world.write').map(msg => [msg.params.mode, msg.params.name]);
+  assert.deepEqual(writes, [['create', 'JX'], ['replace', 'JX'], ['import', 'JX.json']]);
+  assert.equal(messages.find(msg => msg.type === 'rpc' && msg.method === 'world.write' && msg.params.mode === 'import').params.content, '{"entries":{}}');
+  const bind = messages.find(msg => msg.type === 'rpc' && msg.method === 'world.bindGlobal');
+  assert.deepEqual(JSON.parse(JSON.stringify([bind.params.names, bind.params.scriptId])), [['World', 'JX'], 'jx187']);
+  console.log('ok - generation start events, eventMakeLast and worldbook writes reach scripts like TavernHelper');
+}
+
+{
+  const runtime = Object.create(ScriptRuntime.prototype);
+  runtime.listenerEvents = new Set(['generation_after_commands']);
+  const calls = [];
+  runtime.dispatchEvent = async (event, payload, options) => { calls.push({ event, payload, options }); };
+  await runtime.dispatchGenerationStart({ sessionId: 's1', type: 'continue', dryRun: true, input: '本轮输入' });
+  assert.deepEqual(calls.map(call => call.event), ['generation_after_commands'], 'events without listeners are skipped');
+  assert.deepEqual(calls[0].payload, { sessionId: 's1', args: ['continue', {}, true], input: '本轮输入' });
+  assert.equal(calls[0].options.sessionId, 's1');
+  assert.equal(calls[0].options.allowMutate, false);
+  assert.ok(calls[0].options.timeoutMs >= 20000, 'slow preset scripts get more than the default dispatch timeout');
+
+  runtime.listenerEvents = new Set(['generation_started', 'generation_after_commands']);
+  calls.length = 0;
+  runtime.dispatchEvent = async (event) => {
+    calls.push({ event });
+    if (event === 'generation_started') throw new Error('boom');
+  };
+  await runtime.dispatchGenerationStart({ sessionId: 's1' });
+  assert.deepEqual(calls.map(call => call.event), ['generation_started', 'generation_after_commands'], 'a failing listener does not block generation');
+  console.log('ok - generation start events are dispatched in tavern order and awaited');
+}
+
+{
+  const runtime = new ScriptRuntime({ ready: Promise.resolve(), getScripts: () => [] });
+  await runtime.ready;
+  runtime.bridge = { getGlobalWorldIds: () => ['G1'], worldStore: { list: () => ['G1', 'B'] } };
+  assert.deepEqual(runtime.buildContext('rp:s1').globalWorldbookNames, ['G1']);
+  const received = [];
+  runtime.scriptWorldbookWriter = {
+    write: async params => { received.push(['write', params.name]); return { created: true }; },
+    bindGlobal: async params => { received.push(['bind', params.names]); return { globalNames: params.names }; },
+  };
+  assert.deepEqual(await runtime.processRpc('world.write', { mode: 'create', name: 'JX', entries: [] }), { created: true });
+  assert.deepEqual(await runtime.processRpc('world.bindGlobal', { names: ['G1', 'JX'] }), { globalNames: ['G1', 'JX'] });
+  assert.deepEqual(received, [['write', 'JX'], ['bind', ['G1', 'JX']]]);
+  console.log('ok - script runtime exposes real global worldbooks and routes worldbook writes to the guarded writer');
+}
+
+{
+  const { sandbox, messages } = createWorkerHarness();
+  const script = `
+    globalThis.__clicks = 0;
+    eventOn(getButtonEvent('剑仙187'), () => { __clicks += 1; });
+    globalThis.__declared = getScriptButtons();
+    appendInexistentScriptButtons([{ name: '剑仙187', visible: true }, { name: '额外', visible: true }]);
+  `;
+  await sandbox.self.onmessage({
+    data: {
+      type: 'sync',
+      settings: { allowNetwork: false },
+      context: { sessionId: 's1' },
+      scripts: [
+        { id: 'jx187', name: '剑仙187', enabled: true, content: script, button: { enabled: true, buttons: [{ name: '剑仙187', visible: true }, { name: '隐藏', visible: false }] } },
+        { id: 'off', name: 'off', enabled: true, content: 'void 0;', button: { enabled: false, buttons: [{ name: '不显示', visible: true }] } },
+      ],
+    },
+  });
+  assert.equal(
+    messages.some(msg => msg.type === 'rpc' && msg.method === 'log' && msg.params?.args?.[0] === '脚本加载失败'),
+    false,
+    JSON.stringify(messages.filter(msg => msg.method === 'log').map(msg => msg.params?.args)),
+  );
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.__declared)), [{ name: '剑仙187', visible: true }, { name: '隐藏', visible: false }]);
+  const group = sandbox.document.getElementById('chatapp-script-buttons-jx187');
+  const buttons = Array.from(group?.querySelectorAll('button') || []);
+  assert.deepEqual(buttons.map(button => button.textContent), ['剑仙187', '额外'], 'declared buttons are drawn once, hidden ones skipped');
+  assert.equal(sandbox.document.getElementById('chatapp-script-buttons-off'), null, 'a disabled button declaration draws nothing');
+  buttons[0].click();
+  await flushTimers();
+  assert.equal(sandbox.__clicks, 1);
+  console.log('ok - TavernHelper button declarations are drawn and clicks reach getButtonEvent listeners');
+}
+
+{
+  const runtime = new ScriptRuntime({ ready: Promise.resolve(), getScripts: () => [] });
+  await runtime.ready;
+  runtime.store = {
+    getScripts: (scope, scopeId) => (scope === 'preset' && scopeId === 'p1'
+      ? [{ id: 'jx', name: '剑仙187', content: 'void 0;', enabled: true, authorized: true }]
+      : []),
+  };
+  runtime.presets = {
+    getPreset: (type, id) => (type === 'openai' && id === 'p1'
+      ? { extensions: { tavern_helper: { scripts: [{ id: 'jx', button: { enabled: true, buttons: [{ name: '剑仙187', visible: true }] } }] } } }
+      : null),
+  };
+  runtime.buildContext = () => ({ sessionId: 's1', personaId: '', presetId: 'p1', presetIds: ['p1'] });
+  runtime.isEnabled = () => true;
+  const posted = [];
+  runtime.worker = { postMessage: msg => posted.push(msg) };
+  await runtime.syncScripts();
+  const sync = posted.find(msg => msg.type === 'sync');
+  assert.deepEqual(sync.scripts[0].button, { enabled: true, buttons: [{ name: '剑仙187', visible: true }] });
+  console.log('ok - preset scripts imported before declarations were kept get them back from the preset at sync');
+}
+
+{
+  const { sandbox } = createWorkerHarness();
+  await sandbox.self.onmessage({ data: { type: 'sync', settings: { allowNetwork: false }, scripts: [] } });
+  const failures = vm.runInContext(`(() => {
+    const failures = [];
+    const check = (ok, label) => { if (!ok) failures.push(label); };
+    // 浮窗常见写法：先用 HTML 建 jQuery 对象，再 append 到 body
+    const popup = $('<div id="jq-root" class="pop"><div class="body"><button class="b" data-x="1">a</button><span class="b">s</span></div><p class="tail">t</p></div>');
+    check(popup.jquery && popup.length === 1, 'html creation returns a jQuery-like collection');
+    $(document.body).append(popup);
+    check(document.getElementById('jq-root') === popup.get(0), 'append accepts a jQuery collection');
+    const items = popup.find('.b');
+    check(items.length === 2, 'find returns every match');
+    check(items.first().text() === 'a' && items.last().text() === 's', 'first / last');
+    check(items.eq(-1).text() === 's', 'eq supports negative indexes');
+    check(items.filter('button').length === 1 && items.filter(function (index) { return index === 1; }).text() === 's', 'filter by selector and callback');
+    check(items.is('span') && !items.is('p'), 'is');
+    check($('.b', popup).length === 2 && $('.b', document.createElement('div')).length === 0, 'selector with context');
+    check(popup.find('.b').closest('.body').length === 1, 'closest de-duplicates');
+    check(items.parent().length === 1 && popup.children('.tail').length === 1, 'parent / children with selector');
+    check(items.add(popup.find('.tail')).length === 3, 'add');
+    items.first().addClass('on');
+    check(items.first().hasClass('on') && !items.last().hasClass('on'), 'hasClass');
+    items.toggleClass('on', true);
+    check(items.last().hasClass('on'), 'toggleClass with state adds');
+    items.toggleClass('on', false);
+    check(!items.first().hasClass('on'), 'toggleClass with state removes');
+    popup.find('.tail').after('<i class="after">x</i>').before($('<i class="before">y</i>'));
+    const order = Array.from(popup.get(0).children).map(node => node.className).join(',');
+    check(order === 'body,before,tail,after', 'after / before keep order: ' + order);
+    popup.find('.after').replaceWith('<b class="replaced">z</b>');
+    check(popup.find('.after').length === 0 && popup.find('.replaced').length === 1, 'replaceWith');
+    const copy = popup.find('.replaced').clone();
+    check(copy.length === 1 && copy.get(0) !== popup.find('.replaced').get(0) && copy.text() === 'z', 'clone');
+    popup.find('.before').detach();
+    check(popup.find('.before').length === 0, 'detach');
+    popup.find('.replaced').toggle(false);
+    check(popup.find('.replaced').get(0).style.display === 'none', 'toggle(false) hides');
+    check(popup.stop() === popup, 'stop is chainable');
+    // 命名空间 + 委托：$(this) 是匹配的子元素，event.target 是实际点到的节点
+    const calls = [];
+    popup.on('click.jx', '[data-x]', function (event) { calls.push([this.getAttribute('data-x'), event.target === button, event.currentTarget === this, event.delegateTarget === popup.get(0)]); });
+    popup.on('click.other', function () { calls.push(['root']); });
+    const button = popup.find('button').get(0);
+    button.click();
+    check(JSON.stringify(calls) === JSON.stringify([['1', true, true, true], ['root']]), 'delegated handler binding: ' + JSON.stringify(calls));
+    calls.length = 0;
+    popup.find('span').get(0).click();
+    check(JSON.stringify(calls) === JSON.stringify([['root']]), 'delegated selector filters targets');
+    calls.length = 0;
+    popup.off('click.jx', '[data-x]');
+    button.click();
+    check(JSON.stringify(calls) === JSON.stringify([['root']]), 'off by namespace and selector');
+    calls.length = 0;
+    popup.off('.other');
+    button.click();
+    check(calls.length === 0, 'off by namespace only');
+    let once = 0;
+    popup.one('click', 'button', () => { once += 1; });
+    button.click(); button.click();
+    check(once === 1, 'one fires once');
+    let prevented = null;
+    popup.on('click.ret', 'button', () => false);
+    popup.on('click.check', (event) => { prevented = event.defaultPrevented; });
+    button.click();
+    check(prevented === null, 'returning false stops propagation');
+    popup.off('.ret').off('.check');
+    let triggered = [];
+    popup.on('custom.ns', (event, a, b) => { triggered.push([event.type, a, b]); });
+    popup.trigger('custom', [1, 2]);
+    check(JSON.stringify(triggered) === JSON.stringify([['custom', 1, 2]]), 'trigger passes extra params');
+    let shortcut = 0;
+    popup.find('button').click(() => { shortcut += 1; });
+    popup.find('button').click();
+    check(shortcut === 1, 'click(fn) binds and click() triggers');
+    check($.trim('  x  ') === 'x', '$.trim');
+    const seen = [];
+    $.each(['a', 'b'], (index, value) => { seen.push(index + value); });
+    check(seen.join() === '0a,1b', '$.each over arrays');
+    check($.extend({ a: 1 }, { b: 2 }).b === 2 && $.extend(true, { o: { a: 1 } }, { o: { b: 2 } }).o.a === 1, '$.extend shallow and deep');
+    popup.remove();
+    return failures;
+  })()`, sandbox);
+  assert.deepEqual(Array.from(failures), []);
+  console.log('ok - worker jQuery shim covers collections, DOM insertion and namespaced delegated events used by preset consoles');
+}
+
+{
+  const { sandbox } = createWorkerHarness();
+  await sandbox.self.onmessage({ data: { type: 'sync', settings: { allowNetwork: false }, scripts: [] } });
+  const result = await vm.runInContext(`(async () => {
+    const deep = [];
+    const shallow = [];
+    const host = document.createElement('div');
+    host.id = 'mo-host';
+    document.body.appendChild(host);
+    const observer = new MutationObserver((list, self) => {
+      deep.push(list.map(record => [record.type, record.target.id, record.addedNodes.length, record.removedNodes.length, self === observer]));
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    const bodyOnly = new MutationObserver(list => { shallow.push(list.length); });
+    bodyOnly.observe(document.body, { childList: true });
+    const child = document.createElement('p');
+    child.id = 'mo-child';
+    host.appendChild(child);
+    host.removeChild(child);
+    const syncCount = deep.length;
+    await Promise.resolve();
+    await Promise.resolve();
+    const afterFirst = deep.slice();
+    host.innerHTML = '<span>a</span>';
+    await Promise.resolve();
+    const innerHtmlBatch = deep.length;
+    observer.disconnect();
+    host.appendChild(document.createElement('i'));
+    await Promise.resolve();
+    return { syncCount, afterFirst, innerHtmlBatch, afterDisconnect: deep.length, shallow: shallow.slice(), pending: observer.takeRecords().length };
+  })()`, sandbox);
+  const plain = JSON.parse(JSON.stringify(result));
+  assert.equal(plain.syncCount, 0, 'records are delivered asynchronously');
+  assert.deepEqual(plain.afterFirst, [[['childList', 'mo-host', 1, 0, true], ['childList', 'mo-host', 0, 1, true]]]);
+  assert.equal(plain.innerHtmlBatch, 2, 'innerHTML changes are observed');
+  assert.equal(plain.afterDisconnect, 2, 'disconnect stops delivery');
+  assert.deepEqual(plain.shallow, [], 'without subtree only direct children are observed');
+  assert.equal(plain.pending, 0);
+  console.log('ok - worker MutationObserver reports child list changes like the browser');
+}
+
+{
+  const { sandbox } = createWorkerHarness();
+  await sandbox.self.onmessage({ data: { type: 'sync', settings: { allowNetwork: false }, scripts: [] } });
+  const result = vm.runInContext(`(() => {
+    const host = document.createElement('div');
+    host.innerHTML = '<div class="box"><div class="head"><span>t</span></div></div>';
+    document.body.appendChild(host);
+    const nested = host.querySelector('.head');
+    const detached = $('<section><p>x</p></section>').get(0).querySelector('p');
+    const made = nested.ownerDocument.createElement('b');
+    return { nested: nested.ownerDocument === document, detached: detached.ownerDocument === document, made: made.tagName };
+  })()`, sandbox);
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), { nested: true, detached: true, made: 'B' });
+  console.log('ok - every compat element knows its owner document, including parsed descendants');
+}
+
+{
+  const { sandbox, messages } = createWorkerHarness();
+  const script = `
+    globalThis.__seenInput = [];
+    eventOn(tavern_events.GENERATION_AFTER_COMMANDS, (type, params, dryRun) => {
+      __seenInput.push([document.getElementById('send_textarea').value, dryRun]);
+    });
+  `;
+  await sandbox.self.onmessage({
+    data: { type: 'sync', settings: { allowNetwork: false }, context: { sessionId: 's1', input: '草稿' }, scripts: [{ id: 'reader', name: 'reader', enabled: true, content: script }] },
+  });
+  const textarea = sandbox.document.getElementById('send_textarea');
+  assert.ok(textarea, 'a SillyTavern-style input box exists');
+  assert.equal(textarea.value, '草稿', 'it mirrors the app draft');
+  assert.equal(textarea.style.display, 'none');
+  await sandbox.self.onmessage({ data: { type: 'context', context: { input: '新草稿' } } });
+  assert.equal(textarea.value, '新草稿');
+  assert.equal(messages.some(msg => msg.type === 'rpc' && msg.method === 'ui.setInputText'), false, 'mirroring does not write back');
+  textarea.value = '【JX16_MANAGED_INPUT_BEGIN】x【JX16_MANAGED_INPUT_END】';
+  assert.equal(textarea.value, '【JX16_MANAGED_INPUT_BEGIN】x【JX16_MANAGED_INPUT_END】', 'scripts read back what they wrote');
+  const write = messages.find(msg => msg.type === 'rpc' && msg.method === 'ui.setInputText');
+  assert.deepEqual([write?.params?.text, write?.params?.sessionId], ['【JX16_MANAGED_INPUT_BEGIN】x【JX16_MANAGED_INPUT_END】', 's1']);
+  await sandbox.self.onmessage({ data: { type: 'dispatch', id: 'g1', event: 'generation_after_commands', payload: { args: ['normal', {}, false], input: '发出去的话' }, allowMutate: false } });
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.__seenInput)), [['发出去的话', false]], 'like SillyTavern the box still holds the outgoing text');
+  assert.equal(textarea.value, '', 'and is cleared after a real send');
+  await sandbox.self.onmessage({ data: { type: 'dispatch', id: 'g2', event: 'generation_after_commands', payload: { args: ['normal', {}, true], input: '预览' }, allowMutate: false } });
+  assert.equal(textarea.value, '预览', 'a dry run leaves the box alone');
+  assert.equal(messages.filter(msg => msg.type === 'rpc' && msg.method === 'ui.setInputText').length, 1, 'generation mirroring does not write back');
+  console.log('ok - worker send_textarea mirrors the app input, writes back script edits and holds the outgoing text during generation start');
+}
+
+{
+  const runtime = new ScriptRuntime({ ready: Promise.resolve(), getScripts: () => [] });
+  await runtime.ready;
+  const events = [];
+  const inputEl = { value: 'old', dispatchEvent: event => events.push(event.type) };
+  let set = null;
+  runtime.chatStore = { getCurrent: () => 's1' };
+  runtime.context = { sessionId: 's1' };
+  runtime.bridge = { getChatUI: () => ({ inputEl, setInputText: (text) => { set = text; inputEl.value = text; } }) };
+  assert.equal(await runtime.processRpc('ui.setInputText', { text: '写入', sessionId: 's1' }), true);
+  assert.deepEqual([set, inputEl.value, events], ['写入', '写入', ['input']]);
+  assert.equal(await runtime.processRpc('ui.setInputText', { text: '别处', sessionId: 'other' }), false, 'only the current session input is written');
+  assert.equal(inputEl.value, '写入');
+  console.log('ok - scripts write the current session input box through the app chat UI');
+}
+
+{
+  // 先在未挂上页面的元素里 innerHTML 再用 #id 查（脚本常先组好弹窗再 appendChild）：
+  // 浏览器查得到，compat DOM 的 id 索引只收已挂上的节点，不能只靠索引，否则绑不到事件
+  const { sandbox } = createWorkerHarness();
+  const script = `
+    const overlay = document.createElement('div');
+    overlay.innerHTML = '<div><button id="close-btn" type="button">x</button><span class="tag" data-k="v">t</span></div>';
+    globalThis.__found = {
+      id: overlay.querySelector('#close-btn') !== null,
+      idAll: overlay.querySelectorAll('#close-btn').length,
+      attr: overlay.querySelector('span[data-k="v"]') !== null,
+    };
+    overlay.querySelector('#close-btn').onclick = () => overlay.remove();
+    document.body.appendChild(overlay);
+    globalThis.__attached = document.body.querySelector('#close-btn') === overlay.querySelector('#close-btn');
+  `;
+  await sandbox.self.onmessage({ data: { type: 'sync', context: { sessionId: 'detached' }, scripts: [{ id: 'detached', enabled: true, content: script }] } });
+  await flushTimers();
+  assert.deepEqual({ ...sandbox.__found }, { id: true, idAll: 1, attr: true });
+  assert.equal(sandbox.__attached, true, 'after attaching the same node is found through the index');
+  console.log('ok - id and attribute selectors find nodes inside detached subtrees');
 }

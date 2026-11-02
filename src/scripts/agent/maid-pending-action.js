@@ -120,6 +120,19 @@ export const classifyMaidPendingActionReply = (input = '', { voice = false } = {
   return 'none';
 };
 
+// 语音里有确认在等时，「好的，开启吧」「可以开吧」「开启吧」只是在回答确认，不是新请求：
+// 返回其中的肯定词（没有肯定词时为 ok），交给确认分类按含糊回答处理；带新事情的（「好的，帮我查天气」）返回空
+const APPROVAL_HEAD = /^(好(?:的|啊|呀|吧|哒)?|可以|行|嗯+|对|對|是的?|ok(?:ay)?|没问题|沒問題)/iu;
+const APPROVAL_ACTION_TAIL = /^(?:那)?(?:就)?(?:开启|開啟|打开|打開|开|開|开始|開始|执行|執行|继续|繼續|调用|調用|删除|刪除|删|刪|建|弄|做|来|來)?(?:吧|啊|呀|了|哦|喔)?$/u;
+export const maidApprovalLikeReplyHead = (input = '') => {
+  const text = String(input ?? '').normalize('NFKC').trim().replace(/[\s。.!！~～?？]+$/u, '');
+  if (!text || text.length > 12) return '';
+  const head = text.match(APPROVAL_HEAD)?.[1] || '';
+  const tail = text.slice(head.length).replace(/^[\s，,、]+/u, '');
+  if (head) return APPROVAL_ACTION_TAIL.test(tail) ? head : '';
+  return /吧$/u.test(tail) && APPROVAL_ACTION_TAIL.test(tail) ? 'ok' : '';
+};
+
 export const buildConfirmedPendingActionPlan = (pending = {}) => ({
   ok: true,
   action: 'tool',

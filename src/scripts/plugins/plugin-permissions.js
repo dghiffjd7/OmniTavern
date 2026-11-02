@@ -9,6 +9,9 @@ export const ALLOWED_PERMISSIONS = new Set([
   'ui.inject',
   'variables.read',
   'variables.write',
+  // 用户工具（自定义工具、动作与手势）：写输入框或直接发送、用当前聊天的模型调用一次
+  'input.write',
+  'model.call',
 ]);
 
 export const POWER_REQUIRED_PERMISSIONS = new Set([
@@ -24,6 +27,8 @@ export const RISKY_PERMISSIONS = new Map([
   ['prompt.modify', '修改提示词'],
   ['ui.inject', '注入 UI'],
   ['network', '网络访问'],
+  ['input.write', '写入输入框或直接发送'],
+  ['model.call', '调用模型（会产生费用）'],
 ]);
 
 export const RISKY_PERMISSION_SET = new Set(RISKY_PERMISSIONS.keys());

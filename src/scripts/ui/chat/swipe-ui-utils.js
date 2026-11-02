@@ -42,7 +42,7 @@ export const applySwipeSourcesStateToMeta = (meta = {}, branch = {}, activeIndex
   return nextMeta;
 };
 
-const buildSwipeBranchFromMessage = (message = {}) => {
+export const buildSwipeBranchFromMessage = (message = {}) => {
   const meta = message?.meta && typeof message.meta === 'object' ? message.meta : {};
   const branch = { content: message?.content, raw: message?.raw };
   if (message?.rawSource !== undefined) branch.rawSource = message.rawSource;

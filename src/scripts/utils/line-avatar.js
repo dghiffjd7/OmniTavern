@@ -26,6 +26,9 @@ const TAG_COLOR_SCHEMES = {
 
 const COLOR_TAG_PRIORITY = ['女性', '男性'];
 
+// 群聊里对不上任何联系人的发言者（例如剧情里临时出现的角色）：彩色底色，和没打标签的联系人（灰色）区分
+const STRANGER_COLOR_SCHEME = ['#E57373', '#F06292', '#BA68C8', '#9575CD', '#7986CB', '#64B5F6', '#4DB6AC', '#81C784', '#FFB74D', '#FF8A65'];
+
 const cache = new Map();
 
 const normalizeTags = (tags) =>
@@ -70,9 +73,9 @@ const canUseCanvas = () => {
   }
 };
 
-const buildAvatarDataUrl = ({ name, tags, size = 96 }) => {
+const buildAvatarDataUrl = ({ name, tags, size = 96, palette = '' }) => {
   if (!canUseCanvas()) return '';
-  const scheme = pickColorScheme(tags);
+  const scheme = palette === 'stranger' ? STRANGER_COLOR_SCHEME : pickColorScheme(tags);
   const idx = hashString(name) % scheme.length;
   const background = scheme[idx] || scheme[0] || TAG_COLOR_SCHEMES.default[0];
   const text = pickInitial(name);
@@ -98,13 +101,13 @@ const buildAvatarDataUrl = ({ name, tags, size = 96 }) => {
   return canvas.toDataURL('image/png');
 };
 
-export const getLineAvatarDataUrl = ({ name = '', tags = [], size = 96 } = {}) => {
+export const getLineAvatarDataUrl = ({ name = '', tags = [], size = 96, palette = '' } = {}) => {
   const keyName = String(name || '').trim();
   if (!keyName) return '';
   const keyTags = normalizeTags(tags).join('|');
-  const cacheKey = `${keyName}__${keyTags}__${size}`;
+  const cacheKey = `${keyName}__${keyTags}__${size}__${palette}`;
   if (cache.has(cacheKey)) return cache.get(cacheKey) || '';
-  const url = buildAvatarDataUrl({ name: keyName, tags, size });
+  const url = buildAvatarDataUrl({ name: keyName, tags, size, palette });
   cache.set(cacheKey, url);
   return url;
 };
@@ -115,13 +118,13 @@ export const isDefaultAvatar = (avatar) => {
   return raw.includes('feather-default') || raw.includes('app-icon-dark') || raw.includes('app-icon-light');
 };
 
-export const resolveLineAvatar = ({ avatar = '', name = '', tags = [], size = 96 } = {}) => {
+export const resolveLineAvatar = ({ avatar = '', name = '', tags = [], size = 96, palette = '' } = {}) => {
   const raw = String(avatar || '').trim();
   if (raw && !isDefaultAvatar(raw)) return raw;
-  const generated = getLineAvatarDataUrl({ name, tags, size });
+  const generated = getLineAvatarDataUrl({ name, tags, size, palette });
   return generated || raw || getFeatherDefault();
 };
 
 const FEATHER_DEFAULT = getFeatherDefault();
-export { FEATHER_DEFAULT, TAG_COLOR_SCHEMES };
+export { FEATHER_DEFAULT, TAG_COLOR_SCHEMES, STRANGER_COLOR_SCHEME };
 

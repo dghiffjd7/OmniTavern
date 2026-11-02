@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
   createGenerationProviderCallDiagnosticsTracker,
@@ -101,5 +102,22 @@ const cancelled = tracker.snapshot().at(-1);
 assert.equal(cancelled.tokensPerSecond, null);
 assert.equal(cancelled.completionTokens, null, 'missing usage stays unknown');
 assert.equal(cancelled.outputSpeedStatus, 'missing_usage');
+
+// 回归：bridge.generate 的 catch 引用了只在 try 里声明的名字，任何生成错误都会变成
+// 「activeProviderCallId is not defined」，盖住真正的错误（聊天模式走这条非流式路径）。
+const bridgeSource = readFileSync(new URL('../../src/scripts/ui/bridge.js', import.meta.url), 'utf8');
+const generateStart = bridgeSource.indexOf('\n  async generate(');
+const tryStart = bridgeSource.indexOf('\n    try {\n', generateStart);
+const catchStart = bridgeSource.indexOf('\n    } catch (error) {\n', tryStart);
+const finallyStart = bridgeSource.indexOf('\n    } finally {\n', catchStart);
+assert.ok(generateStart >= 0 && tryStart > generateStart && catchStart > tryStart && finallyStart > catchStart,
+  'locate generate try/catch/finally');
+const tryScopedNames = [...bridgeSource.slice(tryStart, catchStart).matchAll(/^ {6}(?:const|let|var) ([A-Za-z_$][\w$]*)/gm)]
+  .map(match => match[1]);
+assert.ok(tryScopedNames.includes('activeProviderCallId'), 'try-scoped names are detected');
+const generateCatchBody = bridgeSource.slice(catchStart, finallyStart);
+const leakedIntoCatch = tryScopedNames.filter(name => new RegExp(`(?<![\\w$.])${name.replace(/\$/g, '\\$')}(?![\\w$])`).test(generateCatchBody));
+assert.deepEqual(leakedIntoCatch, [], 'generate catch must not reference names declared inside its try');
+console.log('ok - bridge.generate catch only uses names in scope');
 
 console.log('generation-provider-call-diagnostics-utils-tests passed');

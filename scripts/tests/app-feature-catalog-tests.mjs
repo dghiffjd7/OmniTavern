@@ -20,6 +20,8 @@ import { createAppUiCaptureTools } from '../../src/scripts/agent/tools/app-ui-ca
 import { createWebSearchAgentTools } from '../../src/scripts/agent/tools/web-search-tools.js';
 import { createMaidTodoTools } from '../../src/scripts/agent/tools/maid-todo-tools.js';
 import { createMaidMemoryTools } from '../../src/scripts/agent/tools/maid-memory-tools.js';
+import { createMaidCapabilityAgentTools } from '../../src/scripts/agent/tools/maid-capability-tools.js';
+import { createMcpAgentTools } from '../../src/scripts/agent/tools/mcp-tools.js';
 import { createGuideStartFlowTools } from '../../src/scripts/agent/tools/guide-start-flow-tools.js';
 import { createChatFormatRepairTools } from '../../src/scripts/agent/tools/chat-format-tools.js';
 import { createMomentsAgentTools } from '../../src/scripts/agent/tools/moments-tools.js';
@@ -78,6 +80,14 @@ const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
   assert.deepEqual(click.tools, ['ui.click_element']);
   assert.equal(click.directAction, 'ui.click_element');
   console.log('ok - inspect and click tools have unambiguous feature ownership');
+}
+
+{
+  // 骰子、硬币、抽签的口语说法也要检索到随机互动（手机实测「帮我掷一个六面骰子」没进候选，女仆自己编了点数）
+  for (const query of ['帮我掷一个六面骰子', '掷两个骰子', '帮我抽个签', '抛个硬币']) {
+    assert.equal(searchAppFeatures(query, { limit: 3 })[0]?.id, 'maid.random', query);
+  }
+  console.log('ok - casual dice, coin and draw requests retrieve the random capability');
 }
 
 {
@@ -679,7 +689,19 @@ const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
     readWorldbookSnapshot: readAttachmentWorld,
   });
   const attachmentFileTools = createAttachmentFileAgentTools({ getAttachmentRegistry: () => attachmentRegistry });
-  const tools = [...navTools, ...sessionTools, ...groupTools, ...contentTools, ...mediaTools, ...captureTools, ...webTools, ...todoTools, ...maidMemoryTools, ...guideTools, ...formatTools, ...momentsTools, ...presetRegexScriptTools, ...contactProfileTools, ...attachmentTools, ...attachmentFileTools];
+  // 内置能力：目录测试按已开启处理（开关与确认在 maid-capability-tools-tests 里测）
+  const capabilityTools = createMaidCapabilityAgentTools({
+    getSettingsStore: () => ({ getBuiltinCapability: () => ({ enabled: true, revision: 1, lastUsedAt: 0 }), setBuiltinCapabilityEnabled: async () => ({ ok: true }), markBuiltinCapabilityUsed: async () => null }),
+  });
+  const mcpTools = createMcpAgentTools({
+    getServer: id => (id === 'srv' ? { id, name: '目录 MCP', url: 'http://127.0.0.1:3917/mcp', revision: 1 } : null),
+    getManager: () => ({
+      search: async () => ({ tools: [{ serverId: 'srv', serverName: '目录 MCP', name: 'echo', description: 'Echo', inputSchema: { type: 'object', properties: { text: { type: 'string' } } }, schemaHash: 'a'.repeat(64) }], total: 1 }),
+      describeTool: () => null,
+      call: async ({ toolName, arguments: callArgs }) => ({ serverId: 'srv', serverName: '目录 MCP', toolName, isError: false, text: String(callArgs.text), truncated: false }),
+    }),
+  });
+  const tools = [...navTools, ...sessionTools, ...groupTools, ...contentTools, ...mediaTools, ...captureTools, ...webTools, ...todoTools, ...maidMemoryTools, ...guideTools, ...formatTools, ...momentsTools, ...presetRegexScriptTools, ...contactProfileTools, ...attachmentTools, ...attachmentFileTools, ...capabilityTools, ...mcpTools];
   const worldbookRegistry = createAgentToolRegistry({
     permissionEvaluator: { evaluateTool: () => ({ decision: 'allow', checks: [] }) },
     logger: { warn() {} },
@@ -1054,6 +1076,16 @@ const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
       assert.equal(result.resource, 'chat');
       return;
     }
+    if (feature.id === 'mcp.external') {
+      const found = await getTool(tools, 'mcp.search').execute({ query: 'echo' }, {});
+      assert.deepEqual(found.tools.map(tool => tool.toolName), ['echo']);
+      const args = { serverId: 'srv', toolName: 'echo', schemaHash: found.tools[0].schemaHash, argumentsJson: '{"text":"目录"}' };
+      const preflight = await getTool(tools, 'mcp.call').safety.preflight(args, {});
+      assert.equal(preflight.requiresConfirmation, true);
+      const result = await getTool(tools, 'mcp.call').execute(args, {});
+      assert.deepEqual([result.ok, result.text], [true, '目录']);
+      return;
+    }
     if (feature.id === 'web.search') {
       const result = await getTool(tools, 'web.search').execute({ query: 'Catalog Web', limit: 1 });
       assert.equal(result.ok, true);
@@ -1153,6 +1185,21 @@ const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
       const result = await getTool(tools, feature.directAction).execute(args, {});
       assert.equal(result.ok, true, `${feature.id} direct action should succeed: ${JSON.stringify(result).slice(0, 200)}`);
       if (feature.id === 'attachment.import') assert.deepEqual([result.worldbookId, result.verified], ['目录测试', true]);
+      return;
+    }
+    if (feature.id === 'maid.random' || feature.id === 'maid.capability.request_enable') {
+      const args = feature.id === 'maid.random' ? { mode: 'choose', options: ['正面', '反面'] } : { capabilityId: 'random' };
+      const result = await getTool(tools, feature.directAction).execute(args, {});
+      assert.equal(result.ok, true, `${feature.id} direct action should succeed: ${JSON.stringify(result).slice(0, 200)}`);
+      return;
+    }
+    if (feature.id === 'attachment.view_image') {
+      const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+      attachmentRegistry.register('catalog-image', { bytes: png, name: 'catalog.png', mime: 'image/png', inspection: { format: 'image' } });
+      const context = { maidAttachments: [] };
+      const result = await getTool(tools, feature.directAction).execute({ attachmentId: 'catalog-image' }, context);
+      assert.equal(result.ok, true, `${feature.id} direct action should succeed: ${JSON.stringify(result).slice(0, 200)}`);
+      assert.equal(context.maidAttachments.length, 1);
       return;
     }
     if (['attachment.read', 'attachment.search', 'attachment.extract', 'attachment.create', 'attachment.pack'].includes(feature.id)) {

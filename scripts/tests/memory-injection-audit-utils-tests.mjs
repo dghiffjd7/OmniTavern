@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import {
   buildMemoryPlanAudit,
   buildRequestInjectionAudit,
+  estimatePromptMessagesTokens,
+  estimatePromptToolsTokens,
   formatInjectionAuditText,
   promptMessagesContainNonTextContent,
 } from '../../src/scripts/memory/memory-injection-audit-utils.js';
@@ -155,4 +157,22 @@ console.log('ok - state over-quota guardrail warning is surfaced in audit text a
     { role: 'user', content: [{ type: 'input_audio', input_audio: { data: 'x' } }] },
   ]), true);
   console.log('ok - non-text prompt content is detected for calibration exclusion');
+}
+
+{
+  // 工具定义与历史里的工具调用也算输入（供应方 usage 含这两部分），只算正文会少估、把校准系数顶高
+  const call = { id: 'c1', type: 'function', function: { name: 'soliumbra_reply', arguments: '{"game_content":"测试连通性，一切正常"}' } };
+  const plain = [{ role: 'user', content: '继续' }, { role: 'assistant', content: null }];
+  const withCall = [{ role: 'user', content: '继续' }, { role: 'assistant', content: null, tool_calls: [call] }];
+  assert.ok(estimatePromptMessagesTokens(withCall) > estimatePromptMessagesTokens(plain), 'tool call arguments are counted');
+  const tools = [{ type: 'function', function: { name: 'context', description: '世界设定与人设原文'.repeat(40), parameters: { type: 'object', properties: {} } } }];
+  const toolTokens = estimatePromptToolsTokens(tools, { mode: 'rough', coefficient: 1.5 });
+  assert.equal(toolTokens, estimateTokens(JSON.stringify(tools), { mode: 'rough', coefficient: 1.5 }));
+  assert.equal(estimatePromptToolsTokens([]), 0);
+  assert.equal(estimatePromptToolsTokens(undefined), 0);
+  const tokenMode = { mode: 'rough', coefficient: 1.5 };
+  const audit = buildRequestInjectionAudit({ messages: withCall, tools, tokenMode, budget: { inputBudgetTokens: 100000 } });
+  assert.equal(audit.totalEstimateTokens, estimatePromptMessagesTokens(withCall, tokenMode) + toolTokens, 'total includes tool definitions');
+  assert.equal(audit.segments.find(item => item.id === 'fixed')?.usedTokens, audit.totalEstimateTokens, 'tool tokens fall into the existing other-prompts segment, no separate segment');
+  console.log('ok - request estimate counts tool definitions and tool call arguments');
 }

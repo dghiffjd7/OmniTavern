@@ -70,6 +70,7 @@ export const createRealtimeCallAppRuntime = ({
   commitAssistantMessage,
   commitLiveTranscript,
   handleMaidTaskRequest,
+  onMaidTaskDelivery = null,
   getMaidSurface = () => null,
   registerSettingsTarget = registerRealtimeSettingsTarget,
   openVoiceSettings = null,
@@ -133,6 +134,7 @@ export const createRealtimeCallAppRuntime = ({
     commitAssistantMessage,
     commitLiveTranscript,
     handleMaidTaskRequest,
+    onMaidTaskDelivery,
     onStateChange: state => {
       surface()?.renderState?.(state);
       if (state.status === 'idle') surface()?.hide?.();

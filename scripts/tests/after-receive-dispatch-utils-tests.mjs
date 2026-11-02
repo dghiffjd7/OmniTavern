@@ -624,26 +624,39 @@ test('checker malfunction is labeled 格式检查未完成, never 聊天格式�
     '格式检查未完成',
   );
 
-  // 检查完成、真实格式问题：标题保持「聊天格式错误」，status 仍是 failed
+  assert.equal(timedOut.metadata.outcome, undefined, 'a checker fault is not an issues-found outcome');
+
+  // 检查完成、真实格式问题：标题保持「聊天格式错误」；活动记录记为完成并标 issues_found，不算失败
   const realInvalid = buildChatFormatGuardianAgentRun({
     now: 1000,
     sessionId: 'contact:boss',
     message: { id: 'm-guardian', role: 'assistant' },
     result: buildResult({ issueType: 'missing_wrapper', message: '缺少 msg_start 包裹' }),
   });
-  assert.equal(realInvalid.status, 'failed');
+  assert.equal(realInvalid.status, 'succeeded');
+  assert.equal(realInvalid.steps[0].status, 'succeeded');
+  assert.equal(realInvalid.metadata.outcome, 'issues_found');
+  assert.equal(realInvalid.errorMessage, '');
   assert.equal(realInvalid.title, '聊天格式错误');
 
-  // 无 modelReview 的解析器级 invalid（未启用模型检查）：同样保持「聊天格式错误」
-  assert.equal(
-    buildChatFormatGuardianAgentRun({
-      now: 1000,
-      sessionId: 'contact:boss',
-      message: { id: 'm-guardian', role: 'assistant' },
-      result: { status: 'invalid', sourceMessageId: 'm-guardian', errors: ['content is required'], warnings: [] },
-    }).title,
-    '聊天格式错误',
-  );
+  // 无 modelReview 的解析器级 invalid（未启用模型检查）：同样保持「聊天格式错误」，也记为检出问题
+  const parserInvalid = buildChatFormatGuardianAgentRun({
+    now: 1000,
+    sessionId: 'contact:boss',
+    message: { id: 'm-guardian', role: 'assistant' },
+    result: { status: 'invalid', sourceMessageId: 'm-guardian', errors: ['content is required'], warnings: [] },
+  });
+  assert.equal(parserInvalid.title, '聊天格式错误');
+  assert.deepEqual([parserInvalid.status, parserInvalid.metadata.outcome], ['succeeded', 'issues_found']);
+
+  // 检查器返回不合格输出（invalid_output）仍是故障
+  const invalidOutput = buildChatFormatGuardianAgentRun({
+    now: 1000,
+    sessionId: 'contact:boss',
+    message: { id: 'm-guardian', role: 'assistant' },
+    result: { status: 'invalid_output', sourceMessageId: 'm-guardian', errors: ['protocol violation'], warnings: [] },
+  });
+  assert.deepEqual([invalidOutput.status, invalidOutput.metadata.outcome], ['failed', undefined]);
 });
 
 test('runChatFormatGuardianPreview keeps ready results silent by default', () => {

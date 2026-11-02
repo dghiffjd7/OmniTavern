@@ -81,3 +81,13 @@ import { renderMaidMarkdownHtml } from '../../src/scripts/ui/maid-markdown-utils
   assert.ok(renderMaidMarkdownHtml('> 一层\n> > 两层').includes('<blockquote><p>一层</p><blockquote><p>两层</p></blockquote></blockquote>'));
   console.log('ok - maid markdown caps blockquote depth');
 }
+
+{
+  // 词中的底线不是斜体（MCP 工具名、变量名常见 read_wiki_structure 这种写法）；前后不连字时照样是斜体与粗体
+  const html = renderMaidMarkdownHtml('用 read_wiki_structure 查了 snake__case__name，_斜体_ 与 __粗体__ 照常');
+  assert.ok(html.includes('read_wiki_structure'), '词中的单底线保留原文');
+  assert.ok(html.includes('snake__case__name'), '词中的双底线保留原文');
+  assert.ok(html.includes('<em>斜体</em>'));
+  assert.ok(html.includes('<strong>粗体</strong>'));
+  console.log('ok - maid markdown keeps underscores inside words');
+}

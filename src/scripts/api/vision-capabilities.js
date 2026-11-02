@@ -78,11 +78,12 @@ export const getVisionInputCapability = ({ provider = '', model = '', baseUrl = 
   }
 
   if (p === 'anthropic') {
-    const supported = /claude-(?:3|4)/.test(m);
+    // Claude 3 起都能看图；现在的名字是 claude-<型号>-<版本>（claude-sonnet-4-5、claude-opus-5-5），只排除 Claude 2／Instant
+    const supported = /claude/.test(m) && !/claude-(?:instant|[12](?:[.-]|$))/.test(m);
     return {
       supported,
       status: supported ? 'supported' : 'unsupported',
-      reason: supported ? '' : `${label} 暂未识别为可接收图片的 Claude 3/4 系列模型。`,
+      reason: supported ? '' : `${label} 暂未识别为可接收图片的 Claude 模型（Claude 2 与 Instant 不支持图片）。`,
       label,
     };
   }

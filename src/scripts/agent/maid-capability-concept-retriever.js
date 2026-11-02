@@ -325,6 +325,13 @@ export const searchMaidCapabilityConcepts = (
   if (has(/(?:待办|任务清单|\btodo\b)/iu)) {
     add('maid.todo', 100, 'todo');
   }
+  // 明说要随机才交给随机互动（选项常夹在中间，整词别名对不上）；只问哪个好是要建议，不算
+  if (
+    hasPositive(/(?:随便|随机|抓阄|帮我决定)/u) &&
+    hasPositive(/(?:选|挑|抽|决定|还是|二选一)/u)
+  ) {
+    add('maid.random', 100, 'random_choice');
+  }
   const maidMemoryIntent = /(?:女仆(?:自己)?(?:的)?(?:长期)?记忆|你(?:自己)?记得|你记住|你.{0,12}保存的长期(?:语义)?记忆|你的长期(?:语义)?记忆|长期语义记忆|maid(?:\.|\s*)memory)/iu;
   if (
     maidMemoryIntent.test(text) &&

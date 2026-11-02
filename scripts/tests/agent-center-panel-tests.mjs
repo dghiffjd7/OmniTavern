@@ -134,7 +134,7 @@ const agentCenterPanelSource = await readFile(
   assert.equal(view.meta.promptModules, 3);
   assert.equal(view.meta.diagnosticViews, 2);
   assert.equal(view.meta.tools, 1);
-  assert.equal(view.meta.resources, 6);
+  assert.equal(view.meta.resources, 8); // 含「Agent 目录」「MCP 服务」
   assert.equal(view.pending[0].kind, 'contact_profile_update');
   assert.equal(view.agents.find(agent => agent.id === 'reply_check').enabled, true);
   assert.equal(view.agents.find(agent => agent.id === 'image_director').title, '生图 Agent');

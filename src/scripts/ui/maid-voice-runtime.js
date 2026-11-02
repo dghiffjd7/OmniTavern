@@ -5,6 +5,7 @@ import { t } from '../i18n/index.js';
 import { getLocalizedPromptText } from '../i18n/prompt-locale.js';
 import { createMaidVoiceTaskRuntime } from './maid-voice-task-runtime.js';
 import { createMaidVoiceOrbUi } from './maid-voice-orb-ui.js';
+import { resolveMaidLiveControl } from './realtime/realtime-maid-tools.js';
 
 export const buildMaidVoiceSnapshot = ({ inputText = '', maidPrompt, conversationContext, context = {} } = {}) => {
   const messages = buildMaidChatResponderMessages({ input: inputText, maidPrompt, conversationContext, context, voiceConversation: true });
@@ -24,7 +25,9 @@ export const createMaidVoiceRuntime = ({
   // 卡内确认：语音托盘显示本通话任务的待确认项；口头“允许”只算允许一次
   getApproval = () => null, onApprovalDecision = null, confirmApproval = () => false,
   cancelPendingAction = () => false,
-  makeId = () => globalThis.crypto?.randomUUID?.() || `maid-voice-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  onResultCardAction = null,
+  describeTool = () => '',
+  makeId =() => globalThis.crypto?.randomUUID?.() || `maid-voice-${Date.now()}-${Math.random().toString(36).slice(2)}`,
 } = {}) => {
   let recorder = null, activeTarget = null, callState = 'idle', starting = false;
   const runViews = new Map(); // 语音任务 id（= submissionId）→ 最新运行投影
@@ -34,13 +37,16 @@ export const createMaidVoiceRuntime = ({
     onToggleOutputMute: () => { const runtime = getCallAppRuntime()?.runtime; runtime?.setOutputMuted(!runtime.getState().outputMuted); },
     onEnd: () => endCall(), onStopTask: id => tasks.cancel(id),
     onApprovalDecision: payload => onApprovalDecision?.(payload),
+    onResultCardAction: payload => onResultCardAction?.(payload),
     onOpenInput: () => getCommandRuntime()?.open({ autoFocus: false }), onRetry: () => action('realtime'),
   });
   const tasks = createMaidVoiceTaskRuntime({ getCommandRuntime, captureContext: () => structuredClone(getAppContext()),
     prepareSubmission: skillRuntime?.prepare,
     cancelPendingAction,
+    describeTool,
     onChange: state => orb?.setTasks(state),
     onResult: update => { if (isTargetCurrent(update.target)) getCallAppRuntime()?.runtime?.notifyTaskUpdate?.(update); },
+    onProgress: update => { if (isTargetCurrent(update.target)) getCallAppRuntime()?.runtime?.notifyTaskUpdate?.(update); },
     getApproval: taskId => {
       const runId = runViews.get(taskId)?.runId;
       return runId ? getApproval(runId) : null;
@@ -66,6 +72,7 @@ export const createMaidVoiceRuntime = ({
     getCallAppRuntime()?.runtime?.notifyTaskUpdate?.({
       kind: 'confirmation', task_id: meta.task_id, status: 'awaiting_user_confirmation', request: meta.request,
       message: [approval.title, approval.message].filter(Boolean).join('：'), target: meta.target, requestId: meta.requestId,
+      ...(approval.purpose ? { purpose: approval.purpose } : {}),
     });
   };
   const sync = () => getCommandRuntime?.()?.syncVoiceState?.();
@@ -151,13 +158,26 @@ export const createMaidVoiceRuntime = ({
     if (!['realtime', 'stt'].includes(choice)) return;
     await settingsStore.setVoiceInputMode(choice); sync();
   };
+  // 逐轮上下文：任务状态有变化或用户在问进度时才附完整状态；无变化的闲聊只附各任务的 id 与状态
+  const injectedTaskStates = new Map(); // callId → 上次附上的完整状态
+  const taskStateForTurn = (callId, inputText) => {
+    const state = tasks.getState(callId);
+    const full = JSON.stringify(state);
+    if (injectedTaskStates.get(callId) !== full || resolveMaidLiveControl(inputText).action === 'status') {
+      injectedTaskStates.set(callId, full);
+      while (injectedTaskStates.size > 8) injectedTaskStates.delete(injectedTaskStates.keys().next().value);
+      return `Current maid task state (application data): ${full}`;
+    }
+    const brief = { active: state.active.map(task => ({ task_id: task.task_id, status: task.status })), latest: state.latest ? { task_id: state.latest.task_id, status: state.latest.status } : null };
+    return `Maid task state unchanged since the previous turn (application data; use maid_task status for details): ${JSON.stringify(brief)}`;
+  };
   const buildSemanticSnapshot = async ({ target, inputText = '', realtimeHistory = null } = {}) => {
     if (!isTargetCurrent(target)) throw new Error(t('通话已结束'));
     const conversationContext = await prepareConversationContext({ input: inputText, realtimeHistory });
     if (!isTargetCurrent(target)) throw new Error(t('通话已结束'));
     const snapshot = buildMaidVoiceSnapshot({ inputText, maidPrompt: settingsStore.getMaidPrompt(), conversationContext, context: getAppContext() });
     snapshot.realtimeTranscripts = conversationContext?.realtimeTranscripts || [];
-    snapshot.instructions += `\n\nCurrent maid task state (application data): ${JSON.stringify(tasks.getState(target.maidCallId))}`;
+    snapshot.instructions += `\n\n${taskStateForTurn(target.maidCallId, inputText)}`;
     onContextInjected?.({ conversationContext });
     onDebugSnapshot?.({ source: 'maid_realtime', input: inputText, requestPrompt: snapshot.instructions });
     return snapshot;
@@ -183,6 +203,7 @@ export const createMaidVoiceRuntime = ({
     },
     submitText: (text, attachments = []) => tasks.request({ target: activeTarget, requestId: makeId(), args: { action: 'execute', request: text }, attachments, preserveDraft: false, showInput: true }),
     getTasks: () => tasks.getState(),
+    noteTaskDelivery: delivery => tasks.setDelivery(delivery),
     consumeTrace: view => {
       if (view?.source !== 'maid_realtime') return false;
       const taskId = String(view.submissionId || '').trim();

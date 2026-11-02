@@ -11,6 +11,7 @@ import { registerMaidMediaAssetTools } from '../../src/scripts/agent/tools/media
 import { registerAppUiCaptureTools } from '../../src/scripts/agent/tools/app-ui-capture-tools.js';
 import { registerMaidTodoTools } from '../../src/scripts/agent/tools/maid-todo-tools.js';
 import { registerMaidMemoryTools } from '../../src/scripts/agent/tools/maid-memory-tools.js';
+import { registerMaidCapabilityAgentTools } from '../../src/scripts/agent/tools/maid-capability-tools.js';
 import { registerGuideStartFlowTools } from '../../src/scripts/agent/tools/guide-start-flow-tools.js';
 import { registerChatFormatRepairTools } from '../../src/scripts/agent/tools/chat-format-tools.js';
 import { registerWebSearchAgentTools } from '../../src/scripts/agent/tools/web-search-tools.js';
@@ -23,6 +24,8 @@ import { registerAttachmentImportAgentTools } from '../../src/scripts/agent/tool
 const CATALOG_EXEMPT_TOOLS = new Set([
   // 四项内建新手流程由本地意图路由直接启动，不进入女仆模型上下文。
   'guide.start_flow',
+  // 自建文字 Agent 专用：只调用已「始终允许」的 MCP 工具；女仆用 mcp.search／mcp.call。
+  'mcp.lookup',
 ]);
 
 const registry = createAgentToolRegistry();
@@ -35,12 +38,15 @@ registerMaidMediaAssetTools(registry, {});
 registerAppUiCaptureTools(registry, {});
 registerMaidTodoTools(registry, {});
 registerMaidMemoryTools(registry, {});
+registerMaidCapabilityAgentTools(registry, {});
 registerGuideStartFlowTools(registry, {});
 registerChatFormatRepairTools(registry, {});
 registerWebSearchAgentTools(registry, {});
 registerMomentsAgentTools(registry, {});
 registerPresetRegexScriptAgentTools(registry, {});
 registerAttachmentImportAgentTools(registry, {});
+const { registerMcpAgentTools } = await import('../../src/scripts/agent/tools/mcp-tools.js');
+registerMcpAgentTools(registry, {});
 // 通用文件工具经附件识别引入 regex-transfer → logger（加载时读 localStorage）：补最小浏览器环境后再动态加载
 globalThis.localStorage = globalThis.localStorage || { getItem: () => null, setItem() {}, removeItem() {} };
 const { registerAttachmentFileAgentTools } = await import('../../src/scripts/agent/tools/attachment-file-tools.js');

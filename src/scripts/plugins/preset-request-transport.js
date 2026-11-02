@@ -13,6 +13,24 @@ export function isCreativePresetRequest({ presetContext, context = {}, purpose =
     && context.meta?.maidTriggered !== true;
 }
 
+// SPreset「强制提示词后处理」换成本 APP 的模式名；未开启或模式无效时返回 null。
+// 上游 '' 即不处理；本 APP 的后处理不区分 *_tools 变体，按同名模式处理。
+const forcedPostProcessingModes = { '': 'none', claude: 'merge', merge: 'merge', merge_tools: 'merge',
+  semi: 'semi', semi_tools: 'semi', strict: 'strict', strict_tools: 'strict', single: 'single' };
+export function resolveForcedPromptPostProcessing(spreset) {
+  const settings = spreset?.ForcedPostProcessing;
+  const mode = String(settings?.mode ?? '');
+  return settings?.enabled === true && Object.hasOwn(forcedPostProcessingModes, mode)
+    ? forcedPostProcessingModes[mode] : null;
+}
+
+// SPreset 条目条件的结果只改这一轮的开关：返回套用后的新顺序，不改原预设
+export function applyPresetEntryDecisions(order, decisions) {
+  if (!decisions || !Array.isArray(order)) return order;
+  return order.map(item => Object.hasOwn(decisions, item?.identifier)
+    ? { ...item, enabled: decisions[item.identifier] } : item);
+}
+
 const family = provider => ['gemini', 'makersuite', 'vertexai'].includes(provider)
   ? 'gemini' : provider === 'anthropic' ? 'anthropic' : 'openai';
 const canonicalTools = tools => (Array.isArray(tools) ? tools : []).flatMap(tool => {
@@ -96,7 +114,22 @@ function makeQueue() {
 // Only serializable request data enters the Worker; connection URLs, credentials,
 // native request IDs, abort signals and provider callbacks stay with the host.
 export class PresetRequestTransport {
-  constructor({ post, onTimeout }) { this.post = post; this.onTimeout = onTimeout; this.jobs = new Map(); this.seq = 0; }
+  constructor({ post, onTimeout }) {
+    this.post = post; this.onTimeout = onTimeout; this.jobs = new Map(); this.conditions = new Map(); this.seq = 0;
+  }
+  // SPreset 条目条件交给 Worker 执行，得到 { decisions: { 标识: 是否启用 }, failures }
+  evaluateEntryConditions(payload, { timeoutMs = 15000 } = {}) {
+    const id = 'pe_' + Date.now().toString(36) + '_' + (++this.seq);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.conditions.delete(id);
+        reject(new Error('预设条目条件执行超时'));
+        this.onTimeout?.();
+      }, timeoutMs);
+      this.conditions.set(id, { resolve, reject, timer });
+      this.post({ ...payload, type: 'preset_request', id, event: 'entry_conditions' });
+    });
+  }
   async prepare(payload, { signal, timeoutMs = 15000 } = {}) {
     if (signal?.aborted) throw abortError();
     const id = 'pr_' + Date.now().toString(36) + '_' + (++this.seq);
@@ -141,6 +174,13 @@ export class PresetRequestTransport {
   }
   handle(msg) {
     if (msg.type !== 'preset_request') return false;
+    const condition = this.conditions.get(msg.id);
+    if (condition) {
+      this.conditions.delete(msg.id); clearTimeout(condition.timer);
+      if (msg.event === 'error') condition.reject(new Error(msg.error || '预设条目条件执行失败'));
+      else condition.resolve({ decisions: msg.decisions || {}, failures: msg.failures || [] });
+      return true;
+    }
     const job = this.jobs.get(msg.id);
     if (!job) return true;
     if (msg.event === 'prepared') {
@@ -151,7 +191,11 @@ export class PresetRequestTransport {
     else if (msg.event === 'error') this.finish(job, new Error(msg.error || '预设请求处理失败'));
     return true;
   }
-  reset(error = new Error('脚本运行器已重启')) { for (const job of this.jobs.values()) this.finish(job, error); }
+  reset(error = new Error('脚本运行器已重启')) {
+    for (const job of this.jobs.values()) this.finish(job, error);
+    for (const condition of this.conditions.values()) { clearTimeout(condition.timer); condition.reject(error); }
+    this.conditions.clear();
+  }
 }
 
 // Convert provider tool deltas to an OpenAI-compatible virtual response for

@@ -59,11 +59,21 @@ const saveKv = async (name, data) => {
   }
 };
 
+// 酒馆助手在脚本配置里声明的按钮：运行时据此绘制，导出预设时原样带回
+const normalizeScriptButton = (raw) => {
+  if (!raw || typeof raw !== 'object' || !Array.isArray(raw.buttons)) return null;
+  const buttons = raw.buttons
+    .map(item => ({ name: String(item?.name || '').trim(), visible: item?.visible !== false }))
+    .filter(item => item.name);
+  return { enabled: raw.enabled !== false, buttons };
+};
+
 const normalizeScript = (raw = {}, overrides = {}) => {
   const base = raw && typeof raw === 'object' ? raw : {};
   const schemaOnly = base.schemaOnly === true;
   const content = String(base.content || '');
   const compatibility = analyzeScriptCompatibility(content);
+  const button = normalizeScriptButton(base.button);
   return {
     id: String(base.id || overrides.id || genId('script')),
     name: String(base.name || overrides.name || '未命名脚本').trim() || '未命名脚本',
@@ -78,6 +88,7 @@ const normalizeScript = (raw = {}, overrides = {}) => {
     updatedAt: Date.now(),
     source: String(base.source || overrides.source || 'user'),
     compatibility,
+    ...(button ? { button } : {}),
   };
 };
 
@@ -95,6 +106,20 @@ const flattenScriptTrees = (list = []) => {
     out.push(item);
   }
   return out;
+};
+
+// 早先导入时没保留按钮声明；预设里还留着原始脚本，按 ID 补回（只读，不写回存储）
+export const fillDeclaredScriptButtons = (scripts = [], originals = []) => {
+  const declared = new Map();
+  flattenScriptTrees(originals).forEach((item) => {
+    const id = String(item?.id || '').trim();
+    const button = normalizeScriptButton(item?.button);
+    if (id && button) declared.set(id, button);
+  });
+  if (!declared.size) return scripts;
+  return scripts.map(script => (script?.button || !declared.has(String(script?.id || ''))
+    ? script
+    : { ...script, button: declared.get(String(script.id)) }));
 };
 
 const makeDefaultState = () => ({

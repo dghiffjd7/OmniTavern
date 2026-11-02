@@ -1,4 +1,5 @@
-const SCRIPT_COMPATIBILITY_VERSION = 1;
+// 判定规则改了就加一，已存的判定结果会重新计算
+export const SCRIPT_COMPATIBILITY_VERSION = 2;
 
 const scanJavascriptSource = (value) => {
   const source = String(value || '');
@@ -100,7 +101,8 @@ export const analyzeScriptCompatibility = (scriptOrContent = '') => {
   const assignsAssetUrl = /(?:\.|\?\.)\s*(?:src|href)\s*=/.test(code);
   const injectsDomAsset = /(?:\.|\?\.)\s*(?:appendChild|append|prepend|insertBefore)\s*\(/.test(code);
   const remoteAssetLoader = hasRemoteUrl && createsDomAsset && assignsAssetUrl && injectsDomAsset;
-  const nativeExtensionApi = /\b(?:AutoCardUpdaterAPI|extension_settings|saveSettingsDebounced|registerExtension)\b/.test(code);
+  // saveSettingsDebounced 由 SillyTavern.getContext() 提供（酒馆助手脚本常经 context 呼叫），不当作外部扩展的信号
+  const nativeExtensionApi = /\b(?:AutoCardUpdaterAPI|extension_settings|registerExtension)\b/.test(code);
   const topLevelAwait = hasTopLevelAwait(content);
   const reasons = [];
   if (hostDomAccess) reasons.push('host_dom_access');

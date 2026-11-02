@@ -1,6 +1,7 @@
 // One command submission, shared by the input bar and the continuous voice task queue.
 import { t } from '../i18n/index.js';
 import { captureMaidTextApprovalScope, sameMaidTextApprovalScope } from './maid-text-approval-reply.js';
+import { collectMaidResultCards } from '../agent/maid-result-cards.js';
 export const createMaidCommandSubmit = ({
   getVoiceRuntime, getOnboardingRuntime, matchMaidIntent, hasConfiguredMaidProfile, resolveMaidRuntimeConfig,
   logger, checkMaidVisionInput, maidSettingsStore, buildAppFeatureSearchContextText, getAppContext,
@@ -114,6 +115,9 @@ export const createMaidCommandSubmit = ({
           source: 'no_model_result',
         });
       }
+      // 结果卡片：只取成功步骤的工具返回；文字回复区与语音托盘都从这里读
+      const cards = collectMaidResultCards(result?.steps);
+      if (cards.length && result && typeof result === 'object') result.cards = cards;
       if (controls.source === 'maid_realtime') return result;
       // 导入附件后提供「打开」按钮（按成功的导入步骤生成）
       const importActions = buildResultActions?.(result) || [];

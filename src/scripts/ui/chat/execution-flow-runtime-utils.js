@@ -369,7 +369,8 @@ const injectStyle = (documentRef) => {
   scrollbar-width: thin;
   overscroll-behavior: contain;
 }
-.exec-flow-stream .mrc { box-shadow: none; }
+/* 卡片自己 overflow:hidden，弹性项目会被压到比内容矮（确认按钮被裁掉）；不许压缩，改由面板滚动 */
+.exec-flow-stream .mrc { box-shadow: none; flex-shrink: 0; }
 body[data-reduced-motion='on'] .exec-flow-dot { animation: none !important; }
 body[data-reduced-motion='on'] .exec-flow-root::after { animation: none !important; opacity: 0.72; }
 @media (prefers-reduced-motion: reduce) {

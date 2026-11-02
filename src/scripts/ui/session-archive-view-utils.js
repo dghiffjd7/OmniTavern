@@ -1,5 +1,48 @@
 const normalizeArchiveQuery = value => String(value || '').trim().toLowerCase();
 
+// 正文命中片段：单行显示，关键词前只留 8 字、后取 40 字，窄屏也看得到高亮；空白折叠成一个空格
+const buildArchiveHitSnippet = ({ raw = '', lower = '' } = {}, q = '') => {
+  const idx = lower.indexOf(q);
+  if (idx < 0) return null;
+  const start = Math.max(0, idx - 8);
+  const end = Math.min(raw.length, idx + q.length + 40);
+  const flat = value => value.replace(/\s+/g, ' ');
+  return {
+    before: `${start > 0 ? '…' : ''}${flat(raw.slice(start, idx))}`,
+    hit: flat(raw.slice(idx, idx + q.length)),
+    after: `${flat(raw.slice(idx + q.length, end))}${end < raw.length ? '…' : ''}`,
+  };
+};
+
+const renderArchiveHit = (entry, snippet, documentRef) => {
+  if (!snippet) {
+    if (entry.hitEl?.style) entry.hitEl.style.display = 'none';
+    return;
+  }
+  if (!documentRef?.createElement) return;
+  if (!entry.hitEl) {
+    if (!entry.info?.appendChild) return;
+    const hitEl = documentRef.createElement('div');
+    hitEl.className = 'session-archive-hit';
+    const label = documentRef.createElement('span');
+    label.style.cssText = 'margin-right:6px; font-weight:600;';
+    label.textContent = '正文';
+    const text = documentRef.createElement('span');
+    text.setAttribute('data-i18n-skip', '');
+    hitEl.appendChild(label);
+    hitEl.appendChild(text);
+    hitEl.style.cssText = 'margin-top:2px; font-size:12px; color:var(--app-text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;';
+    entry.info.appendChild(hitEl);
+    entry.hitEl = hitEl;
+    entry.hitText = text;
+  }
+  entry.hitEl.style.display = '';
+  const mark = documentRef.createElement('mark');
+  mark.style.cssText = 'background:var(--app-accent-soft); color:var(--app-text-primary); font-weight:700; border-radius:3px; padding:0 1px;';
+  mark.textContent = snippet.hit;
+  entry.hitText.replaceChildren(snippet.before, mark, snippet.after);
+};
+
 const archiveMatchesQuery = ({ archive = {}, dateText = '', messageCount = 0, isCurrent = false } = {}, query = '', contentText = '') => {
   const q = normalizeArchiveQuery(query);
   if (!q) return true;
@@ -224,20 +267,8 @@ export const renderSessionArchivesSection = ({
       const matched = archiveMatchesQuery(entry, query, indexed?.lower || '');
       if (matched) visible += 1;
       if (entry.row?.style) entry.row.style.display = matched ? '' : 'none';
-      if (entry.row) {
-        // 正文命中时用 title 提示片段，帮助定位是哪份存档
-        let hint = '';
-        if (q && matched && indexed?.lower) {
-          const idx = indexed.lower.indexOf(q);
-          if (idx >= 0) {
-            const start = Math.max(0, idx - 24);
-            const end = Math.min(indexed.raw.length, idx + q.length + 24);
-            hint = `正文：${start > 0 ? '…' : ''}${indexed.raw.slice(start, end).replace(/\s+/g, ' ')}${end < indexed.raw.length ? '…' : ''}`;
-          }
-        }
-        if (hint) entry.row.title = hint;
-        else if (entry.row.title) entry.row.removeAttribute?.('title');
-      }
+      // 正文命中时在存档名下显示片段并高亮关键词，帮助定位是哪份存档
+      renderArchiveHit(entry, q && matched && indexed?.lower ? buildArchiveHitSnippet(indexed, q) : null, documentRef);
     }
     if (management?.count) {
       management.count.textContent = q ? `${visible} / ${archives.length}` : `${archives.length} 份`;
@@ -251,7 +282,7 @@ export const renderSessionArchivesSection = ({
   };
 
   if (shouldRenderCurrent) {
-    const { row } = createArchiveRow({
+    const { row, info } = createArchiveRow({
       archiveId: '',
       archiveName: '当前聊天',
       isCurrent: true,
@@ -269,6 +300,7 @@ export const renderSessionArchivesSection = ({
     if (row) {
       entries.push({
         row,
+        info,
         archive: { id: '', name: '当前聊天' },
         dateText: '当前可见线程',
         messageCount: currentMessageCount,
@@ -282,7 +314,7 @@ export const renderSessionArchivesSection = ({
     const dateText = new Date(archive.timestamp).toLocaleString();
     const messageCount = Number(archive.messageCount || (Array.isArray(archive.messages) ? archive.messages.length : 0)) || 0;
     const isCurrent = archive.id === currentId;
-    const { row } = createArchiveRow({
+    const { row, info } = createArchiveRow({
       archiveId: archive.id,
       archiveName: archive.name,
       isCurrent,
@@ -362,7 +394,7 @@ export const renderSessionArchivesSection = ({
       },
     });
     if (row) {
-      entries.push({ row, archive, dateText, messageCount, isCurrent });
+      entries.push({ row, info, archive, dateText, messageCount, isCurrent });
       container.appendChild(row);
     }
   });

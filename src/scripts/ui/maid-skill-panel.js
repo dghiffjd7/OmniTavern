@@ -6,7 +6,18 @@ import { maidSkillMessage } from './maid-skill-messages.js';
 import { readMaidSkillImportFiles, commitMaidSkillImport, exportMaidSkillMarkdown, exportMaidSkillPackage } from './maid-skill-transfer.js';
 import { skillElement as el, skillButton as button, skillUserText as userText, injectMaidSkillStyle, saveMaidSkillFile, appendMaidSkillSourceDetails } from './maid-skill-ui.js';
 
-export const createMaidSkillPanel = ({ store, documentRef: doc = document, listFeatures = () => [], onUseSkill = null, confirm = appConfirm, saveFile = saveMaidSkillFile } = {}) => {
+// 内置能力图标（线宽 2，和技能页其他图标一样粗）
+const CAPABILITY_ICONS = {
+  random: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3.5"/><circle cx="9" cy="9" r="1.1" fill="currentColor"/><circle cx="15" cy="9" r="1.1" fill="currentColor"/><circle cx="12" cy="12" r="1.1" fill="currentColor"/><circle cx="9" cy="15" r="1.1" fill="currentColor"/><circle cx="15" cy="15" r="1.1" fill="currentColor"/></svg>',
+};
+const formatUsedAt = (at) => {
+  const date = new Date(at), today = new Date();
+  const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return date.toDateString() === today.toDateString() ? t('今天 {time}', { time }) : `${date.toLocaleDateString()} ${time}`;
+};
+
+// capabilities：内置能力的开关来源 { list, setEnabled, subscribe }（计划：放在技能页顶部，筛选同时作用于能力与技能）
+export const createMaidSkillPanel = ({ store, documentRef: doc = document, listFeatures = () => [], onUseSkill = null, confirm = appConfirm, saveFile = saveMaidSkillFile, capabilities = null } = {}) => {
   let root, status, view = 'list', draft = null, original = '', saveOptions = {}, busy = false, refreshList = null;
   let disableBuiltin = true, importEntries = null;
   const exported = new Set();
@@ -196,7 +207,33 @@ export const createMaidSkillPanel = ({ store, documentRef: doc = document, listF
     let filter = 'all';
     searchbar.append(search); select(searchbar, t('筛选'), [['all', t('全部')], ['custom', t('自定义')], ['builtin', t('内置')], ['enabled', t('已启用')], ['disabled', t('已停用')]], filter, value => { filter = value; refreshList(); });
     const summary = el(doc, 'div', '', 'maid-skill-summary'), rows = el(doc, 'div', '', 'maid-skill-list');
-    root.append(el(doc, 'p', t('告诉女仆如何处理一类任务；自动选用或在输入框手动指定。'), 'maid-skill-muted maid-skill-intro'), summary, searchbar, rows);
+    const capabilityHead = el(doc, 'h4', t('内置能力'), 'maid-skill-group-title'), capabilityRows = el(doc, 'div', '', 'maid-skill-list maid-skill-capabilities');
+    const skillHead = el(doc, 'h4', t('技能'), 'maid-skill-group-title');
+    root.append(el(doc, 'p', t('告诉女仆如何处理一类任务；自动选用或在输入框手动指定。'), 'maid-skill-muted maid-skill-intro'), summary, searchbar,
+      ...(capabilities ? [capabilityHead, capabilityRows, skillHead] : []), rows);
+    const renderCapabilities = () => {
+      const query = search.value.toLowerCase();
+      const visible = capabilities.list().filter(item => (filter === 'all' || filter === 'builtin' || filter === 'enabled' && item.enabled || filter === 'disabled' && !item.enabled)
+        && `${t(item.title)} ${t(item.subtitle)} ${item.title}`.toLowerCase().includes(query));
+      capabilityRows.replaceChildren();
+      capabilityHead.hidden = capabilityRows.hidden = skillHead.hidden = !visible.length;
+      for (const item of visible) {
+        const row = el(doc, 'div', '', `maid-skill-row is-capability${item.enabled ? '' : ' is-disabled'}`);
+        const icon = el(doc, 'span', '', 'maid-skill-capability-icon'); icon.setAttribute('aria-hidden', 'true'); icon.innerHTML = CAPABILITY_ICONS[item.id] || '';
+        const copy = el(doc, 'div', '', 'maid-skill-copy');
+        copy.append(el(doc, 'p', t(item.title), 'maid-skill-capability-title'), el(doc, 'p', t(item.subtitle), 'maid-skill-muted maid-skill-description'));
+        if (item.enabled && item.lastUsedAt) copy.append(el(doc, 'p', t('上次使用 · {time}', { time: formatUsedAt(item.lastUsedAt) }), 'maid-skill-muted maid-skill-capability-used'));
+        const actions = el(doc, 'div', '', 'maid-skill-row-actions');
+        const toggle = check(actions, t('启用'), item.enabled, enabled => run(async () => {
+          try {
+            const result = await capabilities.setEnabled(item.id, enabled);
+            if (!result?.ok) message(t('保存失败，开关没有改动'), true);
+          } finally { refreshList?.(); }
+        }), 'maid-skill-switch');
+        toggle.setAttribute('aria-label', `${t('启用')} ${t(item.title)}`);
+        row.append(icon, copy, actions); capabilityRows.append(row);
+      }
+    };
     const showSummary = (all, state) => summary.replaceChildren(el(doc, 'span', `${t('自定义')} ${all.filter(item => item.kind === 'custom').length}/100`, 'maid-skill-tag'),
       el(doc, 'span', `${(skillBytes(state) / 1024).toFixed(1)} KiB / 2 MiB`, 'maid-skill-tag'),
       ...(exported.size ? [el(doc, 'span', t('已选 {count} 个用于导出', { count: exported.size }), 'maid-skill-tag is-accent')] : []));
@@ -206,6 +243,7 @@ export const createMaidSkillPanel = ({ store, documentRef: doc = document, listF
         const all = store.list(), state = store.exportState();
         for (const id of exported) if (!all.some(item => item.id === id)) exported.delete(id);
         showSummary(all, state);
+        if (capabilities) renderCapabilities();
         const visible = all.filter(item => (filter === 'all' || filter === item.kind || filter === 'enabled' && item.enabled || filter === 'disabled' && !item.enabled) && `${item.title} ${item.description}`.toLowerCase().includes(search.value.toLowerCase()));
         rows.replaceChildren();
         const broken = (state.quarantined || []).length;
@@ -250,7 +288,10 @@ export const createMaidSkillPanel = ({ store, documentRef: doc = document, listF
     search.addEventListener('input', refreshList); refreshList();
   };
   return {
-    mount(container) { root = container; root.classList.add('maid-skills'); injectMaidSkillStyle(doc); renderList(); store.subscribe(() => refreshList?.()); store.ready.then(() => refreshList?.(), report); },
+    mount(container) {
+      root = container; root.classList.add('maid-skills'); injectMaidSkillStyle(doc); renderList();
+      store.subscribe(() => refreshList?.()); capabilities?.subscribe?.(() => refreshList?.()); store.ready.then(() => refreshList?.(), report);
+    },
     refresh() { if (view === 'list') refreshList?.(); },
     isDirty, beforeLeave,
   };

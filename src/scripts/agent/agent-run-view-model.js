@@ -1,7 +1,7 @@
 const RUNNING_STATUSES = new Set(['queued', 'running', 'waiting_permission']);
 const FAILURE_STATUSES = new Set(['failed', 'cancelled']);
-// 用户主动停止的 run 不计入失败统计/徽章；其余 cancelled（如异常遗留）仍按失败呈现
-const USER_CANCELLED_REASONS = new Set(['user_cancelled', 'user_cancelled_pending_workflow']);
+// 用户主动停止、复核候选在重启后过期（review_expired）的 run 不计入失败统计/徽章；其余 cancelled（如异常遗留）仍按失败呈现
+const USER_CANCELLED_REASONS = new Set(['user_cancelled', 'user_cancelled_pending_workflow', 'review_expired']);
 const isUserCancelledRun = (run = {}) => (
   String(run?.status ?? '').trim() === 'cancelled'
   && (
@@ -277,6 +277,7 @@ export const buildAgentRunSummary = (run = {}, {
     reviewDecision,
     reviewedAt: toFiniteNumber(run.metadata?.reviewedAt, 0),
     reviewReason: trim(run.metadata?.reviewReason),
+    outcome: trim(run.metadata?.outcome),
     createdAt: toFiniteNumber(run.createdAt || run.startedAt, 0),
     updatedAt: toFiniteNumber(run.updatedAt, 0),
     finishedAt: toFiniteNumber(run.finishedAt, 0),
@@ -295,6 +296,8 @@ export const buildAgentRunSummary = (run = {}, {
     continuable: run.metadata?.continuable === true,
     failureCode: trim(run.metadata?.failureCode),
     usage: isPlainObject(run.usage) ? run.usage : null,
+    // 女仆每个动作的结果（检索 → 执行 → 自动验证）；有才带
+    ...(Array.isArray(run.metadata?.outcomes) && run.metadata.outcomes.length ? { outcomes: run.metadata.outcomes } : {}),
   };
 };
 

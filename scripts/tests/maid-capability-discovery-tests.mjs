@@ -50,3 +50,15 @@ const concepts = input => searchMaidCapabilityConcepts(input, { features }).map(
   assert.ok(!concepts('不要新增一个青梅竹马，先看当前角色卡').includes('worldbook.create'));
   console.log('ok - story placeholders preserve creative worldbook intent without creating APP user identities');
 }
+
+{
+  // 明说要随机才走随机互动：选项夹在中间也要找得到；问哪个好（要建议）或没提选择的「随便」「随机」不算
+  for (const input of ['随便帮我在火锅和烧烤里选一个', '火锅还是烧烤，随机选一个吧', '帮我抓阄决定吃面还是吃饭', '奶茶和咖啡我选不出来，帮我随机挑一个', '在这三个里随机抽一个']) {
+    assert.ok(concepts(input).includes('maid.random'), input);
+    assert.ok(ids(input).includes('maid.random'), input);
+  }
+  for (const input of ['帮我在火锅和烧烤里选一个', '火锅和烧烤哪个好', '随便聊聊吧', '随机生成一个角色名字', '帮我选一个好看的头像', '不要随机选，帮我认真挑一个']) {
+    assert.ok(!concepts(input).includes('maid.random'), input);
+  }
+  console.log('ok - explicit random choices retrieve the random capability, advice questions do not');
+}

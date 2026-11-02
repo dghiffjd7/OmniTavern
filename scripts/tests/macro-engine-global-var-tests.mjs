@@ -81,6 +81,26 @@ const makeStore = () => {
 }
 
 {
+  // 写作模式没开共享：getvar／setvar 读写这个聊天的变量（与世界书条件、EJS、脚本一致）；
+  // 聊天里没有这个变量时退回读全局——旧版写作模式一律把 setvar 存在全局
+  const store = makeStore();
+  store.global.set('old', 'g');
+  const engine = new MacroEngine(store);
+  const output = engine.process('{{getvar::seed}}|{{getvar::old}}|{{setvar::hp::3}}{{getvar::hp}}', { sessionId: 'rp:s1', uiMode: 'rp' });
+  assert.equal(output, '4|g|3');
+  assert.deepEqual(store.writes, [['local', 'hp', '3']]);
+  // 开了共享（调用方传 useGlobalVariables）：照旧读写全局
+  const shared = makeStore();
+  assert.equal(new MacroEngine(shared).process('{{getvar::seed}}{{setvar::hp::5}}', { sessionId: 'rp:s1', uiMode: 'rp', useGlobalVariables: true }), '8');
+  assert.deepEqual(shared.writes, [['global', 'hp', '5']]);
+  // 聊天模式不退回全局
+  const chat = makeStore();
+  chat.global.set('old', 'g');
+  assert.equal(new MacroEngine(chat).process('[{{getvar::old}}]', { sessionId: 's1' }), '[]');
+  console.log('ok - 写作模式变量宏按共享设定读写，聊天里没有时退回读全局');
+}
+
+{
   const store = makeStore();
   const engine = new MacroEngine(store);
   const output = engine.process('{{setglobalvar::p::5}}{{getglobalvar::p}}', {

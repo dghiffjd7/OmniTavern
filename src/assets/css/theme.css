@@ -6,6 +6,7 @@
   --app-surface-topbar: rgba(255, 255, 255, 0.92);
   --app-surface-input: rgba(255, 255, 255, 0.92);
   --app-surface-overlay: rgba(15, 23, 42, 0.42);
+  --app-statusbar-scrim: transparent;
   --app-surface-subtle: #f8fafc;
   --app-surface-hover: #f1f5f9;
   --app-text-primary: #0f172a;
@@ -53,6 +54,13 @@
   --pull-handle-anchor-color: color-mix(in srgb, var(--app-accent-primary) 34%, transparent);
   --pull-handle-rest-filter: drop-shadow(0 0 2px color-mix(in srgb, var(--app-accent-primary) 34%, transparent)) drop-shadow(0 1px 1px var(--app-shadow-color));
   --pull-handle-hover-filter: drop-shadow(0 0 3.5px color-mix(in srgb, var(--app-accent-primary) 58%, transparent)) drop-shadow(0 1px 1px var(--app-shadow-color));
+}
+
+/* 状态栏遮罩：系统深色时安卓状态栏图标是白色，浅色界面铺到状态栏后面要垫这层才看得清（电脑上状态栏高度为 0，不显示） */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --app-statusbar-scrim: var(--app-surface-overlay);
+  }
 }
 
 body[data-theme-mode='dark'] {

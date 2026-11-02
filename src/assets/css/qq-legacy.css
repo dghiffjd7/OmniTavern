@@ -5014,9 +5014,10 @@ body[data-ui-mode='rp'] .sticker-panel {
 }
 
 @media (min-width: 600px) {
+  /* 列数由分页决定（--sticker-cols，每页排满两行） */
   .sticker-page {
-    grid-template-columns: repeat(auto-fill, minmax(70px, 100px));
-    grid-template-rows: auto auto;
+    grid-template-columns: repeat(var(--sticker-cols, 4), minmax(70px, 96px));
+    grid-template-rows: repeat(2, auto);
     align-content: center;
     justify-content: center;
     gap: 10px;

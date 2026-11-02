@@ -10,6 +10,7 @@ import { extractMvuTavernHelperScripts } from './mvu-card-conversion-utils.js';
 import { countScripts, extractScriptTree } from './script-tree-utils.js';
 import { detectPresetJsonType } from '../utils/preset-type-detect.js';
 import { CARD_ASSET_SKIP_LABELS, planCardAssetImport } from '../utils/character-card-assets.js';
+import { describeJsonSyntaxError, diagnoseRegexRules, diagnoseScripts } from './attachment-diagnostics.js';
 
 const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10];
 
@@ -98,6 +99,7 @@ const summarizeCharacterCard = (raw, { source, keyword = '' }) => {
       diagnostics.push(`CCv3 资源 ${assetPlan.skipped.length} 个暂不导入（${reasons.join('、')}）`);
     }
   }
+  diagnostics.push(...diagnoseRegexRules(extractCharacterCardRegexScripts(card)), ...diagnoseScripts(extractMvuTavernHelperScripts(card)));
   return {
     format: 'character_card',
     title: card.name,
@@ -118,7 +120,8 @@ const classifyJson = (json, { name }) => {
   const presetType = detectPresetJsonType(json);
   if (presetType) {
     const result = { format: 'preset', title: text(json.name) || fileBaseName(name), details: { presetType },
-      counts: Array.isArray(json.prompts) ? { prompts: json.prompts.length } : {}, diagnostics: [] };
+      counts: Array.isArray(json.prompts) ? { prompts: json.prompts.length } : {},
+      diagnostics: [...diagnoseRegexRules(json.extensions?.regex_scripts), ...diagnoseScripts(extractScriptTree(json))] };
     // 整套预设设定档要选覆盖或合并，只能在预设面板导入
     if (presetType === 'store') return [{ ...result, title: fileBaseName(name), targets: [], diagnostics: ['整套预设设定档需在预设面板导入（选择覆盖或合并）'] }];
     return [result];
@@ -137,14 +140,14 @@ const classifyJson = (json, { name }) => {
   const scripts = extractScriptTree(json);
   if (scripts.length) {
     matches.push({ format: 'script', title: isPlainObject(json) ? text(json.name) || fileBaseName(name) : fileBaseName(name),
-      counts: { scripts: countScripts(scripts) }, diagnostics: [] });
+      counts: { scripts: countScripts(scripts) }, diagnostics: diagnoseScripts(scripts) });
   }
   if (looksLikeRegexFile(json)) {
     const parsed = parseRegexImportData(json);
     const rules = flattenRegexImportRules(parsed).length;
     if (rules) {
       matches.push({ format: 'regex', title: text(parsed.name) || fileBaseName(name),
-        counts: { rules, sets: parsed.sets.length }, diagnostics: [] });
+        counts: { rules, sets: parsed.sets.length }, diagnostics: diagnoseRegexRules(flattenRegexImportRules(parsed)) });
     }
   }
   return matches;
@@ -170,15 +173,20 @@ export const inspectAttachmentFile = ({ name = '', mime = '', bytes = null } = {
     const source = decodeText(data);
     return finish({
       format: 'script', title: fileBaseName(name), counts: { scripts: 1 }, details: { source: 'js', bytes: data.byteLength },
-      diagnostics: source.trim() ? [] : ['脚本文件为空'],
+      diagnostics: source.trim() ? diagnoseScripts([{ name: fileBaseName(name), content: source }]) : ['脚本文件为空'],
     });
   }
   let json;
+  const source = decodeText(data);
   try {
-    json = JSON.parse(decodeText(data));
+    json = JSON.parse(source);
   } catch (error) {
-    return finish({ format: 'invalid_json', title: fileBaseName(name),
-      diagnostics: [`JSON 解析失败：${String(error?.message || error).slice(0, 160)}`] });
+    // 指到出错的行列，并带上前后几行，方便女仆说明和写改好的副本
+    const jsonError = describeJsonSyntaxError(source, error);
+    return finish({ format: 'invalid_json', title: fileBaseName(name), details: { jsonError },
+      diagnostics: [jsonError.line
+        ? `JSON 语法错误：第 ${jsonError.line} 行第 ${jsonError.column} 列（${jsonError.message}）`
+        : `JSON 解析失败：${jsonError.message}`] });
   }
   const matches = classifyJson(json, { name });
   if (!matches.length) return finish({ format: 'unknown_json', title: fileBaseName(name) });

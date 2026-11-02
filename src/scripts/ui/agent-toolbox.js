@@ -1,11 +1,10 @@
 import { t } from '../i18n/index.js';
 import { allowsAgentInvocation, isInputAgent } from '../agent/agent-invocation.js';
-import { agentIconMarkup, getAgentIconName } from '../agent/agent-icons.js';
 import { agentToolContextKey, isAgentToolReply } from '../agent/agent-tool-targets.js';
 import { createMessageClipboardUiRuntime } from './chat/message-clipboard-ui-utils.js';
 import { createFormatRepairPicker } from './chat/format-repair-picker.js';
 import { resolveFormatRepairProfile } from '../agent/format-repair-profiles.js';
-import { createAgentToolboxView, toolboxEscape as e, toolboxButton as button, toolboxNamedIcon, toolboxManagementMarkup } from './agent-toolbox-view.js';
+import { createAgentToolboxView, toolboxEscape as e, toolboxButton as button, toolboxNamedIcon, toolboxManagementMarkup, toolboxIconMarkup, toolboxIconKey } from './agent-toolbox-view.js';
 import { normalizeToolboxPreferences, reconcileToolboxPreferences, getToolboxItems, setToolboxItemVisible,
   isAgentToolToggle, toolboxVisibleCount } from './agent-toolbox-model.js';
 
@@ -15,7 +14,8 @@ const isNote = job => job?.outputMode === 'note' || job?.kind === 'note';
 const sameContext = (a, b) => agentToolContextKey(a) === agentToolContextKey(b);
 const sourceHint = (config, snapshot) => snapshot?.targetMode === 'full' || config.target?.mode === 'full' ? '完整回复' : ['tags', 'regex'].includes(config.target?.mode) ? '指定部分' : '正文';
 
-export const createAgentToolbox = ({ input, actions, getContext, getMessages, getInputSnapshot, openAgent, openCenter, getToolGate = null,
+// userTools：用户工具（list() → [{ id, name, icon }]、iconMarkup(name)、run(id, { messageId })、edit(id)、openSettings()），与 Agent 同排显示
+export const createAgentToolbox = ({ input, actions, getContext, getMessages, getInputSnapshot, openAgent, openCenter, getToolGate = null, userTools = null,
   triggerContainer, anchorEl, targetEventRoot, beforeOpen = () => {}, documentRef = document, storage = globalThis.localStorage } = {}) => {
   const doc = documentRef, win = doc.defaultView, bindings = [], nodes = new Map(), toggling = new Set(), invoking = new Set();
   const clipboard = createMessageClipboardUiRuntime({ documentLike: doc, navigatorLike: win.navigator, execCopyCommand: command => doc.execCommand(command) });
@@ -52,6 +52,7 @@ export const createAgentToolbox = ({ input, actions, getContext, getMessages, ge
   const stopFormatPick = () => { if (formatPicker.active) { formatPicker.stop(); controller?.cancel?.(); } };
   const readCatalog = () => {
     catalog = (actions.listAgentConfigurations({ context: getContext() }) || []).map(record => record.config).filter(config => config && config.kind !== 'archive_naming');
+    if (userTools) catalog = [...catalog, ...(userTools.list() || []).map(tool => ({ id: tool.id, title: tool.name, kind: 'user_tool', enabled: true, icon: tool.icon, iconMarkup: userTools.iconMarkup(tool.icon) }))];
     const next = reconcileToolboxPreferences(prefs, catalog, getContext());
     if (JSON.stringify(next) !== JSON.stringify(prefs)) { prefs = next; savePrefs(); }
     items = getToolboxItems(prefs, catalog, getContext());
@@ -175,7 +176,7 @@ export const createAgentToolbox = ({ input, actions, getContext, getMessages, ge
     cardStamp = stamp;
     const focusedKey = card.contains(doc.activeElement) ? doc.activeElement.dataset.key : '', scrollTop = card.scrollTop;
     const expanded = card.querySelector('.at-hidden-tools')?.open;
-    card.innerHTML = toolboxManagementMarkup({ items, catalog, ordering, shortcut: prefs.shortcut, recording, shortcutError, expanded });
+    card.innerHTML = toolboxManagementMarkup({ items, catalog, ordering, shortcut: prefs.shortcut, recording, shortcutError, expanded, userTools: Boolean(userTools) });
     card.scrollTop = scrollTop;
     if (focusedKey) {
       const control = [...card.querySelectorAll('[data-key]')].find(node => node.dataset.key === focusedKey);
@@ -201,15 +202,16 @@ export const createAgentToolbox = ({ input, actions, getContext, getMessages, ge
     for (const [index, config] of visible.entries()) {
       let node = nodes.get(config.id);
       if (!node) { node = doc.createElement('button'); node.type = 'button'; node.className = 'at-tool'; node.dataset.key = `tool:${config.id}`;
-        node.innerHTML = `${agentIconMarkup(getAgentIconName(config))}<span class="at-tool-state" aria-hidden="true"></span><span class="at-tooltip" aria-hidden="true"></span>`; nodes.set(config.id, node); }
-      const iconName = getAgentIconName(config); if (node.dataset.icon !== iconName) { node.querySelector('svg').outerHTML = agentIconMarkup(iconName); node.dataset.icon = iconName; }
+        node.innerHTML = `${toolboxIconMarkup(config)}<span class="at-tool-state" aria-hidden="true"></span><span class="at-tooltip" aria-hidden="true"></span>`; nodes.set(config.id, node); }
+      const iconName = toolboxIconKey(config); if (node.dataset.icon !== iconName) { node.querySelector('svg').outerHTML = toolboxIconMarkup(config); node.dataset.icon = iconName; }
       if (icons.children[index] !== node) icons.insertBefore(node, icons.children[index] || null);
       const job = jobs.filter(item => item.agentId === config.id && (pendingStates.has(item.status) || item.unread)).at(-1);
       const toggle = isAgentToolToggle(config), state = job?.status || (config.enabled ? 'enabled' : 'disabled');
       node.dataset.status = state; node.dataset.enabled = String(config.enabled); node.disabled = toggling.has(config.id);
       node.toggleAttribute('aria-pressed', toggle); if (toggle) node.setAttribute('aria-pressed', String(config.enabled));
-      node.toggleAttribute('aria-expanded', !toggle); if (!toggle) node.setAttribute('aria-expanded', String(['task', 'profiles'].includes(mode) && selectedId === config.id));
-      const text = `${config.title} · ${t(job ? labels[job.status] || '待查看' : toggle ? config.enabled ? '点击关闭' : '点击开启' : '查看工具')}`;
+      const userTool = config.kind === 'user_tool';
+      node.toggleAttribute('aria-expanded', !toggle && !userTool); if (!toggle && !userTool) node.setAttribute('aria-expanded', String(['task', 'profiles'].includes(mode) && selectedId === config.id));
+      const text = `${config.title} · ${t(job ? labels[job.status] || '待查看' : toggle ? config.enabled ? '点击关闭' : '点击开启' : userTool ? '点击执行' : '查看工具')}`;
       node.setAttribute('aria-label', text); node.querySelector('.at-tooltip').textContent = text;
       node.querySelector('.at-tool-state').textContent = job?.status === 'running' ? '…' : job?.status === 'ready' || job?.unread ? '1' : toggle ? config.enabled ? '✓' : '−' : '';
       node.querySelector('.at-tool-state').hidden = !node.querySelector('.at-tool-state').textContent;
@@ -243,10 +245,10 @@ export const createAgentToolbox = ({ input, actions, getContext, getMessages, ge
     const showLegend = !picking && mode === 'shelf' && !prefs.legendDismissed && (win.matchMedia('(pointer:coarse)').matches || win.innerWidth <= 600);
     legend.hidden = !showLegend;
     if (showLegend) {
-      const markup = `${button('dismiss-legend', '关闭', { icon: 'close' })}<p>${e(t('点图标使用工具，齿轮管理快捷栏。'))}</p><div class="at-legend-list">${shelfTools.slice(0, count).map(config => `<span data-i18n-skip>${agentIconMarkup(getAgentIconName(config))}${e(config.title)}</span>`).join('')}</div>`;
+      const markup = `${button('dismiss-legend', '关闭', { icon: 'close' })}<p>${e(t('点图标使用工具，齿轮管理快捷栏。'))}</p><div class="at-legend-list">${shelfTools.slice(0, count).map(config => `<span data-i18n-skip>${toolboxIconMarkup(config)}${e(config.title)}</span>`).join('')}</div>`;
       if (legend.innerHTML !== markup) legend.innerHTML = markup;
     }
-    if (!items.length && mode === 'shelf' && !picking) { notice.hidden = false; notice.innerHTML = `<span>${e(t('还没有快捷工具'))}</span>${button('center', '添加工具')}`; }
+    if (!items.length && mode === 'shelf' && !picking) { notice.hidden = false; notice.innerHTML = `<span>${e(t('还没有快捷工具'))}</span>${button(userTools ? 'user-tools' : 'center', '添加工具')}`; }
     place();
   };
   const refresh = () => { readCatalog(); win.cancelAnimationFrame(frame); frame = win.requestAnimationFrame(render); };
@@ -377,6 +379,7 @@ export const createAgentToolbox = ({ input, actions, getContext, getMessages, ge
         else focusShelf(selectedId);
       }
       else if (key === 'center') { close(); openCenter(); }
+      else if (key === 'user-tools') { close(); userTools?.openSettings(); }
       else if (key === 'execute') await invoke();
       else if (key === 'new-repair') configure('reply_check', { newRepairProfile: true, repairProfileId: '' });
       else if (key === 'repair-profiles' || key === 'repair-cancel') showTool('reply_check');
@@ -407,13 +410,21 @@ export const createAgentToolbox = ({ input, actions, getContext, getMessages, ge
       else if (key === 'sort') { ordering = !ordering; recording = false; render(); }
       else if (key.startsWith('tool:')) {
         const config = catalog.find(item => item.id === key.slice(5));
-        if (config) {
+        if (config?.kind === 'user_tool') {
+          // 从选字工具栏打开时，用那条消息当目标；否则交给工具自己取最后一条
+          const messageId = selectionSnapshot?.messageId || '';
+          const selection = selectionSnapshot?.target?.text || '';
+          close(); void userTools?.run(config.id, { messageId, selection });
+        } else if (config) {
           if (isAgentToolToggle(config)) await toggle(config);
           else if (['task', 'profiles'].includes(mode) && selectedId === config.id) { hideCard(); focusShelf(config.id); }
           else showTool(config.id);
         }
       }
-      else if (key.startsWith('config:')) configure(key.slice(7));
+      else if (key.startsWith('config:')) {
+        const id = key.slice(7);
+        if (catalog.find(item => item.id === id)?.kind === 'user_tool') { close(); userTools?.edit(id); } else configure(id);
+      }
       else if (key.startsWith('result:')) { const job = runs().find(item => item.id === key.slice(7)); if (job) showTool(job.agentId, job.id); }
       else if (key.startsWith('visible:')) { const id = key.slice(8); prefs = setToolboxItemVisible(prefs, id, !items.some(config => config.id === id), context); savePrefs(); readCatalog(); render(); }
       else if (key.startsWith('up:') || key.startsWith('down:')) {
@@ -490,6 +501,8 @@ export const createAgentToolbox = ({ input, actions, getContext, getMessages, ge
   readCatalog(); render();
   return { open, close, back, refresh, trigger, panel, listRuns: runs, useSelection,
     openRun: (id, runId) => { open(); showTool(id, runId); },
+    openTool: (id, { messageId = '' } = {}) => { open(messageId ? { messageId } : {}); showTool(id); return catalog.some(config => config.id === id); },
+    getShortcut: () => prefs.shortcut,
     captureSelectionIdentity: messageId => actions.captureAgentToolSelectionIdentity?.({ messageId }),
     setSelectionController: value => { controller = value; },
     hasSelectionTools: () => catalog.some(config => !isInputAgent(config) && config.enabled),

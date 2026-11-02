@@ -74,6 +74,7 @@ import {
 } from '../utils/regex-transfer.js';
 import { getPresetStore } from './preset-store-runtime-utils.js';
 import { waitForScriptStoreReady } from './script-runtime-utils.js';
+import { fillDeclaredScriptButtons } from '../storage/script-store.js';
 import {
     applyInjectChipTap,
     buildInjectCardDefs,
@@ -8066,7 +8067,7 @@ export class PresetPanel {
                     const helper = Array.isArray(rawHelper)
                         ? Object.fromEntries(rawHelper)
                         : (rawHelper && typeof rawHelper === 'object' ? deepClone(rawHelper) : {});
-                    helper.scripts = deepClone(boundScripts);
+                    helper.scripts = deepClone(fillDeclaredScriptButtons(boundScripts, helper.scripts));
                     if (!helper.variables || typeof helper.variables !== 'object') helper.variables = {};
                     payload.extensions.tavern_helper = helper;
                 }

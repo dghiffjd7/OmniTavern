@@ -72,6 +72,25 @@ const setupInlineVoiceConfirmation = async () => {
   return { voice, callTarget, queue, notices, shown, approvals, confirmed, cancelledPending, submit, openApproval, reply, cleanup };
 };
 
+{
+  // 持久开启能力的确认：播报带用途，口头“允许”回报“已确认开启”，不说成允许一次
+  const env = await setupInlineVoiceConfirmation();
+  const first = await env.submit('掷两个骰子');
+  const runId = 'approval-run-0';
+  env.voice.consumeTrace({ source: 'maid_realtime', submissionId: first.task_id, runId, terminal: false });
+  const decision = env.approvals.request({
+    title: '开启「随机互动」？', message: '会一直开着', confirmText: '开启', allowAlways: false, danger: false,
+    details: { purpose: 'persistent_enable', capabilityId: 'random', capabilityTitle: '随机互动', revision: 0 },
+  }, { runId, signal: env.queue[0].controller.signal });
+  assert.equal(env.notices.at(-1).purpose, 'persistent_enable', 'the voice model is told this is a persistent enable');
+  const result = await env.reply('允许');
+  assert.equal(result.confirmed, true);
+  assert.match(result.message, /已确认开启「随机互动」/);
+  assert.doesNotMatch(result.message, /允许一次/);
+  assert.equal((await decision).decision, 'allow');
+  await env.cleanup();
+}
+
 for (const action of ['confirm', 'revise']) {
   const env = await setupInlineVoiceConfirmation();
   const first = await env.submit('删除两个项目');
@@ -612,6 +631,42 @@ for (const normalized of [false, true]) {
   await voice.request({ target, inputText: '可以', args: { action: 'confirm', request: '可以' } });
   await tick();
   assert.deepEqual(submitted, ['导入卡建房', '可以'], 'low-risk imported-card confirmation remains lenient');
+}
+{
+  // 通话里有确认在等时，「好的，开启吧」只是在回答确认：不另排新任务，含糊就请用户说「允许」；带着新事情的照常交办
+  const queue = [], approvals = createMaidToolConfirmationRuntime({ canShowInline: () => true });
+  const controller = new AbortController();
+  let seq = 0;
+  const voice = createMaidVoiceTaskRuntime({ makeId: () => `enable-${++seq}`,
+    getCommandRuntime: () => ({ submitVoiceTask: (input, options) => { const done = deferred(); queue.push({ input, options, done }); return done.promise; } }),
+    getApproval: id => approvals.getInline(id), confirmApproval: ids => approvals.confirmByVoice(ids),
+  });
+  const task = await voice.request({ target, args: { action: 'execute', request: '帮我开启随机互动' } });
+  approvals.request({ kind: 'capability_enable', operationType: 'write' }, { runId: task.task_id, signal: controller.signal });
+  for (const reply of ['好的，开启吧', '可以开吧', '开启吧']) {
+    const answer = await voice.request({ target, args: { action: 'execute', request: reply } });
+    assert.equal(answer.message, '请明确说「允许」或「取消」。', reply);
+  }
+  assert.equal(queue.length, 1, 'approval-like replies are not queued as new tasks');
+  await voice.request({ target, args: { action: 'execute', request: '好的，帮我查一下天气' } });
+  assert.equal(queue.length, 2, 'a reply carrying new work is still a new request');
+  controller.abort();
+}
+{
+  // 导入建房仍宽松：「好的，建吧」当作对原清单的确认
+  const submitted = [];
+  let seq = 0;
+  const voice = createMaidVoiceTaskRuntime({ makeId: () => `import-reply-${++seq}`,
+    getCommandRuntime: () => ({ submitVoiceTask: async input => {
+      submitted.push(input);
+      return submitted.length === 1 ? { ok: true, status: 'awaiting_confirmation', pendingWorkflow: { kind: 'imported_card_session_setup' } } : { ok: true };
+    } }),
+  });
+  await voice.request({ target, args: { action: 'execute', request: '导入卡建房' } });
+  await tick();
+  await voice.request({ target, args: { action: 'execute', request: '好的，建吧' } });
+  await tick();
+  assert.deepEqual(submitted, ['导入卡建房', '好的'], 'an approval-like reply confirms the lenient imported-card list');
 }
 console.log('ok - conditional permissions revise, repeated permissions reuse results, text scopes are isolated and imports stay lenient');
 

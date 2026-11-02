@@ -1098,6 +1098,14 @@
   color: var(--prompt-warning);
 }
 
+/* 工具定义不是消息：同色系、虚线框 */
+#prompt-preview-panel .prompt-document-role[data-prompt-role='tool_definition'] strong {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--prompt-warning) 40%, var(--prompt-border));
+  background: color-mix(in srgb, var(--prompt-warning) 4%, var(--prompt-surface));
+  color: var(--prompt-warning);
+}
+
 #prompt-preview-panel .prompt-document-rule {
   height: 1px;
   flex: 1;

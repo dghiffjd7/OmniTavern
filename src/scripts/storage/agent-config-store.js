@@ -5,6 +5,7 @@ import { normalizeAgentIcon } from '../agent/agent-icons.js';
 import { normalizeAgentGenerationSettings } from '../agent/agent-generation-settings.js';
 import { RECAP_AGENT_ID, buildRecapAgentConfig } from '../agent/recap-agent.js';
 import { normalizeFormatRepairProfiles, mergeFormatRepairProfiles, diffFormatRepairProfiles, resolveFormatRepairProfile, formatRepairProfileTooLong } from '../agent/format-repair-profiles.js';
+import { normalizeFormatGuideSource } from '../agent/format-guide-assist.js';
 export const AGENT_CONFIG_KEY = 'agent_config_library_v1';
 export const CONFIGURABLE_AGENT_IDS = ['text_completion', 'reply_check', 'archive_naming'];
 const clone = value => value == null ? value : JSON.parse(JSON.stringify(value));
@@ -60,7 +61,7 @@ export const normalizeAgentConfiguration = (value = {}, id = value.id) => ({
     ...normalizeAgentGenerationSettings({ reasoningMode: 'off', maxTokens: 128, ...value }, id),
   } : {}),
   updatedAt: Number(value.updatedAt) || 0,
-  ...(id === 'reply_check' ? { repairProfiles: normalizeFormatRepairProfiles(value.repairProfiles, value), repairCheckType: value.repairCheckType === 'tableEdit' ? 'tableEdit' : 'custom' } : {}),
+  ...(id === 'reply_check' ? { repairProfiles: normalizeFormatRepairProfiles(value.repairProfiles, value), repairCheckType: value.repairCheckType === 'tableEdit' ? 'tableEdit' : 'custom', formatGuideSource: normalizeFormatGuideSource(value.formatGuideSource) } : {}),
 });
 const normalizeEntry = (entry, id) => ({ updatedAt: Number(entry.updatedAt) || 0,
   ...(entry.deleted === true ? { deleted: true } : entry.follow === true ? { follow: true }

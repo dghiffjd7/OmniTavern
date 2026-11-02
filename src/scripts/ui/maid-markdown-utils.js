@@ -1,4 +1,5 @@
-const INLINE_MARKDOWN_RE = /(`[^`]+`|\[[^\]]+\]\(([^)]+)\)|\*\*[\s\S]+?\*\*|__[\s\S]+?__|~~[\s\S]+?~~|\*[^*\n]+\*|_[^_\n]+_)/g;
+// 底线强调前后不能连着字母数字（read_wiki_structure 这类名称不是斜体）
+const INLINE_MARKDOWN_RE = /(`[^`]+`|\[[^\]]+\]\(([^)]+)\)|\*\*[\s\S]+?\*\*|(?<![A-Za-z0-9_])__[\s\S]+?__(?![A-Za-z0-9_])|~~[\s\S]+?~~|\*[^*\n]+\*|(?<![A-Za-z0-9_])_[^_\n]+_(?![A-Za-z0-9_]))/g;
 
 const escapeHtml = value => String(value ?? '')
   .replace(/&/g, '&amp;')

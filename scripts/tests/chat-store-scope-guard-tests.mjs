@@ -400,3 +400,19 @@ const makeSession = (timestamp = 1) => ({
   assert.equal(Boolean(store.state.contacts['room-b']), true);
   console.log('ok - ContactsStore filters and refuses foreign RP contacts per scope');
 }
+
+{
+  // 脚本 chatMetadata 的引用记在会话上：改名跟着搬并更新 sessionId；删除会话就没了
+  const store = new ChatStore({ scopeId: 'persona_meta_ref' });
+  store.state = { currentId: 'room-a', sessions: { 'room-a': makeSession(1) } };
+  store.currentId = 'room-a';
+  assert.equal(store.getScriptMetadataRef('room-a'), null);
+  assert.equal(store.setScriptMetadataRef('room-a', { key: 'script_chat_metadata_v1__x', sessionId: 'room-a' }), true);
+  assert.deepEqual(store.getScriptMetadataRef('room-a'), { key: 'script_chat_metadata_v1__x', sessionId: 'room-a' });
+  store.rename('room-a', 'room-b');
+  assert.deepEqual(store.getScriptMetadataRef('room-b'), { key: 'script_chat_metadata_v1__x', sessionId: 'room-b' });
+  assert.equal(store.getScriptMetadataRef('room-a'), null);
+  store.delete('room-b');
+  assert.equal(store.getScriptMetadataRef('room-b'), null);
+  console.log('ok - script chat metadata references move with renamed sessions and vanish with deleted ones');
+}

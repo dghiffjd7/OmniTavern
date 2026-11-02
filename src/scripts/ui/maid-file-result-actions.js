@@ -1,5 +1,5 @@
-// 女仆在 APP 内产出文件（写出、打包、从压缩包取出）后，结果里提供「查看」与「附加给女仆」：
-// 查看用只读文本框（可复制）；附加把文件放回女仆输入条，方便接着让女仆处理。
+// 女仆在 APP 内产出文件（写出、打包、从压缩包取出）后，结果里提供「查看」「保存」与「附加给女仆」：
+// 查看用只读文本框（可复制）；保存存到 APP 外（桌面另存为、手机下载文件夹）；附加把文件放回女仆输入条，方便接着让女仆处理。
 import { t } from '../i18n/index.js';
 import { listZipEntries } from '../utils/zip-archive.js';
 
@@ -25,13 +25,18 @@ export const collectMaidOutputFiles = (steps = []) => {
   return Array.from(files.values());
 };
 
-export const buildMaidFileResultActions = (steps = [], { preview = null, attach = null } = {}) => {
+export const buildMaidFileResultActions = (steps = [], { preview = null, save = null, attach = null } = {}) => {
   const files = collectMaidOutputFiles(steps);
   if (!files.length) return [];
   const actions = [];
   if (typeof preview === 'function') {
     files.slice(0, MAX_PREVIEW_ACTIONS).forEach((file) => {
       actions.push({ label: t('查看「{name}」', { name: file.name }), onClick: () => preview(file.attachmentId) });
+    });
+  }
+  if (typeof save === 'function') {
+    files.slice(0, MAX_PREVIEW_ACTIONS).forEach((file) => {
+      actions.push({ label: t('保存「{name}」', { name: file.name }), onClick: () => save(file.attachmentId) });
     });
   }
   if (typeof attach === 'function') {

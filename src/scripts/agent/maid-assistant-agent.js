@@ -65,6 +65,7 @@ import {
 } from './maid-visual-spec.js';
 import { getLocalizedPromptText } from '../i18n/prompt-locale.js';
 import { t } from '../i18n/index.js';
+import { buildMaidStepOutcomes } from './maid-run-outcomes.js';
 
 const trim = (value, fallback = '') => {
   const text = String(value ?? '').trim();
@@ -444,7 +445,7 @@ const summarizeMaidModelCallTiming = (usage = [], promptStartedAt = 0) => (Array
     ...(trim(entry.error) ? { error: trim(entry.error).slice(0, 160) } : {}),
   }));
 
-const createMaidRunTracker = ({ agentTaskRuntime = null, input = '', context = {}, promptStartedAt = 0 } = {}) => {
+const createMaidRunTracker = ({ agentTaskRuntime = null, input = '', context = {}, promptStartedAt = 0, onOutcomes = null } = {}) => {
   const canTrack = Boolean(
     agentTaskRuntime &&
     typeof agentTaskRuntime.startRun === 'function' &&
@@ -600,8 +601,15 @@ const createMaidRunTracker = ({ agentTaskRuntime = null, input = '', context = {
       try { void agentTaskRuntime.flush?.(); } catch {}
       return;
     }
+    const runStatus = cancelled ? 'cancelled' : (ok ? 'succeeded' : 'failed');
+    // 检索 → 执行 → 自动验证 → 结果：每个动作步骤记一条，并挂回它的检索快照
+    const outcomes = buildMaidStepOutcomes(result?.steps, { runStatus });
+    if (outcomes.length) {
+      metadata.outcomes = outcomes;
+      try { onOutcomes?.(outcomes, { runId: run.id, status: runStatus }); } catch {}
+    }
     const finishedRun = agentTaskRuntime.finishRun(run.id, {
-      status: cancelled ? 'cancelled' : (ok ? 'succeeded' : 'failed'),
+      status: runStatus,
       summary,
       errorMessage: ok || cancelled ? '' : truncateForRun(result?.reason || result?.message || ''),
       ...(cancelled ? { cancelReason: 'user_cancelled' } : {}),
@@ -5121,8 +5129,9 @@ export const createMaidAssistantAgent = ({
           context.onStatus({
             stage: ok ? 'observed' : 'repairing',
             // 写死的过程提示用 progress（UI 收进轻量 live 行）；模型生成的话语保持 thinking（正常气泡）
+            // 每完成一步都会显示，不能说成已取得最终结果（多步任务第一步后就出现）
             tone: 'progress',
-            message: ok ? '我已经取得结果，正在整理给你。' : '工具遇到错误，我正在尝试修正参数。',
+            message: ok ? '这一步完成了，接着处理。' : '工具遇到错误，我正在尝试修正参数。',
             steps: clone(steps),
           });
         }
@@ -5645,7 +5654,8 @@ export const createMaidAssistantAgent = ({
         if (usage.outcome !== 'provider_request_failed') tracker?.noteModel?.(usage.model);
       },
     };
-    tracker = createMaidRunTracker({ agentTaskRuntime, input: rawUserInput, context: routedContext, promptStartedAt });
+    tracker = createMaidRunTracker({ agentTaskRuntime, input: rawUserInput, context: routedContext, promptStartedAt,
+      onOutcomes: outcomes => capabilityRoutingRuntime?.observeOutcomes?.(outcomes) });
     if (routedContext.maidSkillContext?.loaded?.length || runContinuation) tracker.ensureRun();
     try {
       const rawResult = await runPromptWithTracker(input, routedContext, tracker, groupWorkflow);

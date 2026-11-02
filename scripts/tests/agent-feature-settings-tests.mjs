@@ -220,7 +220,7 @@ const createStorage = () => {
   assert.match(promptManager.summary, /只读检查提示词/);
   assert.equal(memoryManager.title, '记忆管家');
   assert.equal(memoryManager.implemented, false);
-  assert.match(memoryManager.summary, /只读检查空表/);
+  assert.match(memoryManager.summary, /只读检查空行/);
   console.log('ok - agent feature list merges product copy with saved state');
 }
 

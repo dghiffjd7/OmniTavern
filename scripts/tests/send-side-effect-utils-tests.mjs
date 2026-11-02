@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 
 import {
   commitAssistantReceiveEffects,
@@ -149,6 +150,34 @@ test('dispatchAfterSendEvents logs rejected runtime dispatches without aborting 
   assert.deepEqual(pluginCalls, [
     { event: 'message.after_send', payload: { message: { id: 'm1' }, sessionId: 'session-b' } },
   ]);
+});
+
+test('runAssistantGenerationRequest lets scripts finish generation-start hooks before the context is built', async () => {
+  const calls = [];
+  let release;
+  const result = runAssistantGenerationRequest(
+    { text: 'hi', sessionId: 's' },
+    {
+      beforeBuildContext: () => new Promise((resolve) => {
+        calls.push(['before']);
+        release = () => { calls.push(['before-done']); resolve(); };
+      }),
+      buildContext: (text) => { calls.push(['context', text]); return {}; },
+      appBridge: { generate: () => { calls.push(['generate']); return 'ok'; } },
+    },
+  );
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual(calls, [['before']]);
+  release();
+  assert.equal(await result, 'ok');
+  assert.deepEqual(calls, [['before'], ['before-done'], ['context', 'hi'], ['generate']]);
+});
+
+test('creative sends and previews dispatch script generation-start hooks before building the prompt', async () => {
+  const source = await readFile(new URL('../../src/scripts/ui/app.js', import.meta.url), 'utf8');
+  assert.match(source, /const dispatchScriptGenerationStart = \(\) => \(rpUiMode && !skipScripts\s*\? scriptRuntime\?\.dispatchGenerationStart\?\.\(\{\s*sessionId,\s*type: swipeTarget \? 'swipe' : \(continueTarget \? 'continue' : 'normal'\),\s*dryRun: Boolean\(previewOnly\),\s*input: swipeTarget \|\| continueTarget \? '' : String\(text \|\| ''\),\s*\}\)\s*: null\);/);
+  const calls = source.match(/runAssistantGenerationRequest\(\{[\s\S]*?\}, \{[\s\S]*?beforeBuildContext: dispatchScriptGenerationStart,/g) || [];
+  assert.equal(calls.length, 2, 'both the real send and the preview pass the hook');
 });
 
 test('runAssistantGenerationRequest preserves prompt, context, then bound bridge generate order', async () => {

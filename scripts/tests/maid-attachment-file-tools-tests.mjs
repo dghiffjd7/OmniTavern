@@ -110,3 +110,46 @@ const context = { roleCardId: 'p-test', sessionId: 'rp:p-test' };
   assert.equal(lib.total, library.list().length);
   console.log('ok - attachment.inspect pages archive listings and lists the whole file library');
 }
+
+// attachment.view_image：文件库或压缩包里的图片加到本轮女仆图片附件，下一步模型就能看到
+{
+  const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+  const jpeg = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 4, 5]);
+  const pics = await buildZip([{ path: '图/封面.png', bytes: png }, { path: '图/说明.txt', bytes: text('不是图') }, { path: 'b.jpg', bytes: jpeg }, { path: 'c.png', bytes: png }]);
+  const lib = createMaidFileLibrary();
+  lib.register('pics', { bytes: pics, hash: await sha256Hex(pics), name: '图集.zip', mime: 'application/zip', inspection: { format: 'archive' } });
+  lib.register('solo', { bytes: jpeg, hash: await sha256Hex(jpeg), name: '照片.jpg', mime: 'image/jpeg', inspection: { format: 'image' } });
+  const prepared = [];
+  const visionCalls = [];
+  let visionOk = true;
+  const viewTools = Object.fromEntries(createAttachmentFileAgentTools({
+    getAttachmentRegistry: () => lib,
+    checkVisionSupport: async ({ context: ctx }) => { visionCalls.push(ctx); return visionOk ? { ok: true } : { ok: false, message: '当前模型不能看图' }; },
+    prepareImage: async ({ bytes, mime }) => { prepared.push([mime, bytes.length]); return { dataUrl: `data:image/jpeg;base64,${'A'.repeat(bytes.length)}`, mime: 'image/jpeg' }; },
+    maxRunViews: 2,
+  }).map(tool => [tool.name, tool]));
+  const view = viewTools['attachment.view_image'];
+  const ctx = { maidAttachments: [{ id: 'user-img', kind: 'image', url: 'data:image/png;base64,AA==' }] };
+
+  const fromZip = await view.execute({ attachmentId: 'pics', entry: '图/封面.png' }, ctx);
+  assert.deepEqual([fromZip.ok, fromZip.imageInjected, fromZip.name, fromZip.mime], [true, true, '封面.png', 'image/jpeg']);
+  assert.deepEqual(prepared[0], ['image/png', png.length], 'the image is detected by its bytes and prepared before injection');
+  assert.equal(visionCalls[0], ctx, 'the vision check sees the run context');
+  assert.deepEqual(ctx.maidAttachments.map(item => item.id), ['user-img', 'view:pics:图/封面.png'], 'user images stay; the viewed image is appended');
+  assert.equal(ctx.maidAttachments[1].llmUrl, ctx.maidAttachments[1].url);
+
+  const again = await view.execute({ attachmentId: 'pics', entry: '图/封面.png' }, ctx);
+  assert.equal(again.ok, true);
+  assert.equal(ctx.maidAttachments.length, 2, 'viewing the same image again replaces it');
+  assert.equal((await view.execute({ attachmentId: 'solo' }, ctx)).ok, true, 'a library image can be viewed directly');
+  assert.equal((await view.execute({ attachmentId: 'pics', entry: 'b.jpg' }, ctx)).reason, 'view_image_limit');
+  assert.equal((await view.execute({ attachmentId: 'pics', entry: '图/说明.txt' }, { maidAttachments: [] })).reason, 'not_an_image');
+  assert.equal((await view.execute({ attachmentId: 'pics', entry: '没有.png' }, { maidAttachments: [] })).reason, 'entry_not_found');
+  assert.equal((await view.execute({ attachmentId: 'pics', entry: 'c.png' }, {})).reason, 'image_pool_unavailable');
+  visionOk = false;
+  const blocked = await view.execute({ attachmentId: 'pics', entry: 'c.png' }, { maidAttachments: [] });
+  assert.deepEqual([blocked.reason, blocked.message], ['maid_vision_not_supported', '当前模型不能看图']);
+  const budget = Object.fromEntries(createAttachmentFileAgentTools({ getAttachmentRegistry: () => lib, maxRunImageChars: 10 }).map(tool => [tool.name, tool]));
+  assert.equal((await budget['attachment.view_image'].execute({ attachmentId: 'solo' }, { maidAttachments: [] })).reason, 'view_image_budget_exceeded');
+  console.log('ok - attachment.view_image injects library and archive images into the run within limits');
+}

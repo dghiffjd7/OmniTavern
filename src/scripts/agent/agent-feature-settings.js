@@ -119,13 +119,13 @@ export const AGENT_FEATURE_DEFINITIONS = Object.freeze([
   {
     id: AGENT_FEATURE_IDS.memoryManager,
     title: '记忆管家',
-    summary: '只读检查空表、重复行、跨模式共享范围和待确认写表变更。',
+    summary: '只读检查空行、重复、超出上限、旧模板留下的记忆和共享过多。',
     detailTitle: '记忆管家',
     detail: [
-      '定位是只读审计，不会自动写入或删除记忆。',
-      '后续会输出表格健康度、当前会话注入摘要和清理建议。',
-      '涉及写入时仍走记忆写入预览、确认、提交、撤销流程。',
+      '在 Agent 资源中心 → 记忆总览里按「检查」使用；只用规则，不调用模型，不会改动记忆。',
+      '每条问题附「去处理」，打开对应的表格、共享或模板设置，由用户修改。',
     ],
+    // 手动检查，不是可开关的常驻 Agent，所以不进 Agent 卡片列表（入口在记忆总览）
     implemented: false,
     supportsModel: true,
     modelDefault: 'none',

@@ -99,6 +99,11 @@ const isChatFormatGuardianCheckIncomplete = (review = null) => {
     && issues.every(issue => CHAT_FORMAT_GUARDIAN_CHECK_FAILURE_ISSUE_TYPES.has(trim(issue?.type)));
 };
 
+// 活动记录：检查正常跑完、确实检出格式问题时记为完成（outcome: issues_found），不算失败；
+// 检查器自身故障（invalid_output、请求失败／超时／解析失败）仍记失败。
+const isChatFormatGuardianIssuesFound = (result = null) => trim(result?.status) === 'invalid'
+  && !isChatFormatGuardianCheckIncomplete(result?.modelReview);
+
 const getChatFormatGuardianTitle = (result = null) => {
   if (isChatFormatGuardianCheckIncomplete(result?.modelReview)) return '格式检查未完成';
   const status = trim(result?.status);
@@ -771,7 +776,8 @@ export const buildChatFormatGuardianAgentRun = ({
   const events = list(result?.eventDrafts);
   const errors = list(result?.errors).map(item => trim(item)).filter(Boolean);
   const warnings = list(result?.warnings).map(item => trim(item)).filter(Boolean);
-  const status = getChatFormatGuardianStatus(result?.status);
+  const issuesFound = isChatFormatGuardianIssuesFound(result);
+  const status = issuesFound ? 'succeeded' : getChatFormatGuardianStatus(result?.status);
   const at = toTimestamp(now);
   const sourceMessageId = trim(result?.sourceMessageId || message?.id || sessionId, 'message');
   const runId = part?.runId || buildChatFormatGuardianRunId({ result, message, sessionId });
@@ -806,6 +812,7 @@ export const buildChatFormatGuardianAgentRun = ({
     sourceMessageRole: trim(message?.role),
     protocolParseFailure: message?.meta?.protocolParseFailure === true,
     rawStatus: trim(result?.status),
+    ...(issuesFound ? { outcome: 'issues_found' } : {}),
     sourceTextKind: trim(result?.sourceTextKind),
     hasRawOriginal: result?.hasRawOriginal === true,
     modelReview: summarizeChatFormatModelReview(result?.modelReview, { includeText: false }),

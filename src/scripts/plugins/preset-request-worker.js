@@ -1,7 +1,7 @@
 // Serialized into ScriptRuntime's existing Worker. User processors and fetch
 // middleware run here, never in the application window or a provider client.
 export function createPresetRequestWorker({ send, getFetch, getBaseFetch, getContext,
-  waitUntilReady = async () => {}, dispatch = async (_event, data) => data }) {
+  waitUntilReady = async () => {}, dispatch = async (_event, data) => data, substitute = text => text }) {
   const jobs = new Map();
   const copy = value => JSON.parse(JSON.stringify(value));
   const fail = value => value instanceof Error ? value : new Error(String(value || '预设请求处理失败'));
@@ -20,11 +20,161 @@ export function createPresetRequestWorker({ send, getFetch, getBaseFetch, getCon
       parameters: copy(tool.parameters || { type: 'object', properties: {} }),
     } };
   };
+  // SPreset ChatSquash（聊天合并）：行为对照上游 inject.js，独立实现。
+  // 依赖酒馆内部结构的三项先不支持，遇到时明确报错，不发出与预设设计不同的请求。
+  const squashUnsupported = { separate_chat_history: '仅合并聊天记录', parse_clewd: '解析 clewd 标记', re_split: '重新拆分提示词' };
+  const isPlainTextPart = part => typeof part === 'string' || (part?.type === 'text' && typeof part.text === 'string'
+    && Object.keys(part).every(key => key === 'type' || key === 'text'));
+  // 角色之外带其他字段、带图片等非文字段的消息保持原样，不并进文字
+  const isNativeSquashMessage = (message, roles) => !roles.includes(message.role)
+    || Object.keys(message).some(key => key !== 'role' && key !== 'content' && message[key] != null)
+    || (Array.isArray(message.content) && !message.content.every(isPlainTextPart))
+    || (message.content != null && typeof message.content === 'object' && !Array.isArray(message.content));
+  const removeSquashTag = (messages, tag) => {
+    let found = false;
+    const strip = value => {
+      if (typeof value === 'string') {
+        if (!value.includes(tag)) return value;
+        found = true;
+        return value.split(tag).join('');
+      }
+      if (Array.isArray(value)) return value.map(strip);
+      if (value && typeof value === 'object') for (const key of Object.keys(value)) value[key] = strip(value[key]);
+      return value;
+    };
+    for (const message of messages) if (message && Object.hasOwn(message, 'content')) message.content = strip(message.content);
+    return found;
+  };
+  const squashSPresetMessages = async (messages, squash) => {
+    // 开了条件合并时，prompt 里要有目标标签才合并（标签本身移除）
+    if (squash.conditional_enabled === true) {
+      const tag = String(squash.conditional_tag || '');
+      if (!tag || !removeSquashTag(messages, tag)) return messages;
+    }
+    const unsupported = Object.keys(squashUnsupported).filter(key => squash[key] === true).map(key => squashUnsupported[key]);
+    if (unsupported.length) throw new Error('此预设的 SPreset 聊天合并用到了尚未支持的选项：' + unsupported.join('、') + '；请换用其他预设');
+    const affix = {
+      user: [substitute(squash.user_prefix || ''), substitute(squash.user_suffix || '')],
+      assistant: [substitute(squash.char_prefix || ''), substitute(squash.char_suffix || '')],
+      system: [substitute(squash.prefix_system || ''), substitute(squash.suffix_system || '')],
+    };
+    const roles = Object.keys(affix);
+    const follow = squash.role === 'follow';
+    let squashRole = follow ? (messages[0]?.role || 'user') : (squash.role || 'assistant');
+    const separator = squash.enable_squashed_separator === true && squash.squashed_separator_string
+      ? (squash.squashed_separator_regex === true ? new RegExp(squash.squashed_separator_string) : String(squash.squashed_separator_string))
+      : null;
+    const dropSeparator = text => (separator ? text.replace(separator, '') : text);
+    const hasSeparator = text => (separator instanceof RegExp ? separator.test(text) : Boolean(separator) && text.includes(separator));
+    const process = squash.squashed_post_script_enable === true ? compile(squash.squashed_post_script, '合并后处理') : null;
+    const output = [];
+    let merged = '', lastRole = '';
+    const flush = async () => {
+      if (!merged) return;
+      let text = merged + (lastRole ? affix[lastRole][1] : '');
+      if (process) {
+        text = await process(text);
+        if (typeof text !== 'string') throw new Error('合并后处理必须返回文字');
+      }
+      output.push({ role: squashRole, content: text });
+      merged = ''; lastRole = '';
+    };
+    // 单独成条：先收尾前面合并的段落，跟随角色时改跟这一条
+    const standalone = async message => {
+      await flush();
+      if (follow) squashRole = message.role;
+      lastRole = '';
+      output.push(message);
+    };
+    for (const source of messages) {
+      if (!source) continue;
+      if (isNativeSquashMessage(source, roles)) {
+        const content = source.content;
+        await standalone({ ...source, ...(typeof content === 'string' ? { content: dropSeparator(content) }
+          : Array.isArray(content) ? { content: content.map(part => (typeof part === 'string' ? dropSeparator(part)
+            : isPlainTextPart(part) ? { ...part, text: dropSeparator(part.text) } : part)) } : {}) });
+        continue;
+      }
+      if (!source.content) continue;
+      const text = Array.isArray(source.content)
+        ? source.content.map(part => (typeof part === 'string' ? part : part.text)).join('')
+        : String(source.content);
+      const role = squash.user_role_system === true && source.role === 'system' ? 'user' : source.role;
+      if (hasSeparator(text)) {
+        await standalone({ ...source, role, content: dropSeparator(text) });
+        continue;
+      }
+      merged += role === lastRole ? '\n' : (lastRole ? affix[lastRole][1] : '') + affix[role][0];
+      merged += text;
+      lastRole = role;
+    }
+    await flush();
+    return output;
+  };
+  const applySquashStopStrings = (body, squash) => {
+    if (squash.enable_stop_string !== true || !squash.stop_string) return;
+    let stops;
+    try { stops = JSON.parse(squash.stop_string); } catch { stops = squash.stop_string; }
+    stops = (Array.isArray(stops) ? stops : [stops]).map(String);
+    const current = Array.isArray(body.stop) ? body.stop : typeof body.stop === 'string' ? [body.stop] : [];
+    body.stop = [...current.filter(item => !stops.includes(item)), ...stops];
+  };
+  // SPreset 条目条件：开了条件的条目各跑一次脚本，结果只决定这一轮是否启用；出错或不是布尔值的本轮不启用
+  const evaluateEntryConditions = async msg => {
+    try {
+      await waitUntilReady();
+      const context = getContext();
+      if (context.sessionId !== msg.sessionId || context.openaiPresetId !== msg.presetId) {
+        throw new Error('会话或预设已切换，请重新发起生成');
+      }
+      const decisions = {}, failures = [];
+      for (const entry of msg.entries || []) {
+        try {
+          const result = await compile(entry.spreset_condition_script, '条目条件')({
+            model: String(msg.provider?.model || ''), provider: copy(msg.provider || {}),
+            source: String(msg.provider?.source || ''), type: String(msg.generationType || 'normal'),
+            entry: copy(entry), chat: copy(Array.isArray(context.chat) ? context.chat : []),
+          });
+          if (typeof result !== 'boolean') throw new Error('条目条件必须返回 true 或 false');
+          decisions[entry.identifier] = result;
+        } catch (error) {
+          decisions[entry.identifier] = false;
+          failures.push({ identifier: String(entry.identifier || ''), name: String(entry.name || entry.identifier || ''),
+            error: String(error?.message || error) });
+        }
+      }
+      send({ type: 'preset_request', id: msg.id, event: 'entry_conditions', decisions, failures });
+    } catch (error) {
+      send({ type: 'preset_request', id: msg.id, event: 'error', error: String(error?.message || error) });
+    }
+  };
+  // SPreset 最终请求处理：其他预设脚本都处理完、发出前最后改一次请求；规则照上游
+  const processFinalRequest = async (job, request) => {
+    const draft = copy(request);
+    const result = await compile(job.spreset.FinalRequestProcessing.script, '最终请求处理')({
+      request: draft, provider: copy(job.provider || {}),
+      model: String(request.model ?? job.provider?.model ?? ''),
+      source: String(request.chat_completion_source ?? job.provider?.provider ?? ''),
+      stream: request.stream === true, preview: Boolean(job.preview),
+    });
+    const processed = result === undefined ? draft : result;
+    if (!processed || typeof processed !== 'object' || Array.isArray(processed)) {
+      throw new Error('最终请求处理必须返回请求对象，或直接修改 request 后不返回');
+    }
+    const normalized = JSON.parse(JSON.stringify(processed));
+    // 流式与来源决定了响应的解析方式，改了会按错误的格式读回复
+    if (normalized.stream !== request.stream || normalized.chat_completion_source !== request.chat_completion_source) {
+      throw new Error('最终请求处理不能改变 stream 或 chat_completion_source');
+    }
+    return normalized;
+  };
   const prepareSPreset = async (body, preset, settings) => {
     const squash = settings.ChatSquash || {};
-    // ChatSquash's message postprocessor also runs when merging is disabled.
-    if (squash.enabled === true) throw new Error('此预设启用了尚未兼容的 SPreset 聊天合并；请关闭合并后重试');
-    if (squash.squashed_post_script_enable === true) {
+    if (squash.enabled === true) {
+      body.messages = await squashSPresetMessages(body.messages, squash);
+      applySquashStopStrings(body, squash);
+    } else if (squash.squashed_post_script_enable === true) {
+      // ChatSquash's message postprocessor also runs when merging is disabled.
       const process = compile(squash.squashed_post_script, '预设消息后处理');
       const value = await process(body.messages);
       if (value !== undefined) {
@@ -193,9 +343,13 @@ export function createPresetRequestWorker({ send, getFetch, getBaseFetch, getCon
       // Arbitrary fetch calls still pass guardedFetch's network permission gate.
       const raw = typeof init.body === 'string' ? init.body : await input.clone().text();
       if (raw.length > 1200000) throw new Error('预设请求体过大');
-      const body = JSON.parse(raw);
-      if (!Array.isArray(body.messages) || !body.messages.length) throw new Error('预设请求缺少 messages');
+      let body = JSON.parse(raw);
       job.prepared = true;
+      if (job.spreset?.FinalRequestProcessing?.enabled === true) {
+        try { body = await processFinalRequest(job, body); }
+        catch (error) { throw new Error('SPreset 最终请求处理失败：' + (error?.message || String(error))); }
+      }
+      if (!Array.isArray(body.messages) || !body.messages.length) throw new Error('预设请求缺少 messages');
       const response = new Response(new ReadableStream({ start(controller) { job.input = controller; } }), {
         headers: { 'content-type': job.stream ? 'text/event-stream' : 'application/json' },
       });
@@ -240,6 +394,7 @@ export function createPresetRequestWorker({ send, getFetch, getBaseFetch, getCon
     handle(msg) {
       if (msg.type !== 'preset_request') return false;
       if (msg.event === 'start') { void start(msg); return true; }
+      if (msg.event === 'entry_conditions') { void evaluateEntryConditions(msg); return true; }
       const job = jobs.get(msg.id);
       if (!job) return true;
       if (msg.event === 'cancel' || msg.event === 'error') finish(job, new Error(msg.error || '生成已取消'));

@@ -52,6 +52,15 @@ export const injectMaidSkillStyle = doc => {
 .maid-skill-searchbar .maid-skill-field>span {font-size:12px;color:var(--app-text-secondary,#64748b);white-space:nowrap}
 .maid-skill-searchbar select {width:auto;min-width:108px}
 .maid-skill-list {display:grid;gap:10px}
+.maid-skill-group-title[hidden],.maid-skill-capabilities[hidden] {display:none}
+.maid-skill-group-title {margin:4px 0 8px;font-size:12.5px;font-weight:800;letter-spacing:.02em;color:var(--app-text-secondary,#475569)}
+.maid-skill-capabilities {margin-bottom:18px}
+.maid-skill-row.is-capability {align-items:center}
+.maid-skill-capability-icon {display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;flex:0 0 36px;border-radius:12px;background:rgba(var(--skill-accent-rgb),.09);color:var(--skill-accent)}
+.maid-skill-capability-icon svg {width:20px;height:20px;display:block}
+.maid-skill-row.is-disabled .maid-skill-capability-icon {background:var(--app-surface-subtle,#f1f5f9);color:var(--app-text-muted,#94a3b8)}
+.maid-skill-copy .maid-skill-capability-title {margin:0;font-size:14px;font-weight:800;line-height:1.45}
+.maid-skill-row.is-disabled .maid-skill-capability-title {opacity:.62}
 .maid-skill-row {display:flex;align-items:flex-start;gap:12px;padding:14px 16px;border:1px solid var(--skill-line);border-radius:16px;background:var(--app-surface-card,#fff);box-shadow:0 1px 2px rgba(15,23,42,.03);transition:border-color 160ms ease,box-shadow 160ms ease}
 .maid-skill-row:hover {border-color:rgba(var(--skill-accent-rgb),.28)}
 .maid-skill-row.is-disabled .maid-skill-title,.maid-skill-row.is-disabled .maid-skill-description {opacity:.62}

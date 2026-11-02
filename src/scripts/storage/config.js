@@ -870,6 +870,32 @@ export class ConfigManager {
         this.isLoaded = true;
     }
 
+    // 与 API Key 同一把 AES-GCM 主密钥加密其他凭证（如 MCP 服务的令牌）；没有主密钥时不保存，避免明文落盘
+    async encryptSecret(plainText) {
+        await this.ensureStores();
+        const text = String(plainText || '');
+        if (!text) return '';
+        if (!this.cryptoKey || !crypto?.subtle?.encrypt || !crypto?.getRandomValues) throw new Error('凭证加密不可用，未保存');
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, this.cryptoKey, new TextEncoder().encode(text));
+        const packed = new Uint8Array(iv.byteLength + ct.byteLength);
+        packed.set(iv, 0);
+        packed.set(new Uint8Array(ct), iv.byteLength);
+        return encodeB64(packed);
+    }
+
+    async decryptSecret(cipherText) {
+        await this.ensureStores();
+        if (!cipherText || !this.cryptoKey || !crypto?.subtle?.decrypt) return '';
+        try {
+            const bytes = decodeB64(String(cipherText));
+            const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: bytes.slice(0, 12) }, this.cryptoKey, bytes.slice(12));
+            return new TextDecoder().decode(pt);
+        } catch {
+            return '';
+        }
+    }
+
     async decryptKey(profileId, keyId) {
         await this.ensureStores();
         const pid = profileId || this.getActiveProfileId();

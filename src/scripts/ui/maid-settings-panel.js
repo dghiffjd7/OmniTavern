@@ -11,6 +11,7 @@ import { getAgentReasoningControl } from '../agent/agent-generation-settings.js'
 import { rankModelCandidates } from '../utils/model-candidates.js';
 import { ONBOARDING_TASKS } from './maid-onboarding-flows.js';
 import { appendMaidSkillRunDetails } from './maid-skill-ui.js';
+import { describeMaidBuiltinCapability } from '../agent/tools/maid-capability-tools.js';
 const STYLE_ID = 'maid-settings-panel-style';
 
 const trim = (value, fallback = '') => {
@@ -886,6 +887,11 @@ const injectStyle = (documentRef) => {
   background: color-mix(in srgb, var(--app-warning-text, #b45309) 9%, var(--app-surface-card));
   border-color: color-mix(in srgb, var(--app-warning-text, #b45309) 18%, transparent);
 }
+.maid-settings-run-icon.is-capability {
+  color: var(--app-accent-primary, #2563eb);
+  background: color-mix(in srgb, var(--app-accent-primary, #2563eb) 9%, var(--app-surface-card));
+  border-color: color-mix(in srgb, var(--app-accent-primary, #2563eb) 18%, transparent);
+}
 .maid-settings-rule-icon {
   border-radius: 12px;
   color: var(--app-accent-primary, #2563eb);
@@ -914,6 +920,11 @@ const injectStyle = (documentRef) => {
   color: var(--app-warning-text, #b45309);
   background: color-mix(in srgb, var(--app-warning-text, #b45309) 8%, transparent);
   border-color: color-mix(in srgb, var(--app-warning-text, #b45309) 16%, transparent);
+}
+.maid-settings-status-chip.is-capability {
+  color: var(--app-accent-primary, #2563eb);
+  background: color-mix(in srgb, var(--app-accent-primary, #2563eb) 8%, transparent);
+  border-color: color-mix(in srgb, var(--app-accent-primary, #2563eb) 16%, transparent);
 }
 .maid-settings-prompt-tabs {
   max-width: 100%;
@@ -1550,6 +1561,52 @@ const injectStyle = (documentRef) => {
   border-radius: 9px;
   background: var(--app-surface-subtle, #f8fafc);
 }
+.maid-subagent-budget {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.maid-subagent-budget-input {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  border: 1px solid var(--app-border-default, rgba(148, 163, 184, 0.28));
+  border-radius: 10px;
+  background: var(--app-surface-card, #fff);
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+}
+.maid-subagent-budget-input:focus-within {
+  border-color: rgba(var(--app-accent-rgb, 37, 99, 235), 0.46);
+  box-shadow: 0 0 0 3px rgba(var(--app-accent-rgb, 37, 99, 235), 0.1);
+}
+.maid-subagent-budget-input input {
+  flex: 1;
+  min-width: 0;
+  min-height: 38px;
+  padding: 8px 4px 8px 11px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+.maid-subagent-budget-unit {
+  flex: 0 0 auto;
+  padding: 0 11px 0 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--app-text-muted, #94a3b8);
+}
+.maid-subagent-budget-hint {
+  margin: 4px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--app-text-muted, #94a3b8);
+}
+@media (max-width: 420px) {
+  .maid-subagent-budget { grid-template-columns: minmax(0, 1fr); }
+}
 
 @media (hover: hover) and (pointer: fine) {
   .maid-settings-close:hover {
@@ -1658,8 +1715,18 @@ const injectStyle = (documentRef) => {
     transform: translate3d(0, 18px, 0) scale(0.99);
   }
   .maid-settings-header {
+    position: relative;
     min-height: 72px;
     padding: calc(10px + env(safe-area-inset-top, 0px)) 16px 10px;
+  }
+  /* 系统深色时状态栏图标是白色：在状态栏后垫一层遮罩（同聊天页） */
+  .maid-settings-header::before {
+    content: '';
+    position: absolute;
+    inset: 0 0 auto;
+    height: env(safe-area-inset-top, 0px);
+    background: linear-gradient(180deg, var(--app-statusbar-scrim, transparent) 50%, transparent);
+    pointer-events: none;
   }
   .maid-settings-mark {
     width: 40px;
@@ -1967,6 +2034,8 @@ export const createMaidSettingsPanel = ({
   documentRef = globalThis?.document || null,
   settingsStore = null,
   skillPanel = null,
+  // 对话历史（含结果卡片），见 maid-history-panel.js
+  historyPanel = null,
   listModelProfiles = null,
   listProfileModels = null,
   onOpenApiConfig = null,
@@ -1981,7 +2050,7 @@ export const createMaidSettingsPanel = ({
   clearHistoryContext = null,
   clearMemoryTable = null,
   confirmMemoryAction = null,
-  // 女仆文件库：{ list, usage, remove, clear, preview }（由 APP 注入）
+  // 女仆文件库：{ list, usage, remove, clear, preview, save }（由 APP 注入）
   fileLibrary = null,
   listRuns = null,
   allowRulesStore = null,
@@ -2102,13 +2171,15 @@ export const createMaidSettingsPanel = ({
       main.append(title, meta);
       const previewBtn = createButton(documentRef, 'maid-settings-action', '查看');
       previewBtn.addEventListener?.('click', () => void fileLibrary?.preview?.(file.id));
+      const saveBtn = typeof fileLibrary?.save === 'function' ? createButton(documentRef, 'maid-settings-action', '保存') : null;
+      saveBtn?.addEventListener?.('click', () => void fileLibrary.save(file.id));
       const removeBtn = createButton(documentRef, 'maid-memory-delete', '删除');
       removeBtn.addEventListener?.('click', () => {
         const removed = fileLibrary?.remove?.(file.id);
         setStatus(removed ? '文件已删除' : '删除失败');
         renderFileLibrary();
       });
-      item.append(main, previewBtn, removeBtn);
+      item.append(main, previewBtn, ...(saveBtn ? [saveBtn] : []), removeBtn);
       fileLibraryListEl.appendChild(item);
     });
   };
@@ -2120,6 +2191,33 @@ export const createMaidSettingsPanel = ({
     container.appendChild(empty);
   };
 
+  // 内置能力的开启／关闭也列进最近活动，方便追溯什么时候开的、是谁开的
+  const appendCapabilityChange = (change) => {
+    const item = documentRef.createElement?.('div');
+    item.className = 'maid-settings-list-item is-run';
+    const icon = documentRef.createElement?.('span');
+    icon.className = 'maid-settings-run-icon is-capability';
+    icon.innerHTML = ICONS.bolt;
+    const main = documentRef.createElement?.('div');
+    main.className = 'maid-settings-item-main';
+    const heading = documentRef.createElement?.('div');
+    heading.className = 'maid-settings-item-heading';
+    const title = documentRef.createElement?.('div');
+    title.className = 'maid-settings-item-title';
+    const name = t(describeMaidBuiltinCapability(change.id)?.title || change.id);
+    title.textContent = change.enabled ? t('开启了「{name}」', { name }) : t('关闭了「{name}」', { name });
+    const chip = documentRef.createElement?.('span');
+    chip.className = 'maid-settings-status-chip is-capability';
+    chip.textContent = t(change.source === 'maid_request' ? '女仆请求，已确认' : '在设置里');
+    const time = documentRef.createElement?.('time');
+    time.className = 'maid-settings-item-time';
+    time.textContent = formatRunTime(change.at);
+    heading.append(title, chip, time);
+    main.append(heading);
+    item.append(icon, main);
+    runListEl.appendChild(item);
+  };
+
   const renderRuns = () => {
     if (!runListEl) return;
     clearChildren(runListEl);
@@ -2129,12 +2227,21 @@ export const createMaidSettingsPanel = ({
     } catch (error) {
       logger?.warn?.('maid settings list runs failed', error);
     }
-    if (runCountEl) runCountEl.textContent = String(runs.length);
-    if (!runs.length) {
+    const changes = settingsStore?.getCapabilityLog?.() || [];
+    const entries = [
+      ...runs.map(run => ({ at: Number(run?.updatedAt) || 0, run })),
+      ...changes.map(change => ({ at: change.at, change })),
+    ].sort((a, b) => b.at - a.at).slice(0, 20);
+    if (runCountEl) runCountEl.textContent = String(entries.length);
+    if (!entries.length) {
       appendEmptyItem(runListEl, '还没有女仆任务记录。');
       return;
     }
-    runs.forEach((run) => {
+    entries.forEach(({ run, change }) => {
+      if (change) {
+        appendCapabilityChange(change);
+        return;
+      }
       const item = documentRef.createElement?.('div');
       item.className = 'maid-settings-list-item is-run';
       const status = describeMaidRunStatus(run);
@@ -2543,7 +2650,7 @@ export const createMaidSettingsPanel = ({
     const promptSubtab = tab === 'appKnowledge' || tab === 'historyContext' || tab === 'semanticMemory' || tab === 'memoryTable' || tab === 'lastPrompt' || tab === 'lastResponse' || tab === 'persona'
       ? tab
       : '';
-    const next = promptSubtab ? 'prompt' : (['api', 'prompt', 'skills', 'tasks', 'activity', 'safety'].includes(tab) ? tab : 'api');
+    const next = promptSubtab ? 'prompt' : (['api', 'prompt', 'skills', 'tasks', 'activity', 'history', 'safety'].includes(tab) ? tab : 'api');
     if (next === 'api') {
       try { refreshApiSubSection?.(); } catch {}
     }
@@ -2558,6 +2665,7 @@ export const createMaidSettingsPanel = ({
     });
     if (activeTab === 'prompt') switchPromptTab(promptSubtab || activePromptTab || 'persona');
     if (activeTab === 'skills') skillPanel?.refresh();
+    if (activeTab === 'history') historyPanel?.refresh();
     refresh();
     setStatus('');
   };
@@ -2662,6 +2770,7 @@ export const createMaidSettingsPanel = ({
       ...(skillPanel ? [['skills', '技能', ICONS.tasks]] : []),
       ['tasks', '任务', ICONS.tasks],
       ['activity', '活动', ICONS.activity],
+      ...(historyPanel ? [['history', '历史', ICONS.history]] : []),
       ['safety', '权限', ICONS.shield],
     ].forEach(([key, label, icon]) => {
       const button = createButton(documentRef, 'maid-settings-tab', label);
@@ -2839,7 +2948,7 @@ export const createMaidSettingsPanel = ({
                 <div class="maid-subagent-item${item.id === editingSubAgentId ? ' is-editing' : ''}">
                   <div class="maid-subagent-item-main">
                     <span class="maid-subagent-item-name" data-i18n-skip>${escapeHtml(item.name)}</span>
-                    <span class="maid-subagent-item-meta">${item.skills.length ? item.skills.map(id => `<span>${escapeHtml(MAID_SUB_AGENT_SKILLS.find(s => s.id === id)?.label || id)}</span>`).join(' · ') : '<span>未设标签</span>'}${item.modelOverride ? ` · <code data-i18n-skip>${escapeHtml(item.modelOverride)}</code>` : ''}</span>
+                    <span class="maid-subagent-item-meta">${item.skills.length ? item.skills.map(id => `<span>${escapeHtml(MAID_SUB_AGENT_SKILLS.find(s => s.id === id)?.label || id)}</span>`).join(' · ') : '<span>未设标签</span>'}${item.modelOverride ? ` · <code data-i18n-skip>${escapeHtml(item.modelOverride)}</code>` : ''}${item.timeLimitSeconds || item.maxOutputTokens ? ` · <span>${escapeHtml([item.timeLimitSeconds ? t('上限 {seconds} 秒', { seconds: item.timeLimitSeconds }) : '', item.maxOutputTokens ? t('输出 {tokens} tokens', { tokens: item.maxOutputTokens }) : ''].filter(Boolean).join(' · '))}</span>` : ''}</span>
                   </div>
                   <button type="button" class="maid-settings-action" data-sub-edit="${escapeHtml(item.id)}">编辑</button>
                   <button type="button" class="maid-settings-action" data-sub-remove="${escapeHtml(item.id)}">删除</button>
@@ -2875,6 +2984,20 @@ export const createMaidSettingsPanel = ({
                 <span class="maid-api-field-label">备注</span>
                 <input type="text" class="maid-subagent-input" data-sub-note placeholder="可选，会展示给女仆" maxlength="200" value="${escapeHtml(editing?.note || '')}" />
               </label>
+              <div class="maid-api-field">
+                <span class="maid-api-field-label">委派上限</span>
+                <div class="maid-subagent-budget">
+                  <label class="maid-subagent-budget-input">
+                    <input type="number" data-sub-time-limit inputmode="numeric" min="5" max="600" step="5" placeholder="不另设" aria-label="时间上限（秒）" value="${editing?.timeLimitSeconds ? escapeHtml(String(editing.timeLimitSeconds)) : ''}" />
+                    <span class="maid-subagent-budget-unit">秒</span>
+                  </label>
+                  <label class="maid-subagent-budget-input">
+                    <input type="number" data-sub-max-tokens inputmode="numeric" min="256" max="32000" step="100" placeholder="默认 2400" aria-label="输出上限（tokens）" value="${editing?.maxOutputTokens ? escapeHtml(String(editing.maxOutputTokens)) : ''}" />
+                    <span class="maid-subagent-budget-unit">tokens</span>
+                  </label>
+                </div>
+                <p class="maid-subagent-budget-hint">超过时间上限会停止这次委派，改用女仆主模型；留空表示跟随连线配置的超时、输出默认 2400 tokens。</p>
+              </div>
               <div class="maid-api-form-actions">
                 <button type="button" class="maid-settings-action is-primary" data-sub-add>${editing ? '保存修改' : '添加 Sub-agent'}</button>
                 ${editing ? '<button type="button" class="maid-settings-action" data-sub-cancel-edit>取消编辑</button>' : ''}
@@ -3141,6 +3264,8 @@ export const createMaidSettingsPanel = ({
             modelOverride: chosenModel && chosenModel !== profileModel ? chosenModel : '',
             skills,
             note: apiSection.querySelector('[data-sub-note]')?.value?.trim() || '',
+            timeLimitSeconds: Number(apiSection.querySelector('[data-sub-time-limit]')?.value) || 0,
+            maxOutputTokens: Number(apiSection.querySelector('[data-sub-max-tokens]')?.value) || 0,
           });
           if (!editingSubAgentId && existingCount >= 1) {
             globalThis.toastr?.info?.('提示：配置多个模型时，女仆委派会带来相应的多份模型消耗。');
@@ -3500,12 +3625,16 @@ export const createMaidSettingsPanel = ({
     const skillSection = documentRef.createElement?.('section');
     skillSection.className = 'maid-settings-section';
     skillPanel?.mount(skillSection);
+    const historySection = documentRef.createElement?.('section');
+    historySection.className = 'maid-settings-section';
+    historyPanel?.mount(historySection);
     [
       ['api', apiSection],
       ['prompt', promptSection],
       ...(skillPanel ? [['skills', skillSection]] : []),
       ['tasks', tasksSection],
       ['activity', activitySection],
+      ...(historyPanel ? [['history', historySection]] : []),
       ['safety', safetySection],
     ].forEach(([key, section]) => {
       section.setAttribute?.('id', `maid-settings-section-${key}`);
@@ -3541,6 +3670,9 @@ export const createMaidSettingsPanel = ({
     setStatus('');
     return true;
   };
+
+  // 能力开关变了（设置里或女仆请求开启）：最近活动跟着更新
+  settingsStore?.subscribeCapabilities?.(() => { if (isOpen) renderRuns(); });
 
   return {
     show,

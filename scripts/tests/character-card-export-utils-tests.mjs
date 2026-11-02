@@ -163,3 +163,86 @@ console.log('character-card-export-utils-tests passed');
   assert.equal(rewritten.removedCharacterChunkCount, 2, 'old chara and ccv3 chunks are replaced together');
   console.log('ok - PNG export writes matching chara and ccv3 chunks and .charx keeps only satisfiable assets');
 }
+
+// APNG 角色卡：acTL／fcTL／fdAT 动画块与 chara／ccv3／资源块共存时照常读取，导出时动画块原样保留
+{
+  const { deflateSync } = await import('node:zlib');
+  const { extractCharacterCardFromPng, extractPngEmbeddedAssets } = await import('../../src/scripts/utils/character-card.js');
+  globalThis.localStorage = globalThis.localStorage || { getItem: () => null, setItem() {}, removeItem() {} };
+  globalThis.window = globalThis.window || { addEventListener() {}, removeEventListener() {} };
+  const { inspectAttachmentFile } = await import('../../src/scripts/import/attachment-file-inspector.js');
+  const CRC_TABLE = Array.from({ length: 256 }, (_v, n) => {
+    let c = n;
+    for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    return c >>> 0;
+  });
+  const crc32 = (bytes) => {
+    let c = 0xffffffff;
+    for (const b of bytes) c = CRC_TABLE[(c ^ b) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  };
+  const u32 = value => [(value >>> 24) & 0xff, (value >>> 16) & 0xff, (value >>> 8) & 0xff, value & 0xff];
+  const chunk = (type, data = []) => {
+    const body = Uint8Array.from([...Buffer.from(type, 'latin1'), ...data]);
+    return Uint8Array.from([...u32(data.length), ...body, ...u32(crc32(body))]);
+  };
+  const text = (keyword, value) => chunk('tEXt', [...Buffer.from(`${keyword}\0`, 'latin1'), ...Buffer.from(value, 'latin1')]);
+  const b64 = value => Buffer.from(JSON.stringify(value), 'utf8').toString('base64');
+  const fcTL = seq => chunk('fcTL', [...u32(seq), ...u32(1), ...u32(1), ...u32(0), ...u32(0), 0, 1, 0, 10, 0, 0]);
+  const frame = rgba => [...deflateSync(Buffer.from([0, ...rgba]))];
+  const apng = (textChunks = [], { textFirst = false } = {}) => {
+    const animation = [
+      chunk('acTL', [...u32(2), ...u32(0)]),
+      fcTL(0),
+      chunk('IDAT', frame([255, 0, 0, 255])),
+      fcTL(1),
+      chunk('fdAT', [...u32(2), ...frame([0, 0, 255, 255])]),
+    ];
+    const parts = [
+      Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      chunk('IHDR', [...u32(1), ...u32(1), 8, 6, 0, 0, 0]),
+      ...(textFirst ? [...textChunks, ...animation] : [...animation, ...textChunks]),
+      chunk('IEND'),
+    ];
+    return Uint8Array.from(parts.flatMap(part => [...part]));
+  };
+  const rawChunks = (bytes) => {
+    const out = [];
+    for (let offset = 8; offset + 12 <= bytes.length;) {
+      const length = Buffer.from(bytes.subarray(offset, offset + 4)).readUInt32BE(0);
+      out.push({ type: Buffer.from(bytes.subarray(offset + 4, offset + 8)).toString('latin1'), raw: Buffer.from(bytes.subarray(offset, offset + 12 + length)) });
+      offset += 12 + length;
+    }
+    return out;
+  };
+  const types = bytes => rawChunks(bytes).map(item => item.type);
+  const animationChunks = bytes => rawChunks(bytes).filter(item => ['acTL', 'fcTL', 'IDAT', 'fdAT'].includes(item.type)).map(item => item.raw.toString('hex'));
+  const toBuffer = bytes => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+  const iconApng = apng();
+  const v2 = { spec: 'chara_card_v2', spec_version: '2.0', data: { name: '旧副本', first_mes: 'hi' } };
+  const v3 = { spec: 'chara_card_v3', spec_version: '3.0', data: { name: '动图船长', first_mes: 'hi', assets: [{ type: 'emotion', uri: 'embeded://0', name: 'joy', ext: 'apng' }] } };
+  const card = apng([text('chara', b64(v2)), text('ccv3', b64(v3)), text('chara-ext-asset_:0', Buffer.from(iconApng).toString('base64'))]);
+
+  for (const bytes of [card, apng([text('chara', b64(v2)), text('ccv3', b64(v3))], { textFirst: true })]) {
+    const read = extractCharacterCardFromPng(toBuffer(bytes));
+    assert.deepEqual([read.keyword, read.keywords, read.json.data.name], ['ccv3', ['ccv3', 'chara'], '动图船长']);
+  }
+  const v3Only = extractCharacterCardFromPng(toBuffer(apng([text('ccv3', b64(v3))])));
+  assert.deepEqual([v3Only.keyword, v3Only.keywords, v3Only.json.spec], ['ccv3', ['ccv3'], 'chara_card_v3']);
+
+  const inspected = inspectAttachmentFile({ name: '动图船长.png', mime: 'image/png', bytes: card });
+  assert.deepEqual([inspected.format, inspected.details.pngKeyword, inspected.title], ['character_card', 'ccv3', '动图船长']);
+  assert.equal(inspectAttachmentFile({ name: 'plain.png', mime: 'image/png', bytes: iconApng }).format, 'image', 'an APNG without card text is just an image');
+
+  const assets = extractPngEmbeddedAssets(toBuffer(card), [{ path: '0', ext: 'apng' }]);
+  assert.equal(assets.get('0'), `data:image/png;base64,${Buffer.from(iconApng).toString('base64')}`, 'APNG asset bytes come back unchanged');
+
+  const exported = embedTavernV2CharacterCardInPng(card, v2, { v3Card: v3 });
+  assert.equal(exported.removedCharacterChunkCount, 2, 'old chara and ccv3 chunks are replaced');
+  assert.deepEqual(types(exported.bytes), ['IHDR', 'acTL', 'fcTL', 'IDAT', 'fcTL', 'fdAT', 'tEXt', 'tEXt', 'tEXt', 'IEND']);
+  assert.deepEqual(animationChunks(exported.bytes), animationChunks(card), 'animation chunks keep their bytes and order');
+  const reread = extractCharacterCardFromPng(exported.buffer);
+  assert.deepEqual([reread.keyword, reread.json.data.name], ['ccv3', '动图船长']);
+  assert.equal(extractPngEmbeddedAssets(exported.buffer, [{ path: '0', ext: 'apng' }]).size, 1, 'the asset chunk survives export');
+  console.log('ok - APNG cards: animation chunks coexist with chara/ccv3/asset text and survive export');
+}

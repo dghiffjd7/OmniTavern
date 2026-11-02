@@ -1,3 +1,4 @@
+import { makeTestPdf } from './fixtures/make-test-pdf.mjs';
 import assert from 'node:assert/strict';
 
 globalThis.localStorage = globalThis.localStorage || { getItem: () => null, setItem() {}, removeItem() {} };
@@ -67,7 +68,13 @@ const CONTENT_TYPES = { path: '[Content_Types].xml', bytes: text('<Types/>') };
   const world = await inspect('书.json', text(JSON.stringify({ entries: { 0: { key: ['a'], content: 'x' } } })));
   assert.equal(world.inspection.format, 'worldbook', 'importable JSON keeps its import format');
   assert.equal((await inspect('notes.txt', text('{ not json'))).inspection.format, 'text');
-  assert.equal((await inspect('a.pdf', text('%PDF-1.4 ...'))).unsupported, 'pdf');
+  assert.equal((await inspect('a.pdf', text('%PDF-1.4 ...'))).unsupported, 'pdf_unreadable', 'a broken PDF says why it cannot be read');
+  const pdf = await inspect('论文.pdf', makeTestPdf([['Abstract'], ['Results']]));
+  assert.deepEqual([pdf.inspection.format, pdf.inspection.label, pdf.inspection.counts.pages, pdf.inspection.details.type], ['document', 'PDF', 2, 'pdf']);
+  const pdfText = await createAttachmentTextReader().read({ hash: 'pdf-1', name: '论文.pdf', bytes: makeTestPdf([['Abstract'], ['Results']]) });
+  assert.deepEqual([pdfText.ok, pdfText.kind, pdfText.pages, pdfText.text], [true, 'PDF', 2, '[第 1 页]\nAbstract\n\n[第 2 页]\nResults']);
+  const scanned = await createAttachmentTextReader().read({ hash: 'pdf-2', name: '扫描.pdf', bytes: makeTestPdf([[]]) });
+  assert.equal(scanned.reason, 'pdf_no_text', 'a PDF without a text layer cannot be read as text');
   assert.equal((await inspect('a.bin', Uint8Array.from([0, 1, 2]))).unsupported, 'binary');
 
   const zip = await buildZip([

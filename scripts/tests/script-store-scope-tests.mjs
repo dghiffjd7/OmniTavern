@@ -8,7 +8,8 @@ globalThis.window = globalThis.window || {
   dispatchEvent: () => true,
 };
 
-const { ScriptStore } = await import('../../src/scripts/storage/script-store.js');
+const { ScriptStore, fillDeclaredScriptButtons } = await import('../../src/scripts/storage/script-store.js');
+const { SCRIPT_COMPATIBILITY_VERSION } = await import('../../src/scripts/import/script-capability-preflight.js');
 
 const makeStore = (state) => {
   const store = Object.create(ScriptStore.prototype);
@@ -121,7 +122,7 @@ const emptyState = () => ({
 
 {
   const storedCompatibility = {
-    version: 1,
+    version: SCRIPT_COMPATIBILITY_VERSION,
     level: 'module',
     blocked: false,
     reasons: ['top_level_await'],
@@ -160,4 +161,53 @@ const emptyState = () => ({
   assert.equal(compileCount, 0);
   assert.equal(active[0]?.compatibility?.marker, 'stored-result');
   console.log('ok - active script reads reuse normalized compatibility metadata');
+}
+
+{
+  const store = makeStore(emptyState());
+  const result = await store.importTavernHelperScripts({
+    scope: 'preset',
+    scopeId: 'p1',
+    source: 'preset',
+    scripts: [
+      { id: 'jx', name: '剑仙187', content: 'void 0;', button: { enabled: true, buttons: [{ name: ' 剑仙187 ', visible: true }, { name: '隐藏', visible: false }, { name: '' }, null] } },
+      { type: 'folder', scripts: [{ id: 'off', name: 'off', content: 'void 0;', button: { enabled: false, buttons: [{ name: 'B' }] } }] },
+      { id: 'bad', name: 'bad', content: 'void 0;', button: 'oops' },
+    ],
+  });
+  assert.equal(result.count, 3);
+  const byId = id => store.getScripts('preset', 'p1').find(script => script.id === id);
+  const [jx, off, bad] = ['jx', 'off', 'bad'].map(byId);
+  assert.deepEqual(jx.button, { enabled: true, buttons: [{ name: '剑仙187', visible: true }, { name: '隐藏', visible: false }] });
+  assert.deepEqual(off.button, { enabled: false, buttons: [{ name: 'B', visible: true }] });
+  assert.equal('button' in bad, false);
+  assert.equal(await store.updateScript('preset', 'p1', 'jx', { name: '改名' }), true);
+  assert.deepEqual(byId('jx').button.buttons[0], { name: '剑仙187', visible: true }, 'editing keeps the declaration');
+  console.log('ok - script store keeps TavernHelper button declarations through import and edits');
+}
+
+{
+  const stored = [
+    { id: 'jx', name: '剑仙187', content: 'a' },
+    { id: 'kept', name: 'kept', content: 'b', button: { enabled: true, buttons: [{ name: 'mine', visible: true }] } },
+    { id: 'plain', name: 'plain', content: 'c' },
+  ];
+  const originals = [
+    { id: 'jx', button: { enabled: true, buttons: [{ name: '剑仙187', visible: true }] } },
+    { type: 'folder', scripts: [{ id: 'kept', button: { enabled: true, buttons: [{ name: 'theirs', visible: true }] } }] },
+  ];
+  const filled = fillDeclaredScriptButtons(stored, originals);
+  assert.deepEqual(filled[0].button, { enabled: true, buttons: [{ name: '剑仙187', visible: true }] });
+  assert.equal(filled[1].button.buttons[0].name, 'mine', 'a stored declaration wins');
+  assert.equal('button' in filled[2], false);
+  assert.equal('button' in stored[0], false, 'the stored record is not modified');
+  assert.equal(fillDeclaredScriptButtons(stored, []), stored);
+  console.log('ok - missing button declarations are recovered by script id from the original preset scripts');
+}
+
+{
+  const { readFile } = await import('node:fs/promises');
+  const source = await readFile(new URL('../../src/scripts/ui/preset-panel.js', import.meta.url), 'utf8');
+  assert.match(source, /helper\.scripts = deepClone\(fillDeclaredScriptButtons\(boundScripts, helper\.scripts\)\);/);
+  console.log('ok - preset export writes button declarations back into tavern_helper scripts');
 }

@@ -263,6 +263,8 @@ export class GeneralSettingsPanel {
     this.memoryAdvancedWrap = null;
     this.cleanWallpapersBtn = null;
     this.cleanWallpapersStatus = null;
+    this.compactChatShardsBtn = null;
+    this.compactChatShardsStatus = null;
     this.bundleExportBtn = null;
     this.bundleImportBtn = null;
     this.customBundleExportBtn = null;
@@ -273,9 +275,11 @@ export class GeneralSettingsPanel {
     this.bundleImportInput = null;
     this.openSessionBtn = null;
     this.openMemoryTemplatesBtn = null;
+    this.openUserToolsBtn = null;
     this.externalActions = {
       openSession: null,
       openMemoryTemplates: null,
+      openUserTools: null,
       openConfig: null,
       restartApp: null,
       importExperiencePackFile: null,
@@ -294,6 +298,8 @@ export class GeneralSettingsPanel {
       typeof actions.openSession === 'function' ? actions.openSession : null;
     this.externalActions.openMemoryTemplates =
       typeof actions.openMemoryTemplates === 'function' ? actions.openMemoryTemplates : null;
+    this.externalActions.openUserTools =
+      typeof actions.openUserTools === 'function' ? actions.openUserTools : null;
     this.externalActions.openConfig =
       typeof actions.openConfig === 'function' ? actions.openConfig : null;
     this.externalActions.restartApp =
@@ -916,6 +922,9 @@ export class GeneralSettingsPanel {
     }
     if (this.openMemoryTemplatesBtn) {
       this.openMemoryTemplatesBtn.disabled = typeof this.externalActions.openMemoryTemplates !== 'function';
+    }
+    if (this.openUserToolsBtn) {
+      this.openUserToolsBtn.disabled = typeof this.externalActions.openUserTools !== 'function';
     }
     if (this.customBundleExportBtn) {
       this.customBundleExportBtn.disabled = typeof this.externalActions.exportCustomBundle !== 'function';
@@ -2492,6 +2501,7 @@ export class GeneralSettingsPanel {
           <div class="general-settings-shortcut-grid">
             <button id="general-open-session" class="general-settings-shortcut-btn">💬 会话</button>
             <button id="general-open-memory-templates" data-maid-guide-target="general-memory-templates" class="general-settings-shortcut-btn">🧠 记忆表格</button>
+            <button id="general-open-user-tools" class="general-settings-shortcut-btn">⚡ 工具与手势</button>
           </div>
         </div>
 
@@ -2533,6 +2543,15 @@ export class GeneralSettingsPanel {
             </button>
             <span id="general-clean-wallpapers-status" style="font-size: 12px; color:var(--app-text-muted);">
               清理未引用旧文件
+            </span>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px; flex-wrap: wrap; margin-top: 8px;">
+            <button id="general-compact-chat-shards"
+                    style="padding: 6px 10px; border-radius: 8px; border: 1px solid var(--app-border-default); background: var(--app-surface-card); cursor: pointer; font-size: 12px; color: var(--app-text-primary);">
+              整理聊天分片
+            </button>
+            <span id="general-compact-chat-shards-status" style="font-size: 12px; color:var(--app-text-muted);">
+              合并删消息后变零碎的聊天文件，不删消息
             </span>
           </div>
         </div>
@@ -2669,8 +2688,11 @@ export class GeneralSettingsPanel {
     this.scriptOptionsWrap = this.element.querySelector('#general-script-options');
     this.openSessionBtn = this.element.querySelector('#general-open-session');
     this.openMemoryTemplatesBtn = this.element.querySelector('#general-open-memory-templates');
+    this.openUserToolsBtn = this.element.querySelector('#general-open-user-tools');
     this.cleanWallpapersBtn = this.element.querySelector('#general-clean-wallpapers');
     this.cleanWallpapersStatus = this.element.querySelector('#general-clean-wallpapers-status');
+    this.compactChatShardsBtn = this.element.querySelector('#general-compact-chat-shards');
+    this.compactChatShardsStatus = this.element.querySelector('#general-compact-chat-shards-status');
     this.bundleExportBtn = this.element.querySelector('#general-bundle-export');
     this.bundleImportBtn = this.element.querySelector('#general-bundle-import');
     this.customBundleExportBtn = this.element.querySelector('#general-custom-bundle-export');
@@ -2695,6 +2717,12 @@ export class GeneralSettingsPanel {
     });
     this.openMemoryTemplatesBtn?.addEventListener('click', () => {
       const fn = this.externalActions.openMemoryTemplates;
+      if (typeof fn !== 'function') return;
+      this.hide();
+      fn();
+    });
+    this.openUserToolsBtn?.addEventListener('click', () => {
+      const fn = this.externalActions.openUserTools;
       if (typeof fn !== 'function') return;
       this.hide();
       fn();
@@ -3545,6 +3573,34 @@ export class GeneralSettingsPanel {
           this.cleanWallpapersBtn.disabled = false;
           this.cleanWallpapersBtn.textContent = '清理壁纸残留';
         }
+      }
+    });
+    this.compactChatShardsBtn?.addEventListener('click', async () => {
+      const confirmed = await appConfirm({
+        title: '整理聊天分片',
+        message: '把当前身份下所有聊天（含存档）里删消息后变零碎的分片合并，不删、不改任何消息。整理会重写聊天文件，建议先用上方「完整备份」备份一次。是否继续？',
+        danger: true,
+      });
+      if (!confirmed) return;
+      const store = window?.appBridge?.chatStore || null;
+      if (typeof store?.compactShards !== 'function') return;
+      this.compactChatShardsBtn.disabled = true;
+      this.compactChatShardsBtn.textContent = '整理中...';
+      try {
+        const result = await store.compactShards();
+        const parts = result.compacted
+          ? t('整理了 {count} 条聊天，分片 {before} → {after}', { count: result.compacted, before: result.partsBefore, after: result.partsAfter })
+          : t('没有需要合并的分片');
+        const issues = result.skipped || result.failed
+          ? t('；{count} 条读写失败，已保持原样', { count: result.skipped + result.failed })
+          : '';
+        if (this.compactChatShardsStatus) this.compactChatShardsStatus.textContent = `${parts}${issues}`;
+      } catch (err) {
+        const message = String(err?.message || err || '').trim();
+        if (this.compactChatShardsStatus) this.compactChatShardsStatus.textContent = t('整理失败: {value}', { value: message });
+      } finally {
+        this.compactChatShardsBtn.disabled = false;
+        this.compactChatShardsBtn.textContent = '整理聊天分片';
       }
     });
     this.memoryInjectPositionSelect?.addEventListener('change', (e) => {

@@ -2046,6 +2046,8 @@ export const createAppContentAgentTools = ({
       let delegated = false;
       let modelUsed = '';
       let subAgentName = '';
+      // 委派预算用量：逐条记下用时与是否超限，写进运行记录
+      const delegationBudgets = [];
       let webSearchUsed = false;
       for (const item of outlineEntries) {
         const title = trim(item?.title);
@@ -2077,6 +2079,7 @@ export const createAppContentAgentTools = ({
             generatedCount: generated.length,
           };
         }
+        if (out.budget) delegationBudgets.push({ title, ...out.budget, ...(out.fallbackReason ? { fallbackReason: out.fallbackReason } : {}) });
         delegated = out.delegated === true;
         modelUsed = trim(out.modelUsed);
         subAgentName = trim(out.subAgentName);
@@ -2143,6 +2146,7 @@ export const createAppContentAgentTools = ({
             ...(webSources.length ? { sources: webSources.slice(0, 24) } : {}),
             ...(modelUsed ? { modelUsed } : {}),
             ...(subAgentName ? { subAgentName } : {}),
+            ...(delegationBudgets.length ? { delegationBudgets } : {}),
             generatedTitles: generated.map(entry => entry.title),
           };
         }

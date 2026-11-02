@@ -466,3 +466,28 @@ const request = {
   assert.doesNotMatch(full.html, /暂无 Prompt 内容/);
   console.log('ok - unavailable provider identity is localized inside skipped code content');
 }
+
+{
+  // 完整 Prompt 也列出工具定义：有些预设（SPreset 工具绑定）把整段提示词放在工具说明里，只看消息会以为缺了内容
+  const gemini = buildFullPromptDocument({
+    messages: [{ role: 'user', content: '继续' }],
+    wireRequest: { body: { tools: [
+      { functionDeclarations: [
+        { name: 'context', description: '世界设定 <b>全文</b>', parameters: { type: 'object', properties: {} } },
+        { name: 'soliumbra_reply', description: '回复工具', parameters: { type: 'object', properties: { game_content: { type: 'string' } } } },
+      ] },
+      { googleSearch: {} },
+    ] } },
+  });
+  assert.match(gemini.plain, /\[tool definition\] · context\n世界设定 <b>全文<\/b>/);
+  assert.match(gemini.plain, /\[tool definition\] · soliumbra_reply\n回复工具\n\nparameters:\n\{\n {2}"type": "object"/);
+  assert.ok(gemini.plain.indexOf('[tool definition] · context') < gemini.plain.indexOf('[user] #1'), 'tool definitions come before the messages');
+  assert.equal(gemini.messageCount, 1, 'tools are not counted as messages');
+  assert.equal(gemini.toolCount, 2, 'built-in tools without a name are skipped');
+  assert.equal(gemini.html.includes('<b>全文'), false);
+  assert.match(gemini.html, /data-prompt-role="tool_definition"/);
+  const openai = buildFullPromptDocument({ messages: [], requestOptions: { tools: [{ type: 'function', function: { name: 'lookup', description: '查资料' } }] } });
+  assert.match(openai.plain, /\[tool definition\] · lookup\n查资料/);
+  assert.equal(buildFullPromptDocument({ messages: [{ role: 'user', content: 'x' }] }).toolCount, 0);
+  console.log('ok - full prompt document lists tool definitions before the messages');
+}

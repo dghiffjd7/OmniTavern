@@ -71,7 +71,7 @@ export const formatWorldScopeLabel = ({
         if (sid.startsWith('rp:')) return `创意写作会话「${sid}」的专属世界书`;
         return sid ? `当前会话「${sid}」的附加世界书` : '当前会话的附加世界书';
     }
-    return sid ? `当前会话「${sid}」的角色/附加世界书` : '当前会话的角色/附加世界书';
+    return sid ? `当前会话「${sid}」用到的全局/角色/附加世界书` : '当前会话用到的全局/角色/附加世界书';
 };
 
 export const buildWorldbookImpactText = ({
@@ -430,7 +430,7 @@ export class WorldPanel {
             const roleSummary = activeRoleIds.length ? activeRoleIds.join(' + ') : '未启用';
 
             if (listTitle) {
-                listTitle.textContent = this.scope === 'global' ? '全局世界书' : '角色与聊天室世界书';
+                listTitle.textContent = this.scope === 'global' ? '全局世界书' : '本会话用到的世界书';
             }
             if (this.globalSettingsEl) {
                 this.globalSettingsEl.style.display = this.scope === 'global' ? '' : 'none';
@@ -508,27 +508,29 @@ export class WorldPanel {
 
             if (indicator) {
                 let indicatorText = '';
+                const globalLabel = normalizedGlobalIds.length
+                    ? normalizedGlobalIds.join(' + ')
+                    : translateUiText('未启用');
                 if (this.scope === 'global') {
-                    indicatorText = t('全局当前：{value}', {
-                        value: normalizedGlobalIds.length
-                            ? normalizedGlobalIds.join(' + ')
-                            : translateUiText('未启用'),
-                    });
+                    indicatorText = t('全局当前：{value}', { value: globalLabel });
                 } else if (isGroupSession) {
-                    indicatorText = t('群聊 {name}：角色 {role} / 成员附加自动合并', {
+                    indicatorText = t('群聊 {name}：全局 {global} / 角色 {role} / 成员附加自动合并', {
                         name: contact?.name || sessionKey,
+                        global: globalLabel,
                         role: roleSummary === '未启用' ? translateUiText(roleSummary) : roleSummary,
                     });
                 } else if (isRpSession) {
                     const extrasLabel = visibleSessionIds.length ? visibleSessionIds.join(' + ') : '未启用';
-                    indicatorText = t('创意写作会话：角色 {role} / 创作专属 {extras}', {
+                    indicatorText = t('创意写作会话：全局 {global} / 角色 {role} / 创作专属 {extras}', {
+                        global: globalLabel,
                         role: roleSummary === '未启用' ? translateUiText(roleSummary) : roleSummary,
                         extras: extrasLabel === '未启用' ? translateUiText(extrasLabel) : extrasLabel,
                     });
                 } else {
                     const extrasLabel = visibleSessionIds.length ? visibleSessionIds.join(' + ') : '未启用';
-                    indicatorText = t('私聊 {name}：角色 {role} / 附加 {extras}', {
+                    indicatorText = t('私聊 {name}：全局 {global} / 角色 {role} / 附加 {extras}', {
                         name: contact?.name || sessionKey,
+                        global: globalLabel,
                         role: roleSummary === '未启用' ? translateUiText(roleSummary) : roleSummary,
                         extras: extrasLabel === '未启用' ? translateUiText(extrasLabel) : extrasLabel,
                     });
@@ -802,6 +804,40 @@ export class WorldPanel {
                 card.appendChild(entriesWrap);
                 return card;
             };
+
+            // 会话视图按注入顺序先列全局世界书（全局 → 角色 → 会话）；这里的停用、添加对所有会话生效
+            if (this.scope !== 'global') {
+                const globalSection = createSection({
+                    title: '全局世界书',
+                    description: '所有会话共用（聊天和创意写作）。在这里停用或添加会影响所有会话；扫描深度、预算等在「全局设置」里调整。',
+                });
+                const globalLibraryBtn = createTextButton('全局世界书库');
+                globalLibraryBtn.onclick = () => this.openLibraryModal({ type: 'global', sessionId: sessionKey });
+                const globalSettingsBtn = createTextButton('全局设置');
+                globalSettingsBtn.onclick = async () => {
+                    await this.show({ scope: 'global' });
+                    if (!this.globalSettingsOpen) this.panel?.querySelector('#world-global-settings-header')?.click();
+                    this.globalSettingsEl?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+                };
+                globalSection.actions.appendChild(globalLibraryBtn);
+                globalSection.actions.appendChild(globalSettingsBtn);
+                if (!normalizedGlobalIds.length) {
+                    appendEmpty(globalSection.body, '尚未启用全局世界书。');
+                }
+                for (const worldId of normalizedGlobalIds) {
+                    const card = await buildWorldCard(worldId, {
+                        subtitle: '所有会话共用 · 停用会影响所有会话',
+                        onToggle: async () => {
+                            await window.appBridge.setGlobalWorldIds(
+                                normalizedGlobalIds.filter((id) => id !== worldId),
+                            );
+                            window.toastr?.success?.('已停用全局世界书');
+                            await this.refreshList();
+                        },
+                    });
+                    globalSection.body.appendChild(card);
+                }
+            }
 
             if (this.scope === 'global') {
                 const globalSection = createSection({

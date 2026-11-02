@@ -3,9 +3,12 @@ import { agentIconMarkup, getAgentIconName } from '../agent/agent-icons.js';
 
 export const toolboxEscape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[c]);
 export const toolboxButton = (key, label, { icon, primary = false, disabled = false } = {}) => `<button type="button" data-key="${toolboxEscape(key)}"${disabled ? ' disabled' : ''} class="${primary ? 'at-primary' : ''}"${icon ? ` aria-label="${toolboxEscape(t(label))}" title="${toolboxEscape(t(label))}"` : ''}>${icon ? agentIconMarkup(icon) : toolboxEscape(t(label))}</button>`;
-export const toolboxNamedIcon = config => `<span class="at-named-icon" aria-hidden="true">${agentIconMarkup(getAgentIconName(config))}</span>`;
+// 用户工具（kind: 'user_tool'）自带图示，其余按 Agent 图标
+export const toolboxIconMarkup = config => config.iconMarkup || agentIconMarkup(getAgentIconName(config));
+export const toolboxIconKey = config => (config.iconMarkup ? `tool:${config.icon}` : getAgentIconName(config));
+export const toolboxNamedIcon = config => `<span class="at-named-icon" aria-hidden="true">${toolboxIconMarkup(config)}</span>`;
 
-export const toolboxManagementMarkup = ({ items, catalog, ordering, shortcut, recording, shortcutError, expanded }) => {
+export const toolboxManagementMarkup = ({ items, catalog, ordering, shortcut, recording, shortcutError, expanded, userTools = false }) => {
   const e = toolboxEscape, button = toolboxButton, visibleIds = items.map(config => config.id);
   const hidden = catalog.filter(config => !visibleIds.includes(config.id));
   const row = (config, visible) => {
@@ -22,6 +25,7 @@ export const toolboxManagementMarkup = ({ items, catalog, ordering, shortcut, re
     <div class="at-management-list">${items.map(config => row(config, true)).join('') || `<p class="at-status at-empty">${e(t('还没有快捷工具'))}</p>`}</div>
     ${hidden.length ? `<details class="at-hidden-tools"${expanded ? ' open' : ''}${ordering ? ' hidden' : ''}><summary><span class="at-disclosure-icon">${agentIconMarkup('forward')}</span>${e(t('未显示'))}<span class="at-count">${hidden.length}</span></summary><div class="at-management-list">${hidden.map(config => row(config, false)).join('')}</div></details>` : ''}
     <div class="at-management-tools"${ordering ? ' hidden' : ''}>
+      ${userTools ? `<button type="button" data-key="user-tools" class="at-settings-link" aria-label="${e(t('打开工具与手势'))}">${agentIconMarkup('settings')}<span>${e(t('工具与手势'))}</span><span class="at-config-arrow">${agentIconMarkup('forward')}</span></button>` : ''}
       <button type="button" data-key="center" class="at-settings-link" aria-label="${e(t('打开 Agent Center'))}">${agentIconMarkup('toolbox')}<span>Agent Center</span><span class="at-config-arrow">${agentIconMarkup('forward')}</span></button>
       <div class="at-shortcut-row">${agentIconMarkup('keyboard')}<span>${e(t('打开工具箱'))}</span><button type="button" data-key="shortcut" class="at-shortcut-key" aria-label="${e(t(recording ? '请按组合键' : '设置工具箱快捷键'))}" aria-pressed="${recording}">${recording ? e(t('请按组合键')) : shortcut ? `<kbd data-i18n-skip>${e(shortcut.label)}</kbd>` : e(t('未设置'))}</button>${shortcut || recording ? button(recording ? 'cancel-shortcut' : 'clear-shortcut', recording ? '取消' : '清除快捷键', { icon: 'close' }) : ''}</div>
       ${recording ? `<p class="at-shortcut-hint" role="status">${e(t(shortcutError || '例如 Ctrl + Alt + J；Esc 取消。'))}</p>` : ''}

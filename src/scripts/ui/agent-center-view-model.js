@@ -1,4 +1,19 @@
 import { buildAgentRunListView, buildAgentUsageProfile } from '../agent/agent-run-view-model.js';
+import { summarizeMaidToolOutcomes } from '../agent/maid-run-outcomes.js';
+import { listAppFeatures } from '../agent/app-feature-catalog.js';
+
+// 工具成效用功能目录的标题显示工具（找不到时界面退回工具名）
+let featureTitleByTool = null;
+const toolFeatureTitle = (toolName) => {
+  if (!featureTitleByTool) {
+    featureTitleByTool = new Map();
+    listAppFeatures().forEach(feature => (Array.isArray(feature.tools) ? feature.tools : []).forEach((tool) => {
+      if (!featureTitleByTool.has(tool)) featureTitleByTool.set(tool, String(feature.title || '').trim());
+    }));
+  }
+  return featureTitleByTool.get(toolName) || '';
+};
+const labelToolOutcomes = profile => ({ ...profile, byTool: profile.byTool.map(item => ({ ...item, label: toolFeatureTitle(item.toolName) })) });
 import {
   AGENT_PERMISSION_LAYERS,
   normalizeAgentPermissionRule,
@@ -695,6 +710,10 @@ export const buildAgentCenterView = ({
       usageProfile: buildAgentUsageProfile(
         Array.isArray(agentRuns) && agentRuns.length ? agentRuns : (Array.isArray(runView?.runs) ? runView.runs : []),
       ),
+      // 工具成效：女仆动作做成了没有（已验证／验证没通过／失败／被拒绝），与上面的用量分开
+      toolOutcomes: labelToolOutcomes(summarizeMaidToolOutcomes(
+        Array.isArray(agentRuns) && agentRuns.length ? agentRuns : (Array.isArray(runView?.runs) ? runView.runs : []),
+      )),
     },
     agents: agentCards,
     agentCards,

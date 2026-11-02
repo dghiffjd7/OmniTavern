@@ -85,6 +85,8 @@ const normalizeCohort = (raw = {}) => {
   };
 };
 
+const OUTCOME_VALUES = new Set(['verified', 'verification_failed', 'succeeded', 'failed', 'denied', 'cancelled']);
+
 export const normalizeCapabilityRetrievalSnapshot = (raw = {}, {
   now = Date.now,
 } = {}) => {
@@ -126,6 +128,13 @@ export const normalizeCapabilityRetrievalSnapshot = (raw = {}, {
       attributed: true,
       code: trim(src.missAttribution.code, 'manually_attributed').slice(0, 80),
       attributedAt: Math.max(0, finite(src.missAttribution.attributedAt, 0)),
+    } : null,
+    // 选中的能力最后做成了没有（见 maid-run-outcomes.js）：命中候选不等于做成
+    outcome: isPlainObject(src.outcome) && OUTCOME_VALUES.has(trim(src.outcome.outcome)) ? {
+      outcome: trim(src.outcome.outcome),
+      verification: ['verified', 'failed'].includes(trim(src.outcome.verification)) ? trim(src.outcome.verification) : 'none',
+      toolName: trim(src.outcome.toolName).slice(0, 120),
+      recordedAt: Math.max(0, finite(src.outcome.recordedAt, 0)),
     } : null,
     cohort: normalizeCohort(src.cohort),
   };
@@ -487,7 +496,8 @@ export class CapabilityRetrievalStore {
     if (!snapshot.id) return null;
     const existingIndex = this.state.snapshots.findIndex(item => item.id === snapshot.id);
     const isNewSnapshot = existingIndex < 0;
-    if (existingIndex >= 0) this.state.snapshots[existingIndex] = snapshot;
+    // 同一快照再次记录（选择结果回填）时保留已挂上的执行结果
+    if (existingIndex >= 0) this.state.snapshots[existingIndex] = { ...snapshot, outcome: snapshot.outcome || this.state.snapshots[existingIndex].outcome || null };
     else this.state.snapshots.push(snapshot);
     const currentTime = this.now();
     const cutoff = currentTime - this.ttlMs;
@@ -615,6 +625,23 @@ export class CapabilityRetrievalStore {
       bucket.attributedMissCount += 1;
     }
     pool.lastSeenAt = Math.max(pool.lastSeenAt, snapshot.missAttribution.attributedAt);
+    this.state.updatedAt = this.now();
+    this.scheduleFlush();
+    return clone(snapshot);
+  }
+
+  // 把执行结果挂回选中它的那次检索快照；快照已被淘汰就略过
+  recordOutcome(snapshotId = '', raw = {}) {
+    this.ensureLoaded();
+    const snapshot = this.state.snapshots.find(item => item.id === trim(snapshotId));
+    const outcome = trim(raw?.outcome);
+    if (!snapshot || !OUTCOME_VALUES.has(outcome)) return null;
+    snapshot.outcome = {
+      outcome,
+      verification: ['verified', 'failed'].includes(trim(raw?.verification)) ? trim(raw.verification) : 'none',
+      toolName: trim(raw?.toolName).slice(0, 120),
+      recordedAt: this.now(),
+    };
     this.state.updatedAt = this.now();
     this.scheduleFlush();
     return clone(snapshot);

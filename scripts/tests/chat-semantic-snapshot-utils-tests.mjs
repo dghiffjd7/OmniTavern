@@ -151,3 +151,22 @@ const legacyMessages = [
   assert.equal(restored.replacements.output_format, 1);
   console.log('ok - fail-closed FC planning can restore deferred layers without rebuilding semantics');
 }
+
+{
+  // 回归：聊天模式带图片时，末尾的格式层标记被并进最后一条用户消息，而它是「文字 + 图片」数组
+  const marker = 'chat-semantic:req-image:output_format';
+  const imagePart = { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } };
+  const messages = [
+    { role: 'system', content: '角色语义' },
+    { role: 'user', content: [{ type: 'text', text: '哲: [图片]' }, imagePart, { type: 'text', text: marker }] },
+  ];
+  const restored = restoreDeferredLegacyTextMessages({
+    messages,
+    deferredLegacyLayers: [{ id: 'output_format', content: outputLayer, marker }],
+  });
+  assert.equal(restored.ok, true, restored.reason);
+  assert.equal(restored.replacements.output_format, 1);
+  assert.deepEqual(restored.messages[1].content, [{ type: 'text', text: '哲: [图片]' }, imagePart, { type: 'text', text: outputLayer }]);
+  assert.equal(messages[1].content[2].text, marker, 'input messages are not mutated');
+  console.log('ok - deferred layers inside multimodal user content are restored');
+}

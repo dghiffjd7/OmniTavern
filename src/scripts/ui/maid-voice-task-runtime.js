@@ -1,10 +1,21 @@
 import { t } from '../i18n/index.js';
-import { classifyMaidPendingActionReply } from '../agent/maid-pending-action.js';
+import { classifyMaidPendingActionReply, maidApprovalLikeReplyHead } from '../agent/maid-pending-action.js';
 import { MAID_IMPORTED_CARD_WORKFLOW_KIND } from '../agent/maid-imported-card-workflow.js';
 import { buildMaidResultBasis, normalizeMaidResultBasis } from '../agent/maid-result-basis.js';
+import { normalizeMaidResultCards } from '../agent/maid-result-cards.js';
+import { resolveMaidToolTarget } from './maid-run-card-model.js';
 
 const text = value => String(value ?? '').trim();
 const terminal = task => ['succeeded', 'failed', 'cancelled', 'awaiting_confirmation'].includes(task.status);
+// 实际开始执行后这么久仍未结束、且已有步骤时，最多插入一次进度提示（排队时间不算）
+export const MAID_VOICE_PROGRESS_HINT_MS = 20000;
+// 步骤进度用执行流的步骤标题，加上操作对象（如「搜索：台北 天气」）
+// 步骤没有标题时用工具说明（如 Search APP features），只给工具名时语音模型会把「搜索某功能」误说成「某功能已做完」
+const stepLabel = (step, describeTool = () => '') => {
+  const title = text(step?.title) || text(describeTool(text(step?.toolName))) || text(step?.toolName);
+  const target = resolveMaidToolTarget(step?.args);
+  return (target && !title.includes(target) ? `${title}：${target}` : title).slice(0, 80);
+};
 // 续接授权只属于那一次“允许”：复用任务上下文（修订、引用旧任务继续做事）时必须去掉
 const withoutPendingAuthorization = (context) => {
   if (!context) return context;
@@ -18,19 +29,28 @@ const forNewTaskFrom = (context) => {
   return rest;
 };
 const publicTask = task => task ? { task_id: task.id, request: task.request, status: task.status, message: task.message, has_references: Boolean(task.attachments?.length || task.context?.userSelection?.length),
-  ...(task.resultBasis ? { resultBasis: normalizeMaidResultBasis(task.resultBasis) } : {}) } : null;
+  ...(task.traceView?.steps?.length ? { steps: task.traceView.steps.slice(-3).map(step => ({ label: step.label, status: step.status })) } : {}),
+  ...(task.resultBasis ? { resultBasis: normalizeMaidResultBasis(task.resultBasis) } : {}),
+  ...(task.cards?.length ? { cards: task.cards } : {}),
+  // 结果版本与送达状态：同一版本只主动播报一次；被打断或未确认送达时如实标出，不自动重播
+  ...(task.resultVersion ? { result_version: task.resultVersion, delivery: task.delivery || 'pending' } : {}) } : null;
 
 // Owns accepted voice work independently of the microphone/session lifetime.
 // Execution, ordering and cancellation still belong to the existing maid queue.
 export const createMaidVoiceTaskRuntime = ({
   getCommandRuntime, captureContext = () => ({}), onChange = () => {}, onResult = () => {},
   prepareSubmission = null,
-  // 口头“允许”：只作用于本通话任务正在卡内等待的确认，结果恒为允许一次
+  // 口头“允许”：只作用于本通话任务正在卡内等待的确认，结果恒为允许一次（持久开启的确认则是开启本身）
   getApproval = () => null,
   confirmApproval = () => false,
   cancelPendingAction = () => false,
+  // 长任务的一次进度提示：交给通话会话，在没人说话时再复核任务未结束后插入
+  onProgress = () => {},
+  // 工具名 → 工具说明（注册表 title），给没有标题的步骤当标签
+  describeTool = () => '',
   makeId = () => `maid_voice_${globalThis.crypto.randomUUID()}`,
   now = Date.now,
+  setTimeoutFn = globalThis.setTimeout, clearTimeoutFn = globalThis.clearTimeout,
 } = {}) => {
   const tasks = new Map();
   const requests = new Map();
@@ -39,6 +59,25 @@ export const createMaidVoiceTaskRuntime = ({
   const snapshot = (callId = '') => {
     const list = scopedTasks(callId);
     return { active: list.filter(task => !terminal(task)).map(publicTask), latest: publicTask(list.at(-1)), recent: list.slice(-3).reverse().map(publicTask) };
+  };
+  // 重拨后可查询之前通话交办的任务（只读）：不接收旧通话的播报或授权
+  const earlierTasks = callId => (callId ? [...tasks.values()].filter(task => task.target?.maidCallId !== callId).slice(-3).reverse().map(publicTask) : []);
+  const progressCurrent = task => task.status === 'running' && !task.superseded;
+  const maybeReportProgress = (task) => {
+    if (task.progressReported || !progressCurrent(task) || !task.runningSince || now() - task.runningSince < MAID_VOICE_PROGRESS_HINT_MS
+      || !task.traceView?.steps?.length) return;
+    task.progressReported = true;
+    try { onProgress({ ...publicTask(task), kind: 'progress', target: task.target, requestId: task.requestId, isCurrent: () => progressCurrent(task) }); } catch {}
+  };
+  // 从实际开始执行时计时；排队不算
+  const markRunning = (task) => {
+    if (task.runningSince || task.status !== 'running') return;
+    task.runningSince = now();
+    task.progressTimer = setTimeoutFn?.(() => { task.progressTimer = null; maybeReportProgress(task); }, MAID_VOICE_PROGRESS_HINT_MS);
+  };
+  const stopProgress = (task) => {
+    if (task.progressTimer != null) clearTimeoutFn?.(task.progressTimer);
+    task.progressTimer = null;
   };
   const notify = () => { try { onChange(snapshot()); } catch {} };
   const prune = () => {
@@ -95,7 +134,7 @@ export const createMaidVoiceTaskRuntime = ({
       status: command.isSubmitting?.() ? 'queued' : 'running', message: command.isSubmitting?.() ? t('排队') : t('正在处理'), completion: null,
       pendingActionSubmissionId: pendingTask?.id || '', goal: pendingTask?.goal || request };
     if (pendingTask) pendingTask.continuationId = id;
-    tasks.set(id, task); latest = task; prune(); notify();
+    tasks.set(id, task); latest = task; markRunning(task); prune(); notify();
     let completion;
     try {
       completion = command.submitVoiceTask(request, {
@@ -104,7 +143,7 @@ export const createMaidVoiceTaskRuntime = ({
         voiceRequestId: requestId, attachments: task.attachments, preserveDraft, showInput,
         onStatus: (message, tone) => {
           if (terminal(task)) return;
-          task.status = 'running'; task.message = text(message); task.tone = tone; notify();
+          task.status = 'running'; task.message = text(message); task.tone = tone; markRunning(task); notify();
         },
       });
     } catch (error) { completion = Promise.reject(error); }
@@ -114,13 +153,18 @@ export const createMaidVoiceTaskRuntime = ({
       task.pendingWorkflowKind = text(result.pendingWorkflow?.kind);
       task.message = text(result.message || result.summary || result.reason) || t(task.status === 'succeeded' ? '已完成。' : task.status === 'cancelled' ? '任务已终止。' : '执行失败。');
       task.resultBasis = buildMaidResultBasis(result, { traceView: task.traceView, recordedAt: now() });
+      // 结果卡片显示在通话托盘的任务里；语音只说一句重点
+      task.cards = normalizeMaidResultCards(result.cards);
+      task.resultVersion = (task.resultVersion || 0) + 1; task.delivery = 'pending';
       syncClosedWorkflow(task);
       return result;
     }).catch(error => {
       task.status = 'failed'; task.message = text(error?.message) || t('执行失败。');
       task.resultBasis = buildMaidResultBasis({}, { traceView: task.traceView, recordedAt: now() });
+      task.resultVersion = (task.resultVersion || 0) + 1; task.delivery = 'pending';
       return { ok: false, status: 'failed', message: task.message };
     }).then(result => {
+      stopProgress(task);
       if (pendingTask) { pendingTask.status = task.status === 'awaiting_confirmation' ? 'succeeded' : task.status; pendingTask.message = task.message; }
       notify();
       // The receiver checks the original call identity before speaking a result.
@@ -146,7 +190,7 @@ export const createMaidVoiceTaskRuntime = ({
       const stopped = task.status === 'awaiting_confirmation' ? await cancelPending(task.id) : await getCommandRuntime?.()?.cancelSubmission?.(task.id);
       if (stopped) {
         if (task.pendingActionSubmissionId) await cancelPending(task.pendingActionSubmissionId);
-        task.status = 'cancelled'; task.message = t('任务已终止。'); count++;
+        task.status = 'cancelled'; task.message = t('任务已终止。'); stopProgress(task); count++;
       }
     }
     notify();
@@ -169,7 +213,17 @@ export const createMaidVoiceTaskRuntime = ({
     if (requestId && requests.has(key)) return requests.get(key);
     const operation = (async () => {
       const action = text(args.action || 'execute');
-      if (action === 'status') return { ok: true, ...snapshot(target?.maidCallId) };
+      if (action === 'status') {
+        const callId = target?.maidCallId || '';
+        // 指名查询之前通话的任务：核对任务身份后读取最新结果，用于补报，不重新执行
+        if (args.task_id && !findTask(text(args.task_id), callId)) {
+          const earlier = followContinuation(tasks.get(text(args.task_id)));
+          if (!earlier) return { ok: false, message: t('找不到引用的女仆任务，请重新说明目标') };
+          return { ok: true, task: publicTask(earlier), from_earlier_call: true };
+        }
+        const earlier = earlierTasks(callId);
+        return { ok: true, ...snapshot(callId), ...(earlier.length ? { earlier_calls: earlier } : {}) };
+      }
       if (action === 'cancel') return cancel(text(args.task_id), args.scope === 'all', target?.maidCallId || '');
       if (action === 'confirm') {
         const selected = confirmationTarget(text(args.task_id), target?.maidCallId);
@@ -190,8 +244,12 @@ export const createMaidVoiceTaskRuntime = ({
         if (vague && pendingTask?.pendingWorkflowKind !== MAID_IMPORTED_CARD_WORKFLOW_KIND) {
           return { ok: false, message: t('请明确说「允许」或「取消」。') };
         }
-        if (!vague && pendingTask && getApproval(pendingTask.id) && confirmApproval([pendingTask.id]) === true) {
-          return { ok: true, confirmed: true, message: t('已允许一次') };
+        const approval = !vague && pendingTask ? getApproval(pendingTask.id) : null;
+        if (approval && confirmApproval([pendingTask.id]) === true) {
+          // 持久开启：确认后才写设置，写入结果随任务结果回报，这里只说已确认
+          return { ok: true, confirmed: true, message: approval.purpose === 'persistent_enable'
+            ? t('已确认开启「{name}」，会一直开着，可在女仆设置 → 技能关闭', { name: approval.capabilityTitle })
+            : t('已允许一次') };
         }
         if (pendingTask && pendingTask.status !== 'awaiting_confirmation') {
           return { ok: false, message: t('当前没有需要确认的操作') };
@@ -218,6 +276,14 @@ export const createMaidVoiceTaskRuntime = ({
         return revise(selected.pendingTask || findTask(selected.taskId, target?.maidCallId), commandText, { target, requestId, preserveDraft, showInput });
       }
       if (action !== 'execute') return { ok: false, message: t('未知的女仆任务操作') };
+      // 本通话有确认在等时，只是在回答确认的话（「好的，开启吧」「允许」「取消」）按确认处理，不另排新任务
+      if (!args.task_id) {
+        const reply = classifyMaidPendingActionReply(commandText, { voice: true });
+        const answer = ['confirm', 'cancel'].includes(reply) ? commandText : maidApprovalLikeReplyHead(commandText);
+        if (answer && confirmationTarget('', target?.maidCallId).pendingTask) {
+          return request({ args: { action: 'confirm', request: answer }, target, inputText: answer, attachments, preserveDraft, showInput });
+        }
+      }
       const reference = args.task_id ? findTask(text(args.task_id), target?.maidCallId) : null;
       if (args.task_id && !reference) return { ok: false, message: t('找不到引用的女仆任务，请重新说明目标') };
       return submit({ request: commandText, target, requestId, attachments: attachments?.length ? attachments : reference?.attachments,
@@ -236,9 +302,10 @@ export const createMaidVoiceTaskRuntime = ({
       if (Number(view.updatedAt) < Number(task.traceView?.updatedAt)) return;
       task.traceView = { runId: text(view.runId), updatedAt: Number(view.updatedAt) || 0,
         steps: (Array.isArray(view.steps) ? view.steps : []).map(step => ({
-          id: text(step.id), toolName: text(step.toolName), status: text(step.status),
+          id: text(step.id), toolName: text(step.toolName), status: text(step.status), label: stepLabel(step, describeTool),
           startedAt: Number(step.startedAt) || 0, finishedAt: Number(step.finishedAt) || 0,
         })) };
+      maybeReportProgress(task);
       if (task.resultBasis) task.resultBasis = buildMaidResultBasis({ resultBasis: task.resultBasis }, {
         traceView: task.traceView, recordedAt: task.resultBasis.recordedAt,
       });
@@ -246,6 +313,12 @@ export const createMaidVoiceTaskRuntime = ({
       task.traceSummary = text(view.doneSummary);
       const closed = syncClosedWorkflow(task);
       if (closed || task.resultBasis) notify();
+    },
+    // 通话会话回报的送达状态（待发送／已交给会话／播报中／播报完成／被打断／未确认送达）
+    setDelivery: ({ task_id: taskId, result_version: version, state } = {}) => {
+      const task = tasks.get(text(taskId));
+      if (!task || task.resultVersion !== version || task.delivery === state) return;
+      task.delivery = text(state); notify();
     },
     getTaskMeta: id => {
       const task = tasks.get(text(id));

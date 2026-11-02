@@ -242,10 +242,16 @@ const createClassList = () => {
     appSource.indexOf('const handleComposerSend = () => {'),
     appSource.indexOf('handleSend();', appSource.indexOf('const handleComposerSend = () => {')),
   );
-  assert.match(composerBlock, /cancelActiveGeneration\('user'\)/);
+  // 停止生成抽成 stopCurrentGeneration（发送键与「停止生成」工具共用）
+  const stopBlock = appSource.slice(
+    appSource.indexOf('const stopCurrentGeneration = () => {'),
+    appSource.indexOf('const handleComposerSend = () => {'),
+  );
+  assert.match(stopBlock, /cancelActiveGeneration\('user'\)/);
+  assert.match(composerBlock, /if \(stopCurrentGeneration\(\)\) return;/);
   assert.match(composerBlock, /protocolDeliveryQueuesBySession\.has\(revealSid\)/);
   assert.ok(
-    composerBlock.indexOf("cancelActiveGeneration('user')") < composerBlock.indexOf('protocolDeliveryQueuesBySession.has(revealSid)'),
+    composerBlock.indexOf('stopCurrentGeneration()') < composerBlock.indexOf('protocolDeliveryQueuesBySession.has(revealSid)'),
     '生成中的停止语义必须优先于跳过动画',
   );
   assert.match(chatUiSource, /setRevealingState\(isRevealing\)/);

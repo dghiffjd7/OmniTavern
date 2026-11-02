@@ -203,3 +203,19 @@ const installLocalStorage = () => {
   assert.equal(fullExport.events.every(event => Object.hasOwn(fullExport.runs, event.runId)), true);
   console.log('ok - AgentRunStore enforces long-session cache limits and filters export payloads');
 }
+
+{
+  let currentTime = 9000;
+  const store = new AgentRunStore({ now: () => currentTime });
+  [['done', 'succeeded'], ['bad', 'failed'], ['busy', 'running'], ['ask', 'waiting_permission']].forEach(([id, status]) => {
+    currentTime += 10;
+    store.upsertRun({ id, kind: 'task', status, updatedAt: currentTime });
+    store.recordEvent({ id: `event-${id}`, runId: id, type: 'agent.run.updated', status, createdAt: currentTime });
+  });
+  assert.deepEqual(store.removeRuns(['done', 'busy', 'ask', 'missing', '']), ['done'], 'running and waiting runs are kept');
+  assert.deepEqual(store.removeRuns('bad'), ['bad']);
+  assert.deepEqual(store.listRuns().map(run => run.id).sort(), ['ask', 'busy']);
+  assert.deepEqual(store.listEvents().map(event => event.runId).sort(), ['ask', 'busy'], 'events of removed runs go with them');
+  assert.deepEqual(store.removeRuns([]), []);
+  console.log('ok - AgentRunStore removeRuns deletes finished runs with their events and keeps active ones');
+}

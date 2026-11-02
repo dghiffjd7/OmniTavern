@@ -2,6 +2,7 @@ import { safeInvoke } from '../utils/tauri.js';
 import { estimateTokens } from '../memory/memory-prompt-utils.js';
 import { formatMaidMemoryDate, isExplicitMaidPreferenceInstruction } from '../agent/maid-memory-prompt.js';
 import { normalizeMaidResultBasis } from '../agent/maid-result-basis.js';
+import { normalizeMaidResultCards } from '../agent/maid-result-cards.js';
 import { selectMaidContextScope } from './maid-context-scope.js';
 
 export const MAID_CONVERSATION_STORE_KEY = 'maid_conversation_store_v1';
@@ -151,6 +152,28 @@ const MAID_AUTOMATIC_ACKNOWLEDGEMENTS = new Set([
   'request accepted', 'task accepted', 'your request has been accepted',
   'your task has been queued', 'queued', "I've handed it to the maid",
 ].map(normalizeMaidAcknowledgement));
+// 重复检测（兜底）：同一通话里自动的接单／状态复述与上一句几乎相同（字符二元组相似度 ≥ 0.8）时视为没有新信息。
+// 加了问题或新内容的句子相似度会明显下降，不会被算作重复。
+const characterBigrams = (value) => {
+  const counts = new Map();
+  for (let index = 0; index < value.length - 1; index += 1) {
+    const gram = value.slice(index, index + 2);
+    counts.set(gram, (counts.get(gram) || 0) + 1);
+  }
+  return counts;
+};
+export const isRepeatedMaidReceipt = (previous, next) => {
+  const a = normalizeMaidAcknowledgement(previous), b = normalizeMaidAcknowledgement(next);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  if (Math.min(a.length, b.length) < 4) return false;
+  const gramsA = characterBigrams(a), gramsB = characterBigrams(b);
+  let overlap = 0;
+  gramsA.forEach((count, gram) => { overlap += Math.min(count, gramsB.get(gram) || 0); });
+  return (2 * overlap) / (a.length + b.length - 2) >= 0.8;
+};
+const isAutomaticMaidReceipt = context => context?.realtimeRole === 'assistant'
+  && ['ack', 'status'].includes(context?.maidTranscriptKind) && context?.maidTranscriptAutomatic === true;
 // Only an explicit whole-caption classification may remove a transcript from
 // prompt/memory projections. Scheduling an acknowledgement response alone does
 // not prove that the generated speech contains no substantive conversation.
@@ -615,6 +638,8 @@ const normalizeTurn = (raw = {}, { now = Date.now } = {}) => {
     rawProtection &&
     currentAt - at > MAID_COMPACTION_PROTECTION_TTL_MS
   );
+  // 结果卡片随对话保存，翻历史时仍可见；只给界面看，不进模型的历史投影
+  const cards = normalizeMaidResultCards(src.cards);
   return {
     id,
     at,
@@ -643,6 +668,7 @@ const normalizeTurn = (raw = {}, { now = Date.now } = {}) => {
       .filter(Boolean)
       .slice(0, 16),
     context: isPlainObject(src.context) ? clone(src.context) : {},
+    ...(cards.length ? { cards } : {}),
   };
 };
 
@@ -1753,6 +1779,18 @@ export class MaidConversationStore {
       && transcriptContext.maidTranscriptAutomatic === true) {
       transcriptContext.maidTranscriptContentOnly = MAID_AUTOMATIC_ACKNOWLEDGEMENTS.has(normalizeMaidAcknowledgement(content));
     }
+    // 没有新信息的复述：排除出后续历史投影，字幕修订记录照常保留；同一句只计一次
+    let repeated = false;
+    delete transcriptContext.maidTranscriptRepeat;
+    if (role === 'assistant' && isAutomaticMaidReceipt({ ...transcriptContext, realtimeRole: role }) && transcriptContext.maidTranscriptContentOnly !== true) {
+      const previous = this.state.turns.filter(turn => turn.id !== id && turn.context?.realtimeCallId === callId
+        && isAutomaticMaidReceipt(turn.context)).at(-1);
+      if (previous && isRepeatedMaidReceipt(previous.message, content)) {
+        transcriptContext.maidTranscriptContentOnly = true;
+        transcriptContext.maidTranscriptRepeat = true;
+        repeated = old?.context?.maidTranscriptRepeat !== true;
+      }
+    }
     const turn = normalizeTurn({ ...old, id, [field]: content, status: 'succeeded', responseType: 'realtime',
       compactionProtection: 'realtime_transcript', context: {
         ...transcriptContext,
@@ -1761,7 +1799,7 @@ export class MaidConversationStore {
     }, { now: this.now });
     if (old) { Object.assign(old, turn); if (!await this.write()) return null; }
     else if (!await this.appendTurn(turn, { requirePersisted: true })) return null;
-    return { messageId: id, revision };
+    return { messageId: id, revision, ...(repeated ? { repeated: true } : {}) };
   }
 
   async finalizeRealtimeConversation(callId) {
@@ -2093,6 +2131,24 @@ export class MaidConversationStore {
   getLegacyArchive() {
     this.ensureLegacyArchiveSync(this.state);
     return clone(this.legacyArchive);
+  }
+
+  // 女仆历史界面（只读）：当前回合加上被挤出或整理进记忆后归档的回合（保留 90 天），同一回合以当前的为准，按时间排序
+  listHistoryTurns() {
+    this.ensureLoaded();
+    const archive = this.ensureLegacyArchiveSync(this.state);
+    const seen = new Set();
+    return [
+      ...this.state.turns,
+      ...(Array.isArray(archive?.compactedTurns) ? archive.compactedTurns : []),
+      ...(Array.isArray(archive?.evictedTurns) ? archive.evictedTurns : []),
+      ...(Array.isArray(archive?.baseline?.turns) ? archive.baseline.turns : []),
+    ].filter((turn) => {
+      const key = buildArchiveRecordKey(turn, 'turn');
+      if (!isPlainObject(turn) || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).sort((a, b) => (Number(a.at) || 0) - (Number(b.at) || 0)).map(turn => clone(turn));
   }
 
   exportState() {

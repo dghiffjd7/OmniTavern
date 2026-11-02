@@ -3,6 +3,7 @@
  * Supports both Express mode (API key) and Full mode (Service Account JSON)
  */
 
+import { createGeminiContentsBuilder, geminiSystemKeptInContents } from './gemini-contents.js';
 import { finalizeTextRequestBody, getRequestParamReport } from '../request-params.js';
 import { handleSSE, parseSSEBuffer } from '../stream.js';
 import { createLinkedAbortController, invokeNativeHttpRequest, splitRequestOptions } from '../abort.js';
@@ -321,7 +322,6 @@ export class VertexAIProvider {
    * Convert OpenAI-style messages to Gemini format
    */
   convertMessages(messages) {
-    const contents = [];
     let systemInstruction = '';
     const parseDataUrl = (url) => {
       const raw = String(url || '').trim();
@@ -364,19 +364,18 @@ export class VertexAIProvider {
       return String(content ?? '');
     };
 
+    const gemini = createGeminiContentsBuilder(toGeminiParts);
+    const keptSystem = geminiSystemKeptInContents(messages);
     for (const msg of messages) {
-      if (msg.role === 'system') {
+      if (msg.role === 'system' && msg !== keptSystem) {
         const text = toSystemText(msg.content);
         systemInstruction += (systemInstruction ? '\n\n' : '') + text;
       } else {
-        contents.push({
-          role: msg.role === 'assistant' ? 'model' : 'user',
-          parts: toGeminiParts(msg.content),
-        });
+        gemini.append(msg);
       }
     }
 
-    return { contents, systemInstruction };
+    return { contents: gemini.contents, systemInstruction };
   }
 
   /**

@@ -313,12 +313,24 @@ export const restoreDeferredLegacyTextMessages = ({
     .filter(entry => entry.content && entry.marker);
   const restored = cloneJson(Array.isArray(messages) ? messages : [], []);
   const replacements = Object.fromEntries(layers.map(layer => [layer.id, 0]));
-  restored.forEach((message) => {
-    if (typeof message?.content !== 'string') return;
+  const restoreText = (text) => {
+    let next = text;
     layers.forEach((layer) => {
-      const count = countExact(message.content, layer.marker);
+      const count = countExact(next, layer.marker);
       replacements[layer.id] += count;
-      if (count) message.content = message.content.split(layer.marker).join(layer.content);
+      if (count) next = next.split(layer.marker).join(layer.content);
+    });
+    return next;
+  };
+  restored.forEach((message) => {
+    if (typeof message?.content === 'string') {
+      message.content = restoreText(message.content);
+      return;
+    }
+    // 带图片的用户消息是「文字 + 图片」数组；并进来的格式层标记在其中的 text 段里
+    if (!Array.isArray(message?.content)) return;
+    message.content.forEach((part) => {
+      if (part?.type === 'text' && typeof part.text === 'string') part.text = restoreText(part.text);
     });
   });
   if (layers.some(layer => replacements[layer.id] !== 1)) {

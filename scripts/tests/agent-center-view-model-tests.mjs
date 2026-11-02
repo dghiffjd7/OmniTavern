@@ -84,7 +84,7 @@ import {
   assert.equal(view.meta.unreadFailedRuns, 1);
   assert.equal(view.meta.newestFailureAt, 9);
   assert.equal(view.meta.tools, 2);
-  assert.equal(view.meta.resources, 6);
+  assert.equal(view.meta.resources, 8); // 含「Agent 目录」「MCP 服务」
   assert.equal(view.meta.resourceAlerts, 1);
   assert.equal(view.pending[0].id, 'profile-pending-1');
   assert.equal(view.pending[0].kind, 'contact_profile_update');

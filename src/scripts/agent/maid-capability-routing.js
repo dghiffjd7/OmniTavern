@@ -671,6 +671,8 @@ export const createMaidCapabilityRoutingRuntime = ({
   now = Date.now,
   retrieverVersion = MAID_CAPABILITY_RETRIEVER_VERSION,
   logger = console,
+  // 内置能力开关（女仆设置 → 技能 → 内置能力）：id → 是否开启；每次决策时读最新值
+  isBuiltinCapabilityEnabled = null,
 } = {}) => {
   const allFeatures = (Array.isArray(features) ? features : []).map(item => clone(item, {}));
   const activeRetriever = retriever?.retrieve
@@ -742,6 +744,8 @@ export const createMaidCapabilityRoutingRuntime = ({
     const platform = inferPlatform(context);
     const records = new Map();
     const excluded = [];
+    // 没开启的内置能力：不进候选，改列进「可开启能力」，由女仆请用户开启
+    const enableableCapabilities = [];
     const projectedById = new Map();
     const primaryIntent = input || state.input;
     // 对上一份待确认清单的修改回复：原清单的功能不需要这句话再写一次“删除”
@@ -751,6 +755,12 @@ export const createMaidCapabilityRoutingRuntime = ({
       const allowedPlatforms = list(rawFeature?.allowedPlatforms || rawFeature?.platforms).map(item => item.toLowerCase());
       if (rawFeature?.enabled === false) {
         excluded.push({ id: trim(rawFeature.id), tools: list(rawFeature.tools), reason: 'disabled' });
+        continue;
+      }
+      const capabilityId = trim(rawFeature?.builtinCapability);
+      if (capabilityId && typeof isBuiltinCapabilityEnabled === 'function' && !isBuiltinCapabilityEnabled(capabilityId)) {
+        enableableCapabilities.push({ capabilityId, featureId: trim(rawFeature.id), title: trim(rawFeature.title), summary: trim(rawFeature.summary).slice(0, 80) });
+        excluded.push({ id: trim(rawFeature.id), tools: list(rawFeature.tools), reason: 'capability_disabled' });
         continue;
       }
       if (allowedPlatforms.length && platform !== 'unknown' && !allowedPlatforms.includes(platform)) {
@@ -884,8 +894,8 @@ export const createMaidCapabilityRoutingRuntime = ({
     if (fileAttachments.some(item => item?.file)) {
       addRecord(projectedById.get('attachment.import'), 117, 'file_attachment', { pinned: true });
       addRecord(projectedById.get('attachment.inspect'), 116, 'file_attachment', { pinned: true });
-      // 通用文件处理：读、搜、从压缩包取出、写出与打包
-      ['attachment.read', 'attachment.search', 'attachment.extract', 'attachment.create', 'attachment.pack']
+      // 通用文件处理：读、搜、从压缩包取出、写出与打包、看图
+      ['attachment.read', 'attachment.search', 'attachment.extract', 'attachment.create', 'attachment.pack', 'attachment.view_image']
         .forEach((id, index) => addRecord(projectedById.get(id), 115 - index, 'file_attachment', { pinned: true }));
     }
     // 模型读过说明的功能进入下一步候选：提示词只给其余功能的名称索引，“查说明→使用”这条路要走得通
@@ -962,7 +972,10 @@ export const createMaidCapabilityRoutingRuntime = ({
       candidateRefs,
       candidateIds: new Set(candidateFeatures.map(feature => trim(feature.id))),
       excluded,
-      promptFeatures: useCandidates ? candidateFeatures : allFeatures,
+      enableableCapabilities,
+      promptFeatures: useCandidates
+        ? candidateFeatures
+        : allFeatures.filter(feature => !enableableCapabilities.some(item => item.featureId === trim(feature?.id))),
       cohort: {
         uiMode: trim(context?.uiMode),
         activePage: trim(context?.activePage),
@@ -1277,6 +1290,11 @@ export const createMaidCapabilityRoutingRuntime = ({
     getConfig,
     getSnapshot: snapshotId => snapshotCache.get(trim(snapshotId)) || null,
     observeDecision,
+    // 运行结束后把每个动作的结果挂回它的检索快照（只记录，不参与排序）
+    observeOutcomes: (outcomes = []) => (Array.isArray(outcomes) ? outcomes : []).forEach((item) => {
+      if (!String(item?.candidateSnapshotId || '').trim()) return;
+      try { retrievalStore?.recordOutcome?.(item.candidateSnapshotId, item); } catch {}
+    }),
     prepareDecision,
     setConfig,
     validatePlan,

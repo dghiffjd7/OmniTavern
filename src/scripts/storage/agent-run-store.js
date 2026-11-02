@@ -18,6 +18,7 @@ export const AGENT_RUN_STORE_VERSION = 1;
 const LOCAL_BOOTSTRAP_JSON_SOFT_LIMIT = 500_000;
 const DEFAULT_MAX_RUNS = 120;
 const DEFAULT_MAX_EVENTS = 400;
+const REVIEW_CANDIDATE_KINDS = new Set(['chat_format_guardian', 'chat_body_quality_guardian']);
 
 const isPlainObject = value => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 
@@ -158,8 +159,10 @@ export class AgentRunStore {
     const bootAt = Number(this.now?.() || Date.now()) || Date.now();
     Object.values(this.state.runs || {}).forEach((run) => {
       if (!run || !['queued', 'running', 'waiting_permission'].includes(String(run.status || ''))) return;
+      // 格式／正文复核留下的待确认修复候选：重启后只是过期，不算失败
+      const expiredReview = run.status === 'waiting_permission' && REVIEW_CANDIDATE_KINDS.has(String(run.kind || ''));
       run.status = 'cancelled';
-      run.cancelReason = run.cancelReason || 'app_restarted';
+      run.cancelReason = run.cancelReason || (expiredReview ? 'review_expired' : 'app_restarted');
       run.finishedAt = run.finishedAt || bootAt;
       run.updatedAt = bootAt;
       run.metadata = { ...(run.metadata || {}), continuable: true, failureCode: run.metadata?.failureCode || 'app_restarted' };
@@ -453,5 +456,23 @@ export class AgentRunStore {
       state.events = [];
       return true;
     });
+  }
+
+  // 删除指定的已结束 run（连同它的事件）；运行中、待确认的跳过。返回实际删掉的 id。
+  removeRuns(runIds = []) {
+    const ids = new Set((Array.isArray(runIds) ? runIds : [runIds]).map(id => String(id || '').trim()).filter(Boolean));
+    if (!ids.size) return [];
+    const removed = this._commit((state) => {
+      const out = [];
+      ids.forEach((id) => {
+        const run = state.runs[id];
+        if (!run || ['queued', 'running', 'waiting_permission'].includes(String(run.status || ''))) return;
+        delete state.runs[id];
+        out.push(id);
+      });
+      return out;
+    });
+    if (removed.length) this.flush();
+    return removed;
   }
 }

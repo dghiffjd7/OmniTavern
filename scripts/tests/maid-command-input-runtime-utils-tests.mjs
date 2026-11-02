@@ -288,6 +288,39 @@ class FakeDocument {
 }
 
 {
+  // 结果卡片排在回复之后；「再来一次」追加新卡，旧卡原样保留
+  const documentRef = new FakeDocument();
+  const card = { id: 'card-1', type: 'random', createdAt: 1, data: { mode: 'dice', sides: 6, rolls: [2, 5], total: 7 } };
+  const cardActions = [];
+  const runtime = createMaidCommandInputRuntime({
+    documentRef,
+    getViewportSize: () => ({ w: 360, h: 640 }),
+    onSubmit: async () => ({ ok: true, message: '掷出了 7', cards: [card] }),
+    onResultCardAction: async (payload) => {
+      cardActions.push(payload);
+      return { card: { ...card, id: 'card-2', data: { ...card.data, rolls: [6, 6] } } };
+    },
+    setTimeoutFn: () => 1,
+    clearTimeoutFn: () => {},
+  });
+  runtime.open();
+  runtime.getElements().inputEl.value = '掷两个骰子';
+  await runtime.submit();
+  const { resultEl } = runtime.getElements();
+  const kinds = () => resultEl.children.map(node => (node.className.includes('is-card') ? `card:${node.dataset.cardId}` : node.className.includes('is-report') ? 'report' : 'other'));
+  assert.deepEqual(kinds(), ['report', 'card:card-1']);
+  const firstCard = resultEl.children[1].children[0];
+  const reroll = [...(function* walk(node) { yield node; for (const child of node.children) yield* walk(child); })(firstCard)]
+    .find(node => node.className === 'mrcard-action');
+  reroll.dispatchEvent('click', { preventDefault() {}, stopPropagation() {} });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual(cardActions.map(item => [item.action, item.card.id]), [['reroll', 'card-1']]);
+  assert.deepEqual(kinds(), ['report', 'card:card-1', 'card:card-2']);
+  assert.equal(resultEl.children[1].children[0], firstCard, 'the original card element is kept as is');
+  console.log('ok - maid command input shows result cards after the reply and appends rerolls');
+}
+
+{
   const documentRef = new FakeDocument();
   const modeSwitchEl = new FakeElement('div');
   const outsideEl = new FakeElement('main');

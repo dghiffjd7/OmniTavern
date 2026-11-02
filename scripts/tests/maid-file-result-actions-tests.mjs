@@ -25,8 +25,13 @@ const { buildZip } = await import('../../src/scripts/utils/zip-archive.js');
   actions[0].onClick();
   actions[2].onClick();
   assert.deepEqual([previewed, attached], [['f1'], [['f1', 'f2', 'f3']]]);
+  const saved = [];
+  const withSave = buildMaidFileResultActions(steps, { preview() {}, save: id => saved.push(id), attach() {} });
+  assert.deepEqual(withSave.map(action => action.label.replace(/「.*」/, '「…」')), ['查看「…」', '查看「…」', '保存「…」', '保存「…」', '附加这 3 个文件给女仆']);
+  withSave[3].onClick();
+  assert.deepEqual(saved, ['f2'], 'save buttons follow the previewed files');
   assert.deepEqual(buildMaidFileResultActions([{ toolName: 'attachment.read', status: 'succeeded', output: { ok: true } }], { preview() {}, attach() {} }), []);
-  console.log('ok - maid file result actions offer preview and re-attach for produced files');
+  console.log('ok - maid file result actions offer preview, save and re-attach for produced files');
 }
 
 {

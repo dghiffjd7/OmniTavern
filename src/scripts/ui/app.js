@@ -107,7 +107,7 @@ import {
   createMaidMemoryExtractionRuntimeResolver,
   createMaidRuntimeConfigResolver,
 } from '../agent/maid-runtime-config.js';
-import { createAgentRegistry, createSubAgentRegistryProvider } from '../agent/agent-registry.js';
+import { createAgentRegistry, createSubAgentRegistryProvider, createConfiguredAgentRegistryProvider, createMaidSkillRegistryProvider } from '../agent/agent-registry.js';
 import { registerAppNavigationAgentTools } from '../agent/tools/app-navigation-tools.js';
 import { registerAppSessionAgentTools } from '../agent/tools/app-session-tools.js';
 import { registerGroupChatAgentTools } from '../agent/tools/group-chat-agent-tools.js';
@@ -120,6 +120,11 @@ import { registerMaidMediaAssetTools } from '../agent/tools/media-asset-tools.js
 import { createMaidMediaAttachmentPersistence } from './maid-media-attachment-persistence.js';
 import { registerAppUiCaptureTools } from '../agent/tools/app-ui-capture-tools.js';
 import { registerWebSearchAgentTools } from '../agent/tools/web-search-tools.js';
+import { registerMcpAgentTools, mcpAllowRequest, pruneMcpAllowRules } from '../agent/tools/mcp-tools.js';
+import { createMcpManager } from '../agent/mcp/mcp-manager.js';
+import { McpServerStore } from '../storage/mcp-server-store.js';
+import { UserToolStore } from '../storage/user-tool-store.js';
+import { invokeNativeHttpRequest } from '../api/abort.js';
 import { registerMomentsAgentTools } from '../agent/tools/moments-tools.js';
 import { registerMaidTodoTools } from '../agent/tools/maid-todo-tools.js';
 import { registerMaidMemoryTools } from '../agent/tools/maid-memory-tools.js';
@@ -133,11 +138,12 @@ import { MaidSettingsStore } from '../storage/maid-settings-store.js';
 import { MaidSkillStore } from '../storage/maid-skill-store.js';
 import { createMaidSkillRuntime, createMaidSkillTaskValidator } from './maid-skill-runtime.js';
 import { createMaidSkillPanel } from './maid-skill-panel.js';
+import { createMaidHistoryPanel } from './maid-history-panel.js';
 import { createMaidSkillInput } from './maid-skill-ui.js';
 import { appSettings } from '../storage/app-settings.js';
 import { bootstrapAppLanguage } from '../i18n/app-language-bootstrap.js';
 import { requestAppLanguageRestart } from '../i18n/app-language-restart.js';
-import { t, translateUiText } from '../i18n/index.js';
+import { getCurrentLocale, t, translateUiText } from '../i18n/index.js';
 import { getLocalizedPromptText } from '../i18n/prompt-locale.js';
 import { chatFcLocalCapabilityStore } from '../storage/chat-fc-local-capability-store.js';
 import { chatStructuredRouteEvidenceStore } from '../storage/chat-structured-route-evidence-store.js';
@@ -584,6 +590,9 @@ import { isAgentToolReply } from '../agent/agent-tool-targets.js';
 import { createAgentReferenceAppRuntime } from './chat/agent-reference-app-runtime.js';
 import { createCustomAgentAppRuntime } from './chat/custom-agent-app-runtime.js';
 import { createAgentModelRequest } from '../agent/agent-model-request.js';
+import { createFormatGuideAssistRuntime } from './chat/format-guide-assist-runtime.js';
+import { registerMaidCapabilityAgentTools, listMaidBuiltinCapabilityStates, rerollMaidRandomCard } from '../agent/tools/maid-capability-tools.js';
+import { collectMaidResultCards } from '../agent/maid-result-cards.js';
 import { createChatImageJobRuntime } from './chat/chat-image-job-runtime.js';
 import { createInputSuggestionRequest } from './chat/input-suggestion-runtime.js';
 import { createExecutionFlowRuntime } from './chat/execution-flow-runtime-utils.js';
@@ -919,6 +928,21 @@ import { createContactAvatarElement } from './group-avatar-view-utils.js';
 import { GroupPanel } from './group-panel.js';
 import { MediaPicker } from './media-picker.js';
 import { MemoryTemplatePanel } from './memory-template-panel.js';
+import { createMemoryOverviewRuntime, revealWhenShown } from './memory-overview-runtime.js';
+import { createPromptStewardRuntime } from './prompt-steward-runtime.js';
+import { createAgentDirectoryPanel } from './agent-directory-panel.js';
+import { createMcpServerPanel } from './mcp-server-panel.js';
+import { BUILTIN_TOOL_ACTIONS, getBuiltinToolAction, agentToolAction, userToolIconMarkup, SCRIPT_TOOL_ACTION, pluginToolAction, TOOL_SCRIPT_CAPABILITIES } from './tools/user-tool-actions.js';
+import { createToolResultEffects, createScriptToolExecutor } from './tools/user-tool-script.js';
+import { createUserToolRunner, bindUserToolShortcuts } from './tools/user-tool-runner.js';
+import { bindUserToolGestures } from './tools/user-tool-gestures.js';
+import { createBuiltinToolExecutors } from './tools/user-tool-builtin-executors.js';
+import { createUserToolSettingsPanel } from './tools/user-tool-settings-panel.js';
+import { showUndoToast } from './tools/user-tool-undo-toast.js';
+import { createUndoableMessageDelete, createPendingUndo, DELETE_UNDO_WINDOW_MS } from './chat/message-delete-undo.js';
+import { buildSwipeBranchFromMessage } from './chat/swipe-ui-utils.js';
+import { isInputAgent } from '../agent/agent-invocation.js';
+import { getAgentIconName } from '../agent/agent-icons.js';
 import { MomentSummaryPanel } from './moment-summary-panel.js';
 import { MomentsPanel } from './moments-panel.js';
 import { PersonaPanel } from './persona-panel.js';
@@ -945,6 +969,7 @@ import {
   writeStickerAiState,
   writeStickerUsage,
 } from './sticker-storage-utils.js';
+import { resolveStickerPanelLayout } from './chat/sticker-panel-layout-utils.js';
 import { UserPanel } from './user-panel.js';
 import { VariablePanel } from './variable-panel.js';
 import { applyMvuSchemaDefaultsToStore } from '../variables/mvu-variable-defaults-utils.js';
@@ -1996,6 +2021,7 @@ const initApp = async () => {
   generalSettingsPanel.setExternalActions({
     openSession: () => sessionPanel.show(),
     openMemoryTemplates: () => memoryTemplatePanel.show(),
+    openUserTools: () => userToolSettingsPanel.show(),
     openConfig: (options = {}) => configPanel.show({ tab: 'chat', ...(options || {}) }),
     restartApp: () => requestAppLanguageRestart({ safeInvokeFn: safeInvoke }),
     importExperiencePackFile: async (file) => {
@@ -2973,6 +2999,7 @@ const initApp = async () => {
     presetServices: agentPresetServices,
     isVariableRuntimeEnabled,
     setVariableRuntimeEnabled,
+    openWorldEditor: (worldId, options) => worldPanel.openEditor(worldId, options),
   });
   const patchDebugUiRegistry = (mutator) => patchDebugUiRegistryCore(window.appBridge, mutator);
   const recordDebugTraceEvent = (event) => recordAppDebugTraceEvent(event);
@@ -3705,7 +3732,7 @@ const initApp = async () => {
   const generateWithSubAgent = createMaidSubAgentRuntime({
     resolveMaidRuntimeConfig: context => resolveMaidTaskRuntimeConfig(context),
     // 注册工具早于 registry / 确认运行时初始化，依赖只在任务执行时读取。
-    listEnabledAgents: () => agentRegistry.listEnabledAgents(),
+    listEnabledAgents: () => agentRegistry.listEnabledAgents({ role: 'sub_agent' }),
     chatConfigManager, createClient: config => new LLMClient(config),
     requestMaidToolConfirmation: (request, options) => requestMaidToolConfirmation(request, options),
     runAdHocWebSearchChat, logger,
@@ -3937,7 +3964,16 @@ const initApp = async () => {
     presetGroupStore,
   });
   // 女仆通用文件工具（读、搜、取出、写文件、打包）：文件库在女仆输入条装配处创建，这里按需读取
-  registerAttachmentFileAgentTools(agentToolRegistry, { getAttachmentRegistry: () => maidFileAttachmentRegistry });
+  registerAttachmentFileAgentTools(agentToolRegistry, {
+    getAttachmentRegistry: () => maidFileAttachmentRegistry,
+    // attachment.view_image：先确认女仆模型能看图，再按女仆附图的规格压缩（GIF 原样）
+    checkVisionSupport: ({ context } = {}) => checkMaidVisionInput([{ id: 'maid-file-vision-check', kind: 'image', url: 'data:image/png;base64,AA==' }], context),
+    prepareImage: async ({ bytes, mime }) => {
+      const dataUrl = `data:${mime};base64,${bytesToBase64(bytes)}`;
+      const url = await compressImageDataUrl(dataUrl, { maxDim: 1280, quality: 0.82, maxBytes: 1_200_000, mime: 'image/jpeg' });
+      return { dataUrl: url, mime: url.slice(5, url.indexOf(';')) || mime };
+    },
+  });
   // 女仆附件导入（世界书／正则）：附件缓存与导入服务在女仆输入条装配处创建，这里按需读取
   registerAttachmentImportAgentTools(agentToolRegistry, {
     getAttachmentRegistry: () => maidFileAttachmentRegistry,
@@ -4180,10 +4216,14 @@ const initApp = async () => {
   const maidSkillStore = new MaidSkillStore();
   markBootPhase('maid-stores');
   await maidSettingsStore.load();
-  // Phase B：统一 Agent Registry，第一种来源 = 女仆 Sub-agent 配置（投影为统一 Agent capability）。
-  // planner prompt 与委派执行都从这里取，行为与直接读 store 一致；后续领域/用户/MCP Agent 复用同接口。
+  // Phase B：统一 Agent Registry：女仆 Sub-agent、可配置 Agent（当前会话生效的那份）、女仆技能。
+  // planner prompt 与委派只取 Sub-agent（role 过滤），行为与直接读 store 一致；后续 MCP 等来源复用同接口。
   const agentRegistry = createAgentRegistry({
-    providers: [createSubAgentRegistryProvider(() => maidSettingsStore.listSubAgents())],
+    providers: [
+      createSubAgentRegistryProvider(() => maidSettingsStore.listSubAgents()),
+      createConfiguredAgentRegistryProvider(() => agentConfigStore.list(getAgentConfigContext(), 'effective')),
+      createMaidSkillRegistryProvider(() => maidSkillStore.list()),
+    ],
   });
   const maidSemanticMemoryStore = new MaidSemanticMemoryStore({
     loadKv: name => safeInvoke('load_kv', { name }),
@@ -4193,6 +4233,8 @@ const initApp = async () => {
   registerMaidMemoryTools(agentToolRegistry, {
     semanticMemoryStore: maidSemanticMemoryStore,
   });
+  // 内置能力：开关在女仆设置 → 技能，女仆只能请求开启（用户确认），能力工具执行前再读最新开关
+  registerMaidCapabilityAgentTools(agentToolRegistry, { getSettingsStore: () => maidSettingsStore });
   const maidConversationStore = new MaidConversationStore({
     semanticMemoryStore: maidSemanticMemoryStore,
   });
@@ -4240,6 +4282,9 @@ const initApp = async () => {
     if (!tokenCount) return;
     void maidConversationStore.recordContextInjection(tokenCount);
   };
+  // 结果卡「再来一次」（文字回复区与通话托盘共用）：和工具一样在执行前读最新开关
+  const handleMaidResultCardAction = ({ action, card } = {}) => (action === 'reroll' && card?.type === 'random'
+    ? rerollMaidRandomCard(card, { settingsStore: maidSettingsStore }) : null);
   const recordMaidTurnFromResult = async ({
     input = '',
     result = null,
@@ -4252,6 +4297,7 @@ const initApp = async () => {
         status: safeResult.status || (safeResult.ok ? 'succeeded' : 'failed'),
         responseType: safeResult.responseType || '',
         resultBasis: buildMaidResultBasis(safeResult),
+        cards: collectMaidResultCards(safeResult.steps),
         message: safeResult.message || safeResult.reason || '',
         toolName: safeResult.plan?.toolName || safeResult.output?.toolName || '',
         featureId: safeResult.plan?.featureId || '',
@@ -4308,6 +4354,7 @@ const initApp = async () => {
     retrievalStore: capabilityRetrievalStore,
     getConversationContext: getMaidConversationContext,
     logger,
+    isBuiltinCapabilityEnabled: id => maidSettingsStore.getBuiltinCapability(id)?.enabled === true,
   });
   const maidPlanner = createMaidModelBackedPlanner({
     resolveRuntimeConfig: resolveMaidTaskRuntimeConfig,
@@ -4381,6 +4428,42 @@ const initApp = async () => {
   } catch (err) {
     logger.debug('maid tool safety allow store hydrate skipped', err);
   }
+  // MCP（Agent Center 资源页「MCP 服务」）：只连用户加入的 HTTP 服务，请求走原生 http_request；
+  // 女仆用 mcp.search／mcp.call（每次确认，可按工具始终允许），自建文字 Agent 只能用已始终允许的工具（mcp.lookup）
+  const mcpServerStore = new McpServerStore({
+    loadKv: name => safeInvoke('load_kv', { name }),
+    saveKv: (name, data) => safeInvoke('save_kv', { name, data }),
+    encryptSecret: text => chatConfigManager.encryptSecret(text),
+  });
+  try {
+    await mcpServerStore.load();
+  } catch (err) {
+    logger.debug('mcp server store load skipped', err);
+  }
+  const mcpManager = createMcpManager({
+    store: mcpServerStore,
+    decryptSecret: cipher => chatConfigManager.decryptSecret(cipher),
+    httpRequest: ({ url, method, headers, body, timeoutMs, signal }) => invokeNativeHttpRequest({
+      invoker: safeInvoke,
+      args: { url, method, headers, body, timeoutMs },
+      signal,
+    }),
+  });
+  const isMcpOperationAllowed = operationType => maidToolSafetyAllowStore.isAllowed(mcpAllowRequest(operationType));
+  registerMcpAgentTools(agentToolRegistry, {
+    getManager: () => mcpManager,
+    getServer: id => mcpServerStore.get(id),
+    isAllowed: isMcpOperationAllowed,
+  });
+  // 服务删除或换了地址／令牌：清掉不再适用的「始终允许」
+  mcpServerStore.subscribe(id => pruneMcpAllowRules({ allowStore: maidToolSafetyAllowStore, getServer: serverId => mcpServerStore.get(serverId) }, id));
+  const mcpServerPanel = createMcpServerPanel({
+    documentRef: document,
+    store: mcpServerStore,
+    manager: mcpManager,
+    isToolAllowed: isMcpOperationAllowed,
+    revokeTool: operationType => maidToolSafetyAllowStore.revoke(maidToolSafetyAllowStore.buildKey(mcpAllowRequest(operationType))),
+  });
   // 这两个 store 原本只写 localStorage，配额满时会静默丢写（真机实测 5MiB 顶格、重启即丢
   // 校准系数与端点降级记忆）。统一走 kv 权威通道。
   const kvChannel = {
@@ -4415,6 +4498,11 @@ const initApp = async () => {
       maidVoiceRuntime?.refreshApprovals?.();
     },
   });
+  // 内置能力开关在设置里被改过：取消还在等待的「请求开启」确认（版本不符即过期）
+  maidSettingsStore.subscribeCapabilities(() => maidToolConfirmationRuntime.cancelWhere(request => (
+    request?.details?.purpose === 'persistent_enable'
+    && maidSettingsStore.getBuiltinCapability(request.details.capabilityId)?.revision !== request.details.revision
+  )));
   const requestMaidToolConfirmation = (request, options = {}) => maidToolConfirmationRuntime.request(request, options);
   const resolveMaidInlineApproval = ({ id = '', action = 'deny' } = {}) => maidToolConfirmationRuntime.resolve(id, action);
   let applyRejectedFormatRepairAgentRun = async () => ({
@@ -4423,16 +4511,91 @@ const initApp = async () => {
     message: '格式修复入口尚未就绪。',
   });
   let hasRejectedFormatRepairAgentRunCandidate = () => false;
+  // 会话名称：RP 会话取角色名，聊天与群聊取联系人名（活动记录与记忆总览共用）
+  const resolveSessionDisplayLabel = (sessionId) => {
+    const sid = String(sessionId || '').trim();
+    if (!sid) return '';
+    if (sid.startsWith('rp:')) return String(window.appBridge?.getRpCharacterNameForSession?.(sid) || '').trim() || sid;
+    return String(contactsStore.getContact?.(sid)?.name || '').trim() || sid;
+  };
+  // 记忆总览（Agent 资源中心 → 记忆）与记忆管家；跳去的主界面都在下面才建立，入口用时再取
+  const { panel: memoryOverviewPanel } = createMemoryOverviewRuntime({
+    documentRef: document,
+    memoryTableStore,
+    memoryTemplateStore,
+    contactsStore,
+    chatStore,
+    agentTaskRuntime,
+    getSessionId: () => chatStore.getCurrent(),
+    isGroupSession: sessionId => contactsStore.getContact?.(sessionId)?.isGroup === true,
+    getCardName: () => personaStore.getActive?.()?.name,
+    getSessionLabel: resolveSessionDisplayLabel,
+    getMemoryPlace: () => (uiMode === 'rp' ? 'writing' : 'chat'),
+    getStorageMode: getMemoryStorageMode,
+    isAutoWriteEnabled: isMemoryAutoExtractEnabled,
+    getAutoWriteMode: getMemoryAutoExtractMode,
+    listPending: () => providerToolPendingPermissionStore.list({ status: 'pending' }),
+    getLastMemoryPlan: () => window.appBridge?.getLastMemoryPlan?.() || null,
+    openTemplates: () => memoryTemplatePanel.show(),
+    openShare: (sessionId) => {
+      const isGroup = contactsStore.getContact?.(sessionId)?.isGroup === true;
+      if (isGroup) groupSettingsPanel.show(sessionId);
+      else contactSettingsPanel.show();
+      revealWhenShown(document, isGroup ? '#group-memory-features-section' : '#contact-memory-features-section');
+    },
+    openAutoWriteSettings: () => {
+      generalSettingsPanel.show();
+      revealWhenShown(document, '#general-memory-auto', {
+        before: () => {
+          if (document.getElementById('general-memory-advanced')?.style.display === 'none') document.getElementById('general-memory-advanced-toggle')?.click();
+        },
+      });
+    },
+    openPending: () => agentCenterPanel.show({ tab: 'pending' }),
+  });
+  // Agent 目录（AC 资源页）：统一 Agent Registry 的只读视图；「设置」跳回各自原本的设置位置
+  const agentDirectoryPanel = createAgentDirectoryPanel({
+    documentRef: document,
+    listAgents: () => agentRegistry.listAgents(),
+    // 刚启动时模型档列表可能还在载入：等载入后再画一次，避免显示成「未选模型」
+    prepare: () => chatConfigManager.ensureStores?.(),
+    describeModel: (agent) => {
+      const profile = (chatConfigManager.getProfiles?.() || []).find(item => String(item?.id || '') === agent.modelProfileRef);
+      if (!profile) return '';
+      const model = String(agent.modelOverride || profile.model || '').trim();
+      return [String(profile.name || profile.id || '').trim(), model].filter(Boolean).join(' · ');
+    },
+    openAgent: (agent) => {
+      if (agent.role === 'maid_skill') return maidSettingsPanel.show({ tab: 'skills' });
+      if (agent.role === 'sub_agent') {
+        maidSettingsPanel.show({ tab: 'api' });
+        return revealWhenShown(document, '[data-api-nav="subagent"]', { before: () => document.querySelector('[data-api-nav="subagent"]')?.click() });
+      }
+      return agentCenterPanel.show({ tab: 'agents', agentId: agent.id, configure: true });
+    },
+  });
+  // 提示词管家：Agent Center「提示词」页最上方的只读检查
+  const { controller: promptStewardController } = createPromptStewardRuntime({
+    documentRef: document,
+    presetStore,
+    chatStore,
+    agentTaskRuntime,
+    getSessionId: () => chatStore.getCurrent(),
+    getUiMode: () => (uiMode === 'rp' ? 'rp' : 'chat'),
+    getGlobalPromptLibrary: () => agentCenterSettingsStore.getSettings()?.global?.semanticPromptLibrary || null,
+    openTarget: (target = {}) => {
+      if (target.kind === 'preset_prompt') return presetPanel.show({ section: 'sysprompt', promptId: target.promptId });
+      if (target.kind === 'global_prompts') return agentCenterPanel.setActiveTab('global_prompts');
+      if (target.kind === 'variables') return variablePanel.show();
+      return null;
+    },
+    onChange: () => { if (agentCenterPanel.isVisible() && agentCenterPanel.activeTab === 'prompts') agentCenterPanel.render(); },
+  });
   const agentCenterPanel = new AgentCenterPanel({
     getHopscotchPanel: () => hopscotchBoardPanel,
     presetServices: agentPresetServices,
-    // 活动记录显示会话名称：RP 会话取角色名，聊天会话取联系人名
-    resolveSessionLabel: sessionId => {
-      const sid = String(sessionId || '').trim();
-      if (!sid) return '';
-      if (sid.startsWith('rp:')) return String(window.appBridge?.getRpCharacterNameForSession?.(sid) || '').trim() || sid;
-      return String(contactsStore.getContact?.(sid)?.name || '').trim() || sid;
-    },
+    resolveSessionLabel: resolveSessionDisplayLabel,
+    promptSteward: promptStewardController,
     getFailureSeenAt: ({ surface = '' } = {}) => getAgentFailureSeenAt({ surface }),
     markFailureSeen: ({ surface = '', at = Date.now() } = {}) => markAgentFailuresSeen({ surface, at }),
     openConfig: (options = {}) => configPanel.show({ tab: 'chat', ...(options || {}) }),
@@ -4489,6 +4652,9 @@ const initApp = async () => {
         regexPanel,
         pluginPanel,
         memoryTemplatePanel,
+        memoryOverviewPanel,
+        agentDirectoryPanel,
+        mcpServerPanel,
         worldPanel,
         scriptPanel,
         sessionPanel,
@@ -4547,6 +4713,7 @@ const initApp = async () => {
         ),
         getAgentRunCacheStats: () => agentRunStore.getStats(),
         compactAgentRuns: options => agentRunStore.compact(options || {}),
+        removeAgentRuns: runIds => agentRunStore.removeRuns(runIds),
         resolveAgentRunReview: (options = {}) => {
           const opts = options && typeof options === 'object' ? options : {};
           const runId = String(opts.runId || opts.id || '').trim();
@@ -4613,6 +4780,8 @@ const initApp = async () => {
         listAgentFeatures: () => agentFeatureSettingsStore.listFeatures(),
         getAgentFormatGuide: () => formatGuideSettingsRuntime.read(),
         setAgentFormatGuide: options => formatGuideSettingsRuntime.save(options),
+        collectAgentFormatGuideSources: options => formatGuideAssistRuntime.collectSources(options || {}),
+        draftAgentFormatGuide: options => formatGuideAssistRuntime.draft(options || {}),
         setAgentFeatureEnabled: async (options = {}) => {
           const id = String(options?.id || '').trim();
           const enabling = options?.enabled === true;
@@ -6087,12 +6256,8 @@ const initApp = async () => {
       const contact = resolveGroupSpeakerContact(speaker, groupSessionId, contactHint);
       const latestContact = resolveLatestContact(contact);
       if (latestContact) return resolveAvatarForContact(latestContact.id, latestContact);
-      return resolveAvatarForContact(speaker, {
-        id: speaker,
-        name: speaker,
-        isGroup: false,
-        avatar: '',
-      });
+      // 对不上任何联系人的发言者（例如剧情里临时出现的角色）：按名字给固定的彩色字母头像，不用存
+      return resolveLineAvatar({ name: speaker, size: 96, palette: 'stranger' });
     } catch {
       return '';
     }
@@ -8688,7 +8853,7 @@ const initApp = async () => {
   };
   const getStickerTotalPages = () => {
     const items = getStickerItemsForTab(stickerPanelTab);
-    return Math.max(1, Math.ceil(items.length / STICKER_PAGE_SIZE));
+    return Math.max(1, Math.ceil(items.length / getStickerPageLayout().pageSize));
   };
   const updateStickerDotsActive = (page, totalPages) => {
     if (!stickerPanel?.dots) return;
@@ -8874,12 +9039,12 @@ const initApp = async () => {
       container.appendChild(btn);
     });
   };
-  const buildStickerPage = (items, pageIndex) => {
+  const buildStickerPage = (items, pageIndex, pageSize) => {
     const page = document.createElement('div');
     page.className = 'sticker-page';
     if (!items.length) return page;
-    const start = pageIndex * STICKER_PAGE_SIZE;
-    const pageItems = items.slice(start, start + STICKER_PAGE_SIZE);
+    const start = pageIndex * pageSize;
+    const pageItems = items.slice(start, start + pageSize);
     renderStickerItems(pageItems, page);
     return page;
   };
@@ -9064,7 +9229,10 @@ const initApp = async () => {
     grid.style.transition = 'none';
     grid.style.transform = 'translateX(0px)';
     const items = getStickerItemsForTab(stickerPanelTab);
-    const totalPages = Math.max(1, Math.ceil(items.length / STICKER_PAGE_SIZE));
+    const layout = getStickerPageLayout();
+    stickerPageSize = layout.pageSize;
+    grid.style.setProperty('--sticker-cols', String(layout.columns));
+    const totalPages = Math.max(1, Math.ceil(items.length / layout.pageSize));
     if (stickerPanelPage >= totalPages) stickerPanelPage = totalPages - 1;
     if (!items.length) {
       const label = stickerPanelTab === 'recent' ? '暂无常用贴图' : '暂无贴图';
@@ -9074,18 +9242,26 @@ const initApp = async () => {
     }
     grid.innerHTML = '';
     if (totalPages === 1) {
-      grid.appendChild(buildStickerPage(items, stickerPanelPage));
+      grid.appendChild(buildStickerPage(items, stickerPanelPage, layout.pageSize));
       renderStickerDots(1);
       requestAnimationFrame(() => scrollToStickerPage(0, 'auto'));
       return;
     }
     grid.classList.add('sticker-pages');
     for (let i = 0; i < totalPages; i++) {
-      grid.appendChild(buildStickerPage(items, i));
+      grid.appendChild(buildStickerPage(items, i, layout.pageSize));
     }
     renderStickerDots(totalPages);
     requestAnimationFrame(() => scrollToStickerPage(stickerPanelPage, 'auto'));
   };
+  // 宽度变了（窗口缩放、侧栏开合）每页张数也会变：重新分页，停在原先看到的第一张所在页
+  window.addEventListener('resize', () => {
+    if (!stickerPanelOpen || !stickerPageSize) return;
+    const { pageSize } = getStickerPageLayout();
+    if (pageSize === stickerPageSize) return;
+    stickerPanelPage = Math.floor((stickerPanelPage * stickerPageSize) / pageSize);
+    renderStickerPanel();
+  });
 
   updateStickerPreview = (text = '') => {
     if (!stickerPreview?.el || !stickerPreview.list) return;
@@ -10978,7 +11154,12 @@ const initApp = async () => {
   let stickerPanelOpen = false;
   let stickerPanelTab = 'default';
   let stickerPanelPage = 0;
-  const STICKER_PAGE_SIZE = 8;
+  // 每页张数按列数排满两行（手机 4 列；宽屏按面板宽度算），列数写到网格的 --sticker-cols
+  let stickerPageSize = 0;
+  const getStickerPageLayout = () => resolveStickerPanelLayout({
+    panelWidth: stickerPanel?.el?.parentElement?.clientWidth || 0,
+    wide: window.matchMedia?.('(min-width: 600px)')?.matches === true,
+  });
   let stickerUsage = {};
   const loadStickerUsage = () => readStickerUsage();
   const saveStickerUsage = () => writeStickerUsage(stickerUsage);
@@ -17451,6 +17632,32 @@ const initApp = async () => {
     getPlace: () => uiMode === 'rp' ? 'writing' : 'chat',
     getProfile: getSessionFormatProfile, getStore: () => maidFormatProfileStore,
     notifyChanged: sessionId => window.dispatchEvent(new CustomEvent('agent-feature-settings-changed', { detail: { id: AGENT_FEATURE_IDS.replyCheck, sessionId } })),
+  });
+  // AC 格式修复「辅助填写」：读当前会话的格式来源，按编辑器里的 Agent 连线配置整理草稿
+  const formatGuideAssistRuntime = createFormatGuideAssistRuntime({
+    presetStore, regexStore, contactsStore,
+    getUiMode: resolveUiModeForSession,
+    getRegexContext: options => window.appBridge?.getRegexContext?.(options) || {},
+    getResolvedWorldState: (sessionId, options) => window.appBridge?.getResolvedWorldState?.(sessionId, options) || {},
+    getWorldInfo: async worldId => (await window.appBridge?.getWorldInfo?.(worldId)) || null,
+    getCharacter: (sid) => {
+      if (sid.startsWith('rp:')) {
+        const persona = getEffectivePersona(sid);
+        const card = persona?.originalCard?.data || persona?.originalCard || {};
+        return persona ? { name: persona.name, fields: { description: persona.description, system_prompt: card.system_prompt, post_history_instructions: card.post_history_instructions } } : null;
+      }
+      const contact = contactsStore.getContact(sid);
+      return contact ? { name: contact.name, fields: { description: contact.description } } : null;
+    },
+    createModelRequest: (config, sid) => createAgentModelRequest({ config: { ...config, id: 'reply_check' },
+      requestContext: captureRequestContext({ sessionId: sid }),
+      resolveModel: async () => (config.modelMode === 'profile' && String(config.modelProfileId || '').trim()
+        ? chatConfigManager.getRuntimeConfigByProfileId(config.modelProfileId)
+        : (await window.appBridge.resolveRequestRuntimeConfig({ sessionId: sid, uiMode: resolveUiModeForSession(sid) }))?.config),
+      createClient: model => new LLMClient(model),
+      normalizeMessages: (messages, model) => window.appBridge.normalizeOutgoingProviderMessages?.(messages, model) || messages,
+    }),
+    getLocale: () => getCurrentLocale(),
   });
   const resolveFormatTargetForSession = (sessionId = '') => {
     const sid = String(sessionId || '').trim();
@@ -24334,7 +24541,13 @@ const initApp = async () => {
     documentRef: document,
     settingsStore: maidSettingsStore,
     skillPanel: createMaidSkillPanel({ store: maidSkillStore, documentRef: document, listFeatures: () => listAppFeatures(),
-      onUseSkill: id => { maidSkillRuntime.setSelected([...maidSkillRuntime.getSelected(), id]); maidSettingsPanel.hide(); maidCommandInputRuntime.open(); } }),
+      onUseSkill: id => { maidSkillRuntime.setSelected([...maidSkillRuntime.getSelected(), id]); maidSettingsPanel.hide(); maidCommandInputRuntime.open(); },
+      capabilities: {
+        list: () => listMaidBuiltinCapabilityStates(maidSettingsStore),
+        setEnabled: (id, enabled) => maidSettingsStore.setBuiltinCapabilityEnabled(id, enabled, { source: 'settings' }),
+        subscribe: listener => maidSettingsStore.subscribeCapabilities(listener),
+      } }),
+    historyPanel: createMaidHistoryPanel({ store: maidConversationStore, documentRef: document, onCardAction: handleMaidResultCardAction }),
     onOpenVoiceConfig: mode => maidVoiceRuntime?.openSettings(mode),
     onVoiceModeChanged: () => maidVoiceRuntime?.sync(),
     listModelProfiles: () => (chatConfigManager.getProfiles?.() || []).map(profile => ({
@@ -24364,6 +24577,7 @@ const initApp = async () => {
       remove: id => maidFileAttachmentRegistry.remove(id),
       clear: () => maidFileAttachmentRegistry.clear(),
       preview: id => previewMaidLibraryFile(id),
+      save: id => saveMaidLibraryFile(id),
     },
     listRuns: options => agentRunStore.listRuns({ ...(options || {}), kind: 'maid_assistant' }),
     allowRulesStore: maidToolSafetyAllowStore,
@@ -24426,6 +24640,21 @@ const initApp = async () => {
   // 女仆产出的文件：「查看」用只读文本框（可复制），「附加给女仆」放回输入条接着处理
   const maidFilePreviewReader = createAttachmentTextReader({ maxCachedChars: 2_000_000 });
   let maidFilePreviewModal = null;
+  // 存到 APP 外：桌面弹系统另存为，手机存进下载文件夹（沿用 export_attachment）
+  const saveMaidLibraryFile = async (id) => {
+    const entry = await maidFileAttachmentRegistry.ensureLoaded(id);
+    if (!entry?.bytes) {
+      window.toastr?.warning?.(t('文件已被清理，无法保存。'));
+      return '';
+    }
+    const ext = (/\.([^.]+)$/.exec(String(entry.name || ''))?.[1] || '').toLowerCase();
+    return exportAttachmentFile({
+      bytes: entry.bytes,
+      fileName: entry.name,
+      filters: ext ? [{ name: ext.toUpperCase(), extensions: [ext] }] : [],
+      mimeType: entry.mime,
+    });
+  };
   const previewMaidLibraryFile = async (id) => {
     const entry = await maidFileAttachmentRegistry.ensureLoaded(id);
     if (!maidFilePreviewModal) {
@@ -24570,7 +24799,7 @@ const initApp = async () => {
           regex: () => regexPanel.show(),
           script: () => scriptPanel.show(),
         }),
-        ...buildMaidFileResultActions(result?.steps, { preview: previewMaidLibraryFile, attach: attachMaidLibraryFiles }),
+        ...buildMaidFileResultActions(result?.steps, { preview: previewMaidLibraryFile, save: saveMaidLibraryFile, attach: attachMaidLibraryFiles }),
       ],
       getAppContext: () => ({ sessionId: chatStore.getCurrent(), roleCardId: String(personaStore.getActive?.()?.id || ''), agentId: 'maid-assistant', uiMode, activePage, userSelection: maidSelectionMode.getItems() }),
       maidAssistantAgent,
@@ -24605,6 +24834,7 @@ const initApp = async () => {
     getApproval: runId => maidToolConfirmationRuntime.getInline(runId),
     getPendingApproval: runId => maidToolConfirmationRuntime.getPendingForRun(runId),
     resolveBoundApproval: (binding, action) => maidToolConfirmationRuntime.resolveBound(binding, action),
+    onResultCardAction: handleMaidResultCardAction,
     getAppContext: () => ({
       roleCardId: String(personaStore.getActive?.()?.id || ''),
       sessionId: chatStore.getCurrent(),
@@ -27599,8 +27829,27 @@ const initApp = async () => {
     if (isRpSessionId(sid)) return await resolveCreativeFormatRepairRawOriginal(message, sid);
     return String(message.rawSource ?? message.raw ?? message.content ?? '');
   };
+  // AC 配置编辑器同步读取配置档列表（getProfiles），要先载入；否则第一次发消息前下拉框只有「请选择配置」
+  void chatConfigManager.ensureStores?.().catch?.(() => {});
+  // 用户工具（自定义工具、动作与手势）：全局保存；工具箱与 Agent 同排显示，点了交给统一执行入口
+  const userToolStore = new UserToolStore({
+    loadKv: name => safeInvoke('load_kv', { name }),
+    saveKv: (name, data) => safeInvoke('save_kv', { name, data }),
+  });
+  try {
+    await userToolStore.load();
+  } catch (err) {
+    logger.debug('user tool store load skipped', err);
+  }
+  const userToolsForToolbox = {
+    list: () => userToolStore.listTools().map(tool => ({ id: tool.id, name: tool.name, icon: tool.icon })),
+    iconMarkup: userToolIconMarkup,
+    run: (id, options) => userToolRunner.run(id, { ...options, trigger: 'toolbox' }),
+    edit: id => userToolSettingsPanel.show({ toolId: id }),
+    openSettings: () => userToolSettingsPanel.show(),
+  };
   const agentToolsRuntime = createAgentToolsAppRuntime({
-    ui, store: agentConfigStore, budget: sharedInputBudget,
+    ui, store: agentConfigStore, budget: sharedInputBudget, userTools: userToolsForToolbox,
     toolboxContainer: chatRoom?.querySelector('.chat-action-inline'), toolboxAnchor: stickerToggleBtn,
     onToolboxOpen: () => { setActionPanelOpen(false); setStickerPanelOpen(false); },
     getContext: getAgentExecutionContext,
@@ -27647,6 +27896,250 @@ const initApp = async () => {
     },
   });
   const { textEditRuntime, actions: agentConfigurationActions } = agentToolsRuntime;
+  const isInChatRoom = () => Boolean(chatRoom && !chatRoom.classList.contains('hidden') && chatStore.getCurrent());
+  const isGenerationActive = () => Boolean(ui?.isSending || ui?.isStreaming || (activeGeneration && !activeGeneration.cancelled));
+  const listAgentToolActions = () => (agentConfigurationActions.listAgentConfigurations?.({ context: getAgentExecutionContext() }) || [])
+    .map(record => record.config).filter(config => config && config.kind !== 'archive_naming')
+    .map(config => agentToolAction(config, { isInputAgent, iconName: getAgentIconName(config) }));
+  const listPluginToolActions = () => (pluginRuntime?.listActions?.() || []).map(pluginToolAction);
+  const resolveUserToolAction = (source, id) => (source === 'builtin' ? getBuiltinToolAction(id)
+    : source === 'agent' ? listAgentToolActions().find(action => action.id === id) || null
+      : source === 'script' ? (id === SCRIPT_TOOL_ACTION.id ? SCRIPT_TOOL_ACTION : null)
+        : source === 'plugin' ? listPluginToolActions().find(action => action.id === id) || null : null);
+  const writeComposerText = (text, { mode = 'insert' } = {}) => {
+    const input = ui.inputEl;
+    if (!input) return;
+    const value = String(input.value || '');
+    const piece = String(text ?? '');
+    const start = mode === 'replace' ? 0 : (Number.isInteger(input.selectionStart) ? input.selectionStart : value.length);
+    const end = mode === 'replace' ? value.length : (Number.isInteger(input.selectionEnd) ? input.selectionEnd : value.length);
+    ui.setInputText(`${value.slice(0, start)}${piece}${value.slice(end)}`);
+    input.dispatchEvent(new Event('input', { bubbles: true })); // 草稿保存跟着 input 事件
+    try { input.focus({ preventScroll: true }); input.setSelectionRange(start + piece.length, start + piece.length); } catch {}
+  };
+  // 工具里的删除可撤销：先暂存再清理；同一时间只留一个，切换会话或过期就确定删除
+  const undoableMessageDelete = createUndoableMessageDelete({
+    chatStore, ui,
+    findMessageWrapper: id => ui.scrollEl?.querySelector(`[data-msg-id="${CSS.escape(String(id || ''))}"]`) || null,
+    beforeChange: async (sid) => {
+      const turn = hopscotchTurnRuntime?.getActiveTurn(sid);
+      if (turn) { turn.abort('message_changed'); await turn.turnPromise.catch(() => {}); }
+    },
+    isTableMemory: () => getMemoryStorageMode() === 'table',
+    abortMemoryUpdate: sid => currentMemoryUpdateRuntime?.abortMemoryUpdate?.(sid),
+    getReplyTarget: sid => getReplyTargetForSession(sid),
+    clearReplyTarget: sid => clearReplyTargetForSession(sid),
+    removeTurnCheckpoints: (sid, messages, options) => removeTurnCheckpointsForMessages(sid, messages, options),
+    restoreMemory: (sid, options) => restoreMemoryForActiveThread(sid, options),
+    restoreVariables: sid => restoreVariablesForActiveThread(sid),
+    buildBranchFromMessage: buildSwipeBranchFromMessage,
+    captureBranchState: async (sid, branches, index) => {
+      const { isGroup } = getTurnCheckpointSessionScope(sid);
+      await persistSwipeBranchMemoryState(branches, index, sid, { isGroup });
+      if (hasSessionVariableActivity(sid, branches)) await persistSwipeBranchVariableState(branches, index, sid);
+    },
+    rerender: () => rerenderCurrentSession(),
+    refresh: () => refreshChatAndContacts(),
+    logger,
+  });
+  const pendingDeleteUndo = createPendingUndo({ windowMs: DELETE_UNDO_WINDOW_MS });
+  window.addEventListener('session-changed', () => { void pendingDeleteUndo.commitPending(); });
+  window.addEventListener('pagehide', () => { void pendingDeleteUndo.commitPending(); });
+  // 带「撤销」的通知：同一时间只留一个待撤销项（删除与脚本直接改消息共用）
+  const offerUndo = async ({ sessionId, label, undo, commit = async () => {} }) => {
+    let toast = null;
+    await pendingDeleteUndo.stage({ sessionId, undo, commit, onSettled: () => toast?.dismiss() });
+    toast = showUndoToast({
+      message: t(label), actionLabel: t('撤销'), timeoutMs: DELETE_UNDO_WINDOW_MS,
+      onAction: async () => {
+        const undone = await pendingDeleteUndo.undo();
+        if (undone.ok) window.toastr?.success?.(t('已恢复'));
+        else window.toastr?.warning?.(t(undone.reason === 'expired' ? '已经过了可以撤销的时间' : '聊天已经有新变化，没能撤销'));
+      },
+    });
+  };
+  const runUndoableDelete = async (result, label) => {
+    if (!result?.ok) return { status: 'unavailable', message: result?.reason === 'generating' ? '正在生成，结束后再试' : '没有删除' };
+    if (!result.undoable) {
+      window.toastr?.success?.(t(label));
+      return { status: 'succeeded' };
+    }
+    await offerUndo({ sessionId: result.sessionId, label, undo: result.undo, commit: result.commit });
+    return { status: 'succeeded' };
+  };
+  const builtinToolExecutors = createBuiltinToolExecutors({
+    deleteReply: async (sid, message) => {
+      const result = await undoableMessageDelete.deleteReply(sid, message);
+      return runUndoableDelete(result, result?.kind === 'branch' ? '已删除当前分支' : '已删除这条回复');
+    },
+    retractMessage: async (sid, message) => {
+      // 还在送出／生成中的消息照原本的撤回（会停止这次生成），不提供撤销
+      if (message.status === 'pending' || message.status === 'sending' || (activeGeneration && activeGeneration.userMsgId === message.id)) {
+        await ui.actionHandler?.('retract', message);
+        return { status: 'succeeded' };
+      }
+      return runUndoableDelete(await undoableMessageDelete.deleteMessage(sid, message), '已撤回这条消息');
+    },
+    dispatchMessageAction: (action, message, payload) => ui.actionHandler?.(action, message, payload),
+    startInlineEdit: message => ui.startInlineEdit?.(message),
+    continueReply: () => continueLastReply({ fromTool: true }),
+    stopGeneration: () => stopCurrentGeneration(),
+    selectSwipe: (sid, messageId, index) => {
+      const message = chatStore.findMessage(messageId, sid);
+      const wrapper = ui.scrollEl?.querySelector(`[data-msg-id="${CSS.escape(messageId)}"]`);
+      if (!message || !wrapper) return false;
+      ui._applySwipe(wrapper, message, index);
+      return true;
+    },
+    insertInput: (text, options) => writeComposerText(text, options),
+    sendInput: () => handleComposerSend(),
+    openPanel: (id) => {
+      const openers = {
+        image: () => runQuickAction('generate-image'),
+        memory: () => memoryOverviewPanel.show(),
+        variables: () => variablePanel.show(),
+        worldbook: () => worldPanel.show({ scope: 'session' }),
+        maid: () => openMaidCommandOrSettings(),
+        agent_center: () => agentCenterPanel.show(),
+        presets: () => presetPanel.show(),
+      };
+      if (!openers[id]) return false;
+      void Promise.resolve(openers[id]()).catch(err => logger.warn('user tool open panel failed', err));
+      return true;
+    },
+    isGenerating: isGenerationActive,
+  });
+  // 工具脚本／插件动作：脚本只拿得到声明的能力；结果由宿主按能力套用
+  const plainMessageText = message => String(resolveMessagePlainText(message, { depth: 0 }) || message?.content || '');
+  const buildUserToolScriptContext = async ({ tool, message, sessionId, capabilities = [], selection = '', trigger }) => {
+    const read = capabilities.includes('read');
+    return {
+      trigger,
+      tool: { id: tool.id, name: tool.name },
+      message: read && message ? {
+        id: message.id, role: message.role, content: plainMessageText(message),
+        raw: message.role === 'assistant' ? String(await getTextAgentRaw(message, sessionId) ?? '') : String(message.content ?? ''),
+      } : null,
+      selection: read ? String(selection || '') : '',
+      recent: read ? (chatStore.getMessages(sessionId) || []).filter(item => item?.role === 'user' || item?.role === 'assistant').slice(-10)
+        .map(item => ({ role: item.role, content: plainMessageText(item).slice(0, 4000) })) : [],
+    };
+  };
+  const userToolResultEffects = createToolResultEffects({
+    getRaw: (message, sid) => (message.role === 'assistant' ? getTextAgentRaw(message, sid) : String(message.content ?? '')),
+    review: options => ui.openFormatPatchReview({ ...options, summary: t('工具脚本的修改'), validateCandidate: () => ({ canApply: true, statusText: '' }) }),
+    confirmText: ({ title, text }) => appConfirm({ title, message: `${t('把这条消息改成：')}\n\n${text.length > 1200 ? `${text.slice(0, 1200)}…` : text}`, confirmText: t('应用') }),
+    commitEdit: async (message, text, original) => {
+      const sid = chatStore.getCurrent();
+      const current = chatStore.findMessage(message.id, sid);
+      if (!current) return false;
+      if (current.role === 'assistant') {
+        return Boolean(await ui.actionHandler?.('edit-assistant-raw', current, { text, source: 'user_tool_script', sessionId: sid, sourceSnapshot: original, canCommit: () => true,
+          sourceKind: isRpSessionId(sid) ? FORMAT_REPAIR_SOURCE_KINDS.creativeRawOriginal : 'bubble_raw' }));
+      }
+      return Boolean(await ui.actionHandler?.('edit-confirm', current, { text }));
+    },
+    insertInput: text => writeComposerText(text, { mode: 'replace' }),
+    sendInput: () => handleComposerSend(),
+    copyText: text => ui.copyToClipboard?.(text),
+    notify: text => window.toastr?.info?.(text),
+    offerUndo: ({ sessionId, label, undo }) => offerUndo({ sessionId, label, undo: async () => ({ ok: Boolean(await undo()) }) }),
+    isGenerating: isGenerationActive,
+  });
+  const runScriptTool = createScriptToolExecutor({
+    pluginRuntime,
+    buildContext: buildUserToolScriptContext,
+    applyEffects: userToolResultEffects,
+    getPluginPermissions: id => pluginStore?.get?.(id)?.manifest?.permissions || [],
+  });
+  pluginRuntime?.setToolBridge?.({
+    'tool.input.get': () => String(ui.inputEl?.value || ''),
+    'tool.input.set': ({ text }) => { writeComposerText(text, { mode: 'replace' }); return true; },
+    'tool.input.insert': ({ text }) => { writeComposerText(text, { mode: 'insert' }); return true; },
+    'tool.send': ({ text }) => {
+      if (isGenerationActive()) throw new Error('正在生成，结束后再试');
+      if (text !== undefined) writeComposerText(text, { mode: 'replace' });
+      handleComposerSend();
+      return true;
+    },
+    'tool.model.generate': async ({ prompt, system }) => {
+      const context = getAgentExecutionContext();
+      const model = await customAgentRequests.captureModel({ modelMode: 'follow_current' }, context);
+      const messages = [...(system ? [{ role: 'system', content: String(system) }] : []), { role: 'user', content: String(prompt ?? '') }];
+      return String(await customAgentRequests.request({ messages }, model, null, context) ?? '');
+    },
+    'tool.http': async ({ url, options = {} }) => {
+      const target = String(url || '');
+      if (!/^https?:\/\//i.test(target)) throw new Error('只支持 http(s) 地址');
+      const headers = Object.fromEntries(Object.entries(options.headers && typeof options.headers === 'object' ? options.headers : {}).map(([key, value]) => [String(key), String(value)]));
+      const body = typeof options.body === 'string' ? options.body : (options.body ? JSON.stringify(options.body) : null);
+      const response = await safeInvoke('http_request', { url: target, method: String(options.method || 'GET').toUpperCase(), headers, body, timeoutMs: 30000 });
+      return { status: Number(response?.status) || 0, ok: Boolean(response?.ok), headers: response?.headers || {}, body: String(response?.body ?? '').slice(0, 1_000_000) };
+    },
+    'tool.notify': ({ text, level }) => {
+      const kind = ['success', 'warning', 'error', 'info'].includes(level) ? level : 'info';
+      window.toastr?.[kind]?.(String(text ?? '').slice(0, 500));
+      return true;
+    },
+  });
+  const userToolRunner = createUserToolRunner({
+    store: userToolStore,
+    resolveAction: resolveUserToolAction,
+    execute: async (action, context) => {
+      if (action.source === 'builtin') return builtinToolExecutors[action.id](context);
+      if (action.source === 'script' || action.source === 'plugin') return runScriptTool(action, context);
+      if (action.source === 'agent') {
+        return agentToolsRuntime.toolbox.openTool(action.id, { messageId: context.message?.id || '' })
+          ? { status: 'succeeded' } : { status: 'unavailable', message: '这个 Agent 在当前聊天不可用' };
+      }
+      return { status: 'unavailable', message: '这个工具的动作暂时不能执行' };
+    },
+    getSessionId: () => (isInChatRoom() ? chatStore.getCurrent() : ''),
+    findMessage: (sid, id) => chatStore.findMessage(id, sid),
+    findLastMessage: (sid, role) => {
+      const messages = chatStore.getMessages(sid) || [];
+      for (let i = messages.length - 1; i >= 0; i -= 1) {
+        const message = messages[i];
+        if (message?.role !== role || message.status === 'pending' || message.status === 'sending') continue;
+        if (role === 'user' && message.meta?.generatedByAssistant === true) continue;
+        if (role === 'assistant' && !isAgentToolReply(message)) continue;
+        return message;
+      }
+      return null;
+    },
+    confirm: ({ title, message }) => appConfirm({ title, message: t(message), confirmText: '执行', danger: true }),
+    notify: (result) => {
+      if (['unavailable', 'stale', 'failed'].includes(result.status) && result.message) window.toastr?.warning?.(t(result.message), result.toolName);
+    },
+    logger,
+  });
+  const userToolSettingsPanel = createUserToolSettingsPanel({
+    documentRef: document,
+    store: userToolStore,
+    listActions: () => [...BUILTIN_TOOL_ACTIONS, ...listAgentToolActions(), SCRIPT_TOOL_ACTION, ...listPluginToolActions()],
+    getAction: resolveUserToolAction,
+    exportPack: (pack, filename) => downloadJsonFile(pack, filename),
+    pickPackText: () => pickJsonFileText(),
+    confirmScriptCapabilities: ({ name, capabilities }) => {
+      const items = TOOL_SCRIPT_CAPABILITIES.filter(item => capabilities.includes(item.id));
+      const lines = items.length ? items.map(item => `· ${t(item.title)}：${t(item.description)}`).join('\n') : t('只做计算，不需要额外能力。');
+      return appConfirm({ title: t('确认「{name}」的脚本可以做的事', { name: name || t('新工具') }), message: lines, confirmText: t('确认并保存'), danger: items.some(item => item.risky) });
+    },
+    shortcutTaken: (shortcut) => {
+      const open = agentToolsRuntime.toolbox.getShortcut?.();
+      return open && open.code === shortcut.code && Boolean(open.ctrl) === shortcut.ctrl && Boolean(open.alt) === shortcut.alt && Boolean(open.meta) === shortcut.meta && Boolean(open.shift) === shortcut.shift ? '打开工具箱' : '';
+    },
+  });
+  bindUserToolShortcuts({
+    documentRef: document, store: userToolStore,
+    run: (id, options) => userToolRunner.run(id, options),
+    isEnabled: () => !userToolSettingsPanel.isOpen() && isInChatRoom(),
+  });
+  userToolStore.subscribe(() => agentToolsRuntime.toolbox.refresh());
+  // 设置页建在面板早期注册之后，这里补登记（早期注册的物件建立时还拿不到它）
+  patchDebugUiRegistry((registry) => {
+    registry.panels.userToolSettingsPanel = userToolSettingsPanel;
+  });
   const utilityRequests = createCustomAgentRequestRuntime({ createClient: config => new LLMClient(config) });
   const utilityAgentRuntime = createUtilityAgentRuntime({ chatStore, configStore: agentConfigStore, getContext: getAgentExecutionContext,
     captureModel: customAgentRequests.captureModel, request: utilityRequests.request,
@@ -30957,6 +31450,15 @@ const initApp = async () => {
         window.appBridge.setContextBuilder?.(llmContext);
       } catch {}
     }
+    // 创作模式发送／预览前派发酒馆的生成开始事件（预览即 dryRun），脚本注入赶得上本轮提示词
+    const dispatchScriptGenerationStart = () => (rpUiMode && !skipScripts
+      ? scriptRuntime?.dispatchGenerationStart?.({
+        sessionId,
+        type: swipeTarget ? 'swipe' : (continueTarget ? 'continue' : 'normal'),
+        dryRun: Boolean(previewOnly),
+        input: swipeTarget || continueTarget ? '' : String(text || ''),
+      })
+      : null);
 
     const currentDraftReplyTarget = getReplyTargetForSession(sessionId);
     let consumedDraftReplyTarget = false;
@@ -30998,6 +31500,7 @@ const initApp = async () => {
         text,
         sessionId,
       }, {
+        beforeBuildContext: dispatchScriptGenerationStart,
         buildContext: llmContext,
         appBridge: {
           generate: (input, context) => {
@@ -31734,6 +32237,7 @@ const initApp = async () => {
           text,
           sessionId,
         }, {
+          beforeBuildContext: dispatchScriptGenerationStart,
           consumePromptInjections,
           buildContext: (input) => {
             const context = llmContext(input);
@@ -32466,6 +32970,8 @@ const initApp = async () => {
     onApprovalDecision: resolveMaidInlineApproval,
     confirmApproval: runIds => maidToolConfirmationRuntime.confirmByVoice(runIds),
     cancelPendingAction: options => maidAssistantAgent.cancelPendingAction(options),
+    onResultCardAction: handleMaidResultCardAction,
+    describeTool: name => agentToolRegistry.get(name)?.title || '',
   });
   const commitChatLiveTranscript = createLiveTranscriptCommitter({
     isTargetCurrent: isRealtimeCallTargetCurrent,
@@ -32505,6 +33011,7 @@ const initApp = async () => {
     },
     beforeStart: target => maidVoiceRuntime.beforeRealtimeStart(target),
     getMaidSurface: () => maidVoiceRuntime.getSurface(),
+    onMaidTaskDelivery: delivery => maidVoiceRuntime.noteTaskDelivery(delivery),
     handleMaidTaskRequest: (options) => {
       // 交办时决定执行模型：选“语音执行”且语音设置档能提供文本模型时，本通话的任务都用它
       const callId = options?.target?.maidCallId;
@@ -32570,18 +33077,21 @@ const initApp = async () => {
     generateImageFromSlash,
   });
 
-	  const handleComposerSend = () => {
-	    if (ui?.isSending || ui?.isStreaming || (activeGeneration && !activeGeneration.cancelled)) {
-	      const cancelled = cancelActiveGeneration('user');
-	      if (!cancelled) {
-	        try { window.appBridge.cancelCurrentGeneration('user'); } catch {}
-	        try { ui.cancelDeliverySequence?.(); } catch {}
-	        try { ui.hideTyping?.(); } catch {}
-	        ui.setStreamingState?.(false);
-	        ui.setSendingState?.(false);
-	      }
-	      return;
+	  // 生成中：停止（发送键与「停止生成」工具共用）；没有在生成时返回 false
+	  const stopCurrentGeneration = () => {
+	    if (!(ui?.isSending || ui?.isStreaming || (activeGeneration && !activeGeneration.cancelled))) return false;
+	    const cancelled = cancelActiveGeneration('user');
+	    if (!cancelled) {
+	      try { window.appBridge.cancelCurrentGeneration('user'); } catch {}
+	      try { ui.cancelDeliverySequence?.(); } catch {}
+	      try { ui.hideTyping?.(); } catch {}
+	      ui.setStreamingState?.(false);
+	      ui.setSendingState?.(false);
 	    }
+	    return true;
+	  };
+	  const handleComposerSend = () => {
+	    if (stopCurrentGeneration()) return;
 	    // 揭示动画播放中：本次点击只跳过动画（无论输入框是否有内容），想发送需再点一次。
 	    const revealSid = String(chatStore.getCurrent?.() || '').trim();
 	    if (revealSid && protocolDeliveryQueuesBySession.has(revealSid)) {
@@ -32624,13 +33134,9 @@ const initApp = async () => {
     clearReplyTargetForSession(chatStore.getCurrent());
   });
 
-  const rpContinueBtn = document.getElementById('rp-continue-btn');
-  rpContinueBtn?.addEventListener('click', () => {
-    if (uiMode !== 'rp') return;
-    if (activeGeneration && !activeGeneration.cancelled) {
-      cancelActiveGeneration('user');
-      return;
-    }
+  // 继续生成（创意写作「继续」按钮与「继续生成」工具共用）；工具调用时没有 AI 回复就返回 false
+  const continueLastReply = ({ fromTool = false } = {}) => {
+    if (fromTool && !getLastContinuableAssistantMessage(chatStore.getCurrent())) return false;
     if (canUseDeepSeekContinuePrefill()) {
       const sessionId = chatStore.getCurrent();
       const targetMessage = getLastContinuableAssistantMessage(sessionId);
@@ -32652,7 +33158,7 @@ const initApp = async () => {
             initialContent: String(targetMessage.content || ''),
           }),
         });
-        return;
+        return true;
       }
     }
     handleSend(null, {
@@ -32662,6 +33168,16 @@ const initApp = async () => {
       skipInputRegex: true,
       includeAttachments: false,
     });
+    return true;
+  };
+  const rpContinueBtn = document.getElementById('rp-continue-btn');
+  rpContinueBtn?.addEventListener('click', () => {
+    if (uiMode !== 'rp') return;
+    if (activeGeneration && !activeGeneration.cancelled) {
+      cancelActiveGeneration('user');
+      return;
+    }
+    continueLastReply();
   });
 
   // Legacy send-mode cleanup: RP/创意写作只保留界面切换，不再保留聊天区长按发送模式切换。
@@ -32671,6 +33187,18 @@ const initApp = async () => {
     } catch {}
     clearLegacySendModeState();
   })();
+  // 用户工具的位置手势（要在上面清掉旧发送守卫之后再绑，发送键双击才不会被清掉）
+  bindUserToolGestures({
+    documentRef: document,
+    scrollEl: ui.scrollEl,
+    sendBtn: ui.sendBtn,
+    findGesture: (position, gesture) => userToolStore.findGesture(position, gesture),
+    run: (id, options) => userToolRunner.run(id, options),
+    isEnabled: () => !userToolSettingsPanel.isOpen() && isInChatRoom(),
+    isGenerating: isGenerationActive,
+    setSendClickGuard: guard => ui.setSendClickGuard(guard),
+    performSend: () => handleComposerSend(),
+  });
 
   ui.onInputChange(text => {
     chatStore.setDraft(text, chatStore.getCurrent());
@@ -35109,6 +35637,10 @@ const initApp = async () => {
     () => promptPreviewModal.hide(),
     () => worldDebugLocatorModal.hide(),
     () => hopscotchBoardPanel?.closeTopLayer(),
+    () => memoryOverviewPanel.closeTopLayer(),
+    () => agentDirectoryPanel.closeTopLayer(),
+    () => mcpServerPanel.closeTopLayer(),
+    () => userToolSettingsPanel.closeTopLayer(),
     () => agentCenterPanel.closeTopLayer(),
     () => presetPanel.hide(),
     () => configPanel.hide(),
@@ -35139,6 +35671,10 @@ const initApp = async () => {
     () => isBackLayerVisible(document.getElementById('prompt-preview-overlay')),
     () => isBackLayerVisible(document.getElementById('world-debug-locator-overlay')),
     () => hopscotchBoardPanel?.isOpen(),
+    () => memoryOverviewPanel.isOpen(),
+    () => agentDirectoryPanel.isOpen(),
+    () => mcpServerPanel.isOpen(),
+    () => userToolSettingsPanel.isOpen(),
     () => isBackLayerVisible(agentCenterPanel.overlayElement),
     () => isBackLayerVisible(presetPanel.overlayElement) || isBackLayerVisible(presetPanel.element),
     () => isBackLayerVisible(configPanel.overlayElement) || isBackLayerVisible(configPanel.element),

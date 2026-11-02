@@ -49,6 +49,47 @@ export const stripPausedVariableMacros = (value = '') => {
     return output + text.slice(cursor);
 };
 
+// {{// 注释}} 整段去掉。注释里夹的宏（如 {{user}}）按成对的 {{ }} 算在注释里，不会让注释在第一个 }} 就结束、
+// 后半段漏进提示词。注释里有落单的 {{ 导致配不成对时，退回旧规则删到第一个 }}；没有闭合就照原样保留。
+export const stripCommentMacros = (value = '', replace = () => '') => {
+    const text = String(value ?? '');
+    if (!text.includes('{{//')) return text;
+    let out = '';
+    let index = 0;
+    while (index < text.length) {
+        const start = text.indexOf('{{//', index);
+        if (start < 0) {
+            out += text.slice(index);
+            break;
+        }
+        out += text.slice(index, start);
+        let depth = 1;
+        let cursor = start + 4;
+        while (cursor < text.length && depth > 0) {
+            if (text.startsWith('{{', cursor)) {
+                depth += 1;
+                cursor += 2;
+            } else if (text.startsWith('}}', cursor)) {
+                depth -= 1;
+                cursor += 2;
+            } else {
+                cursor += 1;
+            }
+        }
+        if (depth > 0) {
+            const close = text.indexOf('}}', start + 4);
+            if (close < 0) {
+                out += text.slice(start);
+                break;
+            }
+            cursor = close + 2;
+        }
+        out += replace(text.slice(start, cursor));
+        index = cursor;
+    }
+    return out;
+};
+
 export class MacroEngine {
     constructor(chatStore) {
         this.chatStore = chatStore;
@@ -81,17 +122,17 @@ export class MacroEngine {
         return String(context?.sessionId || 'default').trim() || 'default';
     }
 
-    getVariableAccess(context, { useGlobal = false } = {}) {
+    getVariableAccess(context, { useGlobal = false, fallbackToGlobal = false } = {}) {
         const sessionId = this.getSessionId(context);
         const simulated = context?.macroVariableState instanceof Map
             ? context.macroVariableState
             : null;
         const stateKey = key => `${useGlobal ? 'global' : `session:${sessionId}`}\u0000${String(key ?? '')}`;
-        const readStore = key => (
-            useGlobal
-                ? this.chatStore?.getGlobalVariable?.(key)
-                : this.chatStore?.getVariable?.(key, sessionId)
-        );
+        const readStore = (key) => {
+            if (useGlobal) return this.chatStore?.getGlobalVariable?.(key);
+            const value = this.chatStore?.getVariable?.(key, sessionId);
+            return value == null && fallbackToGlobal ? this.chatStore?.getGlobalVariable?.(key) : value;
+        };
         const writeStore = (key, value) => (
             useGlobal
                 ? this.chatStore?.setGlobalVariable?.(key, value)
@@ -177,10 +218,11 @@ export class MacroEngine {
         if (context?.variableRuntimeEnabled === false) {
             return stripPausedVariableMacros(text);
         }
-        const useGlobal =
-            context?.useGlobalVariables === true ||
-            String(context?.uiMode || '').trim().toLowerCase() === 'rp';
-        const variableAccess = this.getVariableAccess(context, { useGlobal });
+        // 共享变量会话由调用方传 useGlobalVariables（与世界书条件、EJS、脚本一致），其余读写这个聊天的变量。
+        // 旧版写作模式一律用全局，之前存进全局的值：聊天里没有这个变量时退回读全局。
+        const useGlobal = context?.useGlobalVariables === true;
+        const fallbackToGlobal = !useGlobal && String(context?.uiMode || '').trim().toLowerCase() === 'rp';
+        const variableAccess = this.getVariableAccess(context, { useGlobal, fallbackToGlobal });
         const getVar = key => variableAccess.get(key);
         const setVar = (key, value) => variableAccess.set(key, value);
         const finish = value => this.postProcessMacroValue(value, context);
@@ -191,14 +233,16 @@ export class MacroEngine {
             return s.trim() ? s : '';
         })();
 
+        // 酒馆新宏引擎可嵌套、内层先算：变量宏只匹配不含 {{ 的最内层，
+        // 外层（如 {{setvar::名称::…{{random::…}}…}}）等内层在本轮算完，下一轮再整段匹配
         // Replace {{setvar::name::value}} with empty string and set local variable
-        out = out.replace(/{{\s*setvar\s*::([^:}]+)::([^}]*)}}/gi, (_m, name, value) => {
+        out = out.replace(/{{\s*setvar\s*::((?:(?!\{\{)[^:}])+)::((?:(?!\{\{)[^}])*)}}/gi, (_m, name, value) => {
             const key = String(name || '').trim();
             if (key) setVar(key, String(value ?? ''));
             return finish('');
         });
         // {{addvar::name::value}} - numeric add when possible
-        out = out.replace(/{{\s*addvar\s*::([^:}]+)::([^}]*)}}/gi, (_m, name, value) => {
+        out = out.replace(/{{\s*addvar\s*::((?:(?!\{\{)[^:}])+)::((?:(?!\{\{)[^}])*)}}/gi, (_m, name, value) => {
             const key = String(name || '').trim();
             if (!key) return '';
             const curRaw = getVar(key);
@@ -209,21 +253,21 @@ export class MacroEngine {
             return finish('');
         });
         // {{incvar::name}} / {{decvar::name}} return updated value
-        out = out.replace(/{{\s*incvar\s*::([^}]+)}}/gi, (_m, name) => {
+        out = out.replace(/{{\s*incvar\s*::((?:(?!\{\{)[^}])+)}}/gi, (_m, name) => {
             const key = String(name || '').trim();
             const cur = Number(getVar(key));
             const next = (Number.isFinite(cur) ? cur : 0) + 1;
             setVar(key, String(next));
             return finish(next);
         });
-        out = out.replace(/{{\s*decvar\s*::([^}]+)}}/gi, (_m, name) => {
+        out = out.replace(/{{\s*decvar\s*::((?:(?!\{\{)[^}])+)}}/gi, (_m, name) => {
             const key = String(name || '').trim();
             const cur = Number(getVar(key));
             const next = (Number.isFinite(cur) ? cur : 0) - 1;
             setVar(key, String(next));
             return finish(next);
         });
-        out = out.replace(/{{\s*(?:getvar|var)\s*::([^:}]+)(?:::([^}]*))?}}/gi, (_m, name, fallback = '') => {
+        out = out.replace(/{{\s*(?:getvar|var)\s*::((?:(?!\{\{)[^:}])+)(?:::((?:(?!\{\{)[^}])*))?}}/gi, (_m, name, fallback = '') => {
             const key = String(name || '').trim();
             const val = getVar(key);
             return finish(val === undefined || val === null ? fallback : val);
@@ -233,12 +277,12 @@ export class MacroEngine {
         const globalAccess = this.getVariableAccess(context, { useGlobal: true });
         const getGlobal = key => globalAccess.get(key);
         const setGlobal = (key, value) => globalAccess.set(key, value);
-        out = out.replace(/{{\s*setglobalvar\s*::([^:}]+)::([^}]*)}}/gi, (_m, name, value) => {
+        out = out.replace(/{{\s*setglobalvar\s*::((?:(?!\{\{)[^:}])+)::((?:(?!\{\{)[^}])*)}}/gi, (_m, name, value) => {
             const key = String(name || '').trim();
             if (key) setGlobal(key, String(value ?? ''));
             return finish('');
         });
-        out = out.replace(/{{\s*addglobalvar\s*::([^:}]+)::([^}]*)}}/gi, (_m, name, value) => {
+        out = out.replace(/{{\s*addglobalvar\s*::((?:(?!\{\{)[^:}])+)::((?:(?!\{\{)[^}])*)}}/gi, (_m, name, value) => {
             const key = String(name || '').trim();
             if (!key) return '';
             const curRaw = getGlobal(key);
@@ -248,27 +292,47 @@ export class MacroEngine {
             setGlobal(key, next);
             return finish('');
         });
-        out = out.replace(/{{\s*incglobalvar\s*::([^}]+)}}/gi, (_m, name) => {
+        out = out.replace(/{{\s*incglobalvar\s*::((?:(?!\{\{)[^}])+)}}/gi, (_m, name) => {
             const key = String(name || '').trim();
             const cur = Number(getGlobal(key));
             const next = (Number.isFinite(cur) ? cur : 0) + 1;
             setGlobal(key, String(next));
             return finish(next);
         });
-        out = out.replace(/{{\s*decglobalvar\s*::([^}]+)}}/gi, (_m, name) => {
+        out = out.replace(/{{\s*decglobalvar\s*::((?:(?!\{\{)[^}])+)}}/gi, (_m, name) => {
             const key = String(name || '').trim();
             const cur = Number(getGlobal(key));
             const next = (Number.isFinite(cur) ? cur : 0) - 1;
             setGlobal(key, String(next));
             return finish(next);
         });
-        out = out.replace(/{{\s*getglobalvar\s*::([^:}]+)(?:::([^}]*))?}}/gi, (_m, name, fallback = '') => {
+        out = out.replace(/{{\s*getglobalvar\s*::((?:(?!\{\{)[^:}])+)(?:::((?:(?!\{\{)[^}])*))?}}/gi, (_m, name, fallback = '') => {
             const key = String(name || '').trim();
             const val = getGlobal(key);
             return finish(val === undefined || val === null ? fallback : val);
         });
 
         return out;
+    }
+
+    rollDice(count, sides) {
+        let total = 0;
+        for (let i = 0; i < count; i++) {
+            total += Math.floor(Math.random() * sides) + 1;
+        }
+        return total;
+    }
+
+    // ST 的 {{roll}} 公式：XdY、dY、XdY±Z；只写数字视为 1dN；无效时与 ST 一样返回空
+    rollDiceFormula(rawFormula) {
+        let formula = String(rawFormula ?? '').trim();
+        if (/^\d+$/.test(formula)) formula = `1d${formula}`;
+        const match = formula.match(/^(\d*)d(\d+)([+-]\d+)?$/i);
+        if (!match) return '';
+        const count = match[1] ? parseInt(match[1], 10) : 1;
+        const sides = parseInt(match[2], 10);
+        if (count < 1 || sides < 1) return '';
+        return String(this.rollDice(count, sides) + (match[3] ? parseInt(match[3], 10) : 0));
     }
 
     applyBuiltInMacros(text, context, baseVars) {
@@ -299,8 +363,8 @@ export class MacroEngine {
         out = out.replace(/{{newline}}/gi, () => finish('\n'));
         out = out.replace(/(?:\r?\n)*{{trim}}(?:\r?\n)*/gi, () => finish(''));
         out = out.replace(/{{noop}}/gi, () => finish(''));
-        // {{// comment}} => removed
-        out = out.replace(/\{\{\/\/([\s\S]*?)\}\}/gm, () => finish(''));
+        // {{// comment}} => removed（含嵌套宏的注释也整段去掉）
+        out = stripCommentMacros(out, () => finish(''));
 
         // Message macros (subset)
         out = out.replace(/{{lastMessage}}/gi, () => finish(this.getLastMessage(sessionId)));
@@ -323,6 +387,14 @@ export class MacroEngine {
 
         // Reverse macro: {{reverse:...}}
         out = out.replace(/{{reverse:(.+?)}}/gi, (_m, str) => finish(Array.from(String(str ?? '')).reverse().join('')));
+
+        // Dice macro (ST): {{roll:1d6}} / {{roll 1d6}}
+        out = out.replace(/{{roll[ :]([^}]+)}}/gi, (_m, formula) => finish(this.rollDiceFormula(formula)));
+        // Random macro, ST 旧写法: {{random:A,B,C}}（\, 为字面逗号）；{{random::A::B}} 走下面的指令解析
+        out = out.replace(/{{random\s?:(?!:)\s?([^}]+)}}/gi, (_m, listText) => {
+            const list = String(listText).split(/(?<!\\),/).map(item => item.trim().replace(/\\,/g, ','));
+            return finish(list[Math.floor(Math.random() * list.length)]);
+        });
 
         return out;
     }
@@ -376,11 +448,10 @@ export class MacroEngine {
             }
         } catch {}
 
-        // 匹配 {{...}}
-        const macroRegex = /\{\{(.*?)\}\}/g;
+        // 匹配 {{...}}：只取不含 {{ 的最内层，嵌套的外层留到下一轮
+        const macroRegex = /\{\{((?:(?!\{\{).)*?)\}\}/g;
 
         while (pass < maxPasses) {
-            let hasMatch = false;
             let replacedInThisPass = false;
 
             // Apply built-ins + variables macros on every pass (ST ordering: pre-env macros first)
@@ -390,7 +461,6 @@ export class MacroEngine {
             if (output !== before) replacedInThisPass = true;
 
             output = output.replace(macroRegex, (match, content) => {
-                hasMatch = true;
                 const trimmed = this.normalizeSeparators(content).trim();
                 const trimmedLower = trimmed.toLowerCase();
 
@@ -433,7 +503,8 @@ export class MacroEngine {
                 return match;
             });
 
-            if (!hasMatch || !replacedInThisPass) break;
+            // 只看这一轮有没有替换：内层可能全由变量宏算完（通用正则匹配不到跨行的外层），外层要留到下一轮
+            if (!replacedInThisPass) break;
             pass++;
         }
 
@@ -564,11 +635,7 @@ export class MacroEngine {
                 if (!match) return args[0] || '';
                 const count = parseInt(match[1]);
                 const sides = parseInt(match[2]);
-                let total = 0;
-                for (let i = 0; i < count; i++) {
-                    total += Math.floor(Math.random() * sides) + 1;
-                }
-                return String(total);
+                return String(this.rollDice(count, sides));
             }
             case 'time':
                 return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -599,6 +666,7 @@ export const buildMacroEngineRuntimeSource = () => [
     `const VARIABLE_MACRO_COMMANDS = new Set(${JSON.stringify(Array.from(VARIABLE_MACRO_COMMANDS))});`,
     `const VARIABLE_MACRO_HEAD_RE = ${VARIABLE_MACRO_HEAD_RE.toString()};`,
     `const stripPausedVariableMacros = ${stripPausedVariableMacros.toString()};`,
+    `const stripCommentMacros = ${stripCommentMacros.toString()};`,
     'const logger = { warn: (...args) => { try { console.warn(...args); } catch {} } };',
     `const MacroEngine = ${MacroEngine.toString()};`,
 ].join('\n');

@@ -391,5 +391,25 @@ const runs = [
   ], { status: 'failure' });
   assert.deepEqual(view.runs.map(run => run.id), ['run-failed']);
   assert.equal(view.meta.failures, 1);
+  const expiredReview = buildAgentRunSummary({
+    id: 'run-review-expired',
+    kind: 'chat_format_guardian',
+    status: 'cancelled',
+    cancelReason: 'review_expired',
+    createdAt: 1700,
+    updatedAt: 1710,
+    finishedAt: 1710,
+  });
+  assert.equal(expiredReview.isFailure, false, 'an expired repair candidate is not a failure');
+  const issuesFound = buildAgentRunSummary({
+    id: 'run-issues',
+    kind: 'chat_format_guardian',
+    status: 'succeeded',
+    metadata: { outcome: 'issues_found' },
+    createdAt: 1700,
+    updatedAt: 1710,
+    finishedAt: 1710,
+  });
+  assert.deepEqual([issuesFound.isFailure, issuesFound.outcome], [false, 'issues_found']);
   console.log('ok - user-initiated cancellations are excluded from failure stats while orphan cancels remain visible');
 }

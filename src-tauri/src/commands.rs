@@ -384,6 +384,19 @@ fn mime_from_extension(ext: &str) -> Option<String> {
         "zip" => Some("application/zip".to_string()),
         "bmp" => Some("image/bmp".to_string()),
         "svg" => Some("image/svg+xml".to_string()),
+        // 女仆产出的文件存到下载文件夹时要带上正确类型，否则 Android 会记成未知格式
+        "txt" | "log" | "srt" | "ini" | "toml" => Some("text/plain".to_string()),
+        "md" => Some("text/markdown".to_string()),
+        "csv" => Some("text/csv".to_string()),
+        "tsv" => Some("text/tab-separated-values".to_string()),
+        "html" | "htm" => Some("text/html".to_string()),
+        "xml" => Some("text/xml".to_string()),
+        "yaml" | "yml" => Some("text/yaml".to_string()),
+        "json" => Some("application/json".to_string()),
+        "pdf" => Some("application/pdf".to_string()),
+        "docx" => Some("application/vnd.openxmlformats-officedocument.wordprocessingml.document".to_string()),
+        "xlsx" => Some("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet".to_string()),
+        "pptx" => Some("application/vnd.openxmlformats-officedocument.presentationml.presentation".to_string()),
         _ => None,
     }
 }
@@ -6022,5 +6035,18 @@ mod tests {
         assert!(!is_turn_checkpoint_kv_name("turn_checkpoint_v1__../app_settings_v1"));
         assert!(!is_turn_checkpoint_kv_name("turn_checkpoint_v1__a\\..\\b"));
         assert!(!is_turn_checkpoint_kv_name("turn_checkpoint_v1__a/b"));
+    }
+
+    #[test]
+    fn mime_from_extension_covers_maid_text_and_document_files() {
+        assert_eq!(mime_from_extension("MD").as_deref(), Some("text/markdown"));
+        assert_eq!(mime_from_extension("txt").as_deref(), Some("text/plain"));
+        assert_eq!(mime_from_extension("csv").as_deref(), Some("text/csv"));
+        assert_eq!(mime_from_extension("json").as_deref(), Some("application/json"));
+        assert_eq!(mime_from_extension("pdf").as_deref(), Some("application/pdf"));
+        assert!(mime_from_extension("docx").unwrap().contains("wordprocessingml"));
+        assert_eq!(mime_from_extension("png").as_deref(), Some("image/png"));
+        assert!(!is_image_mime(&mime_from_extension("md").unwrap()), "text files never go to the gallery");
+        assert_eq!(mime_from_extension("exe"), None);
     }
 }

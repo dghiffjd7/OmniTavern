@@ -18,6 +18,7 @@ import {
     renderVariableTemplatesPage,
 } from './variable-manager-pages.js';
 import { VariableSchemaEditor } from './variable-schema-editor.js';
+import { createVariableInjectionPages } from './variable-injection-pages.js';
 import {
     applyTemplate,
     listVariableTemplates,
@@ -31,8 +32,20 @@ export {
 
 export const VARIABLE_LIST_BATCH_SIZE = 80;
 
-const VARIABLE_MANAGER_PAGES = new Set(['variables', 'templates', 'rules']);
+const VARIABLE_MANAGER_PAGES = new Set(['variables', 'templates', 'rules', 'injections', 'template-lab']);
 const VARIABLE_UNDO_TTL_MS = 6500;
+
+// 左栏图标：统一 24 格、线宽 2 的线条图标，颜色跟随按钮
+const railIcon = paths => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
+const RAIL_ICONS = Object.freeze({
+    variables: railIcon('<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>'),
+    templates: railIcon('<rect x="3.5" y="4" width="17" height="16" rx="2.5"/><path d="M3.5 9.5h17M10 9.5V20"/>'),
+    rules: railIcon('<path d="M13 3 5 13.5h6L10 21l8-10.5h-6L13 3z"/>'),
+    injections: railIcon('<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><rect x="15" y="9.5" width="5.5" height="5" rx="1.5"/><path d="M8.5 6h2A2.5 2.5 0 0 1 13 8.5V12m-4.5 6h2a2.5 2.5 0 0 0 2.5-2.5V12m0 0h2"/>'),
+    templateLab: railIcon('<path d="M9.5 3.5h5M10.5 3.5v5.2L5.2 17.6a2 2 0 0 0 1.7 2.9h10.2a2 2 0 0 0 1.7-2.9L13.5 8.7V3.5"/><path d="M7.5 14.5h9"/>'),
+    close: railIcon('<path d="M6 6l12 12M18 6 6 18"/>'),
+    mark: railIcon('<path d="M8 4H7a2 2 0 0 0-2 2v3.5A2.5 2.5 0 0 1 2.5 12 2.5 2.5 0 0 1 5 14.5V18a2 2 0 0 0 2 2h1M16 4h1a2 2 0 0 1 2 2v3.5a2.5 2.5 0 0 0 2.5 2.5 2.5 2.5 0 0 0-2.5 2.5V18a2 2 0 0 1-2 2h-1"/>'),
+});
 
 const isReducedMotion = () => (
     globalThis.document?.body?.dataset?.reducedMotion === 'on'
@@ -101,6 +114,17 @@ export class VariablePanel extends VariablePanelRuntime {
             ? options.setVariableRuntimeEnabled
             : (sessionId, enabled) => window.appBridge?.setVariableRuntimeEnabled?.(sessionId, enabled);
         this.page = 'variables';
+        // 注入总览／模板测试：假设值只留在这个面板里，不写真实变量
+        this.injectionPages = createVariableInjectionPages({
+            chatStore: this.chatStore,
+            getSessionId: this.getSessionId,
+            isSharedSession: () => this.isGlobalScope(),
+            openWorldEditor: typeof options?.openWorldEditor === 'function' ? options.openWorldEditor : null,
+            openRuleEditor: (ruleId) => {
+                const rule = this.getRules().rules.find(item => item.id === ruleId);
+                if (rule) this.showRuleEditor(rule);
+            },
+        });
         this.filter = 'all';
         this.sort = 'name';
         this.visibleLimit = VARIABLE_LIST_BATCH_SIZE;
@@ -149,23 +173,31 @@ export class VariablePanel extends VariablePanelRuntime {
         panel.addEventListener('click', event => event.stopPropagation());
         panel.innerHTML = `
             <nav class="variable-manager-rail" aria-label="变量管理器页面">
-                <div class="variable-manager-mark" aria-hidden="true">{ }</div>
+                <div class="variable-manager-mark" aria-hidden="true">${RAIL_ICONS.mark}</div>
                 <button type="button" class="variable-rail-button is-active" data-variable-page="variables" aria-label="变量">
-                    <span aria-hidden="true">◆</span>
+                    <span class="variable-rail-icon" aria-hidden="true">${RAIL_ICONS.variables}</span>
                     <span class="variable-rail-label">变量</span>
                     <span class="variable-page-count" data-count="variables">0</span>
                 </button>
                 <button type="button" class="variable-rail-button" data-variable-page="templates" aria-label="模板">
-                    <span aria-hidden="true">▦</span>
+                    <span class="variable-rail-icon" aria-hidden="true">${RAIL_ICONS.templates}</span>
                     <span class="variable-rail-label">模板</span>
                 </button>
                 <button type="button" class="variable-rail-button" data-variable-page="rules" aria-label="规则">
-                    <span aria-hidden="true">⌁</span>
+                    <span class="variable-rail-icon" aria-hidden="true">${RAIL_ICONS.rules}</span>
                     <span class="variable-rail-label">规则</span>
                     <span class="variable-page-count" data-count="rules">0</span>
                 </button>
+                <button type="button" class="variable-rail-button" data-variable-page="injections" aria-label="注入总览">
+                    <span class="variable-rail-icon" aria-hidden="true">${RAIL_ICONS.injections}</span>
+                    <span class="variable-rail-label">注入总览</span>
+                </button>
+                <button type="button" class="variable-rail-button" data-variable-page="template-lab" aria-label="模板测试">
+                    <span class="variable-rail-icon" aria-hidden="true">${RAIL_ICONS.templateLab}</span>
+                    <span class="variable-rail-label">模板测试</span>
+                </button>
                 <button type="button" class="variable-rail-button variable-manager-close" data-action="close" aria-label="关闭变量管理器">
-                    <span aria-hidden="true">×</span>
+                    <span class="variable-rail-icon" aria-hidden="true">${RAIL_ICONS.close}</span>
                     <span class="variable-rail-label">关闭</span>
                 </button>
             </nav>
@@ -182,6 +214,8 @@ export class VariablePanel extends VariablePanelRuntime {
                     <button type="button" class="is-active" data-variable-page="variables">变量 <span data-count="variables">0</span></button>
                     <button type="button" data-variable-page="templates">模板</button>
                     <button type="button" data-variable-page="rules">规则 <span data-count="rules">0</span></button>
+                    <button type="button" data-variable-page="injections">注入总览</button>
+                    <button type="button" data-variable-page="template-lab">模板测试</button>
                 </nav>
 
                 <section class="variable-manager-page is-active" data-page-panel="variables">
@@ -279,6 +313,34 @@ export class VariablePanel extends VariablePanelRuntime {
                     </header>
                     <div class="variable-manager-scroll">
                         <div id="var-template-grid" class="variable-template-grid"></div>
+                    </div>
+                </section>
+
+                <section class="variable-manager-page" data-page-panel="injections" hidden>
+                    <header class="variable-manager-toolbar">
+                        <div class="variable-toolbar-heading">
+                            <div>
+                                <h2>注入总览</h2>
+                                <p>变量会影响哪些世界书条件、规则和阶段</p>
+                            </div>
+                        </div>
+                    </header>
+                    <div class="variable-manager-scroll">
+                        <div class="var-inj" data-field="injection-overview"></div>
+                    </div>
+                </section>
+
+                <section class="variable-manager-page" data-page-panel="template-lab" hidden>
+                    <header class="variable-manager-toolbar">
+                        <div class="variable-toolbar-heading">
+                            <div>
+                                <h2>模板测试</h2>
+                                <p>试写 EJS 模板与宏，即时看渲染结果</p>
+                            </div>
+                        </div>
+                    </header>
+                    <div class="variable-manager-scroll">
+                        <div data-field="template-lab"></div>
                     </div>
                 </section>
 
@@ -549,7 +611,7 @@ export class VariablePanel extends VariablePanelRuntime {
     switchPage(rawPage, { force = false } = {}) {
         this.ensureUI();
         const page = VARIABLE_MANAGER_PAGES.has(rawPage) ? rawPage : 'variables';
-        if (!force && page !== 'variables' && this.isGlobalScope()) {
+        if (!force && (page === 'rules' || page === 'templates') && this.isGlobalScope()) {
             window.toastr?.info?.(
                 page === 'rules'
                     ? '全局变量暂不支持规则'
@@ -578,6 +640,18 @@ export class VariablePanel extends VariablePanelRuntime {
     }
 
     renderCurrentPage() {
+        if (this.page === 'injections' || this.page === 'template-lab') {
+            const field = this.page === 'injections' ? 'injection-overview' : 'template-lab';
+            const host = this.panel?.querySelector(`[data-field="${field}"]`);
+            if (host && !host.dataset.bound) {
+                host.dataset.bound = '1';
+                if (this.page === 'injections') this.injectionPages.bindOverview(host);
+                else this.injectionPages.bindTemplateLab(host);
+            }
+            if (this.page === 'injections') this.injectionPages.renderOverview(host);
+            else this.injectionPages.renderTemplateLab(host);
+            return;
+        }
         if (this.page === 'templates') {
             this.renderTemplatesPage();
             return;

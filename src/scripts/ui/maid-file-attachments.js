@@ -32,7 +32,7 @@ const fallbackMimeFor = (file, inspection = {}) => {
   if (isCharxAttachmentFile(file)) return 'application/zip';
   if (isScriptAttachmentFile(file)) return 'text/javascript';
   if (inspection.format === 'archive') return 'application/zip';
-  if (inspection.format === 'document') return OFFICE_MIME[inspection.details?.type] || 'application/zip';
+  if (inspection.format === 'document') return inspection.details?.type === 'pdf' ? 'application/pdf' : OFFICE_MIME[inspection.details?.type] || 'application/zip';
   if (inspection.format === 'text') return 'text/plain';
   return 'application/json';
 };
@@ -114,8 +114,8 @@ export const createMaidAttachmentsFromFiles = async (files = [], {
       // 按内容识别：文本、压缩包、Office 文档，以及原有的世界书／正则／脚本／预设／角色卡 JSON
       const content = await inspectAttachmentContent({ name, mime: file.type, bytes });
       if (content.unsupported) {
-        warn(content.unsupported === 'pdf'
-          ? t('PDF 暂不支持（计划中）：{name}', { name })
+        warn(String(content.unsupported).startsWith('pdf')
+          ? t('PDF 无法读取：{name}（{reason}）', { name, reason: t(content.message) })
           : t('暂不支持这类文件：{name}', { name: name || fileExtension(name) }));
         continue;
       }
