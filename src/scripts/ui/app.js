@@ -533,14 +533,16 @@ import {
 } from './chat/prompt-context-utils.js';
 import { createScenePresetAccess, createScenePromptPreviewRequestBuilder, evaluateScenePreviewMacro } from './scene-prompt-preview-utils.js';
 import {
-  LINEAGE_EDGE_STATUS,
-  LINEAGE_EDGE_TYPES,
-  LINEAGE_NODE_TYPES,
-  LINEAGE_TRIGGER_REASONS,
   buildPromptTraceFromRequest,
-  createLineageGraphBuilder,
   formatPromptTraceText,
 } from './chat/context-lineage-graph-utils.js';
+import { buildPersonaLineageTrace } from './chat/persona-lineage-trace-utils.js';
+import {
+  buildLineageDiagnostics,
+  buildLineageExportFile,
+  renderLineageDiagnosticsHtml,
+  renderLineageExportMenuHtml,
+} from './chat/lineage-map-diagnostics-utils.js';
 import {
   buildLineageMapMiniViewport,
   centerLineageMapCamera,
@@ -4519,7 +4521,7 @@ const initApp = async () => {
     return String(contactsStore.getContact?.(sid)?.name || '').trim() || sid;
   };
   // 记忆总览（Agent 资源中心 → 记忆）与记忆管家；跳去的主界面都在下面才建立，入口用时再取
-  const { panel: memoryOverviewPanel } = createMemoryOverviewRuntime({
+  const { panel: memoryOverviewPanel, load: loadMemoryOverview } = createMemoryOverviewRuntime({
     documentRef: document,
     memoryTableStore,
     memoryTemplateStore,
@@ -16211,6 +16213,14 @@ const initApp = async () => {
     let lineageResizeObserver = null;
     let lineageLastViewport = { width: 0, height: 0 };
     let lineageCategoryItemLimits = new Map();
+    // 工具栏「诊断」：起终点与诊断结果（同一张图、同一组起终点时沿用）；「导出」菜单；节点「打开」由调用方给
+    let lineagePathFromId = '';
+    let lineagePathToId = '';
+    let lineageDiagnosticsOpen = false;
+    let lineageDiagnosticsCache = null;
+    let lineageExportMenuEl = null;
+    let lineageCycleBadgeEl = null;
+    let lineageOpenNodeHandler = null;
     const lineageFrameIds = new Set();
     const LINEAGE_CATEGORY_PAGE_SIZE = 12;
 
@@ -16219,6 +16229,64 @@ const initApp = async () => {
     const getPreviewLineageGraph = () => {
       const trace = previewLineageTrace || previewRequest?.lineageTrace || null;
       return trace?.graph && typeof trace.graph === 'object' ? trace.graph : null;
+    };
+
+    const getLineageDiagnostics = () => {
+      const graph = getPreviewLineageGraph();
+      if (!graph) return null;
+      const key = `${lineagePathFromId}\n${lineagePathToId}`;
+      if (lineageDiagnosticsCache?.graph !== graph || lineageDiagnosticsCache?.key !== key) {
+        lineageDiagnosticsCache = { graph, key, result: buildLineageDiagnostics(graph, { fromId: lineagePathFromId, toId: lineagePathToId }) };
+      }
+      return lineageDiagnosticsCache.result;
+    };
+
+    const setLineageExportMenuOpen = (open) => {
+      if (!lineageExportMenuEl) return;
+      if (open && !lineageExportMenuEl.firstElementChild) lineageExportMenuEl.innerHTML = renderLineageExportMenuHtml();
+      lineageExportMenuEl.hidden = !open;
+      lineageGraphEl?.querySelector?.('.lineage-hud-action[data-lineage-tool="export"]')?.setAttribute('aria-expanded', open ? 'true' : 'false');
+    };
+
+    const copyLineageText = async (text) => {
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.cssText = 'position:fixed;left:-9999px;top:0;';
+        ta.setAttribute('readonly', 'true');
+        document.body.appendChild(ta);
+        ta.select();
+        const copied = document.execCommand?.('copy');
+        ta.remove();
+        if (!copied) {
+          window.toastr?.error?.('复制失败');
+          return;
+        }
+      }
+      window.toastr?.success?.('已复制');
+    };
+
+    // 导出整张图：复制文字，或存成文件（电脑弹另存为，手机存到下载文件夹）
+    const exportLineageGraph = async (action = '') => {
+      setLineageExportMenuOpen(false);
+      const graph = getPreviewLineageGraph();
+      if (!graph) {
+        window.toastr?.warning?.('暂无血缘图可导出');
+        return;
+      }
+      const file = buildLineageExportFile(graph, action.endsWith('dot') ? 'dot' : 'mermaid');
+      if (action.startsWith('copy')) {
+        await copyLineageText(file.text);
+        return;
+      }
+      await exportAttachmentFile({
+        bytes: new TextEncoder().encode(file.text),
+        fileName: file.fileName,
+        filters: [{ name: file.filterName, extensions: [file.extension] }],
+        mimeType: 'text/plain',
+      });
     };
 
     const isPromptPreviewVisible = () => Boolean(
@@ -16523,9 +16591,20 @@ const initApp = async () => {
 
     const updateLineageDock = () => {
       if (!lineageDockEl) return;
-      lineageDockEl.innerHTML = renderLineageMapDockHtml(getPreviewLineageGraph(), {
-        expandedIds: Array.from(lineageExpandedIds),
-      });
+      const graph = getPreviewLineageGraph();
+      const diagnostics = getLineageDiagnostics();
+      // 诊断打开时放在分层栏最上面（正在用的工具不用往下找）
+      lineageDockEl.innerHTML = (lineageDiagnosticsOpen && graph ? renderLineageDiagnosticsHtml(graph, diagnostics) : '')
+        + renderLineageMapDockHtml(graph, { expandedIds: Array.from(lineageExpandedIds) });
+      lineageDockEl.classList.toggle('has-diagnostics', Boolean(lineageDiagnosticsOpen && graph));
+      const cycleCount = diagnostics?.cycles?.length || 0;
+      if (lineageCycleBadgeEl) {
+        lineageCycleBadgeEl.hidden = !cycleCount;
+        lineageCycleBadgeEl.textContent = String(cycleCount);
+      }
+      const diagnosticsBtn = lineageGraphEl?.querySelector?.('.lineage-hud-action[data-lineage-tool="diagnostics"]');
+      diagnosticsBtn?.classList.toggle('is-active', lineageDiagnosticsOpen);
+      diagnosticsBtn?.setAttribute('aria-pressed', lineageDiagnosticsOpen ? 'true' : 'false');
     };
 
     const setLineageInspector = (kind = '', id = '') => {
@@ -16546,7 +16625,10 @@ const initApp = async () => {
         return;
       }
       lineageInspectorEl.classList.remove('is-empty');
-      lineageInspectorEl.innerHTML = renderLineageMapDetailHtml(kind, item, graph);
+      lineageInspectorEl.innerHTML = renderLineageMapDetailHtml(kind, item, graph, {
+        pathFromId: lineagePathFromId,
+        pathToId: lineagePathToId,
+      });
     };
 
     const markLineageSelection = () => {
@@ -16594,6 +16676,7 @@ const initApp = async () => {
         lineageCanvasEl.innerHTML = '<div class="lineage-graph-empty">排版中…</div>';
       }
       let html = '';
+      const diagnostics = getLineageDiagnostics();
       try {
         html = await lineageAgentRuntime.renderMapScene({
           graph,
@@ -16603,6 +16686,9 @@ const initApp = async () => {
             focusId: lineageSelection?.kind === 'node' ? lineageSelection.id : '',
             expandedIds: Array.from(lineageExpandedIds),
             categoryItemLimits: Object.fromEntries(lineageCategoryItemLimits),
+            cycleNodeIds: Array.from(diagnostics?.cycleNodeIds || []),
+            pathNodeIds: Array.from(diagnostics?.pathNodeIds || []),
+            pathEdgeIds: Array.from(diagnostics?.pathEdgeIds || []),
           },
         });
       } catch (err) {
@@ -16727,6 +16813,12 @@ const initApp = async () => {
       const editable = isLineageEditableTarget(target);
       const key = String(event.key || '');
       if (key === 'Escape') {
+        if (lineageExportMenuEl && !lineageExportMenuEl.hidden) {
+          event.preventDefault();
+          event.stopPropagation();
+          setLineageExportMenuOpen(false);
+          return;
+        }
         if (lineageSearchEl?.value || (lineageSearchResultsEl && !lineageSearchResultsEl.hidden)) {
           event.preventDefault();
           event.stopPropagation();
@@ -16842,6 +16934,16 @@ const initApp = async () => {
                             <button type="button" class="lineage-hud-action" data-lineage-camera-action="fit" title="适配全图" aria-label="适配全图">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5"/></svg>
                             </button>
+                            <span class="lineage-hud-tool">
+                                <button type="button" class="lineage-hud-action" data-lineage-tool="export" title="导出" aria-label="导出血缘图" aria-haspopup="menu" aria-expanded="false">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5"/><path d="M5 19h14"/></svg>
+                                </button>
+                                <span id="prompt-lineage-export-menu" class="lineage-export-menu lineage-glass" role="menu" aria-label="导出血缘图" hidden></span>
+                            </span>
+                            <button type="button" class="lineage-hud-action" data-lineage-tool="diagnostics" title="路径诊断" aria-label="路径诊断" aria-pressed="false">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.2"/><circle cx="18" cy="18" r="2.2"/><path d="M8.2 6H15a3 3 0 0 1 0 6H9a3 3 0 0 0 0 6h6.8"/></svg>
+                                <b id="prompt-lineage-cycle-badge" class="lineage-hud-badge" title="循环关系" hidden></b>
+                            </button>
                             <span class="lineage-hud-state"><i></i>图谱就绪</span>
                             <div id="prompt-lineage-summary" class="lineage-graph-summary"></div>
                             <div id="prompt-lineage-scope" class="lineage-scope-hint"></div>
@@ -16916,6 +17018,8 @@ const initApp = async () => {
       if (lineageMiniMapEl) lineageMiniMapEl.style.touchAction = 'none';
       lineageEmptyHintEl = panel.querySelector('#prompt-lineage-empty-hint');
       lineageEdgeTooltipEl = panel.querySelector('#prompt-lineage-edge-tooltip');
+      lineageExportMenuEl = panel.querySelector('#prompt-lineage-export-menu');
+      lineageCycleBadgeEl = panel.querySelector('#prompt-lineage-cycle-badge');
       lineageTextarea = panel.querySelector('#prompt-lineage-text');
       apiContentEl = panel.querySelector('#prompt-view-api');
       metaEl = panel.querySelector('#prompt-preview-meta');
@@ -16978,6 +17082,62 @@ const initApp = async () => {
 
       lineageGraphEl?.addEventListener('click', (event) => {
         if (!event.target?.closest?.('.lineage-hud-search') && lineageSearchResultsEl) lineageSearchResultsEl.hidden = true;
+        if (lineageExportMenuEl && !lineageExportMenuEl.hidden && !event.target?.closest?.('.lineage-hud-tool')) setLineageExportMenuOpen(false);
+        const toolEl = event.target?.closest?.('[data-lineage-tool]');
+        if (toolEl) {
+          const tool = String(toolEl.dataset.lineageTool || '');
+          if (tool === 'export') setLineageExportMenuOpen(lineageExportMenuEl?.hidden !== false);
+          if (tool === 'diagnostics') {
+            lineageDiagnosticsOpen = !lineageDiagnosticsOpen;
+            updateLineageDock();
+            if (lineageDiagnosticsOpen && lineageDockEl) lineageDockEl.scrollTop = 0;
+          }
+          return;
+        }
+        const exportEl = event.target?.closest?.('[data-lineage-export]');
+        if (exportEl) {
+          void exportLineageGraph(String(exportEl.dataset.lineageExport || ''));
+          return;
+        }
+        const openNodeEl = event.target?.closest?.('[data-lineage-open-node]');
+        if (openNodeEl) {
+          const node = getLineageGraphItem(getPreviewLineageGraph(), 'node', String(openNodeEl.dataset.lineageOpenNode || ''));
+          const openNode = lineageOpenNodeHandler;
+          if (node?.open && typeof openNode === 'function') {
+            hide();
+            Promise.resolve(openNode(node)).catch((err) => {
+              logger.warn('open lineage node target failed', err);
+              window.toastr?.error?.('打开失败');
+            });
+          }
+          return;
+        }
+        const pathRoleEl = event.target?.closest?.('[data-lineage-path-role]');
+        if (pathRoleEl) {
+          const nodeId = String(pathRoleEl.dataset.lineagePathNode || '').trim();
+          if (pathRoleEl.dataset.lineagePathRole === 'to') {
+            lineagePathToId = lineagePathToId === nodeId ? '' : nodeId;
+            if (lineagePathFromId === nodeId) lineagePathFromId = '';
+          } else {
+            lineagePathFromId = lineagePathFromId === nodeId ? '' : nodeId;
+            if (lineagePathToId === nodeId) lineagePathToId = '';
+          }
+          lineageDiagnosticsOpen = true;
+          if (lineageDockEl) lineageDockEl.scrollTop = 0;
+          // 起终点都有了：聚焦起点，路径上的节点排在相关节点最前面
+          if (lineagePathFromId && lineagePathToId) {
+            lineageSelection = { kind: 'node', id: lineagePathFromId };
+            scheduleLineageMapCenter(`[data-lineage-node-id="${escapeCssValue(lineagePathFromId)}"]`);
+          }
+          void renderLineageGraph();
+          return;
+        }
+        if (event.target?.closest?.('[data-lineage-path-clear]')) {
+          lineagePathFromId = '';
+          lineagePathToId = '';
+          void renderLineageGraph();
+          return;
+        }
         const cameraActionEl = event.target?.closest?.('[data-lineage-camera-action]');
         if (cameraActionEl) {
           const action = String(cameraActionEl.dataset.lineageCameraAction || '');
@@ -17231,7 +17391,7 @@ const initApp = async () => {
       });
     };
 
-    const show = (text, meta = '', { onLocate = null, initialTab = 'api', request = null, lineageText = '', lineageTrace = null, lineageOnly = false } = {}) => {
+    const show = (text, meta = '', { onLocate = null, onOpenNode = null, initialTab = 'api', request = null, lineageText = '', lineageTrace = null, lineageOnly = false } = {}) => {
       ensure();
       if (!overlay || !panel || !textarea) return;
       lineageRenderSeq += 1;
@@ -17259,6 +17419,12 @@ const initApp = async () => {
       lineageDrag = null;
       lineageLastViewport = { width: 0, height: 0 };
       lineageCategoryItemLimits = new Map();
+      lineagePathFromId = '';
+      lineagePathToId = '';
+      lineageDiagnosticsOpen = false;
+      lineageDiagnosticsCache = null;
+      lineageOpenNodeHandler = typeof onOpenNode === 'function' ? onOpenNode : null;
+      setLineageExportMenuOpen(false);
       if (lineageSearchEl) lineageSearchEl.value = '';
       if (lineageSearchResultsEl) {
         lineageSearchResultsEl.hidden = true;
@@ -17319,6 +17485,9 @@ const initApp = async () => {
       if (lineageDrag?.pointerId != null) lineageCanvasWrap?.releasePointerCapture?.(lineageDrag.pointerId);
       if (lineageMiniDrag?.pointerId != null) lineageMiniMapEl?.releasePointerCapture?.(lineageMiniDrag.pointerId);
       locateHandler = null;
+      lineageOpenNodeHandler = null;
+      lineageDiagnosticsCache = null;
+      setLineageExportMenuOpen(false);
       previewRequest = null;
       previewLineageTrace = null;
       lineageOnlyMode = false;
@@ -17957,170 +18126,114 @@ const initApp = async () => {
     notifyError: () => window.toastr?.error?.('打开动态本次 Prompt 失败'),
     logger,
   });
-  const buildPersonaLineageTrace = () => {
-    const at = Date.now();
+  // 角色卡关系图：资料在这里读好，组装与聚合在 persona-lineage-trace-utils（纯函数，有专项测试）
+  const buildCurrentPersonaLineageTrace = async () => {
     const scopeId = normalizeScopeId(chatStore.scopeId || activePersonaScopeKey || contactsStore.scopeId || '') || 'default';
     const persona = personaStore.getActive?.() || {};
-    const personaId = String(persona?.id || scopeId || 'default').trim() || 'default';
-    const rootId = `persona:${personaId}`;
-    const builder = createLineageGraphBuilder({
-      scopeId,
-      mode: 'persona',
-      rootId,
-      generatedAt: at,
-    });
-    builder.addNode({
-      id: rootId,
-      type: LINEAGE_NODE_TYPES.PERSONA_CARD,
-      label: String(persona?.name || '当前角色卡').trim() || '当前角色卡',
-      status: LINEAGE_EDGE_STATUS.ACTIVE,
-      scopeId,
-      meta: { personaId },
-    });
-    const contacts = Array.isArray(contactsStore.listContacts?.()) ? contactsStore.listContacts() : [];
-    const profiles = Array.isArray(contactProfileStore.listProfiles?.()) ? contactProfileStore.listProfiles() : [];
-    const profileByContact = new Map(profiles.map(profile => [String(profile?.contactId || '').trim(), profile]));
-    const addWorldBinding = (ownerNodeId, ownerScopeId, worldId, sourceKind = 'session') => {
-      const wid = String(worldId || '').trim();
-      if (!wid) return;
-      const worldNodeId = `worldbook:${wid}`;
-      builder.addNode({
-        id: worldNodeId,
-        type: LINEAGE_NODE_TYPES.WORLDBOOK,
-        label: `${sourceKind === 'global' ? '全局' : sourceKind === 'role' ? '角色' : '会话'}世界书 ${wid}`,
-        status: LINEAGE_EDGE_STATUS.ACTIVE,
-        scopeId,
-        meta: { worldId: wid, sourceKind },
-      });
-      builder.addEdge({
-        source: ownerNodeId,
-        target: worldNodeId,
-        type: LINEAGE_EDGE_TYPES.BINDS,
-        status: LINEAGE_EDGE_STATUS.ACTIVE,
-        reason: sourceKind === 'session' ? LINEAGE_TRIGGER_REASONS.MANUAL_BINDING : LINEAGE_TRIGGER_REASONS.DEFAULT_ENABLED,
-        sourceScopeId: ownerScopeId || scopeId,
-        targetScopeId: scopeId,
-        evidence: { sourceKind },
-      });
-    };
-    const addContactNode = (contact = {}, { status = LINEAGE_EDGE_STATUS.ACTIVE } = {}) => {
-      const id = String(contact?.id || '').trim();
-      if (!id) return '';
-      const isGroup = Boolean(contact?.isGroup) || id.startsWith('group:');
-      const nodeId = isGroup ? `group:${id}` : `contact:${id}`;
-      builder.addNode({
-        id: nodeId,
-        type: isGroup ? LINEAGE_NODE_TYPES.GROUP_CHAT : LINEAGE_NODE_TYPES.CONTACT,
-        label: String(contact?.name || id).trim() || id,
-        status,
-        scopeId,
-        meta: {
-          sessionId: id,
-          isGroup,
-          memberCount: Array.isArray(contact?.members) ? contact.members.length : 0,
-        },
-      });
-      return nodeId;
-    };
-    contacts.forEach((contact) => {
-      const id = String(contact?.id || '').trim();
-      if (!id) return;
-      const nodeId = addContactNode(contact);
-      if (!nodeId) return;
-      builder.addEdge({
-        source: rootId,
-        target: nodeId,
-        type: LINEAGE_EDGE_TYPES.CONTAINS,
-        status: LINEAGE_EDGE_STATUS.ACTIVE,
-        reason: LINEAGE_TRIGGER_REASONS.DEFAULT_ENABLED,
-        sourceScopeId: scopeId,
-        targetScopeId: scopeId,
-      });
-      if (contact?.isGroup || id.startsWith('group:')) {
-        (Array.isArray(contact?.members) ? contact.members : []).forEach((memberIdRaw) => {
-          const memberId = String(memberIdRaw || '').trim();
-          if (!memberId) return;
-          const member = contactsStore.getContact?.(memberId) || { id: memberId, name: memberId };
-          const memberNodeId = addContactNode(member, { status: member?.id ? LINEAGE_EDGE_STATUS.ACTIVE : LINEAGE_EDGE_STATUS.CANDIDATE });
-          if (!memberNodeId) return;
-          builder.addEdge({
-            source: memberNodeId,
-            target: nodeId,
-            type: LINEAGE_EDGE_TYPES.MEMBER_OF,
-            status: LINEAGE_EDGE_STATUS.ACTIVE,
-            reason: LINEAGE_TRIGGER_REASONS.DEFAULT_ENABLED,
-            sourceScopeId: scopeId,
-            targetScopeId: scopeId,
-          });
-        });
-      }
-      const resolvedWorldState = window.appBridge?.getResolvedWorldState?.(id, {
-        isGroupChat: Boolean(contact?.isGroup) || id.startsWith('group:'),
-        groupMemberIds: Array.isArray(contact?.members) ? contact.members : [],
-      }) || {};
-      (Array.isArray(resolvedWorldState.globalWorldIds) ? resolvedWorldState.globalWorldIds : []).forEach(
-        worldId => addWorldBinding(nodeId, scopeId, worldId, 'global'),
-      );
-      (Array.isArray(resolvedWorldState.roleWorldIds) ? resolvedWorldState.roleWorldIds : []).forEach(worldId => addWorldBinding(nodeId, scopeId, worldId, 'role'));
-      (Array.isArray(resolvedWorldState.sessionWorldIds) ? resolvedWorldState.sessionWorldIds : []).forEach(worldId => addWorldBinding(nodeId, scopeId, worldId, 'session'));
-      const profile = profileByContact.get(id);
-      if (profile && !contact?.isGroup) {
-        const profileNodeId = `contact_profile:${id}`;
-        builder.addNode({
-          id: profileNodeId,
-          type: LINEAGE_NODE_TYPES.CONTACT_PROFILE,
-          label: `${String(contact?.name || id).trim() || id} 画像`,
-          status: LINEAGE_EDGE_STATUS.ACTIVE,
-          scopeId,
-          summary: Array.isArray(profile.trigger_keywords) ? profile.trigger_keywords.slice(0, 8).join(', ') : '',
-          meta: {
-            contactId: id,
-            sourceRefs: Array.isArray(profile.sourceRefs) ? profile.sourceRefs : [],
-            updatedAt: profile.updatedAt || '',
-          },
-        });
-        builder.addEdge({
-          source: nodeId,
-          target: profileNodeId,
-          type: LINEAGE_EDGE_TYPES.CONTAINS,
-          status: LINEAGE_EDGE_STATUS.ACTIVE,
-          reason: LINEAGE_TRIGGER_REASONS.DEFAULT_ENABLED,
-          sourceScopeId: scopeId,
-          targetScopeId: scopeId,
-        });
-      }
-    });
-    const graph = builder.graph;
-    return {
-      traceId: `persona-lineage-${at}`,
-      requestId: 'persona-lineage-overview',
-      scopeId,
-      sessionId: '',
-      mode: 'persona',
-      generatedAt: at,
-      spans: [
-        {
-          id: `persona-lineage-${at}:build-scope-graph`,
-          parentId: '',
-          name: 'buildPersonaScopeGraph',
-          startedAt: at,
-          endedAt: at,
-          result: 'ok',
-          attrs: {
-            contacts: contacts.filter(item => item && !item.isGroup).length,
-            groups: contacts.filter(item => item && item.isGroup).length,
-            profiles: profiles.length,
-            nodes: graph.nodes.length,
-            edges: graph.edges.length,
-          },
-        },
-      ],
-      graph,
-    };
-  };
-  const showPersonaLineageGraph = () => {
+    const creativeSessionId = getRpSessionId(activePersonaId);
+    await Promise.all([presetStore.ready, regexStore.ready].map(ready => Promise.resolve(ready).catch(() => null)));
+    let memory = null;
     try {
-      const trace = buildPersonaLineageTrace();
+      const overview = await loadMemoryOverview();
+      const tables = Array.isArray(overview?.template?.tables) ? overview.template.tables : [];
+      memory = {
+        templateId: overview?.templateId || '',
+        rows: overview?.rows || [],
+        tableNames: Object.fromEntries(tables.map(table => [String(table?.id || ''), String(table?.name || '')])),
+      };
+    } catch (err) {
+      logger.warn('read memory rows for persona lineage failed', err);
+    }
+    const activeRuleCount = (scope) => (scope?.enabled === false
+      ? 0
+      : (Array.isArray(scope?.rules) ? scope.rules.filter(rule => rule && rule.disabled !== true).length : 0));
+    const presetsEnabled = presetStore.getEnabled?.('openai') !== false;
+    return buildPersonaLineageTrace({
+      at: Date.now(),
+      scopeId,
+      persona,
+      contacts: Array.isArray(contactsStore.listContacts?.()) ? contactsStore.listContacts() : [],
+      getContact: id => contactsStore.getContact?.(id) || null,
+      profiles: Array.isArray(contactProfileStore.listProfiles?.()) ? contactProfileStore.listProfiles() : [],
+      resolveWorldState: (sessionId, options) => window.appBridge?.getResolvedWorldState?.(sessionId, options) || {},
+      creative: chatStore.hasSession?.(creativeSessionId)
+        ? { sessionId: creativeSessionId, label: String(window.appBridge?.getRpCharacterNameForSession?.(creativeSessionId) || '').trim() }
+        : null,
+      resolvePreset: (sessionId, { mode }) => {
+        const resolved = presetStore.peekResolvedActive?.('openai', { sessionId, uiMode: mode });
+        const presetId = String(resolved?.presetId || '').trim();
+        if (!presetId) return null;
+        return { presetId, name: String(resolved?.preset?.name || '').trim(), source: resolved.source, enabled: presetsEnabled };
+      },
+      regexSets: regexStore.listLocalSetSummaries?.() || [],
+      globalRegexCount: activeRuleCount(regexStore.getGlobal?.()),
+      sessionRegexCount: sessionId => activeRuleCount(regexStore.getSession?.(sessionId)),
+      getSessionStats: (sessionId) => {
+        const summaries = chatStore.getSummaries?.(sessionId);
+        return {
+          summaryCount: Array.isArray(summaries) ? summaries.length : 0,
+          compacted: Boolean(chatStore.getCompactedSummary?.(sessionId)),
+          variableCount: Object.keys(chatStore.listVariables?.(sessionId) || {}).length,
+          sharedVariables: isSharedVariableSession(sessionId),
+        };
+      },
+      globalVariableCount: Object.keys(chatStore.listGlobalVariables?.() || {}).length,
+      memory,
+      getSessionLabel: resolveSessionDisplayLabel,
+      moments: momentsStore.list?.() || [],
+      momentSummary: {
+        count: (momentSummaryStore.getSummaries?.() || []).length,
+        compacted: Boolean(momentSummaryStore.getCompactedSummary?.()),
+      },
+    });
+  };
+  // 关系图节点的「打开」：要进聊天室的先进入，再打开对应的设置位置
+  const openPersonaLineageNode = async (node) => {
+    const open = node?.open || {};
+    const id = String(open.id || '').trim();
+    const enterSession = async (sessionId) => {
+      if (isRpSessionId(sessionId)) {
+        await enterRpMode();
+        return true;
+      }
+      const result = await enterChatRoom(sessionId, resolveSessionDisplayLabel(sessionId) || sessionId);
+      return result?.blocked !== true;
+    };
+    const isGroupSession = sessionId => sessionId.startsWith('group:') || contactsStore.getContact?.(sessionId)?.isGroup === true;
+    switch (String(open.kind || '')) {
+      case 'persona': return personaPanel.show();
+      case 'contact':
+        if (await enterSession(id)) contactSettingsPanel.show();
+        return undefined;
+      case 'group': return groupSettingsPanel.show(id);
+      case 'creative': return enterRpMode();
+      case 'worldbook': return worldPanel.openEditor(id);
+      case 'preset': return presetPanel.show();
+      case 'regex': return regexPanel.show();
+      case 'memory': return memoryOverviewPanel.show({ room: open.room || null });
+      case 'summary':
+        if (isRpSessionId(id)) return enterRpMode();
+        if (isGroupSession(id)) {
+          groupSettingsPanel.show(id);
+          return revealWhenShown(document, '#group-summary-section');
+        }
+        if (await enterSession(id)) {
+          contactSettingsPanel.show();
+          revealWhenShown(document, '#contact-summary-section');
+        }
+        return undefined;
+      case 'variables':
+        if (!id || !(await enterSession(id))) return undefined;
+        blurComposerInput();
+        return variablePanel.show();
+      case 'moments': return switchPage('moments');
+      case 'moment_summary': return momentSummaryPanel.show();
+      default: return undefined;
+    }
+  };
+  const showPersonaLineageGraph = async () => {
+    try {
+      const trace = await buildCurrentPersonaLineageTrace();
       const persona = personaStore.getActive?.() || {};
       const meta = `${String(persona?.name || '当前角色卡').trim() || '当前角色卡'} · 角色关系图`;
       const request = {
@@ -18135,6 +18248,7 @@ const initApp = async () => {
         lineageTrace: trace,
         lineageText: formatPromptTraceText(trace),
         lineageOnly: true,
+        onOpenNode: openPersonaLineageNode,
       });
     } catch (err) {
       logger.warn('open persona lineage graph failed', err);

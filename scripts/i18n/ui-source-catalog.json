@@ -884,7 +884,8 @@
   {
     "source": "{count} 个变量",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/chat/persona-lineage-trace-utils.js#ui-call"
     ]
   },
   {
@@ -897,6 +898,18 @@
     "source": "{count} 个工具（最多 {limit} 个）",
     "references": [
       "src/scripts/ui/tools/user-tool-settings-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "{count} 个会话共用",
+    "references": [
+      "src/scripts/ui/chat/persona-lineage-trace-utils.js#ui-call"
+    ]
+  },
+  {
+    "source": "{count} 个会话使用",
+    "references": [
+      "src/scripts/ui/chat/persona-lineage-trace-utils.js#ui-call"
     ]
   },
   {
@@ -993,6 +1006,7 @@
       "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/scripts/ui/agent-reference-editor.js#ui-definition",
       "src/scripts/ui/chat-fc-compatibility-panel.js#dom-assignment",
+      "src/scripts/ui/chat/persona-lineage-trace-utils.js#ui-call",
       "src/scripts/ui/conversation-import-dialog.js#ui-call",
       "src/scripts/ui/maid-settings-panel.js#dom-assignment",
       "src/scripts/ui/memory-overview-panel.js#ui-call"
@@ -1017,9 +1031,27 @@
     ]
   },
   {
+    "source": "{count} 条动态",
+    "references": [
+      "src/scripts/ui/chat/persona-lineage-trace-utils.js#ui-call"
+    ]
+  },
+  {
+    "source": "{count} 条规则",
+    "references": [
+      "src/scripts/ui/chat/persona-lineage-trace-utils.js#ui-call"
+    ]
+  },
+  {
     "source": "{count} 条目",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "{count} 条评论",
+    "references": [
+      "src/scripts/ui/chat/persona-lineage-trace-utils.js#ui-call"
     ]
   },
   {
@@ -1077,6 +1109,12 @@
     "source": "{count} 行 · 裁掉 {trimmed}",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "{count} 行停用",
+    "references": [
+      "src/scripts/ui/chat/persona-lineage-trace-utils.js#ui-call"
     ]
   },
   {
@@ -1278,6 +1316,12 @@
     ]
   },
   {
+    "source": "{name} 画像",
+    "references": [
+      "src/scripts/ui/chat/persona-lineage-trace-utils.js#ui-call"
+    ]
+  },
+  {
     "source": "{name}，状态：{status}",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -1330,6 +1374,12 @@
     "source": "{rooms} 个聊天室 · {rows} 条 · 模板「{template}」",
     "references": [
       "src/scripts/ui/memory-overview-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "{rows} 行 · {tables} 张表",
+    "references": [
+      "src/scripts/ui/chat/persona-lineage-trace-utils.js#ui-call"
     ]
   },
   {
@@ -1565,7 +1615,6 @@
   {
     "source": "{value} 画像",
     "references": [
-      "src/scripts/ui/app.js#ui-property",
       "src/scripts/ui/chat/context-lineage-graph-utils.js#ui-property"
     ]
   },
@@ -1969,7 +2018,6 @@
   {
     "source": "{value}世界书 {value2}",
     "references": [
-      "src/scripts/ui/app.js#ui-property",
       "src/scripts/ui/chat/context-lineage-graph-utils.js#ui-property",
       "src/scripts/ui/chat/lineage-graph-view-utils.js#ui-property"
     ]
@@ -3702,6 +3750,18 @@
     ]
   },
   {
+    "source": "保存 .dot 文件",
+    "references": [
+      "src/scripts/ui/chat/lineage-map-diagnostics-utils.js#html-text"
+    ]
+  },
+  {
+    "source": "保存 .mmd 文件",
+    "references": [
+      "src/scripts/ui/chat/lineage-map-diagnostics-utils.js#html-text"
+    ]
+  },
+  {
     "source": "保存 Key 失败",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -5005,6 +5065,12 @@
     ]
   },
   {
+    "source": "编辑世界书",
+    "references": [
+      "src/scripts/ui/chat/lineage-graph-view-utils.js#ui-call"
+    ]
+  },
+  {
     "source": "编辑思维链",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -5116,6 +5182,7 @@
       "src/scripts/ui/app.js#ui-property",
       "src/scripts/ui/chat/creative-execution-lane-runtime-utils.js#ui-property",
       "src/scripts/ui/chat/hopscotch-variable-card-view.js#ui-call",
+      "src/scripts/ui/chat/lineage-graph-view-utils.js#ui-property",
       "src/scripts/ui/contact-settings-panel.js#html-text",
       "src/scripts/ui/conversation-import-dialog.js#ui-call",
       "src/scripts/ui/prompt-steward-card.js#ui-call",
@@ -5230,6 +5297,12 @@
     "source": "变量功能已关闭",
     "references": [
       "src/scripts/ui/chat/hopscotch-activation-utils.js#ui-call"
+    ]
+  },
+  {
+    "source": "变量管理",
+    "references": [
+      "src/scripts/ui/chat/lineage-graph-view-utils.js#ui-call"
     ]
   },
   {
@@ -7204,6 +7277,12 @@
     ]
   },
   {
+    "source": "查看记忆表格",
+    "references": [
+      "src/scripts/ui/chat/lineage-graph-view-utils.js#ui-call"
+    ]
+  },
+  {
     "source": "查看角色资料，再决定是否开始聊天",
     "references": [
       "src/scripts/ui/contact-detail-runtime-utils.js#html-text"
@@ -7325,6 +7404,12 @@
     "source": "查看源码",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "查看摘要",
+    "references": [
+      "src/scripts/ui/chat/lineage-graph-view-utils.js#ui-call"
     ]
   },
   {
@@ -8300,11 +8385,19 @@
       "src/scripts/ui/app.js#ui-call",
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call",
       "src/scripts/ui/chat/hopscotch-workflow-transfer-view.js#ui-call",
+      "src/scripts/ui/chat/lineage-graph-view-utils.js#ui-property",
+      "src/scripts/ui/chat/persona-lineage-trace-utils.js#ui-call",
       "src/scripts/ui/custom-bundle-exporter.js#html-text",
       "src/scripts/ui/custom-bundle-import-room-utils.js#ui-property",
       "src/scripts/ui/general-settings-panel.js#html-text",
       "src/scripts/ui/moment-summary-panel.js#ui-property",
       "src/scripts/ui/preset-panel.js#html-text"
+    ]
+  },
+  {
+    "source": "创意写作 · {name}",
+    "references": [
+      "src/scripts/ui/chat/persona-lineage-trace-utils.js#ui-call"
     ]
   },
   {
@@ -9211,6 +9304,12 @@
     ]
   },
   {
+    "source": "打开动态",
+    "references": [
+      "src/scripts/ui/chat/lineage-graph-view-utils.js#ui-call"
+    ]
+  },
+  {
     "source": "打开动态本次 Prompt 失败",
     "references": [
       "src/scripts/ui/app.js#ui-call"
@@ -9318,7 +9417,14 @@
   {
     "source": "打开设置",
     "references": [
-      "src/index.html#html-attribute"
+      "src/index.html#html-attribute",
+      "src/scripts/ui/chat/lineage-graph-view-utils.js#ui-call"
+    ]
+  },
+  {
+    "source": "打开失败",
+    "references": [
+      "src/scripts/ui/app.js#ui-call"
     ]
   },
   {
@@ -9357,6 +9463,7 @@
     "source": "打开预设",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/chat/lineage-graph-view-utils.js#ui-call",
       "src/scripts/ui/maid-import-result-actions.js#ui-call"
     ]
   },
@@ -9376,6 +9483,7 @@
     "source": "打开正则",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/chat/lineage-graph-view-utils.js#ui-call",
       "src/scripts/ui/maid-import-result-actions.js#ui-call"
     ]
   },
@@ -10839,7 +10947,8 @@
       "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/scripts/ui/agent-configuration-editor.js#ui-definition",
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call",
-      "src/scripts/ui/chat/hopscotch-workflow-transfer-view.js#ui-call"
+      "src/scripts/ui/chat/hopscotch-workflow-transfer-view.js#ui-call",
+      "src/scripts/ui/chat/persona-lineage-trace-utils.js#ui-call"
     ]
   },
   {
@@ -11942,6 +12051,7 @@
     "references": [
       "src/scripts/ui/agent-center-panel.js#html-attribute",
       "src/scripts/ui/agent-center-panel.js#html-text",
+      "src/scripts/ui/app.js#html-attribute",
       "src/scripts/ui/chat-fc-compatibility-panel.js#html-text",
       "src/scripts/ui/chat/hopscotch-workflow-transfer-view.js#ui-call",
       "src/scripts/ui/conversation-export-dialog.js#html-text",
@@ -12196,6 +12306,12 @@
     "source": "导出为文件",
     "references": [
       "src/scripts/ui/chat/hopscotch-workflow-transfer-view.js#ui-call"
+    ]
+  },
+  {
+    "source": "导出血缘图",
+    "references": [
+      "src/scripts/ui/app.js#html-attribute"
     ]
   },
   {
@@ -13405,6 +13521,18 @@
     ]
   },
   {
+    "source": "点选节点后按「设为起点」",
+    "references": [
+      "src/scripts/ui/chat/lineage-map-diagnostics-utils.js#ui-call"
+    ]
+  },
+  {
+    "source": "点选节点后按「设为终点」",
+    "references": [
+      "src/scripts/ui/chat/lineage-map-diagnostics-utils.js#ui-call"
+    ]
+  },
+  {
     "source": "点选气泡检查完整回复，或选择其中的文字。",
     "references": [
       "src/scripts/ui/agent-toolbox.js#ui-call",
@@ -13665,6 +13793,12 @@
       "src/scripts/ui/general-settings-panel.js#html-text",
       "src/scripts/ui/group-memory-share-runtime-utils.js#ui-property",
       "src/scripts/ui/moments-modal-shell-utils.js#html-text"
+    ]
+  },
+  {
+    "source": "动态 · {name}",
+    "references": [
+      "src/scripts/ui/chat/persona-lineage-trace-utils.js#ui-call"
     ]
   },
   {
@@ -13972,6 +14106,8 @@
     "source": "动态摘要",
     "references": [
       "src/scripts/memory/default-template.js#ui-definition",
+      "src/scripts/ui/chat/lineage-graph-view-utils.js#ui-call",
+      "src/scripts/ui/chat/persona-lineage-trace-utils.js#ui-call",
       "src/scripts/ui/moment-summary-panel.js#dom-assignment",
       "src/scripts/ui/moment-summary-panel.js#html-text"
     ]
@@ -15239,6 +15375,12 @@
     ]
   },
   {
+    "source": "方向相反：终点 → 起点可达 · {count} 条最短路径",
+    "references": [
+      "src/scripts/ui/chat/lineage-map-diagnostics-utils.js#ui-call"
+    ]
+  },
+  {
     "source": "防截断传输",
     "references": [
       "src/scripts/ui/chat/body-tool-transport-control.js#ui-call"
@@ -16089,6 +16231,18 @@
       "src/scripts/ui/memory-table-editor.js#html-text",
       "src/scripts/ui/session-summary-modal-utils.js#ui-property",
       "src/scripts/ui/variable-panel-runtime.js#html-text"
+    ]
+  },
+  {
+    "source": "复制 DOT",
+    "references": [
+      "src/scripts/ui/chat/lineage-map-diagnostics-utils.js#html-text"
+    ]
+  },
+  {
+    "source": "复制 Mermaid",
+    "references": [
+      "src/scripts/ui/chat/lineage-map-diagnostics-utils.js#html-text"
     ]
   },
   {
@@ -18020,6 +18174,12 @@
     ]
   },
   {
+    "source": "共同的上游",
+    "references": [
+      "src/scripts/ui/chat/lineage-map-diagnostics-utils.js#html-text"
+    ]
+  },
+  {
     "source": "共享设置尚未保存，关闭将丢弃这些修改。",
     "references": [
       "src/scripts/ui/agent-center-panel.js#ui-call",
@@ -18483,6 +18643,12 @@
     "source": "关闭运行时自动建立",
     "references": [
       "src/scripts/ui/world-panel.js#html-text"
+    ]
+  },
+  {
+    "source": "关闭诊断",
+    "references": [
+      "src/scripts/ui/chat/lineage-map-diagnostics-utils.js#html-attribute"
     ]
   },
   {
@@ -19263,6 +19429,12 @@
     "source": "还没有自己发的消息",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "还有 {count} 个",
+    "references": [
+      "src/scripts/ui/chat/lineage-map-diagnostics-utils.js#ui-call"
     ]
   },
   {
@@ -20232,6 +20404,12 @@
     ]
   },
   {
+    "source": "会话变量 · {name}",
+    "references": [
+      "src/scripts/ui/chat/persona-lineage-trace-utils.js#ui-call"
+    ]
+  },
+  {
     "source": "会话变量、全局变量、写入预览。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -20300,6 +20478,12 @@
     ]
   },
   {
+    "source": "会话世界书 {name}",
+    "references": [
+      "src/scripts/ui/chat/persona-lineage-trace-utils.js#ui-call"
+    ]
+  },
+  {
     "source": "会话世界书 {value}",
     "references": [
       "src/scripts/ui/chat/context-lineage-graph-utils.js#ui-property"
@@ -20347,6 +20531,12 @@
     "source": "会话预设",
     "references": [
       "src/scripts/ui/session-config-panel.js#dom-assignment"
+    ]
+  },
+  {
+    "source": "会话正则 · {name}",
+    "references": [
+      "src/scripts/ui/chat/persona-lineage-trace-utils.js#ui-call"
     ]
   },
   {
@@ -20711,8 +20901,13 @@
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/scripts/ui/agent-center-resource-contract.js#ui-property",
-      "src/scripts/ui/app.js#ui-property",
-      "src/scripts/ui/chat/lineage-graph-view-utils.js#ui-property"
+      "src/scripts/ui/app.js#ui-property"
+    ]
+  },
+  {
+    "source": "记忆 · {name}",
+    "references": [
+      "src/scripts/ui/chat/persona-lineage-trace-utils.js#ui-call"
     ]
   },
   {
@@ -21256,7 +21451,8 @@
   {
     "source": "记忆与摘要",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/chat/lineage-graph-view-utils.js#ui-property"
     ]
   },
   {
@@ -22838,6 +23034,12 @@
     ]
   },
   {
+    "source": "角色卡设置",
+    "references": [
+      "src/scripts/ui/chat/lineage-graph-view-utils.js#ui-call"
+    ]
+  },
+  {
     "source": "角色卡头像加载失败",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -22948,6 +23150,12 @@
     "source": "角色世界书",
     "references": [
       "src/scripts/ui/world-panel.js#ui-property"
+    ]
+  },
+  {
+    "source": "角色世界书 {name}",
+    "references": [
+      "src/scripts/ui/chat/persona-lineage-trace-utils.js#ui-call"
     ]
   },
   {
@@ -24141,6 +24349,12 @@
     ]
   },
   {
+    "source": "进入创意写作",
+    "references": [
+      "src/scripts/ui/chat/lineage-graph-view-utils.js#ui-call"
+    ]
+  },
+  {
     "source": "进入管理",
     "references": [
       "src/scripts/ui/persona-panel.js#html-text"
@@ -24846,6 +25060,12 @@
     "source": "可随时让女仆收工",
     "references": [
       "src/scripts/ui/maid-guide-spotlight.js#html-text"
+    ]
+  },
+  {
+    "source": "可贴到 Mermaid Live 等工具查看",
+    "references": [
+      "src/scripts/ui/chat/lineage-map-diagnostics-utils.js#html-text"
     ]
   },
   {
@@ -26242,6 +26462,18 @@
     ]
   },
   {
+    "source": "两者都用到",
+    "references": [
+      "src/scripts/ui/chat/lineage-map-diagnostics-utils.js#html-text"
+    ]
+  },
+  {
+    "source": "两者之间没有直接的血缘路径",
+    "references": [
+      "src/scripts/ui/chat/lineage-map-diagnostics-utils.js#html-text"
+    ]
+  },
+  {
     "source": "两种方式修改应用内容前都会先请你确认，之后可在“默认语音模式”里更改。",
     "references": [
       "src/scripts/ui/maid-voice-runtime.js#ui-call"
@@ -26568,7 +26800,8 @@
   {
     "source": "聊天设置",
     "references": [
-      "src/index.html#html-text"
+      "src/index.html#html-text",
+      "src/scripts/ui/chat/lineage-graph-view-utils.js#ui-call"
     ]
   },
   {
@@ -27103,9 +27336,22 @@
     ]
   },
   {
+    "source": "路径",
+    "references": [
+      "src/scripts/ui/chat/lineage-graph-view-utils.js#ui-call"
+    ]
+  },
+  {
     "source": "路径数量：{value}",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "路径诊断",
+    "references": [
+      "src/scripts/ui/app.js#html-attribute",
+      "src/scripts/ui/chat/lineage-map-diagnostics-utils.js#html-text"
     ]
   },
   {
@@ -27283,6 +27529,12 @@
     "source": "没有等待确认的记忆写入。",
     "references": [
       "src/scripts/ui/memory-overview-panel.js#ui-call"
+    ]
+  },
+  {
+    "source": "没有发现循环关系",
+    "references": [
+      "src/scripts/ui/chat/lineage-map-diagnostics-utils.js#html-text"
     ]
   },
   {
@@ -30873,6 +31125,18 @@
     ]
   },
   {
+    "source": "起点",
+    "references": [
+      "src/scripts/ui/chat/lineage-map-diagnostics-utils.js#ui-call"
+    ]
+  },
+  {
+    "source": "起点 → 终点可达 · {count} 条最短路径",
+    "references": [
+      "src/scripts/ui/chat/lineage-map-diagnostics-utils.js#ui-call"
+    ]
+  },
+  {
     "source": "起点端口不是输出端口",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -30882,6 +31146,12 @@
     "source": "起点候选：{value}",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "起点与终点是同一个节点。",
+    "references": [
+      "src/scripts/ui/chat/lineage-map-diagnostics-utils.js#html-text"
     ]
   },
   {
@@ -31422,6 +31692,12 @@
     "source": "清除女仆历史上下文",
     "references": [
       "src/scripts/ui/maid-settings-panel.js#ui-property"
+    ]
+  },
+  {
+    "source": "清除起终点",
+    "references": [
+      "src/scripts/ui/chat/lineage-map-diagnostics-utils.js#html-text"
     ]
   },
   {
@@ -33720,6 +33996,12 @@
     ]
   },
   {
+    "source": "全局／动态记忆",
+    "references": [
+      "src/scripts/ui/chat/persona-lineage-trace-utils.js#ui-call"
+    ]
+  },
+  {
     "source": "全局编排",
     "references": [
       "src/scripts/ui/chat/hopscotch-board-panel.js#ui-call"
@@ -33728,7 +34010,8 @@
   {
     "source": "全局变量",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/chat/persona-lineage-trace-utils.js#ui-call"
     ]
   },
   {
@@ -33835,6 +34118,12 @@
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual",
       "src/scripts/ui/world-panel.js#ui-property"
+    ]
+  },
+  {
+    "source": "全局世界书 {name}",
+    "references": [
+      "src/scripts/ui/chat/persona-lineage-trace-utils.js#ui-call"
     ]
   },
   {
@@ -33966,6 +34255,7 @@
   {
     "source": "全局正则",
     "references": [
+      "src/scripts/ui/chat/persona-lineage-trace-utils.js#ui-call",
       "src/scripts/ui/regex-panel.js#html-text"
     ]
   },
@@ -34885,6 +35175,7 @@
   {
     "source": "群聊设置",
     "references": [
+      "src/scripts/ui/chat/lineage-graph-view-utils.js#ui-call",
       "src/scripts/ui/group-chat-panels.js#html-text"
     ]
   },
@@ -36794,6 +37085,18 @@
     "source": "设为默认模板",
     "references": [
       "src/scripts/ui/memory-template-panel.js#ui-property"
+    ]
+  },
+  {
+    "source": "设为起点",
+    "references": [
+      "src/scripts/ui/chat/lineage-graph-view-utils.js#ui-call"
+    ]
+  },
+  {
+    "source": "设为终点",
+    "references": [
+      "src/scripts/ui/chat/lineage-graph-view-utils.js#ui-call"
     ]
   },
   {
@@ -44506,7 +44809,8 @@
   {
     "source": "未知节点",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/chat/lineage-map-diagnostics-utils.js#ui-call"
     ]
   },
   {
@@ -44936,7 +45240,8 @@
   {
     "source": "我",
     "references": [
-      "scripts/i18n/manual-ui-source-keys.json#manual"
+      "scripts/i18n/manual-ui-source-keys.json#manual",
+      "src/scripts/ui/chat/persona-lineage-trace-utils.js#ui-call"
     ]
   },
   {
@@ -47785,6 +48090,12 @@
     ]
   },
   {
+    "source": "选好起点与终点，就能看出两者之间经过哪些关系。",
+    "references": [
+      "src/scripts/ui/chat/lineage-map-diagnostics-utils.js#html-text"
+    ]
+  },
+  {
     "source": "选区截图已加入本轮视觉上下文，下一步请直接查看截图并回答用户。",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -48371,6 +48682,19 @@
     "references": [
       "src/scripts/ui/maid-onboarding-flows.js#ui-definition",
       "src/scripts/ui/maid-onboarding-flows.js#ui-property"
+    ]
+  },
+  {
+    "source": "循环",
+    "references": [
+      "src/scripts/ui/chat/lineage-graph-view-utils.js#ui-call"
+    ]
+  },
+  {
+    "source": "循环关系",
+    "references": [
+      "src/scripts/ui/app.js#html-attribute",
+      "src/scripts/ui/chat/lineage-map-diagnostics-utils.js#html-text"
     ]
   },
   {
@@ -49729,6 +50053,12 @@
     ]
   },
   {
+    "source": "已改用全局变量",
+    "references": [
+      "src/scripts/ui/chat/persona-lineage-trace-utils.js#ui-call"
+    ]
+  },
+  {
     "source": "已更新大总结",
     "references": [
       "src/scripts/ui/session-summary-runtime-utils.js#ui-call"
@@ -49783,7 +50113,8 @@
       "src/scripts/ui/agent-directory-panel.js#ui-call",
       "src/scripts/ui/agent-toolbox-view.js#ui-call",
       "src/scripts/ui/agent-toolbox.js#ui-definition",
-      "src/scripts/ui/chat/hopscotch-court-view.js#ui-call"
+      "src/scripts/ui/chat/hopscotch-court-view.js#ui-call",
+      "src/scripts/ui/chat/persona-lineage-trace-utils.js#ui-call"
     ]
   },
   {
@@ -50495,6 +50826,18 @@
     ]
   },
   {
+    "source": "已设为起点",
+    "references": [
+      "src/scripts/ui/chat/lineage-graph-view-utils.js#ui-call"
+    ]
+  },
+  {
+    "source": "已设为终点",
+    "references": [
+      "src/scripts/ui/chat/lineage-graph-view-utils.js#ui-call"
+    ]
+  },
+  {
     "source": "已设置",
     "references": [
       "src/scripts/ui/agent-center-panel.js#ui-call"
@@ -51059,6 +51402,12 @@
     "source": "已选中，请手动复制",
     "references": [
       "src/scripts/ui/app.js#ui-call"
+    ]
+  },
+  {
+    "source": "已压缩",
+    "references": [
+      "src/scripts/ui/chat/persona-lineage-trace-utils.js#ui-call"
     ]
   },
   {
@@ -53459,6 +53808,12 @@
     ]
   },
   {
+    "source": "预设与正则",
+    "references": [
+      "src/scripts/ui/chat/lineage-graph-view-utils.js#ui-property"
+    ]
+  },
+  {
     "source": "预设正文工具暂不支持此 Gemini 参数路径：",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
@@ -55018,6 +55373,12 @@
     ]
   },
   {
+    "source": "暂无血缘图可导出",
+    "references": [
+      "src/scripts/ui/app.js#ui-call"
+    ]
+  },
+  {
     "source": "暂无原始回复",
     "references": [
       "src/scripts/ui/moment-summary-panel.js#ui-call"
@@ -55154,6 +55515,12 @@
       "src/scripts/ui/group-chat-panels.js#html-text",
       "src/scripts/ui/group-chat-panels.js#ui-property",
       "src/scripts/ui/preset-panel.js#ui-property"
+    ]
+  },
+  {
+    "source": "摘要 · {name}",
+    "references": [
+      "src/scripts/ui/chat/persona-lineage-trace-utils.js#ui-call"
     ]
   },
   {
@@ -58585,9 +58952,27 @@
     ]
   },
   {
+    "source": "终点",
+    "references": [
+      "src/scripts/ui/chat/lineage-map-diagnostics-utils.js#ui-call"
+    ]
+  },
+  {
     "source": "终态工具 Schema（已脱敏）",
     "references": [
       "scripts/i18n/manual-ui-source-keys.json#manual"
+    ]
+  },
+  {
+    "source": "重点",
+    "references": [
+      "src/scripts/ui/chat/lineage-graph-view-utils.js#ui-call"
+    ]
+  },
+  {
+    "source": "重点 {name}",
+    "references": [
+      "src/scripts/ui/chat/lineage-graph-view-utils.js#ui-call"
     ]
   },
   {
@@ -62230,6 +62615,12 @@
     "source": "GPT-Live 支持同时听说；语音按通话时长计费，推理模型另计。通话开始时加载角色上下文。",
     "references": [
       "src/scripts/ui/realtime/realtime-settings-panel.js#ui-definition"
+    ]
+  },
+  {
+    "source": "Graphviz 格式",
+    "references": [
+      "src/scripts/ui/chat/lineage-map-diagnostics-utils.js#html-text"
     ]
   },
   {

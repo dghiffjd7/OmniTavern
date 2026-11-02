@@ -1,3 +1,5 @@
+import { t } from '../../i18n/index.js';
+
 const NODE_TYPE_LABELS = Object.freeze({
   persona_card: '角色卡',
   private_chat: '私聊',
@@ -15,6 +17,8 @@ const NODE_TYPE_LABELS = Object.freeze({
   worldbook_entry: '世界书条目',
   summary: '摘要',
   variable_scope: '变量',
+  preset: '预设',
+  regex: '正则',
   prompt: 'Prompt',
   rule: '规则',
 });
@@ -62,11 +66,14 @@ const STRUCTURAL_EDGE_TYPES = new Set(['contains', 'member_of', 'binds', 'derive
 const MAP_CATEGORY_DEFS = Object.freeze([
   { id: 'contacts', label: '联系人', en: 'CONTACTS', icon: 'contacts', types: ['contact', 'group_member'] },
   { id: 'groups', label: '群聊', en: 'GROUPS', icon: 'groups', types: ['group_chat'] },
+  { id: 'creative', label: '创意写作', en: 'CREATIVE', icon: 'creative', types: ['creative_session'] },
   { id: 'worldbooks', label: '世界书', en: 'WORLDBOOK', icon: 'worldbooks', types: ['worldbook', 'worldbook_entry'] },
-  { id: 'memories', label: '记忆', en: 'MEMORY', icon: 'memories', types: ['memory_table', 'memory_row'] },
+  { id: 'presets', label: '预设与正则', en: 'PRESET', icon: 'presets', types: ['preset', 'regex'] },
+  { id: 'memories', label: '记忆与摘要', en: 'MEMORY', icon: 'memories', types: ['memory_table', 'memory_row', 'summary'] },
+  { id: 'variables', label: '变量', en: 'VARIABLES', icon: 'variables', types: ['variable_scope'] },
   { id: 'profiles', label: '画像', en: 'PROFILE', icon: 'profiles', types: ['contact_profile'] },
   { id: 'moments', label: '动态', en: 'MOMENTS', icon: 'moments', types: ['moment'] },
-  { id: 'contexts', label: '上下文', en: 'CONTEXT', icon: 'contexts', types: ['persona_card', 'private_chat', 'creative_session', 'forum_board', 'forum_thread', 'summary', 'variable_scope', 'rule'] },
+  { id: 'contexts', label: '上下文', en: 'CONTEXT', icon: 'contexts', types: ['persona_card', 'private_chat', 'forum_board', 'forum_thread', 'rule'] },
   { id: 'prompts', label: 'Prompt', en: 'PROMPT', icon: 'prompts', types: ['prompt'] },
 ]);
 
@@ -87,8 +94,10 @@ const TYPE_COLUMNS = Object.freeze({
   memory_table: 2,
   summary: 2,
   variable_scope: 2,
+  preset: 2,
   rule: 2,
   worldbook_entry: 3,
+  regex: 3,
   memory_row: 3,
   prompt: 4,
 });
@@ -151,6 +160,8 @@ const getNodeColumn = (node = {}, rootId = '') => {
   return Number.isFinite(TYPE_COLUMNS[type]) ? TYPE_COLUMNS[type] : 2;
 };
 
+const nodeWeight = node => Math.max(0, Number(node?.meta?.weight) || 0);
+
 const compareNode = (a, b) => {
   const sa = STATUS_SORT[normalizeString(a?.status)] ?? STATUS_SORT.unknown;
   const sb = STATUS_SORT[normalizeString(b?.status)] ?? STATUS_SORT.unknown;
@@ -158,6 +169,10 @@ const compareNode = (a, b) => {
   const ta = normalizeString(a?.type);
   const tb = normalizeString(b?.type);
   if (ta !== tb) return ta.localeCompare(tb);
+  // 同类型时分量大的在前（关系图节点带的行数／变量数／共用会话数；不同类型的分量单位不同，不互比）
+  const wa = nodeWeight(a);
+  const wb = nodeWeight(b);
+  if (wa !== wb) return wb - wa;
   return normalizeString(a?.label || a?.id).localeCompare(normalizeString(b?.label || b?.id));
 };
 
@@ -448,6 +463,9 @@ const lineageIconSvg = (name = 'contexts') => {
     moments: `<svg ${common}><path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z"/><path d="M5 15l.8 2.2L8 18l-2.2.8L5 21l-.8-2.2L2 18l2.2-.8L5 15z"/></svg>`,
     contexts: `<svg ${common}><path d="M8 4c-2 0-3 1-3 3v2c0 1-.5 2-2 2 1.5 0 2 1 2 2v2c0 2 1 3 3 3M16 4c2 0 3 1 3 3v2c0 1 .5 2 2 2-1.5 0-2 1-2 2v2c0 2-1 3-3 3"/></svg>`,
     prompts: `<svg ${common}><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>`,
+    creative: `<svg ${common}><path d="M20 4c-7 .5-12 5.5-13 12.5L5 20l3.5-2C15.5 17 19.5 12 20 4z"/><path d="M7.5 16.5 14 10"/></svg>`,
+    presets: `<svg ${common}><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>`,
+    variables: `<svg ${common}><path d="M8 4c-2 0-3 1-3 3v2.5L3.5 12 5 14.5V17c0 2 1 3 3 3M16 4c2 0 3 1 3 3v2.5l1.5 2.5-1.5 2.5V17c0 2-1 3-3 3"/><path d="m9.5 9.5 5 5M14.5 9.5l-5 5"/></svg>`,
   };
   return icons[normalizeString(name)] || icons.contexts;
 };
@@ -581,7 +599,45 @@ const renderLineageDetailRelation = (node = null, label = '', category = null) =
   `;
 };
 
-export const renderLineageMapDetailHtml = (kind = '', item = null, graph = null) => {
+// 详情卡「打开」按钮的文字（按节点的跳转目标）
+const openActionLabel = (kind = '') => {
+  switch (kind) {
+    case 'persona': return t('角色卡设置');
+    case 'contact': return t('聊天设置');
+    case 'group': return t('群聊设置');
+    case 'creative': return t('进入创意写作');
+    case 'worldbook': return t('编辑世界书');
+    case 'preset': return t('打开预设');
+    case 'regex': return t('打开正则');
+    case 'memory': return t('查看记忆表格');
+    case 'summary': return t('查看摘要');
+    case 'variables': return t('变量管理');
+    case 'moments': return t('打开动态');
+    case 'moment_summary': return t('动态摘要');
+    default: return t('打开设置');
+  }
+};
+
+const renderLineageDetailActions = (node = null, { pathFromId = '', pathToId = '' } = {}) => {
+  const id = normalizeString(node?.id);
+  if (!id) return '';
+  const openKind = normalizeString(node?.open?.kind);
+  const isFrom = normalizeString(pathFromId) === id;
+  const isTo = normalizeString(pathToId) === id;
+  return `
+    <div class="lineage-detail-actions">
+      ${openKind ? `<button type="button" class="lineage-detail-action is-primary" data-lineage-open-node="${escHtml(id)}">${escHtml(openActionLabel(openKind))}<b aria-hidden="true">↗</b></button>` : ''}
+      <button type="button" class="lineage-detail-action${isFrom ? ' is-active' : ''}" data-lineage-path-role="from" data-lineage-path-node="${escHtml(id)}" aria-pressed="${isFrom ? 'true' : 'false'}">${escHtml(isFrom ? t('已设为起点') : t('设为起点'))}</button>
+      <button type="button" class="lineage-detail-action${isTo ? ' is-active' : ''}" data-lineage-path-role="to" data-lineage-path-node="${escHtml(id)}" aria-pressed="${isTo ? 'true' : 'false'}">${escHtml(isTo ? t('已设为终点') : t('设为终点'))}</button>
+    </div>
+  `;
+};
+
+// 诊断卡片复用：节点按钮（点了跳到该节点）与关系类型文字
+export const renderLineageNodeJumpHtml = (node = null, note = '') => renderLineageDetailRelation(node, note);
+export const getLineageEdgeTypeLabel = type => labelFor(EDGE_TYPE_LABELS, type);
+
+export const renderLineageMapDetailHtml = (kind = '', item = null, graph = null, options = {}) => {
   if (!item) return '';
   const nodes = nodeByIdMap(graph);
   const isEdge = normalizeString(kind) === 'edge';
@@ -603,7 +659,10 @@ export const renderLineageMapDetailHtml = (kind = '', item = null, graph = null)
   const title = isEdge
     ? `${labelOfNode(directIncoming[0])} → ${labelOfNode(directOutgoing[0])}`
     : labelOfNode(item);
-  const subtitle = isEdge ? labelFor(EDGE_TYPE_LABELS, item?.type) : labelFor(NODE_TYPE_LABELS, item?.type);
+  const stat = isEdge ? '' : normalizeString(item?.meta?.stat);
+  const subtitle = isEdge
+    ? labelFor(EDGE_TYPE_LABELS, item?.type)
+    : [labelFor(NODE_TYPE_LABELS, item?.type), stat].filter(Boolean).join(' · ');
   const scope = normalizeString(isEdge ? item?.targetScopeId || item?.sourceScopeId : item?.scopeId) || 'default';
   const total = incomingCount + outgoingCount;
   const upstreamWidth = total ? Math.round(incomingCount / total * 100) : 50;
@@ -629,6 +688,7 @@ export const renderLineageMapDetailHtml = (kind = '', item = null, graph = null)
         <span>血缘传播 <b>${total} 节点</b></span>
         <i><em style="width:${upstreamWidth}%"></em><b></b><em class="is-downstream"></em></i>
       </div>
+      ${isEdge ? '' : renderLineageDetailActions(item, options)}
       ${directIncoming.length ? `<section class="lineage-detail-relations"><h4>直接上游 <b>${directIncoming.length}</b></h4>${directIncoming.slice(0, 5).map(parent => renderLineageDetailRelation(parent, '上游来源')).join('')}</section>` : ''}
       ${directOutgoing.length ? `<section class="lineage-detail-relations"><h4>直接下游 <b>${directOutgoing.length}</b></h4>${directOutgoing.slice(0, 5).map(child => renderLineageDetailRelation(child, '下游影响')).join('')}</section>` : ''}
       <details class="lineage-map-detail-full">
@@ -717,6 +777,7 @@ const makeMapNode = ({
   layerId = '',
   lineageState = '',
   count = 0,
+  flags = [],
 } = {}) => ({
   id: normalizeString(id),
   label: normalizeString(label),
@@ -733,7 +794,31 @@ const makeMapNode = ({
   layerId: normalizeString(layerId),
   lineageState: normalizeString(lineageState),
   count: Number(count) || 0,
+  // key：同层分量最大的几个；cycle／path：诊断标出的循环与路径
+  flags: listOf(flags).map(normalizeString).filter(Boolean),
 });
+
+// 节点卡片第二行：关系图节点带的数字（如「12 行 · 4 张表」），没有就显示类型
+const mapNodeMeta = node => normalizeString(node?.meta?.stat) || labelFor(NODE_TYPE_LABELS, node?.type);
+
+// 同层同类型的重点：分量 ≥2、不低于同类最大值的四分之一，每类最多 3 个（如预设按共用会话数、正则按规则数各自比）
+const pickKeyNodeIds = (nodes = []) => {
+  const byType = new Map();
+  listOf(nodes).filter(node => nodeWeight(node) >= 2).forEach((node) => {
+    const type = normalizeString(node?.type);
+    if (!byType.has(type)) byType.set(type, []);
+    byType.get(type).push(node);
+  });
+  const keyIds = new Set();
+  byType.forEach((list) => {
+    const sorted = list.sort((a, b) => nodeWeight(b) - nodeWeight(a));
+    const max = nodeWeight(sorted[0]);
+    sorted.filter(node => nodeWeight(node) >= max / 4).slice(0, 3).forEach(node => keyIds.add(normalizeString(node?.id)));
+  });
+  return keyIds;
+};
+
+const toIdSet = value => new Set((value instanceof Set ? Array.from(value) : listOf(value)).map(normalizeString).filter(Boolean));
 
 const shouldRenderLineageMapEdge = (edge = {}, model = {}, nodeByMapId = new Map()) => {
   if (!normalizeString(edge?.path)) return false;
@@ -803,8 +888,18 @@ export const buildLineageMapSceneModel = (graph = null, {
   maxItemsPerCategory = 12,
   categoryItemLimits = {},
   maxNeighbors = 36,
+  cycleNodeIds = [],
+  pathNodeIds = [],
+  pathEdgeIds = [],
 } = {}) => {
   const nodes = listOf(graph?.nodes);
+  const cycleIds = toIdSet(cycleNodeIds);
+  const pathIds = toIdSet(pathNodeIds);
+  const pathEdges = toIdSet(pathEdgeIds);
+  const diagnosticFlags = (nodeId = '') => [
+    cycleIds.has(nodeId) ? 'cycle' : '',
+    pathIds.has(nodeId) ? 'path' : '',
+  ].filter(Boolean);
   const rootId = normalizeString(graph?.rootId);
   const nodeById = nodeByIdMap(graph);
   const rootNode = nodeById.get(rootId) || nodes.find(node => normalizeString(node?.type) === 'prompt') || nodes[0] || null;
@@ -846,6 +941,7 @@ export const buildLineageMapSceneModel = (graph = null, {
         visibleCount,
         itemLimit,
         hasMore,
+        keyIds: pickKeyNodeIds(sortedNodes),
         bandHeight: expandedRow ? Math.max(112, itemSlots * itemGap + 24) : 98,
         status: statusFromCounts(counts),
       };
@@ -878,13 +974,19 @@ export const buildLineageMapSceneModel = (graph = null, {
     if (index > 0) cursorY += categoryGap;
     const y = cursorY + category.bandHeight / 2;
     cursorY += category.bandHeight;
+    const keyNode = category.nodes.find(node => category.keyIds.has(normalizeString(node?.id)));
     const meta = category.counts.risk
       ? `${category.counts.risk} 风险`
       : category.counts.injects
         ? `${category.counts.injects} 注入`
         : category.counts.candidate
           ? `${category.counts.candidate} 候选`
-          : `${category.nodes.length}`;
+          : keyNode
+            ? t('重点 {name}', { name: truncate(labelOfNode(keyNode), 14) })
+            : `${category.nodes.length}`;
+    const categoryFlags = ['cycle', 'path'].filter(flag => category.nodes.some(node => (
+      diagnosticFlags(normalizeString(node?.id)).includes(flag)
+    )));
     const categoryNode = makeMapNode({
       id: `category:${category.id}`,
       label: category.label,
@@ -904,6 +1006,7 @@ export const buildLineageMapSceneModel = (graph = null, {
         }) ? 'related' : 'dim')
         : '',
       count: category.nodes.length,
+      flags: categoryFlags,
     });
     mapNodes.push(categoryNode);
     const hasRootToCategory = category.nodes.some(node => rootLineage.downstreamIds.has(normalizeString(node?.id)));
@@ -938,7 +1041,7 @@ export const buildLineageMapSceneModel = (graph = null, {
       const itemNode = makeMapNode({
         id: `item:${nodeId}`,
         label: labelOfNode(node),
-        meta: labelFor(NODE_TYPE_LABELS, node?.type),
+        meta: mapNodeMeta(node),
         kind: nodeId === focus ? 'focus' : 'item',
         status: mapNodeStatus(node, graph),
         x: 1080,
@@ -948,6 +1051,7 @@ export const buildLineageMapSceneModel = (graph = null, {
         nodeId,
         layerId: category.id,
         lineageState: lineageStateForNodeId(nodeId, lineage),
+        flags: [category.keyIds.has(nodeId) ? 'key' : '', ...diagnosticFlags(nodeId)],
       });
       mapNodes.push(itemNode);
       mapEdges.push({
@@ -997,7 +1101,7 @@ export const buildLineageMapSceneModel = (graph = null, {
       focusMapNode = makeMapNode({
         id: `focus:${focus}`,
         label: labelOfNode(focusNode),
-        meta: labelFor(NODE_TYPE_LABELS, focusNode?.type),
+        meta: mapNodeMeta(focusNode),
         kind: 'focus',
         status: mapNodeStatus(focusNode, graph),
         x: 1080,
@@ -1007,6 +1111,7 @@ export const buildLineageMapSceneModel = (graph = null, {
         nodeId: focus,
         layerId: categoryForNode(focusNode)?.id || 'contexts',
         lineageState: 'self',
+        flags: diagnosticFlags(focus),
       });
       mapNodes.push(focusMapNode);
       mapNodeByGraphNodeId.set(focus, focusMapNode);
@@ -1029,8 +1134,10 @@ export const buildLineageMapSceneModel = (graph = null, {
         .map(id => nodeById.get(id))
         .filter(Boolean),
     ).sort((a, b) => {
+      // 诊断路径上的节点排最前（相关节点有数量上限，路径不能被截掉）
+      const pathDelta = Number(pathIds.has(normalizeString(b?.id))) - Number(pathIds.has(normalizeString(a?.id)));
       const directDelta = Number(directIds.has(normalizeString(b?.id))) - Number(directIds.has(normalizeString(a?.id)));
-      return directDelta || compareNode(a, b);
+      return pathDelta || directDelta || compareNode(a, b);
     });
     const neighborLimit = Math.max(1, Math.trunc(Number(maxNeighbors) || relatedNodes.length || 1));
     const visibleRelatedNodes = relatedNodes.slice(0, neighborLimit);
@@ -1043,7 +1150,7 @@ export const buildLineageMapSceneModel = (graph = null, {
       const relatedNode = makeMapNode({
         id: `related:${nodeId}`,
         label: labelOfNode(node),
-        meta: labelFor(NODE_TYPE_LABELS, node?.type),
+        meta: mapNodeMeta(node),
         kind: 'related',
         status: mapNodeStatus(node, graph),
         x: state === 'up' ? focusMapNode.x - 360 : focusMapNode.x + 360,
@@ -1053,6 +1160,7 @@ export const buildLineageMapSceneModel = (graph = null, {
         nodeId,
         layerId: categoryForNode(node)?.id || 'contexts',
         lineageState: state,
+        flags: diagnosticFlags(nodeId),
       });
       mapNodes.push(relatedNode);
       mapNodeByGraphNodeId.set(nodeId, relatedNode);
@@ -1078,6 +1186,7 @@ export const buildLineageMapSceneModel = (graph = null, {
         kind: 'related',
         edgeId,
         isRisk: isRiskEdge(edge, graph?.scopeId),
+        isPath: pathEdges.has(edgeId),
         lineageState: lineageStateForEdge(edge, lineage),
       });
     });
@@ -1491,7 +1600,7 @@ const renderLineageMapSceneModelHtml = (model = null) => {
       : '';
     const markerStatus = directionalMarker || (edge?.isRisk ? 'risk' : (markerStatuses.includes(status) ? status : 'unknown'));
     const particleStatus = edge?.isRisk ? 'risk' : (markerStatuses.includes(status) ? status : 'unknown');
-    const riskClass = edge?.isRisk ? ' is-risk' : '';
+    const riskClass = `${edge?.isRisk ? ' is-risk' : ''}${edge?.isPath ? ' is-path' : ''}`;
     const kindClass = edge?.kind ? ` is-${escHtml(normalizeString(edge.kind))}` : '';
     const lineageClass = edge?.lineageState ? ` is-lineage-${escHtml(normalizeString(edge.lineageState))}` : '';
     const edgeAttr = edge?.edgeId ? ` data-lineage-edge-id="${escHtml(edge.edgeId)}"` : '';
@@ -1544,19 +1653,26 @@ const renderLineageMapSceneModelHtml = (model = null) => {
     const outPort = outgoingMapIds.has(mapId) ? '<span class="lineage-node-port is-out" aria-hidden="true"></span>' : '';
     const isInteractive = Boolean(node.nodeId || node.categoryId || node.moreCategoryId);
     const lineageClass = node?.lineageState ? ` is-lineage-${escHtml(normalizeString(node.lineageState))}` : '';
+    const flags = listOf(node?.flags);
+    const flagClass = flags.map(flag => ` is-${escHtml(flag)}`).join('');
+    const flagChips = [
+      flags.includes('key') ? `<em class="lineage-node-flag is-key">${escHtml(t('重点'))}</em>` : '',
+      flags.includes('cycle') ? `<em class="lineage-node-flag is-cycle">${escHtml(t('循环'))}</em>` : '',
+      flags.includes('path') && node.kind !== 'category' ? `<em class="lineage-node-flag is-path">${escHtml(t('路径'))}</em>` : '',
+    ].join('');
     const ariaLabel = node.moreCategoryId
       ? `显示${node.label}个${category.label || '节点'}`
       : node.categoryId
         ? `${model.expandedIds.includes(node.categoryId) ? '收合' : '展开'}${node.label}`
         : `${node.label}，状态：${labelFor(STATUS_LABELS, status)}`;
     return `
-      <div class="lineage-map-node is-${escHtml(node.kind)} is-${escHtml(status)} is-layer-${escHtml(layerId)}${lineageClass}" ${attrs}
+      <div class="lineage-map-node is-${escHtml(node.kind)} is-${escHtml(status)} is-layer-${escHtml(layerId)}${lineageClass}${flagClass}" ${attrs}
         role="${isInteractive ? 'button' : 'img'}" tabindex="${isInteractive ? '0' : '-1'}" aria-label="${escHtml(ariaLabel)}" style="${escHtml(style)}">
         <span class="lineage-node-topline" aria-hidden="true"></span>
         ${inPort}${outPort}
         <span class="lineage-map-node-icon" aria-hidden="true">${lineageIconSvg(node.kind === 'root' ? 'prompts' : category.icon)}</span>
         <span class="lineage-map-text">
-          <span class="lineage-map-node-eyebrow"><b>${escHtml(category.en || layerId)}</b><i class="is-${escHtml(status)}">${escHtml(labelFor(STATUS_LABELS, status))}</i></span>
+          <span class="lineage-map-node-eyebrow"><b>${escHtml(category.en || layerId)}</b><i class="is-${escHtml(status)}">${escHtml(labelFor(STATUS_LABELS, status))}</i>${flagChips}</span>
           <strong data-i18n-skip>${escHtml(truncate(node.label, node.kind === 'root' ? 26 : 20))}</strong>
           ${node.meta ? `<small data-i18n-skip>${escHtml(truncate(node.meta, 24))}</small>` : ''}
         </span>
@@ -1788,6 +1904,9 @@ const makeMermaidIdMap = (nodes = []) => {
   return map;
 };
 
+// Mermaid 引号内的文字：引号写成 #quot;，换行用 <br/>（\n 和 \" 它都不认）
+const mermaidText = value => normalizeString(value).replace(/"/g, '#quot;');
+
 export const exportLineageGraphMermaid = (graph = null) => {
   const nodes = listOf(graph?.nodes);
   const edges = listOf(graph?.edges);
@@ -1799,21 +1918,22 @@ export const exportLineageGraphMermaid = (graph = null) => {
   nodes.forEach((node) => {
     const id = idMap.get(normalizeString(node?.id));
     if (!id) return;
-    const label = `${normalizeString(node?.label || node?.id)}\\n${labelFor(NODE_TYPE_LABELS, node?.type)}`;
-    lines.push(`  ${id}["${label.replace(/"/g, '\\"')}"]`);
+    lines.push(`  ${id}["${mermaidText(node?.label || node?.id)}<br/>${mermaidText(labelFor(NODE_TYPE_LABELS, node?.type))}"]`);
   });
   edges.forEach((edge) => {
     const source = idMap.get(normalizeString(edge?.source));
     const target = idMap.get(normalizeString(edge?.target));
     if (!source || !target) return;
-    const label = [labelFor(EDGE_TYPE_LABELS, edge?.type), labelFor(STATUS_LABELS, edge?.status), normalizeString(edge?.reason)]
+    const label = mermaidText([labelFor(EDGE_TYPE_LABELS, edge?.type), labelFor(STATUS_LABELS, edge?.status), normalizeString(edge?.reason)]
       .filter(Boolean)
-      .join(' / ')
-      .replace(/"/g, '\\"');
+      .join(' / '));
     lines.push(`  ${source} -->|"${label}"| ${target}`);
   });
   return lines.join('\n');
 };
+
+// DOT 的引号字符串可放任意文字：直接用原 id（中文 id 不会被换成同一个下划线 id 而撞在一起）
+const dotText = value => normalizeString(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 
 export const exportLineageGraphDot = (graph = null) => {
   const nodes = listOf(graph?.nodes);
@@ -1821,21 +1941,17 @@ export const exportLineageGraphDot = (graph = null) => {
   const lines = [
     'digraph ContextLineageGraph {',
     '  rankdir=LR;',
-    `  label="scope: ${normalizeString(graph?.scopeId) || 'default'} / mode: ${normalizeString(graph?.mode) || 'unknown'}";`,
+    `  label="scope: ${dotText(graph?.scopeId) || 'default'} / mode: ${dotText(graph?.mode) || 'unknown'}";`,
   ];
   nodes.forEach((node) => {
-    const id = makeSvgId(node?.id);
-    const label = `${normalizeString(node?.label || node?.id)}\\n${labelFor(NODE_TYPE_LABELS, node?.type)}\\n${labelFor(STATUS_LABELS, node?.status)}`.replace(/"/g, '\\"');
-    lines.push(`  "${id}" [label="${label}"];`);
+    const label = [node?.label || node?.id, labelFor(NODE_TYPE_LABELS, node?.type), labelFor(STATUS_LABELS, node?.status)].map(dotText).join('\\n');
+    lines.push(`  "${dotText(node?.id)}" [label="${label}"];`);
   });
   edges.forEach((edge) => {
-    const source = makeSvgId(edge?.source);
-    const target = makeSvgId(edge?.target);
-    const label = [labelFor(EDGE_TYPE_LABELS, edge?.type), labelFor(STATUS_LABELS, edge?.status), normalizeString(edge?.reason)]
+    const label = dotText([labelFor(EDGE_TYPE_LABELS, edge?.type), labelFor(STATUS_LABELS, edge?.status), normalizeString(edge?.reason)]
       .filter(Boolean)
-      .join(' / ')
-      .replace(/"/g, '\\"');
-    lines.push(`  "${source}" -> "${target}" [label="${label}"];`);
+      .join(' / '));
+    lines.push(`  "${dotText(edge?.source)}" -> "${dotText(edge?.target)}" [label="${label}"];`);
   });
   lines.push('}');
   return lines.join('\n');
@@ -1950,6 +2066,8 @@ export const detectLineageCycles = (graph = null, {
     outEdges.get(source).push(edge);
   });
   const cycles = [];
+  // 每个节点都会当一次起点，同一个环会从不同入口被找到多次：按环上的边去重
+  const cycleKeys = new Set();
   const limit = Math.max(1, Math.trunc(Number(maxCycles) || 8));
   const depthLimit = Math.max(1, Math.trunc(Number(maxDepth) || 64));
   const visitLimit = Math.max(1, Math.trunc(Number(maxVisits) || 10000));
@@ -1959,7 +2077,15 @@ export const detectLineageCycles = (graph = null, {
     visits += 1;
     if (seen.has(nodeId)) {
       const start = stack.findIndex(edge => normalizeString(edge?.source) === nodeId);
-      if (start >= 0) cycles.push(stack.slice(start));
+      if (start < 0) return;
+      const cycle = stack.slice(start);
+      const key = cycle
+        .map(edge => normalizeString(edge?.id) || `${normalizeString(edge?.source)}->${normalizeString(edge?.target)}:${normalizeString(edge?.type)}`)
+        .sort()
+        .join('|');
+      if (cycleKeys.has(key)) return;
+      cycleKeys.add(key);
+      cycles.push(cycle);
       return;
     }
     const nextSeen = new Set(seen);

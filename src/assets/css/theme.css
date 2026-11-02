@@ -4316,6 +4316,9 @@ body[data-theme-mode='dark'] .lineage-map-node {
 .is-layer-moments { --lineage-node-accent: var(--lineage-emerald); }
 .is-layer-contexts { --lineage-node-accent: color-mix(in srgb, var(--lineage-violet) 64%, var(--lineage-accent)); }
 .is-layer-prompts { --lineage-node-accent: var(--lineage-active); }
+.is-layer-creative { --lineage-node-accent: color-mix(in srgb, var(--lineage-pink) 58%, var(--lineage-amber)); }
+.is-layer-presets { --lineage-node-accent: color-mix(in srgb, var(--lineage-cyan) 52%, var(--lineage-violet)); }
+.is-layer-variables { --lineage-node-accent: color-mix(in srgb, var(--lineage-emerald) 46%, var(--lineage-cyan)); }
 
 .lineage-map-node[role='button']:hover,
 .lineage-map-node[role='button']:focus-visible {
@@ -4657,6 +4660,244 @@ body[data-theme-mode='dark'] .lineage-graph-inspector {
 .lineage-map-detail-full { margin: 14px; padding: 0; border: 1px solid var(--app-border-subtle); border-radius: 10px; overflow: hidden; }
 .lineage-map-detail-full summary { padding: 9px 10px; color: var(--app-text-muted); background: color-mix(in srgb, var(--app-text-muted) 5%, transparent); }
 .lineage-map-detail-full pre { max-height: 230px; margin: 0; padding: 10px; border-top: 1px solid var(--app-border-subtle); color: var(--app-text-secondary); font-size: 9.5px; line-height: 1.5; }
+
+/* 关系图：节点上的重点／路径／循环标记 */
+.lineage-node-flag {
+  padding: 2px 5px;
+  border-radius: 5px;
+  font: normal 700 8px/1.1 sans-serif;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.lineage-node-flag.is-key { background: color-mix(in srgb, var(--lineage-node-accent) 16%, transparent); color: var(--lineage-node-accent); }
+.lineage-node-flag.is-path { background: color-mix(in srgb, var(--lineage-accent) 14%, transparent); color: var(--lineage-accent); }
+.lineage-node-flag.is-cycle { background: color-mix(in srgb, var(--lineage-danger) 14%, transparent); color: var(--lineage-danger); }
+.lineage-map-node.is-key:not(.is-selected):not(.is-focus):not(:hover) {
+  border-color: color-mix(in srgb, var(--lineage-node-accent) 52%, var(--app-border-default));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--lineage-node-accent) 18%, transparent),
+    0 0 40px -14px color-mix(in srgb, var(--lineage-node-accent) 70%, transparent),
+    0 18px 48px -22px var(--app-shadow-color);
+}
+.lineage-map-node.is-path { outline: 1.5px dashed color-mix(in srgb, var(--lineage-accent) 78%, transparent); outline-offset: 4px; }
+.lineage-map-node.is-cycle { outline: 1.5px dashed color-mix(in srgb, var(--lineage-danger) 78%, transparent); outline-offset: 4px; }
+.lineage-map-node.is-path.is-cycle { outline-style: double; outline-width: 3px; }
+.lineage-map-edge-group.is-path .lineage-map-link {
+  opacity: 1;
+  stroke: var(--lineage-accent);
+  stroke-width: 3;
+  stroke-dasharray: 10 4;
+  filter: url(#lineage-edge-glow) drop-shadow(0 0 3px var(--lineage-accent));
+  animation: lineage-flow-dash 0.8s linear infinite;
+}
+
+/* 详情卡：打开设置、设为起点／终点 */
+.lineage-detail-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 14px 14px 0; }
+.lineage-detail-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 30px;
+  padding: 0 11px;
+  border: 1px solid var(--app-border-default);
+  border-radius: 999px;
+  background: var(--lineage-glass);
+  color: var(--app-text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, color 140ms ease;
+}
+.lineage-detail-action:hover { border-color: color-mix(in srgb, var(--lineage-node-accent) 46%, var(--app-border-default)); color: var(--app-text-primary); }
+.lineage-detail-action.is-primary {
+  border-color: color-mix(in srgb, var(--lineage-node-accent) 46%, transparent);
+  background: color-mix(in srgb, var(--lineage-node-accent) 13%, var(--lineage-glass));
+  color: var(--lineage-node-accent);
+  font-weight: 700;
+}
+.lineage-detail-action.is-primary b { font-weight: 400; opacity: 0.8; }
+.lineage-detail-action.is-active {
+  border-color: var(--lineage-accent);
+  background: color-mix(in srgb, var(--lineage-accent) 12%, transparent);
+  color: var(--lineage-accent);
+}
+
+/* 工具栏：导出菜单与诊断按钮 */
+.lineage-hud-tool { position: relative; display: inline-flex; flex: 0 0 auto; }
+.lineage-hud-action[data-lineage-tool] { position: relative; }
+.lineage-hud-action.is-active,
+.lineage-hud-action[aria-expanded='true'] {
+  border-color: color-mix(in srgb, var(--lineage-accent) 52%, var(--app-border-default));
+  background: color-mix(in srgb, var(--lineage-accent) 11%, var(--lineage-glass));
+  color: var(--lineage-accent);
+}
+.lineage-hud-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: var(--lineage-danger);
+  color: var(--app-text-inverse);
+  font: 700 9px/16px ui-monospace, monospace;
+  text-align: center;
+}
+.lineage-hud-badge[hidden] { display: none; }
+.lineage-export-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 232px;
+  padding: 6px;
+  border-radius: 14px;
+  animation: lineage-detail-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.lineage-export-menu[hidden] { display: none; }
+.lineage-export-menu button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--app-text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+.lineage-export-menu button:hover,
+.lineage-export-menu button:focus-visible {
+  border-color: color-mix(in srgb, var(--lineage-accent) 24%, transparent);
+  background: color-mix(in srgb, var(--lineage-accent) 8%, transparent);
+  outline: none;
+}
+.lineage-export-menu strong { font-size: 12px; }
+.lineage-export-menu small { color: var(--app-text-muted); font-size: 9.5px; }
+.lineage-export-menu > i { height: 1px; margin: 4px 8px; background: var(--app-border-subtle); }
+
+/* 路径诊断卡片（桌面在左侧分层栏下方；窄屏单独浮在上方） */
+.lineage-diagnostics-card { display: flex; flex-direction: column; gap: 9px; }
+.lineage-diag-close {
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--app-text-muted);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.lineage-diag-close:hover { background: color-mix(in srgb, var(--app-text-muted) 10%, transparent); color: var(--app-text-primary); }
+.lineage-diag-endpoints { display: flex; flex-direction: column; gap: 6px; }
+.lineage-diag-endpoint {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  padding: 3px 3px 3px 8px;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 10px;
+}
+.lineage-diag-endpoint > span { color: var(--app-text-muted); font: 700 9px/1 sans-serif; letter-spacing: 0.08em; }
+.lineage-diag-endpoint.is-from > span { color: var(--lineage-cyan); }
+.lineage-diag-endpoint.is-to > span { color: var(--lineage-warning); }
+.lineage-diag-endpoint em { padding: 7px 4px; color: var(--app-text-muted); font-size: 10px; font-style: normal; }
+.lineage-diag-endpoint .lineage-detail-relation { padding: 4px; }
+.lineage-diag-clear {
+  align-self: flex-end;
+  padding: 2px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--app-text-muted);
+  font-size: 10px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.lineage-diag-clear:hover { color: var(--app-text-primary); }
+.lineage-diag-result { display: flex; flex-direction: column; gap: 6px; }
+.lineage-diag-result h5 { margin: 4px 2px 0; color: var(--app-text-muted); font-size: 9.5px; font-weight: 700; }
+.lineage-diag-result h5 b { color: var(--app-text-primary); font-family: ui-monospace, monospace; }
+.lineage-diag-hint { margin: 0; color: var(--app-text-muted); font-size: 10.5px; line-height: 1.5; }
+.lineage-diag-hint.is-ok { color: var(--lineage-active); }
+.lineage-diag-more { margin: 0 6px; color: var(--app-text-muted); font-size: 9.5px; }
+.lineage-diag-verdict {
+  margin: 0;
+  padding: 7px 9px;
+  border-radius: 9px;
+  font-size: 10.5px;
+  font-weight: 700;
+}
+.lineage-diag-verdict.is-forward { background: color-mix(in srgb, var(--lineage-active) 11%, transparent); color: var(--lineage-active); }
+.lineage-diag-verdict.is-reverse { background: color-mix(in srgb, var(--lineage-warning) 12%, transparent); color: var(--lineage-warning); }
+.lineage-diag-verdict.is-none { background: color-mix(in srgb, var(--app-text-muted) 9%, transparent); color: var(--app-text-secondary); }
+.lineage-diag-path { display: flex; flex-direction: column; margin: 0; padding: 4px 0 4px 10px; border-left: 2px solid color-mix(in srgb, var(--lineage-accent) 34%, transparent); list-style: none; }
+.lineage-diag-path + .lineage-diag-path { margin-top: 6px; }
+.lineage-diag-path li { display: flex; flex-direction: column; }
+.lineage-diag-path .lineage-detail-relation { padding: 5px; }
+.lineage-diag-hop { padding: 1px 0 1px 12px; color: var(--app-text-muted); font-size: 9px; }
+.lineage-diag-section { display: flex; align-items: center; gap: 6px; margin: 4px 2px 0; color: var(--app-text-muted); font-size: 9px; letter-spacing: 0.18em; }
+.lineage-diag-section b { padding: 2px 5px; border-radius: 5px; background: color-mix(in srgb, var(--app-text-muted) 10%, transparent); color: var(--app-text-secondary); font: 8px/1 ui-monospace, monospace; }
+.lineage-diag-section.is-warning, .lineage-diag-section.is-warning b { color: var(--lineage-danger); }
+.lineage-diag-section.is-warning b { background: color-mix(in srgb, var(--lineage-danger) 12%, transparent); }
+.lineage-diag-cycle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 7px;
+  border: 1px dashed color-mix(in srgb, var(--lineage-danger) 40%, transparent);
+  border-radius: 10px;
+}
+.lineage-diag-cycle button {
+  max-width: 100%;
+  padding: 3px 7px;
+  overflow: hidden;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: 7px;
+  background: var(--lineage-glass);
+  color: var(--app-text-primary);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.lineage-diag-cycle i { color: var(--lineage-danger); font-size: 10px; font-style: normal; }
+
+:is(.lineage-detail-action, .lineage-diag-close, .lineage-diag-clear, .lineage-diag-cycle button):focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--lineage-accent) 76%, var(--app-text-primary));
+  outline-offset: 2px;
+}
+
+@media (max-width: 1080px) {
+  .lineage-layer-dock.has-diagnostics {
+    display: flex;
+    right: 10px;
+    left: 10px;
+    width: auto;
+    max-width: 420px;
+    max-height: min(46%, 360px);
+  }
+  .lineage-layer-dock.has-diagnostics > :not(.lineage-diagnostics-card) { display: none; }
+}
+
+@media (max-width: 760px) {
+  .lineage-hud-action[data-lineage-tool] { display: inline-flex; width: 34px; height: 34px; border-radius: 11px; }
+  .lineage-layer-dock.has-diagnostics { top: 8px; right: 8px; left: 8px; max-width: none; }
+  .lineage-map-body:has(.lineage-graph-inspector:not(.is-empty)) .lineage-layer-dock.has-diagnostics {
+    max-height: calc(100% - var(--lineage-mobile-detail-height, 48%) - 28px);
+  }
+  .lineage-export-menu { width: min(232px, calc(100vw - 40px)); }
+}
 
 :is(
   .lineage-hud-action,

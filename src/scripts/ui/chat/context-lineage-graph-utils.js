@@ -14,6 +14,8 @@ export const LINEAGE_NODE_TYPES = Object.freeze({
   WORLDBOOK_ENTRY: 'worldbook_entry',
   SUMMARY: 'summary',
   VARIABLE_SCOPE: 'variable_scope',
+  PRESET: 'preset',
+  REGEX: 'regex',
   PROMPT: 'prompt',
   RULE: 'rule',
 });
@@ -135,6 +137,8 @@ export const createLineageGraphBuilder = ({
       summary: normalizeString(node.summary),
       scopeId: normalizeString(node.scopeId) || graph.scopeId,
       meta: node.meta && typeof node.meta === 'object' ? { ...node.meta } : {},
+      // 「打开设置」的跳转目标（关系图用），只有给了才带
+      ...(node.open && typeof node.open === 'object' ? { open: { ...node.open } } : {}),
     });
     return id;
   };
