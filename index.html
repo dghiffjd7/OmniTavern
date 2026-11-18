@@ -1,0 +1,2194 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>OmniTavern</title>
+<link rel="icon" href="img/icon.webp" type="image/webp">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="OmniTavern">
+<meta property="og:title" content="OmniTavern · AI 角色扮演应用">
+<meta property="og:description" content="AI 角色扮演应用：和角色聊天、通话、一起创作。">
+<meta property="og:url" content="https://dghiffjd7.github.io/OmniTavern/">
+<meta property="og:image" content="https://dghiffjd7.github.io/OmniTavern/img/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="675">
+<meta name="twitter:card" content="summary_large_image">
+<style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style>
+<meta name="description" content="AI 角色扮演应用：和角色聊天、通话、一起创作。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;900&family=Unbounded:wght@500;600&display=swap">
+<style>
+  /* Layout: one sticky stage — a hanging signboard on the left, a live device on the right that turns from phone to desktop window and back; cards float out of the screen and each chapter tints the room with its own wallpaper. */
+  :root {
+    color-scheme: dark;
+    --bg: #0e0d13;
+    --bg-2: #17151e;
+    --fg: #ece9f4;
+    --muted: #8f899d;
+    --rule: #2a2734;
+    --accent: #a597ff;
+    --on-accent: #15112a;
+    --glow: rgba(146, 126, 255, 0.22);
+    --device: #050508;
+    --device-ring: #302c3b;
+    --bd-op: 0.38;
+    /* inside the device: the app's warm paper theme */
+    --s-page: #1b1815;
+    --s-bar: #24201c;
+    --s-text: #eee6dc;
+    --s-muted: #938879;
+    --s-bubble: #2c2722;
+    --s-me: #3e3229;
+    --s-me-fg: #f6ece0;
+    --s-user: #e27b52;
+    --s-line: rgba(255, 236, 214, 0.08);
+    --s-shadow: rgba(0, 0, 0, 0.35);
+    --hop-line: rgba(255, 255, 255, 0.16);
+    --s-subtle: #1f1c18;
+    --s-sec: #b5aa9b;
+    --ac-on: #f0a37f;
+    --cw-page: #171512;
+    --paper: #201d19;
+    --ink: #e8dfd1;
+    --seal: #cf5537;
+    --quote: #e8977a;
+    --ok: #3cc37f;
+    --amber: #f0a63a;
+    --display: "Unbounded", "Segoe UI", system-ui, sans-serif;
+    --sign: "Noto Serif SC", "Songti SC", "SimSun", serif;
+    --ui: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      color-scheme: light;
+      --bg: #f1eff5; --bg-2: #ffffff; --fg: #16131e; --muted: #696377; --rule: #dcd7e5;
+      --accent: #5b45e0; --on-accent: #ffffff; --glow: rgba(110, 90, 240, 0.2);
+      --device: #15131a; --device-ring: #2c2934; --bd-op: 0.26;
+      --s-page: #f2efe9; --s-bar: #fcfbf8; --s-text: #2a2520; --s-muted: #978c80; --s-bubble: #ffffff;
+      --s-me: #f4ece0; --s-me-fg: #2a2520; --s-user: #c2512d; --s-line: rgba(70, 45, 20, 0.1); --s-shadow: rgba(70, 45, 20, 0.1);
+      --hop-line: rgba(70, 45, 20, 0.16); --s-subtle: #f7f5f1; --s-sec: #6c6359; --ac-on: #b5502e;
+      --cw-page: #efede8; --paper: #fdfcf9; --ink: #2a2520; --seal: #c4462b; --quote: #a8432a; --ok: #16a34a; --amber: #d97706;
+    }
+  }
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --bg: #f1eff5; --bg-2: #ffffff; --fg: #16131e; --muted: #696377; --rule: #dcd7e5;
+    --accent: #5b45e0; --on-accent: #ffffff; --glow: rgba(110, 90, 240, 0.2);
+    --device: #15131a; --device-ring: #2c2934; --bd-op: 0.26;
+    --s-page: #f2efe9; --s-bar: #fcfbf8; --s-text: #2a2520; --s-muted: #978c80; --s-bubble: #ffffff;
+    --s-me: #f4ece0; --s-me-fg: #2a2520; --s-user: #c2512d; --s-line: rgba(70, 45, 20, 0.1); --s-shadow: rgba(70, 45, 20, 0.1);
+    --hop-line: rgba(70, 45, 20, 0.16); --s-subtle: #f7f5f1; --s-sec: #6c6359; --ac-on: #b5502e;
+    --cw-page: #efede8; --paper: #fdfcf9; --ink: #2a2520; --seal: #c4462b; --quote: #a8432a; --ok: #16a34a; --amber: #d97706;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--ui);
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    -webkit-font-smoothing: antialiased;
+    transition: background-color 0.4s ease, color 0.4s ease;
+  }
+  a { color: inherit; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+  button { font: inherit; color: inherit; }
+
+  /* Top bar */
+  .bar {
+    position: fixed; inset: 0 0 auto; z-index: 20;
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    padding: calc(16px + env(safe-area-inset-top, 0px)) max(20px, env(safe-area-inset-right, 0px)) 28px max(20px, env(safe-area-inset-left, 0px));
+    background: linear-gradient(var(--bg) 40%, transparent);
+    font-size: 13px;
+    pointer-events: none;
+  }
+  .bar > * { pointer-events: auto; }
+  .mark { display: flex; align-items: center; gap: 9px; text-decoration: none; font-family: var(--display); font-weight: 500; letter-spacing: -0.01em; }
+  .mark img { width: 22px; height: 22px; border-radius: 6px; }
+  .controls { display: flex; align-items: center; gap: 18px; }
+  .switch { display: flex; gap: 2px; }
+  .switch button, .icon-btn {
+    appearance: none; border: 0; background: none; cursor: pointer;
+    padding: 4px 6px; color: var(--muted); transition: color 0.2s ease;
+  }
+  .switch button:hover, .icon-btn:hover, .switch button[aria-pressed="true"] { color: var(--fg); }
+  .switch button[aria-pressed="true"] { text-decoration: underline; text-underline-offset: 5px; }
+  .icon-btn svg { display: block; width: 17px; height: 17px; }
+  .quiet { color: var(--muted); text-decoration: none; }
+  .quiet:hover { color: var(--fg); }
+
+  /* Story: the stage sticks while each chapter takes one screen of scrolling */
+  .story { position: relative; height: calc((var(--n) + 0.6) * 100svh); }
+  .stage { position: sticky; top: 0; height: 100svh; overflow: clip; }
+  /* each chapter tints the room with its own wallpaper, blurred far out of focus */
+  .backdrop {
+    position: absolute; inset: -12%; z-index: 0; pointer-events: none;
+    -webkit-mask: radial-gradient(56% 58% at 64% 52%, #000 25%, transparent 100%);
+    mask: radial-gradient(56% 58% at 64% 52%, #000 25%, transparent 100%);
+  }
+  .bd { position: absolute; inset: 0; background: center / cover no-repeat; filter: blur(46px) saturate(1.35); opacity: 0; transition: opacity 1.1s ease; }
+  .bd.on { opacity: var(--bd-op); }
+  .stage-inner {
+    position: relative; z-index: 1;
+    height: 100%; max-width: 1480px; margin-inline: auto;
+    display: flex; align-items: stretch; justify-content: center;
+    column-gap: clamp(40px, 5vw, 84px);
+    padding-block: 84px 40px;
+  }
+  .captions { position: relative; flex: none; width: var(--cap-w, 0px); }
+  .captions.ready { transition: width 0.8s var(--ease); }
+  .label {
+    position: absolute; right: 0; top: 50%; width: max-content;
+    opacity: 0; visibility: hidden; transform: translateY(calc(-50% + 16px));
+    transition: opacity 0.45s var(--ease), transform 0.6s var(--ease), visibility 0s linear 0.45s;
+  }
+  .label.is-on { opacity: 1; visibility: visible; transform: translateY(-50%); transition-delay: 0.1s, 0.1s, 0s; }
+
+  /* Chapter names hang like tavern signboards */
+  .sign { writing-mode: vertical-rl; display: block; }
+  .sign h2 {
+    margin: 0; font-family: var(--sign); font-weight: 900;
+    font-size: clamp(56px, min(8.2vw, 14svh), 116px); line-height: 1.04; letter-spacing: 0.06em; white-space: nowrap;
+  }
+  .sign p {
+    margin: 0; margin-block-start: 0.5em; margin-inline-start: 2.6em;
+    font-family: var(--sign); font-size: 17px; letter-spacing: 0.22em; color: var(--muted); white-space: nowrap;
+  }
+  html[lang="en"] .sign { writing-mode: horizontal-tb; text-align: right; max-width: 22rem; }
+  html[lang="en"] .sign :is(h2, p) { white-space: normal; }
+  html[lang="en"] .sign h2 { font-family: var(--display); font-weight: 600; font-size: clamp(30px, 3.6vw, 52px); letter-spacing: -0.02em; line-height: 1.08; text-wrap: balance; }
+  html[lang="en"] .sign p { margin: 14px 0 0; font-family: var(--ui); font-size: 17px; letter-spacing: 0; text-wrap: balance; }
+
+  .hero { display: grid; gap: 18px; max-width: 36rem; }
+  .hero .hero-icon { width: 64px; height: 64px; border-radius: 16px; box-shadow: 0 10px 30px -10px var(--glow); }
+  .hero h1 { margin: 0; font-family: var(--display); font-weight: 600; font-size: clamp(38px, 4.6vw, 68px); line-height: 1; letter-spacing: -0.035em; }
+  .hero .tag { margin: 0; display: grid; gap: 6px; text-wrap: balance; }
+  .hero .tag b { font-family: var(--sign); font-weight: 600; font-size: clamp(20px, 2vw, 26px); letter-spacing: 0.08em; }
+  html[lang="en"] .hero .tag b { font-family: var(--ui); letter-spacing: 0; }
+  .hero .tag span { font-size: clamp(15px, 1.4vw, 17px); color: var(--muted); }
+  .cta { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; margin-top: 8px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 12px 20px; border-radius: 999px; border: 1px solid var(--rule);
+    background: transparent; color: var(--fg); text-decoration: none; font-size: 15px; font-weight: 600; cursor: pointer;
+    transition: transform 0.2s var(--ease), background-color 0.2s ease, opacity 0.2s ease, border-color 0.2s ease;
+  }
+  .btn svg { width: 16px; height: 16px; }
+  .btn:hover { transform: translateY(-1px); border-color: var(--muted); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  .btn.primary:hover { opacity: 0.9; }
+  .btn .dur { font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .meta { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  /* Device: one frame that is a phone or a desktop window */
+  .device-area { position: relative; flex: none; display: flex; align-items: center; justify-content: center; min-height: 0; padding-right: var(--pop-room, 0px); }
+  .device-area.ready { transition: padding 0.8s var(--ease); }
+  .device { position: relative; isolation: isolate; width: 269px; height: 571px; }
+  .device::before {
+    content: ""; position: absolute; inset: -18% -40%; z-index: -1;
+    background: radial-gradient(closest-side, var(--glow), transparent 75%);
+  }
+  .orbit {
+    position: absolute; left: 50%; top: 50%; width: 175%; aspect-ratio: 1; z-index: -1;
+    transform: translate(-50%, -50%) rotate(-22deg) scaleY(0.34);
+    border-radius: 50%; border: 1px solid var(--rule);
+  }
+  .device.desk .orbit { width: 128%; }
+  .orbit i {
+    position: absolute; inset: -1px; border-radius: 50%;
+    background: conic-gradient(from 0deg, transparent 0 72%, var(--accent) 100%);
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px));
+    mask: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px));
+    animation: spin 16s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(1turn); } }
+  .frame {
+    position: absolute; left: 0; top: 0; width: 320px; height: 680px; transform-origin: 0 0;
+    padding: 10px; border-radius: 48px; background: var(--device);
+    box-shadow: 0 0 0 1.5px var(--device-ring), 0 50px 90px -40px rgba(0, 0, 0, 0.7);
+  }
+  .frame.is-desk { padding: 1px; border-radius: 12px; }
+  .device.ready, .device.ready .frame, .device.ready .screen, .device.ready .orbit {
+    transition: width 0.8s var(--ease), height 0.8s var(--ease), transform 0.8s var(--ease), padding 0.8s var(--ease), border-radius 0.8s var(--ease);
+  }
+  .screen {
+    position: relative; height: 100%; overflow: hidden; border-radius: 39px;
+    background: var(--s-page); color: var(--s-text); font-family: var(--ui);
+  }
+  .is-desk .screen { border-radius: 11px; }
+  .chrome { position: absolute; inset: 0 0 auto; z-index: 8; height: 34px; transition: opacity 0.4s ease; }
+  .chrome-phone { display: flex; align-items: center; justify-content: space-between; padding: 0 24px; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .chrome-phone svg { height: 11px; width: auto; fill: currentColor; }
+  .camera { position: absolute; top: 11px; left: 50%; width: 11px; height: 11px; margin-left: -5.5px; border-radius: 50%; background: #000; box-shadow: inset 0 0 0 2px #15151b; }
+  .chrome-desk { opacity: 0; display: flex; align-items: center; gap: 8px; padding-left: 12px; background: var(--s-bar); border-bottom: 1px solid var(--s-line); font-size: 12px; color: var(--s-muted); }
+  .chrome-desk img { width: 16px; height: 16px; border-radius: 4px; }
+  .chrome-desk .win { margin-left: auto; display: flex; height: 100%; }
+  .chrome-desk .win svg { width: 46px; height: 100%; padding: 11px 17px; stroke: var(--s-muted); fill: none; stroke-width: 1.2; }
+  .is-desk .chrome-phone { opacity: 0; }
+  .is-desk .chrome-desk { opacity: 1; }
+
+  .scene {
+    position: absolute; inset: 34px 0 0; display: flex; flex-direction: column; overflow: hidden;
+    opacity: 0; visibility: hidden; transform: translateX(14px);
+    transition: opacity 0.32s var(--ease), transform 0.4s var(--ease), visibility 0s linear 0.32s;
+  }
+  .scene.is-on { opacity: 1; visibility: visible; transform: none; transition-delay: 0s; }
+  .body, .fx, .ticks, .view { transition: opacity 0.35s ease; }
+  .rewind .body, .rewind .ticks, .rewind .view, .rewind .fx { opacity: 0; }
+
+  .appbar { flex: none; height: 54px; display: flex; align-items: center; gap: 10px; padding: 0 14px; background: var(--s-bar); border-bottom: 1px solid var(--s-line); }
+  .ico { width: 20px; height: 20px; flex: none; stroke: var(--s-muted); fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .appbar .title { flex: 1; min-width: 0; display: grid; line-height: 1.2; }
+  .appbar .title b { font-size: 15px; }
+  .appbar .title.big b { font-size: 19px; }
+  .appbar .title small { font-size: 11px; color: var(--s-muted); }
+  .appbar .title small.online::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; background: #22c55e; vertical-align: 1px; }
+  .ava { width: 32px; height: 32px; flex: none; border-radius: 11px; display: grid; place-items: center; background: var(--c, var(--s-bubble)) center / cover no-repeat; color: #fff; font-size: 14px; font-weight: 700; }
+  .ava.group { background-color: var(--s-bubble); background-size: 50% 50%; background-position: 0 0, 100% 0, 50% 100%; }
+  .stack { display: flex; }
+  .stack .ava { width: 26px; height: 26px; border-radius: 50%; font-size: 11px; box-shadow: 0 0 0 2px var(--s-bar); }
+  .stack .ava + .ava { margin-left: -8px; }
+
+  /* Chat */
+  .view { position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--s-page); }
+  .room-view { z-index: 6; transition: transform 0.42s var(--ease), opacity 0.35s ease; box-shadow: -10px 0 30px var(--s-shadow); }
+  .room-view.off { transform: translateX(104%); }
+  /* 聊天壁纸：宣传用角色的真实壁纸 */
+  .wall { background: var(--wall) center / cover no-repeat, var(--s-page); }
+  .wall .stamp { color: rgba(255, 244, 230, 0.86); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6); }
+  .chat { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; gap: 9px; padding: 14px 12px; transition: filter 0.45s ease, transform 0.6s var(--ease); }
+  .stamp { align-self: center; font-size: 11px; color: var(--s-muted); margin-bottom: 4px; }
+  .msg { display: flex; align-items: flex-end; gap: 8px; }
+  .msg .ava { width: 28px; height: 28px; border-radius: 10px; font-size: 12px; }
+  .msg.me { justify-content: flex-end; }
+  .col { display: grid; justify-items: start; gap: 3px; min-width: 0; }
+  .msg.me .col { justify-items: end; }
+  .name { font-size: 11px; font-weight: 600; color: var(--c); padding-left: 3px; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.55); filter: brightness(1.35); }
+  .bubble {
+    max-width: 208px; padding: 8px 12px; border-radius: 17px; border-bottom-left-radius: 6px;
+    background: var(--s-bubble); box-shadow: 0 2px 8px var(--s-shadow);
+    font-size: 14px; line-height: 1.5; overflow-wrap: anywhere;
+    transition: box-shadow 0.4s ease;
+  }
+  .msg.me .bubble { background: var(--s-me); color: var(--s-me-fg); border-radius: 17px; border-bottom-right-radius: 6px; }
+  .bubble.pic { padding: 4px; }
+  .bubble.pic img { display: block; width: 132px; border-radius: 13px; }
+  .msg.recall .bubble { box-shadow: 0 0 0 2px var(--s-user), 0 0 26px color-mix(in srgb, var(--s-user) 55%, transparent); }
+  .at { color: #3b9cff; font-weight: 600; }
+  .typing .bubble { display: flex; gap: 4px; padding: 13px 14px; }
+  .typing .bubble i { width: 6px; height: 6px; border-radius: 50%; background: var(--s-muted); animation: blink 1.1s infinite ease-in-out; }
+  .typing .bubble i:nth-child(2) { animation-delay: 0.15s; }
+  .typing .bubble i:nth-child(3) { animation-delay: 0.3s; }
+  @keyframes blink { 0%, 60%, 100% { opacity: 0.3; transform: none; } 30% { opacity: 1; transform: translateY(-3px); } }
+  .in { animation: pop 0.38s var(--ease) both; }
+  @keyframes pop { from { opacity: 0; transform: translateY(8px) scale(0.97); } }
+  .react { display: inline-flex; align-items: center; gap: 4px; margin-top: -2px; padding: 1px 8px; border-radius: 999px; background: var(--s-bar); box-shadow: 0 0 0 1px var(--s-line); font-size: 12px; }
+  .react b { font-size: 11px; color: var(--s-muted); }
+
+  /* 实时生图：图在气泡里从噪点慢慢变清楚 */
+  .gen { --b: 16px; --nz: 0.9; display: grid; gap: 6px; width: 164px; padding: 6px; border-radius: 16px; background: var(--s-bubble); box-shadow: 0 2px 8px var(--s-shadow); }
+  .gen-img { position: relative; overflow: hidden; border-radius: 11px; aspect-ratio: 640 / 906; background: #6b4a32; }
+  .gen-img img { display: block; width: 100%; height: 100%; object-fit: cover; filter: blur(var(--b)) saturate(0.85); transform: scale(1.08); }
+  .gen-img::after, .illus::after {
+    content: ""; position: absolute; inset: 0; opacity: var(--nz); mix-blend-mode: overlay; pointer-events: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  .gen small { display: flex; align-items: center; gap: 6px; padding: 0 4px 2px; font-size: 11px; color: var(--s-muted); font-variant-numeric: tabular-nums; }
+  .gen small i { width: 6px; height: 6px; flex: none; border-radius: 50%; background: #e0786a; animation: blink 1.1s infinite ease-in-out; }
+  .gen.done small i { background: var(--ok); animation: none; }
+
+  .inputbar { flex: none; display: flex; align-items: center; gap: 8px; padding: 9px 10px 16px; background: var(--s-bar); border-top: 1px solid var(--s-line); }
+  .plus { width: 30px; height: 30px; display: grid; place-items: center; color: var(--s-muted); font-size: 22px; line-height: 1; }
+  .field { flex: 1; min-width: 0; height: 36px; padding: 0 14px; border-radius: 18px; background: var(--s-page); display: flex; align-items: center; font-size: 14px; color: var(--s-muted); white-space: nowrap; overflow: hidden; }
+  .field.has { color: var(--s-text); }
+  .field.has::after { content: ""; flex: none; width: 1.5px; height: 17px; margin-left: 1px; background: var(--s-user); animation: caret 1s steps(1) infinite; }
+  @keyframes caret { 50% { opacity: 0; } }
+  .send { position: relative; width: 34px; height: 34px; flex: none; border-radius: 50%; display: grid; place-items: center; background: var(--s-user); transition: transform 0.18s var(--ease); }
+  .send svg { width: 16px; height: 16px; fill: #fff; }
+  .send.press { transform: scale(0.86); }
+  .send .stop { display: none; width: 11px; height: 11px; border-radius: 2px; background: #fff; }
+  .streaming .send svg { display: none; }
+  .streaming .send .stop { display: block; }
+  .callbtn { position: relative; width: 30px; height: 30px; flex: none; display: grid; place-items: center; border-radius: 50%; }
+  .callbtn svg { width: 19px; height: 19px; stroke: var(--s-muted); fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* Contact list */
+  .list { flex: 1; min-height: 0; overflow: hidden; padding: 4px 0; }
+  .row { display: flex; align-items: center; gap: 11px; padding: 10px 16px; background: var(--s-page); }
+  .row .ava { width: 44px; height: 44px; border-radius: 12px; font-size: 16px; }
+  .row .meta-col { flex: 1; min-width: 0; display: grid; gap: 2px; }
+  .row b { font-size: 14.5px; }
+  .row small { font-size: 12px; color: var(--s-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row.busy small { color: var(--s-user); }
+  .row .side { align-self: stretch; display: grid; justify-items: end; align-content: start; gap: 5px; padding-top: 2px; }
+  .row time { font-size: 11px; color: var(--s-muted); font-variant-numeric: tabular-nums; }
+  .badge { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: #f04452; color: #fff; font-size: 11px; font-weight: 700; display: grid; place-items: center; }
+  .badge[hidden] { display: none; }
+  .badge.bump { animation: bump 0.4s var(--ease); }
+  @keyframes bump { 40% { transform: scale(1.35); } }
+  .row.new { background: color-mix(in srgb, var(--s-user) 10%, var(--s-page)); }
+  .row.new time { color: var(--s-user); }
+  .tap { position: absolute; left: 50%; top: 50%; width: 34px; height: 34px; margin: -17px 0 0 -17px; border-radius: 50%; background: rgba(139, 124, 246, 0.45); pointer-events: none; animation: tap 0.55s ease-out both; z-index: 5; }
+  @keyframes tap { from { transform: scale(0.3); opacity: 1; } to { transform: scale(1.6); opacity: 0; } }
+
+  /* Voice call, laid over the chat room */
+  .scene.calling .chat { filter: blur(6px) saturate(0.9) brightness(0.8); transform: scale(1.04); }
+  .callp {
+    left: 14px; right: 14px; top: 92px; padding: 18px 14px 12px; border-radius: 24px;
+    display: grid; justify-items: center; gap: 3px;
+    background: var(--s-bar); box-shadow: 0 30px 60px -20px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--s-line);
+  }
+  .callp.off { transform: translateY(26px) scale(0.97); }
+  .call-ava { width: 84px; height: 84px; border-radius: 50%; padding: 3px; background: conic-gradient(from 0deg, #7cc6ff, #c79bff, #ff9fd0, #7cc6ff); }
+  .callp.live .call-ava { animation: spin 6s linear infinite; }
+  .call-ava .ava { width: 100%; height: 100%; border-radius: 50%; box-shadow: 0 0 0 3px var(--s-bar); }
+  .callp.live .call-ava .ava { animation: spin 6s linear infinite reverse; }
+  .callp > b { margin-top: 8px; font-size: 18px; }
+  .call-state { font-size: 12px; color: var(--s-muted); }
+  .wave { display: flex; align-items: center; gap: 3px; height: 24px; margin-top: 6px; }
+  .wave i { width: 3px; height: 5px; border-radius: 2px; background: var(--c); transition: height 0.3s ease; }
+  .callp.speaking .wave i { animation: wave 0.62s ease-in-out infinite alternate; animation-delay: calc(var(--k) * -0.13s); }
+  @keyframes wave { from { height: 4px; } to { height: 22px; } }
+  .call-time { font-size: 12px; color: var(--s-muted); font-variant-numeric: tabular-nums; }
+  .subs { justify-self: stretch; min-height: 116px; margin-top: 10px; padding: 10px 12px; border-radius: 14px; display: grid; align-content: start; gap: 6px; background: var(--s-page); box-shadow: inset 0 0 0 1px var(--s-line); }
+  .subs p, .pop-subs p { margin: 0; display: grid; gap: 1px; }
+  .subs b, .pop-subs p b { font-size: 11px; font-weight: 650; color: var(--s-user); }
+  .subs span { font-size: 13.5px; line-height: 1.55; }
+  .call-btns { justify-self: stretch; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+  .call-btns span { height: 54px; border-radius: 14px; display: grid; place-items: center; align-content: center; gap: 3px; font-size: 11.5px; color: var(--s-sec); background: var(--s-page); box-shadow: inset 0 0 0 1px var(--s-line); }
+  .call-btns svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .call-btns .end { color: #d0453a; background: color-mix(in srgb, #d0453a 10%, var(--s-page)); }
+
+  /* Cards that float out of the screen, beside the phone */
+  .pop {
+    position: absolute; z-index: 9; padding: 12px; border-radius: 18px;
+    background: var(--s-bar); color: var(--s-text); font-family: var(--ui);
+    box-shadow: 0 40px 80px -30px rgba(0, 0, 0, 0.65), 0 0 0 1px var(--s-line);
+    opacity: 0; visibility: hidden; transform: translateX(-22px) scale(0.95);
+    transition: opacity 0.4s ease, transform 0.6s var(--ease), visibility 0s linear 0.4s;
+  }
+  .pop.on { opacity: 1; visibility: visible; transform: none; transition-delay: 0s; }
+  .pop header { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 11.5px; color: var(--s-muted); }
+  .pop header svg { width: 14px; height: 14px; stroke: var(--s-user); fill: none; stroke-width: 2; }
+  .pop-gen { --b: 16px; --nz: 0.9; left: calc(100% - 34px); top: 132px; width: 232px; padding: 8px; rotate: 2.5deg; }
+  .pop-gen .gen-img { border-radius: 12px; }
+  .pop-gen small { display: flex; align-items: center; gap: 6px; padding: 8px 4px 2px; font-size: 12px; color: var(--s-muted); font-variant-numeric: tabular-nums; }
+  .pop-gen small i { width: 7px; height: 7px; border-radius: 50%; background: #e0786a; animation: blink 1.1s infinite ease-in-out; }
+  .pop-gen.done small i { background: var(--ok); animation: none; }
+  .pop-subs { left: calc(100% - 46px); top: 326px; width: 284px; padding: 14px 16px; display: grid; gap: 9px; }
+  .pop-subs span { font-size: 16px; line-height: 1.55; }
+  .pop-mem { left: calc(100% + 36px); top: 300px; width: 280px; padding: 14px 16px; }
+  .pop-mem b { display: block; font-size: 13px; margin-bottom: 4px; }
+  .pop-mem p { margin: 0; font-size: 13px; line-height: 1.7; color: var(--s-sec); }
+  .pop-mem mark, .mem-inline mark { background: color-mix(in srgb, var(--s-user) 22%, transparent); color: var(--s-text); border-radius: 4px; padding: 0 2px; box-shadow: 0 0 0 1px color-mix(in srgb, var(--s-user) 45%, transparent); }
+  .pop-link {
+    position: absolute; z-index: 8; height: 2px; border-radius: 1px; pointer-events: none;
+    background: linear-gradient(90deg, var(--s-user), var(--accent));
+    box-shadow: 0 0 12px var(--accent);
+    opacity: 0; transform: scaleX(0); transform-origin: left center;
+    transition: transform 0.55s var(--ease), opacity 0.3s ease;
+  }
+  .pop-link.on { opacity: 1; transform: none; }
+  .pop-link::before, .pop-link::after { content: ""; position: absolute; top: -3px; width: 8px; height: 8px; border-radius: 50%; }
+  .pop-link::before { left: -4px; background: var(--s-user); }
+  .pop-link::after { right: -4px; background: var(--accent); }
+  .mem-inline { left: 12px; right: 12px; top: 64px; padding: 11px 13px; border-radius: 14px; background: var(--s-bar); box-shadow: 0 16px 36px var(--s-shadow), 0 0 0 1px var(--s-line); font-size: 12px; line-height: 1.65; }
+  .mem-inline header { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; font-size: 11px; color: var(--s-muted); }
+  .mem-inline p { margin: 0; }
+
+  /* Creative writing */
+  .cw { background: var(--paper); color: var(--ink); }
+  .cw .appbar, .cw .inputbar { background: var(--paper); }
+  .is-desk .cw { background: var(--cw-page); }
+  .is-desk .cw .appbar, .is-desk .cw .inputbar { background: var(--s-bar); }
+  .chapter-chip {
+    flex: none; align-self: center; margin: 10px 0 4px; display: flex; align-items: center; gap: 8px;
+    padding: 4px 14px 4px 4px; border-radius: 999px; background: var(--s-bar); box-shadow: 0 2px 10px var(--s-shadow);
+    font-family: var(--sign); font-size: 12px; color: var(--s-text);
+  }
+  .seal-mini { width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; background: var(--seal); color: #fff; font-family: var(--sign); font-weight: 900; font-size: 13px; }
+  .chapter-chip span + span { padding-left: 8px; border-left: 1px solid var(--s-line); }
+  .paper { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .is-desk .paper { margin: 4px 44px 0; background: var(--paper); border-radius: 12px 12px 0 0; box-shadow: 0 0 0 1px var(--s-line); }
+  .prose { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; gap: 12px; padding: 10px 34px 16px 18px; font-family: var(--sign); font-size: 14.5px; line-height: 1.95; color: var(--ink); transition: padding 0.45s var(--ease); }
+  .is-desk .prose { padding: 14px 30px 18px; font-size: 15px; gap: 14px; }
+  .prose p { margin: 0; }
+  .prose .q { color: var(--quote); }
+  .opening { flex: none; align-self: center; width: min(100%, 520px); display: grid; justify-items: center; gap: 4px; padding: 14px 18px 12px; border-radius: 16px; background: var(--paper); box-shadow: 0 0 0 1px var(--s-line), 0 12px 30px -20px var(--s-shadow); font-size: 13.5px; line-height: 1.85; }
+  .opening small { font-size: 10.5px; letter-spacing: 0.6em; color: var(--s-muted); }
+  .opening h3 { margin: 0 0 4px; font-size: 16px; font-weight: 600; }
+  .opening p { justify-self: stretch; }
+  .me-line { flex: none; align-self: flex-end; max-width: 82%; padding: 8px 14px; border-radius: 12px 12px 4px 12px; background: color-mix(in srgb, var(--seal) 11%, var(--paper)); font-family: var(--ui); font-size: 13.5px; line-height: 1.6; color: var(--ink); }
+  .ticks { position: absolute; right: 10px; top: 130px; bottom: 90px; display: flex; flex-direction: column; align-items: flex-end; justify-content: flex-end; gap: 13px; }
+  .is-desk .ticks { right: 14px; }
+  .ticks i { display: block; height: 2px; width: 9px; border-radius: 1px; background: color-mix(in srgb, var(--ink) 28%, transparent); transition: width 0.3s var(--ease), background-color 0.3s ease; }
+  .ticks i:nth-child(odd) { width: 15px; }
+  .ticks i.now { width: 18px; background: var(--seal); }
+
+  /* An illustration the image agent painted, sharpening as it renders */
+  .illus { --b: 14px; --nz: 0.85; position: relative; flex: none; width: 116px; aspect-ratio: 720 / 1052; margin: 2px 0 0; border-radius: 10px; overflow: hidden; background: #24343a; }
+  .is-desk .illus { width: 146px; }
+  .illus img { display: block; width: 100%; height: 100%; object-fit: cover; filter: blur(var(--b)); transform: scale(1.06); }
+  .illus figcaption { position: absolute; z-index: 2; left: 6px; bottom: 6px; padding: 1px 7px; border-radius: 6px; background: rgba(0, 0, 0, 0.5); color: #f3efe6; font-family: var(--ui); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+
+  /* Hopscotch: Agent Center over the writing room. The board copies the app's court (hopscotch-board.css, compact metrics). */
+  .is-desk .hop .paper { margin: 4px 392px 0 28px; }
+  .is-desk .hop .inputbar { margin-right: 376px; }
+  .frame:not(.is-desk) .hop.sheet-up .prose { padding-bottom: 450px; }
+  .ac {
+    position: absolute; left: 0; right: 0; bottom: 0; z-index: 5; height: 500px; display: flex; flex-direction: column; overflow: hidden;
+    background: var(--s-bar); color: var(--s-text); border-radius: 22px 22px 0 0; box-shadow: 0 -12px 30px var(--s-shadow);
+    transform: translateY(103%); transition: transform 0.45s var(--ease), opacity 0.35s ease;
+  }
+  .hop.sheet-up .ac { transform: none; }
+  .is-desk .ac {
+    left: auto; top: 12px; right: 12px; width: 352px; height: auto; border-radius: 22px; opacity: 0; transform: translateY(14px) scale(0.98);
+    box-shadow: 0 30px 70px -24px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--s-line);
+  }
+  .is-desk .hop.sheet-up .ac { opacity: 1; transform: none; }
+  .ac-head { flex: none; display: flex; align-items: center; gap: 10px; padding: 14px 14px 0 16px; }
+  .ac-mark {
+    width: 32px; height: 32px; flex: none; border-radius: 11px; display: grid; place-items: center;
+    background: linear-gradient(145deg, #6366f1 0%, #3b82f6 56%, #22d3ee 100%); color: #fff; font-weight: 800; font-size: 14px;
+    box-shadow: 0 8px 20px -6px rgba(59, 130, 246, 0.65), inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  }
+  .ac-title { flex: 1; min-width: 0; display: grid; gap: 4px; }
+  .ac-title > b { font-size: 14.5px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.2; }
+  .ac-meta { display: flex; gap: 5px; }
+  .ac-badge {
+    display: inline-flex; align-items: center; gap: 4px; height: 19px; padding: 0 7px; border-radius: 999px;
+    border: 1px solid var(--s-line); background: var(--s-subtle); color: var(--s-sec); font-size: 10.5px; font-weight: 650; white-space: nowrap;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+  }
+  .ac-badge b { color: var(--s-text); font-weight: 800; font-variant-numeric: tabular-nums; }
+  .ac-badge.has-value { border-color: color-mix(in srgb, var(--s-user) 30%, transparent); background: color-mix(in srgb, var(--s-user) 14%, transparent); color: var(--s-user); }
+  .ac-badge.has-value b { color: inherit; }
+  .ac-tabs { flex: none; display: flex; align-items: center; gap: 4px; margin: 10px 14px 0; padding: 8px 0 10px; border-top: 1px solid var(--s-line); overflow: hidden; }
+  .ac-tab { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border: 1px solid transparent; border-radius: 999px; font-size: 11.5px; color: var(--s-sec); white-space: nowrap; }
+  .ac-tab svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+  .ac-tab.on {
+    color: var(--ac-on); font-weight: 650; border-color: color-mix(in srgb, var(--ac-on) 28%, transparent);
+    background: color-mix(in srgb, var(--ac-on) 11%, transparent); box-shadow: 0 5px 16px -5px color-mix(in srgb, var(--ac-on) 44%, transparent);
+  }
+  .ac-div { width: 1px; height: 16px; margin: 0 2px; background: var(--s-line); }
+
+  .hop-court-scroll {
+    --hop-board-bg: color-mix(in srgb, var(--s-subtle) 72%, var(--s-bar));
+    position: relative; flex: 1; min-height: 0; overflow: hidden; display: flex; align-items: center;
+    margin: 0 12px 12px; border: 1px solid var(--s-line); border-radius: 20px; background: var(--hop-board-bg);
+  }
+  .hop-court {
+    --hop-violet: #7962e8; --hop-mint: #2cad78; --hop-sky: #16a3bd; --hop-amber: #dc9237; --hop-rose: #da6399;
+    --hop-line: color-mix(in srgb, var(--s-muted) 50%, var(--s-line)); --hop-cell-w: 96px; --hop-success: var(--ok);
+    position: relative; display: flex; flex-direction: column; align-items: center; width: max-content; margin: auto; padding: 14px 46px 16px;
+    font-family: var(--ui); color: var(--s-text);
+  }
+  .hop-court::before { content: ""; position: absolute; top: 18px; bottom: 18px; left: 50%; width: 1px; margin-left: -0.5px; background: var(--hop-line); }
+  .hop-origin { position: relative; z-index: 1; width: 6px; height: 6px; margin: 0 0 18px; border-radius: 50%; background: var(--hop-line); }
+  .hop-tick { position: relative; flex: none; width: 1px; height: 34px; }
+  .hop-tick::before, .hop-tick::after { content: ""; position: absolute; left: -2px; width: 5px; height: 5px; border-radius: 50%; background: var(--hop-line); }
+  .hop-tick::before { top: 5px; }
+  .hop-tick::after { bottom: 5px; }
+  .hop-tail { height: 48px; width: 5px; background: repeating-linear-gradient(to bottom, var(--hop-line) 0 3px, var(--hop-board-bg) 3px 9px); border-inline: 2px solid var(--hop-board-bg); }
+  .hop-row { position: relative; flex: none; z-index: 1; }
+  .hop-cells { display: flex; align-items: center; gap: 8px; }
+  .hop-parallel { position: absolute; top: 12px; bottom: 12px; left: -19px; width: 11px; border: 1px dashed var(--hop-line); border-right: 0; border-radius: 18px 0 0 18px; }
+  .hop-parallel > span { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); padding: 5px 0; background: var(--hop-board-bg); color: var(--s-sec); font-size: 10px; line-height: 1.3; white-space: nowrap; }
+  .hop-cell, .hop-fusion-part {
+    --hop-kind: var(--hop-mint); position: relative; flex: none; width: var(--hop-cell-w); min-height: 108px; padding: 14px 8px 12px;
+    display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 5px;
+    border: 1px solid color-mix(in srgb, var(--hop-kind) 62%, var(--s-bar)); border-radius: 16px; color: var(--s-text);
+    background: linear-gradient(145deg, color-mix(in srgb, var(--hop-kind) 7%, var(--s-bar)), color-mix(in srgb, var(--hop-kind) 15%, var(--s-bar)));
+    box-shadow: inset 0 0 0 3px color-mix(in srgb, var(--s-bar) 45%, transparent), 0 7px 18px -7px color-mix(in srgb, var(--hop-kind) 28%, transparent);
+    transition: border-color 0.3s ease, box-shadow 0.3s ease;
+  }
+  .hop-court [data-hop-part="body"] { --hop-kind: var(--hop-violet); }
+  .hop-court [data-hop-part="memory_table"] { --hop-kind: var(--hop-mint); }
+  .hop-court :is([data-hop-part="image_prompt"], [data-hop-kind="image_generation"]) { --hop-kind: var(--hop-sky); }
+  .hop-court [data-hop-kind="format_review"] { --hop-kind: var(--hop-rose); }
+  .hop-number { font-size: 11px; line-height: 1.2; font-variant-numeric: tabular-nums; letter-spacing: 0.13em; color: var(--s-sec); }
+  .hop-title { font-size: 12px; font-weight: 500; line-height: 1.5; text-align: center; }
+  .hop-glyph { display: block; flex: none; width: 27px; height: 27px; margin-bottom: 5px; overflow: visible; fill: none; stroke: color-mix(in srgb, var(--hop-kind) 85%, var(--s-text)); stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+  .hop-glyph-wash { fill: var(--hop-kind); fill-opacity: 0.13; stroke: none; }
+  .hop-glyph-solid { fill: var(--hop-kind); stroke: none; }
+  .hop-cell-mark {
+    position: absolute; top: 8px; right: 8px; display: grid; place-items: center; width: 19px; height: 19px; border-radius: 50%;
+    background: var(--s-bar); box-shadow: 0 0 0 1px var(--s-line); font-size: 11px; line-height: 1; font-weight: 700; color: var(--ok);
+    opacity: 0; transform: scale(0.5); transition: opacity 0.25s ease, transform 0.4s var(--ease);
+  }
+  .hop-cell.is-succeeded > .hop-cell-mark { opacity: 1; transform: none; }
+  .hop-cell.is-running { z-index: 2; border-color: var(--s-user); box-shadow: 0 0 0 3px color-mix(in srgb, var(--s-user) 14%, transparent), 0 8px 22px -9px var(--s-user); }
+  .hop-cell.is-succeeded { border-color: color-mix(in srgb, var(--hop-success) 65%, var(--s-bar)); }
+  .hop-cell.is-running::after {
+    content: ""; position: absolute; left: 22px; right: 22px; bottom: 5px; height: 2px; border-radius: 2px;
+    background: linear-gradient(90deg, transparent, var(--s-user), transparent); background-size: 60% 100%; animation: hop-progress 1.1s linear infinite;
+  }
+  @keyframes hop-progress { from { background-position: -60% 0; } to { background-position: 160% 0; } }
+  /* 融合：正文和融合项共用一次请求 */
+  .hop-cell.hop-fusion-group { width: max-content; min-height: 0; padding: 0 10px 14px; gap: 0; border: 0; border-radius: 28px; background: transparent; box-shadow: none; isolation: isolate; }
+  .hop-fusion-group::before { content: ""; position: absolute; inset: 56px 0 0; z-index: -1; border: 1px solid var(--hop-line); border-radius: 28px; background: var(--hop-board-bg); transition: border-color 0.3s ease; }
+  .hop-fusion-group.is-running::before { border-color: var(--s-user); }
+  .hop-fusion-group.is-succeeded::before { border-color: var(--hop-success); }
+  .hop-fusion-caption { position: absolute; right: 22px; bottom: -8px; padding: 0 8px; background: var(--hop-board-bg); color: var(--s-sec); font-size: 11px; line-height: 16px; }
+  .hop-fusion-parts { display: grid; grid-template-columns: repeat(2, var(--hop-cell-w)); justify-items: center; gap: 9px; }
+  .hop-court .hop-fusion-part { min-height: 88px; padding: 12px 7px; }
+  .hop-court .hop-fusion-part[data-hop-part="body"] { grid-column: 1 / -1; width: 140px; min-height: 118px; padding-top: 24px; border-radius: 92px 92px 18px 18px; }
+  .hop-fusion-group > .hop-cell-mark { right: calc(50% - 67px); top: 17px; }
+  .hop-stone {
+    position: absolute; left: -21px; top: 0; z-index: 3; width: 11px; height: 11px; border: 2px solid var(--hop-board-bg); border-radius: 50%;
+    background: var(--s-user); box-shadow: 0 2px 8px color-mix(in srgb, var(--s-user) 22%, transparent); animation: hop-land 0.45s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+  }
+  .hop-stone.is-hopping::after { content: ""; position: absolute; inset: -5px; border-radius: 50%; border: 1px solid var(--s-user); opacity: 0.6; animation: hop-pulse 1.2s ease-out infinite; }
+  @keyframes hop-land { from { transform: translateY(-34px) scale(0.7); opacity: 0; } 60% { transform: translateY(3px) scale(1.05); opacity: 1; } to { transform: none; } }
+  @keyframes hop-pulse { from { transform: scale(0.7); opacity: 0.7; } to { transform: scale(1.5); opacity: 0; } }
+  .hop-roof { position: relative; z-index: 1; flex: none; width: 56px; height: 4px; border-radius: 2px; background: currentColor; color: var(--hop-line); transition: color 0.3s ease; }
+  .hop-roof.is-running { color: var(--hop-violet); animation: hop-finish-pulse 1.2s ease-in-out infinite; }
+  .hop-roof.is-succeeded { color: var(--hop-success); }
+  @keyframes hop-finish-pulse { 50% { opacity: 0.4; } }
+
+  /* 记忆表格：正文这一轮顺手记下的新行 */
+  .mem-card {
+    left: 12px; right: 12px; top: 58px; padding: 11px 12px 8px; border-radius: 14px;
+    background: var(--s-bar); color: var(--s-text); box-shadow: 0 16px 36px var(--s-shadow), 0 0 0 1px var(--s-line); font-family: var(--ui);
+  }
+  .is-desk .mem-card { left: 40px; right: auto; top: 112px; width: 300px; }
+  /* 手机上抽屉占了大半屏，只露出新记下的一行 */
+  .frame:not(.is-desk) .mem-card :is(thead, tr:not(.new)) { display: none; }
+  .mem-card header { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--s-muted); margin-bottom: 6px; }
+  .mem-card header svg, .mem-inline header svg { width: 14px; height: 14px; stroke: #2cad78; fill: none; stroke-width: 2; }
+  .mem-card table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .mem-card th { text-align: left; font-weight: 600; font-size: 11px; color: var(--s-muted); padding: 3px 4px; border-bottom: 1px solid var(--s-line); }
+  .mem-card td { padding: 5px 4px; border-bottom: 1px solid var(--s-line); }
+  .mem-card td:last-child, .mem-card th:last-child { text-align: right; width: 2.5em; }
+  .mem-card tr.new td { color: var(--s-user); }
+  .mem-card tr.in { animation: fade 0.35s ease both; }
+  @keyframes fade { from { opacity: 0; } }
+
+  /* Maid: one sentence typed into her bar, then her run card */
+  .fx { position: absolute; z-index: 4; transition: opacity 0.3s ease, transform 0.45s var(--ease); }
+  .fx.off { opacity: 0; transform: translateY(10px); pointer-events: none; }
+  .maid-dock { position: absolute; left: 10px; right: 10px; bottom: 64px; z-index: 4; display: grid; gap: 8px; }
+  .maid-dock .fx { position: relative; }
+  .maid-input { display: flex; align-items: center; gap: 6px; height: 46px; padding: 0 6px 0 10px; border-radius: 23px; background: var(--s-bar); box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--s-user) 32%, var(--s-line)), 0 10px 26px -12px rgba(0, 0, 0, 0.35); }
+  .maid-input .field { height: 32px; padding: 0 4px; background: transparent; font-size: 13.5px; }
+  .maid-input .send svg { fill: none; stroke: #fff; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+  .maid-input .ico { width: 18px; height: 18px; }
+  .dots { width: 4px; height: 16px; flex: none; background: radial-gradient(circle, var(--s-muted) 1.5px, transparent 1.9px) 0 0 / 4px 6px; }
+  .tabbar { position: absolute; left: 0; right: 0; bottom: 0; height: 56px; display: grid; grid-template-columns: repeat(3, 1fr); align-items: center; padding: 0 10px; background: var(--s-bar); border-top: 1px solid var(--s-line); font-size: 11px; color: var(--s-muted); text-align: center; }
+  .tabbar span { padding: 7px 0; border-radius: 12px; }
+  .tabbar span.on { color: var(--s-text); font-weight: 650; background: color-mix(in srgb, #3b82f6 12%, transparent); }
+  .run { padding: 10px 12px 4px; border-radius: 18px; background: var(--s-bar); box-shadow: 0 18px 40px -16px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--s-line); }
+  .run-head { display: flex; align-items: center; gap: 10px; padding-bottom: 6px; }
+  .ring { position: relative; width: 28px; height: 28px; flex: none; display: grid; place-items: center; }
+  .ring svg { position: absolute; inset: 0; width: 28px; height: 28px; transform: rotate(-90deg); }
+  .ring circle { fill: none; stroke-width: 2.6; }
+  .ring .track { stroke: var(--s-line); }
+  .ring .bar { stroke: var(--s-user); stroke-linecap: round; stroke-dasharray: 75.4; stroke-dashoffset: 75.4; transition: stroke-dashoffset 0.45s var(--ease), stroke 0.3s ease; }
+  .ring-n { font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .run.ok .ring .bar { stroke: var(--ok); }
+  .run.ok .ring-n { visibility: hidden; }
+  .run.ok .ring::after { content: ""; position: absolute; left: 11px; top: 6px; width: 6px; height: 11px; border: solid var(--ok); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+  .run-head .title { flex: 1; min-width: 0; display: grid; gap: 1px; }
+  .run-head b { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .run-head small { font-size: 11px; color: var(--s-muted); font-variant-numeric: tabular-nums; }
+  .run-head small em { font-style: normal; color: var(--s-user); }
+  .run.ok .run-head small em { color: var(--ok); }
+  .run-stop { width: 26px; height: 26px; flex: none; border-radius: 50%; background: var(--s-page); box-shadow: inset 0 0 0 1px var(--s-line); display: grid; place-items: center; }
+  .run-stop i { width: 8px; height: 8px; border-radius: 2px; background: var(--s-text); }
+  .run.ok .run-stop { visibility: hidden; }
+  .steps { list-style: none; margin: 0; padding: 0; display: grid; }
+  .steps li { display: flex; align-items: center; gap: 8px; height: 31px; border-top: 1px solid var(--s-line); font-size: 12.5px; color: var(--s-muted); }
+  .steps li > span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .steps li em { flex: none; padding: 0 6px; border-radius: 6px; background: var(--s-page); box-shadow: inset 0 0 0 1px var(--s-line); font-style: normal; font-size: 10.5px; color: var(--s-sec); }
+  .steps li time { margin-left: auto; flex: none; font-size: 11px; font-variant-numeric: tabular-nums; }
+  .steps .st { position: relative; width: 14px; height: 14px; flex: none; border-radius: 50%; border: 1.5px solid var(--s-muted); opacity: 0.6; }
+  .steps li.running { color: var(--s-text); font-weight: 600; }
+  .steps li.running .st { opacity: 1; border-color: var(--s-user); border-right-color: transparent; animation: spin 0.8s linear infinite; }
+  .steps li.done { color: var(--s-sec); }
+  .steps li.done .st { border-color: transparent; opacity: 1; }
+  .steps li.done .st::after { content: ""; position: absolute; left: 3.5px; top: 0; width: 4.5px; height: 9px; border: solid var(--ok); border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
+  .report { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-radius: 16px; background: var(--s-bar); box-shadow: 0 18px 40px -18px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--s-line); font-size: 12.5px; line-height: 1.55; }
+  .report .ava { width: 30px; height: 30px; border-radius: 10px; background-color: #efedf7; }
+  .report p { margin: 0; }
+  .report b { display: block; font-size: 11px; font-weight: 600; color: var(--s-muted); }
+
+  /* Lineage graph: where every part of this prompt came from */
+  .lin { background: var(--s-page); }
+  .lin-head { flex: none; display: flex; align-items: center; gap: 10px; padding: 11px 16px; background: var(--s-bar); border-bottom: 1px solid var(--s-line); }
+  .lin-mark { width: 32px; height: 32px; flex: none; border-radius: 10px; display: grid; place-items: center; background: color-mix(in srgb, var(--s-user) 12%, var(--s-bar)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--s-user) 32%, transparent); }
+  .lin-mark svg { width: 17px; height: 17px; stroke: var(--s-user); fill: none; stroke-width: 2; }
+  .lin-head .title { flex: 1; min-width: 0; display: grid; line-height: 1.25; }
+  .lin-head .title b { font-size: 15px; }
+  .lin-head .title small { font-size: 9px; letter-spacing: 0.16em; color: var(--s-muted); }
+  .lin-btn { padding: 5px 12px; border-radius: 9px; background: var(--s-page); box-shadow: inset 0 0 0 1px var(--s-line); font-size: 12px; }
+  .lin-tabs { flex: none; display: flex; gap: 6px; padding: 9px 14px; }
+  .lin-tabs span { padding: 6px 11px; border-radius: 10px; font-size: 12px; color: var(--s-sec); white-space: nowrap; }
+  .lin-tabs i { margin-right: 5px; font-style: normal; font-size: 9.5px; color: var(--s-muted); font-variant-numeric: tabular-nums; }
+  .lin-tabs .on { color: var(--s-user); font-weight: 600; background: color-mix(in srgb, var(--s-user) 11%, var(--s-bar)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--s-user) 34%, transparent); }
+  .lin-board { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; margin: 0 12px 12px; border-radius: 16px; background: var(--s-bar); box-shadow: inset 0 0 0 1px var(--s-line); }
+  .lin-bar { flex: none; display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-bottom: 1px solid var(--s-line); font-size: 12.5px; }
+  .lin-bar small { font-size: 9px; letter-spacing: 0.16em; color: var(--s-muted); }
+  .lin-stat { margin-left: auto; color: var(--s-sec); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .lin-stat b { color: var(--s-text); }
+  .lin-ready { display: flex; align-items: center; gap: 6px; color: var(--s-sec); font-size: 11.5px; }
+  .lin-ready i { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+  .lin-main { flex: 1; min-height: 0; display: flex; }
+  .lin-side { flex: none; width: 176px; padding: 12px; border-right: 1px solid var(--s-line); }
+  .lin-side h4 { margin: 0 0 10px; font-size: 10px; font-weight: 600; letter-spacing: 0.14em; color: var(--s-muted); }
+  .lin-side ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+  .lin-side li { display: grid; grid-template-columns: 12px minmax(0, 1fr); align-items: center; gap: 3px 8px; font-size: 11.5px; }
+  .lin-side li > i { font-style: normal; font-size: 10px; color: var(--s-muted); font-variant-numeric: tabular-nums; }
+  .lin-side li > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color 0.3s ease; }
+  .lin-side li.hot > span { color: var(--s-user); font-weight: 650; }
+  .meter { grid-column: 2; height: 3px; border-radius: 2px; background: var(--s-line); overflow: hidden; }
+  .meter b { display: block; width: 0; height: 100%; border-radius: 2px; background: #8b6cf0; transition: width 0.9s var(--ease); }
+  .lin-graph { position: relative; flex: 1; min-width: 0; overflow: hidden; background-image: radial-gradient(var(--s-line) 1px, transparent 1.3px); background-size: 18px 18px; }
+  .lin-edges { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .le { fill: none; stroke: color-mix(in srgb, var(--s-muted) 60%, transparent); stroke-width: 1.4; stroke-dasharray: 1; stroke-dashoffset: 1; transition: stroke-dashoffset 0.75s var(--ease), opacity 0.35s ease, stroke 0.3s ease, stroke-width 0.3s ease; }
+  .le.on { stroke-dashoffset: 0; }
+  .le.gone { opacity: 0; }
+  .tracing .le:not(.hot):not(.gone) { opacity: 0.16; }
+  .le.hot { stroke: var(--s-user); stroke-width: 2.2; }
+  .ln {
+    position: absolute; display: flex; align-items: center; gap: 8px; height: 52px; padding: 0 9px; border-radius: 12px;
+    background: var(--s-bar); font-size: 11px;
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--k) 42%, var(--s-line)), 0 8px 18px -10px color-mix(in srgb, var(--k) 60%, transparent);
+    opacity: 0; transform: scale(0.9);
+    transition: opacity 0.35s ease, transform 0.55s var(--ease), box-shadow 0.3s ease;
+  }
+  .ln.on { opacity: 1; transform: none; }
+  .ln.entry { transform: translate(var(--dx), var(--dy)) scale(0.7); }
+  .ln.entry.on { transform: none; }
+  .tracing .ln.on:not(.hot) { opacity: 0.32; }
+  .ln.hot { box-shadow: 0 0 0 2px var(--k), 0 10px 26px -8px var(--k); }
+  .ln-ico { width: 26px; height: 26px; flex: none; display: grid; place-items: center; border-radius: 8px; background: color-mix(in srgb, var(--k) 15%, var(--s-bar)); color: var(--k); }
+  .ln-ico svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .ln-t { flex: 1; min-width: 0; display: grid; line-height: 1.25; }
+  .ln-t small { font-size: 8px; font-weight: 650; letter-spacing: 0.13em; color: var(--k); }
+  .ln-t b { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ln-t span { font-size: 10px; color: var(--s-muted); white-space: nowrap; }
+  .ln-cnt { flex: none; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 10px; display: grid; place-items: center; font-size: 10.5px; font-variant-numeric: tabular-nums; color: var(--k); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--k) 45%, transparent); }
+  .lin-hint { position: absolute; z-index: 3; left: 50%; top: 12px; transform: translateX(-50%); margin: 0; padding: 6px 12px; border-radius: 999px; background: var(--s-bar); box-shadow: 0 0 0 1px var(--s-line), 0 6px 16px var(--s-shadow); font-size: 11.5px; white-space: nowrap; }
+  .lin-hint b { color: var(--s-user); font-weight: 600; }
+  .frame:not(.is-desk) :is(.lin-side, .lin-bar small, .lin-ready, .lin-head .title + .lin-btn) { display: none; }
+  .frame:not(.is-desk) .lin-hint { font-size: 10px; padding: 5px 10px; }
+  .frame:not(.is-desk) .ln { height: 42px; }
+  .frame:not(.is-desk) .ln-t span, .frame:not(.is-desk) .ln-t small { display: none; }
+  .frame:not(.is-desk) .lin-tabs span:not(.on) i { display: none; }
+
+  /* Lorebook */
+  .kw { border-radius: 4px; padding: 0 2px; background: rgba(255, 255, 255, 0.2); transition: box-shadow 0.4s ease, background-color 0.4s ease; }
+  .kw.lit { background: rgba(255, 255, 255, 0.36); box-shadow: 0 0 0 1.5px var(--s-user), 0 0 18px 4px color-mix(in srgb, var(--s-user) 55%, transparent); }
+  .wb-card { right: 12px; top: 58px; width: min(232px, calc(100% - 24px)); padding: 13px 14px; border-radius: 16px; background: var(--s-bar); box-shadow: 0 18px 40px var(--s-shadow), 0 0 0 1px var(--s-line); }
+  .wb-card.off { opacity: 1; transform: translateX(118%); }
+  .wb-card header { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--s-muted); }
+  .wb-card header svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 2; }
+  .wb-card header em { margin-left: auto; font-style: normal; padding: 1px 8px; border-radius: 999px; background: color-mix(in srgb, var(--s-user) 16%, transparent); color: var(--s-user); font-weight: 600; }
+  .wb-card b { display: block; margin: 7px 0 6px; font-size: 16px; }
+  .keys { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
+  .keys span { font-size: 11px; padding: 1px 7px; border-radius: 6px; background: var(--s-page); color: var(--s-muted); }
+  .wb-card p { margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--s-text); }
+  .wb-pill { left: 50%; top: 12px; margin-left: -76px; width: 152px; height: 26px; border-radius: 999px; display: flex; align-items: center; justify-content: center; gap: 6px; background: var(--s-bar); box-shadow: 0 4px 14px var(--s-shadow), 0 0 0 1px var(--s-line); font-size: 11.5px; }
+  .wb-pill i { width: 6px; height: 6px; border-radius: 50%; background: var(--s-user); }
+
+  /* Page rail, modelled on the app's chapter scrubber */
+  .rail { position: fixed; z-index: 15; top: 50%; right: max(10px, env(safe-area-inset-right, 0px)); transform: translateY(-50%); display: grid; justify-items: end; }
+  .rail button { appearance: none; border: 0; background: none; cursor: pointer; padding: 6px 4px; display: grid; justify-items: end; }
+  .rail i { display: block; width: 10px; height: 2px; border-radius: 1px; background: var(--muted); opacity: 0.55; transition: width 0.3s var(--ease), background-color 0.3s ease, opacity 0.3s ease; }
+  .rail button:nth-child(odd) i { width: 16px; }
+  .rail button:hover i { opacity: 1; }
+  .rail button[aria-current="step"] i { width: 22px; background: var(--accent); opacity: 1; }
+
+  /* The film */
+  .film { max-width: 1240px; margin-inline: auto; padding-block: 14svh 0; display: grid; gap: 24px; }
+  .film-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 22px; }
+  .film-head h2 { margin: 0; font-family: var(--sign); font-weight: 900; font-size: clamp(40px, 5.6vw, 72px); letter-spacing: 0.06em; text-wrap: balance; }
+  html[lang="en"] .film-head h2 { font-family: var(--display); font-weight: 600; letter-spacing: -0.02em; }
+  .film-head .meta { font-size: 14px; }
+  .player { position: relative; aspect-ratio: 16 / 9; max-width: 100%; overflow: hidden; border-radius: 22px; background: #07060b; box-shadow: 0 0 0 1px var(--rule), 0 60px 120px -60px var(--glow); }
+  .player video { position: absolute; inset: 0; display: block; width: 100%; height: 100%; background: #07060b; }
+  .film-cover { position: absolute; inset: 0; z-index: 1; display: grid; place-items: center; padding: 0; border: 0; cursor: pointer; color: #fff; background: #07060b; }
+  .film-cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transition: transform 1.2s var(--ease), filter 0.6s ease; }
+  .film-cover::before { content: ""; position: absolute; inset: 0; z-index: 1; background: linear-gradient(to top, rgba(8, 6, 14, 0.78), rgba(8, 6, 14, 0.05) 55%), radial-gradient(circle at 50% 50%, rgba(8, 6, 14, 0.25), transparent 40%); }
+  .film-cover:hover img { transform: scale(1.03); }
+  .disc { position: relative; z-index: 2; width: clamp(64px, 9vw, 96px); aspect-ratio: 1; border-radius: 50%; display: grid; place-items: center; background: rgba(255, 255, 255, 0.16); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.4), 0 20px 50px -20px rgba(0, 0, 0, 0.7); transition: transform 0.35s var(--ease), background-color 0.3s ease; }
+  .disc svg { width: 34%; height: 34%; margin-left: 8%; fill: #fff; }
+  .film-cover:hover .disc { transform: scale(1.07); background: rgba(255, 255, 255, 0.24); }
+  .film-cap { position: absolute; z-index: 2; left: clamp(16px, 3vw, 32px); right: clamp(16px, 3vw, 32px); bottom: clamp(14px, 2.6vw, 28px); display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 16px; text-align: left; }
+  .film-cap b { font-family: var(--display); font-weight: 600; font-size: clamp(18px, 2.4vw, 30px); letter-spacing: -0.02em; }
+  .film-cap span { font-size: 14px; opacity: 0.8; font-variant-numeric: tabular-nums; }
+
+  /* More: small looping tiles */
+  .more { max-width: 1240px; margin-inline: auto; padding-block: 14svh 0; display: grid; gap: 26px; }
+  .eyebrow { margin: 0; font-family: var(--sign); font-size: 15px; letter-spacing: 0.3em; color: var(--muted); }
+  html[lang="en"] .eyebrow { font-family: var(--ui); letter-spacing: 0.08em; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 270px), 1fr)); gap: 18px; }
+  .tile { margin: 0; display: grid; gap: 14px; min-width: 0; }
+  .mini {
+    position: relative; height: 350px; overflow: hidden; border-radius: 24px; display: flex; flex-direction: column;
+    background: var(--s-page); color: var(--s-text); font-family: var(--ui);
+    box-shadow: 0 0 0 1px var(--rule), 0 30px 60px -45px var(--glow);
+  }
+  .tile figcaption { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; }
+  .tile figcaption b { font-family: var(--sign); font-weight: 900; font-size: 26px; letter-spacing: 0.06em; }
+  html[lang="en"] .tile figcaption b { font-family: var(--display); font-weight: 600; font-size: 19px; letter-spacing: -0.01em; }
+  .tile figcaption span { font-size: 14px; color: var(--muted); }
+  .post { padding: 16px; display: flex; flex-direction: column; gap: 10px; min-height: 0; flex: 1; }
+  .post header { display: flex; align-items: center; gap: 10px; }
+  .post header .ava { width: 38px; height: 38px; border-radius: 11px; }
+  .post header div { display: grid; line-height: 1.25; }
+  .post header b { font-size: 14px; }
+  .post header small { font-size: 11px; color: var(--s-muted); }
+  .post > p { margin: 0; font-size: 13.5px; line-height: 1.55; }
+  .shot { flex: none; width: 104px; height: 104px; object-fit: cover; border-radius: 12px; }
+  .acts { display: flex; gap: 18px; font-size: 12.5px; color: var(--s-muted); }
+  .acts span { display: inline-flex; align-items: center; gap: 5px; }
+  .acts svg { width: 17px; height: 17px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linejoin: round; transition: fill 0.2s ease, stroke 0.2s ease, transform 0.3s var(--ease); }
+  .like.liked { color: #f04452; }
+  .like.liked svg { fill: #f04452; stroke: #f04452; transform: scale(1.15); }
+  .cmts { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; gap: 5px; padding: 8px 10px; border-radius: 10px; background: var(--s-bar); font-size: 12.5px; }
+  .cmts p { margin: 0; }
+  .cmts b { color: var(--s-user); font-weight: 600; }
+  .mini .chat { padding: 16px 14px; }
+  .pe { padding: 14px; gap: 10px; }
+  .pe-head { display: flex; align-items: baseline; gap: 8px; }
+  .pe-head b { font-size: 14px; }
+  .pe-head small { font-size: 11.5px; color: var(--s-muted); }
+  .pe-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; flex: 1; align-content: start; }
+  .pe-list li { position: relative; display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 10px; border-radius: 10px; background: var(--s-bar); box-shadow: 0 0 0 1px var(--s-line); font-size: 13px; transition: opacity 0.3s ease, box-shadow 0.3s ease; }
+  .pe-list li.off > span, .pe-list li.off > em { opacity: 0.45; }
+  .pe-list li.lift { z-index: 1; box-shadow: 0 0 0 1.5px var(--s-user), 0 12px 22px -8px var(--s-shadow); }
+  .grip { width: 8px; height: 12px; flex: none; background: radial-gradient(circle, var(--s-muted) 1px, transparent 1.4px) 0 0 / 4px 4px; }
+  .pe-list span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: opacity 0.3s ease; }
+  .pe-list em { font-style: normal; font-size: 11px; color: var(--s-muted); font-variant-numeric: tabular-nums; transition: opacity 0.3s ease; }
+  .tg { position: relative; width: 30px; height: 18px; flex: none; border-radius: 9px; background: color-mix(in srgb, var(--s-muted) 45%, transparent); transition: background-color 0.25s ease; }
+  .tg::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); transition: transform 0.25s var(--ease); }
+  .tg.on { background: var(--s-user); }
+  .tg.on::after { transform: translateX(12px); }
+  .pe-foot { font-size: 12px; color: var(--s-muted); text-align: right; font-variant-numeric: tabular-nums; }
+  .pe-foot b { color: var(--s-text); }
+
+  /* Download */
+  .download { max-width: 1240px; margin-inline: auto; padding-block: 16svh 72px; display: grid; gap: 40px; }
+  .dl-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 22px; }
+  .dl-head h2 { margin: 0; font-family: var(--sign); font-weight: 900; font-size: clamp(44px, 6vw, 72px); letter-spacing: 0.06em; }
+  html[lang="en"] .dl-head h2 { font-family: var(--display); font-weight: 600; letter-spacing: -0.02em; }
+  .dl-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 18px; }
+  .dl { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 22px; padding: 26px; border-radius: 22px; background: var(--bg-2); border: 1px solid var(--rule); }
+  .dl[data-primary] { border-color: color-mix(in srgb, var(--accent) 55%, var(--rule)); box-shadow: 0 30px 60px -40px var(--glow); }
+  .dl svg.dev { width: 88px; height: 88px; color: var(--muted); }
+  .dl[data-primary] svg.dev { color: var(--accent); }
+  .dl-body { display: grid; gap: 10px; justify-items: start; min-width: 0; }
+  .dl h3 { margin: 0; font-family: var(--display); font-weight: 500; font-size: 20px; letter-spacing: -0.01em; }
+  .dl .note { margin: 0; font-size: 12.5px; color: var(--muted); }
+  .local { margin: 0; font-size: 15px; color: var(--muted); }
+  .links { display: flex; flex-wrap: wrap; gap: 8px 22px; font-size: 14px; }
+  footer { max-width: 1240px; margin-inline: auto; padding-block: 28px 40px; border-top: 1px solid var(--rule); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; color: var(--muted); }
+  footer nav { display: flex; gap: 18px; }
+
+  /* Phones and upright tablets: device above, caption below; the device stays a phone */
+  @media (max-width: 760px), (max-aspect-ratio: 4/5) {
+    .stage-inner { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; row-gap: 14px; padding-block: 62px 26px; }
+    .backdrop { -webkit-mask: radial-gradient(70% 50% at 50% 40%, #000 20%, transparent 100%); mask: radial-gradient(70% 50% at 50% 40%, #000 20%, transparent 100%); }
+    .captions { order: 2; width: auto; min-height: 168px; }
+    .label { left: 0; right: 0; top: 0; width: auto; transform: translateY(16px); }
+    .label.is-on { transform: none; }
+    .sign, html[lang="en"] .sign { writing-mode: horizontal-tb; text-align: center; max-width: none; }
+    .sign h2 { font-size: 40px; letter-spacing: 0.08em; }
+    html[lang="en"] .sign h2 { font-size: 30px; }
+    .sign p, html[lang="en"] .sign p { margin: 8px 0 0; font-size: 14px; letter-spacing: 0.1em; }
+    html[lang="en"] .sign p { letter-spacing: 0; }
+    .hero { justify-items: center; text-align: center; gap: 8px; max-width: none; }
+    .hero .hero-icon { display: none; }
+    .hero h1 { font-size: 30px; }
+    .hero .tag { gap: 2px; }
+    .hero .tag b { font-size: 16px; }
+    .hero .tag span { font-size: 13px; }
+    .cta { justify-content: center; margin-top: 4px; gap: 8px 12px; }
+    .btn { padding: 9px 16px; font-size: 14px; }
+    .hero .meta, .hero #hero-other { display: none; }
+    .bar .mark span, .bar .gh { display: none; }
+    .controls { gap: 10px; }
+    .pop, .pop-link { display: none; }
+    .rail { right: max(4px, env(safe-area-inset-right, 0px)); }
+    .rail i { width: 7px; }
+    .rail button:nth-child(odd) i { width: 11px; }
+    .rail button[aria-current="step"] i { width: 15px; }
+    .player { border-radius: 16px; }
+    .dl { padding: 20px; gap: 16px; }
+    .dl svg.dev { width: 64px; height: 64px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+</style>
+
+<header class="bar">
+  <a class="mark" href="#top"><img src="img/icon.webp" alt=""><span>OmniTavern</span></a>
+  <nav class="controls" aria-label="页面设置" data-t-aria="settings">
+    <div class="switch" role="group" aria-label="语言" data-t-aria="lang">
+      <button type="button" data-lang="zh-CN">简</button>
+      <button type="button" data-lang="zh-TW">繁</button>
+      <button type="button" data-lang="en">EN</button>
+    </div>
+    <button type="button" class="icon-btn" id="theme-toggle" aria-label="切换深浅色" data-t-aria="theme">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
+    </button>
+    <a class="quiet gh" href="https://github.com/dghiffjd7/OmniTavern">GitHub</a>
+  </nav>
+</header>
+
+<main>
+  <section class="story" id="top" style="--n: 8">
+    <div class="stage">
+      <div class="backdrop" aria-hidden="true">
+        <i class="bd" data-tone="cafe" style="background-image: url(img/bd-cafe.jpg)"></i>
+        <i class="bd" data-tone="dusk" style="background-image: url(img/bd-dusk.jpg)"></i>
+        <i class="bd" data-tone="neon" style="background-image: url(img/bd-neon.jpg)"></i>
+        <i class="bd" data-tone="fog" style="background-image: url(img/bd-fog.jpg)"></i>
+        <i class="bd" data-tone="door" style="background-image: url(img/bd-door.jpg)"></i>
+      </div>
+      <div class="stage-inner">
+        <div class="captions">
+          <div class="label hero is-on">
+            <img class="hero-icon" src="img/icon.webp" alt="">
+            <h1>OmniTavern</h1>
+            <p class="tag"><b data-t="tag">AI 角色扮演应用</b><span data-t="tag2">和角色聊天、通话、一起创作</span></p>
+            <div class="cta">
+              <a class="btn primary" id="hero-dl" href="#download">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0l-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg>
+                <span id="hero-dl-text" data-t="dlAny">下载</span>
+              </a>
+              <button type="button" class="btn" id="hero-film">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.4-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg>
+                <span data-t="film">看宣传片</span><span class="dur">1:20</span>
+              </button>
+            </div>
+            <div class="cta">
+              <span class="meta" id="hero-dl-meta">v0.7.9 · Android · Windows</span>
+              <a class="quiet" href="#download" id="hero-other" data-t="other">其他平台</a>
+            </div>
+          </div>
+          <div class="label sign"><h2 data-t="c1">群聊</h2><p data-t="s1">像真的在聊天</p></div>
+          <div class="label sign"><h2 data-t="c2">通话</h2><p data-t="s2">打个电话，直接聊</p></div>
+          <div class="label sign"><h2 data-t="c3">长记忆</h2><p data-t="s3">记得你说过的话</p></div>
+          <div class="label sign"><h2 data-t="c4">女仆</h2><p data-t="s4">说一句，女仆来做</p></div>
+          <div class="label sign"><h2 data-t="c5">创意写作</h2><p data-t="s5">一起写故事</p></div>
+          <div class="label sign"><h2 data-t="c6">跳房子</h2><p data-t="s6">写完一段，Agent 接力</p></div>
+          <div class="label sign"><h2 data-t="c7">血缘图</h2><p data-t="s7">每一步都看得见</p></div>
+        </div>
+
+        <div class="device-area" aria-hidden="true">
+          <div class="device">
+            <div class="orbit"><i></i></div>
+            <div class="frame">
+              <div class="screen">
+                <div class="chrome chrome-phone">
+                  <span class="camera"></span>
+                  <span>14:48</span>
+                  <svg viewBox="0 0 46 12"><path d="M1 9h2v3H1zM5 6h2v6H5zM9 3h2v9H9zM13 0h2v12h-2z"/><path d="M26 1h15a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H26a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2zm0 1.5a.5.5 0 0 0-.5.5v6c0 .3.2.5.5.5h11V2.5zM44.5 4.5h1v3h-1z"/></svg>
+                </div>
+                <div class="chrome chrome-desk">
+                  <img src="img/icon.webp" alt=""><span>OmniTavern</span>
+                  <span class="win"><svg viewBox="0 0 12 12"><path d="M1 6h10"/></svg><svg viewBox="0 0 12 12"><rect x="1.5" y="1.5" width="9" height="9"/></svg><svg viewBox="0 0 12 12"><path d="M1.5 1.5l9 9M10.5 1.5l-9 9"/></svg></span>
+                </div>
+
+                <!-- 0 · a picture she paints while you watch -->
+                <div class="scene is-on" data-scene="0">
+                  <div class="appbar">
+                    <svg class="ico" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>
+                    <span class="ava" data-who="姜念禾"></span>
+                    <div class="title"><b>姜念禾</b><small class="online">在线</small></div>
+                    <svg class="ico" viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h14"/></svg>
+                  </div>
+                  <div class="chat body wall" style="--wall: url(img/wall-nianhe.webp)">
+                    <div class="stamp" data-keep>14:46</div>
+                    <div class="msg ai" data-keep><span class="ava" data-who="姜念禾"></span><div class="col"><div class="bubble">好呀，给你留靠窗的位置</div></div></div>
+                  </div>
+                  <div class="inputbar"><span class="plus">+</span><span class="field" data-ph="说点什么…">说点什么…</span><span class="send"><svg viewBox="0 0 24 24"><path d="M3.4 20.4l17.4-7.5c.8-.4.8-1.5 0-1.8L3.4 3.6c-.7-.3-1.4.3-1.2 1l1.9 6.4 8.4 1-8.4 1-1.9 6.4c-.2.7.5 1.3 1.2 1z"/></svg><i class="stop"></i></span></div>
+                </div>
+
+                <!-- 1 · group chat -->
+                <div class="scene" data-scene="1">
+                  <div class="appbar">
+                    <svg class="ico" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>
+                    <span class="stack"><span class="ava" data-who="姜念禾"></span><span class="ava" data-who="晏知白"></span><span class="ava" data-who="黎昼"></span></span>
+                    <div class="title"><b>拾光小分队</b><small>3 位角色</small></div>
+                    <svg class="ico" viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h14"/></svg>
+                  </div>
+                  <div class="chat body wall" style="--wall: url(img/wall-group.webp)">
+                    <div class="msg ai" data-keep><span class="ava" data-who="晏知白"></span><div class="col"><span class="name" style="--c:#4a86c0">晏知白</span><div class="bubble">只飞了两次，进步了。</div></div></div>
+                    <div class="msg ai" data-keep><span class="ava" data-who="黎昼"></span><div class="col"><span class="name" style="--c:#b65bd0">黎昼</span><div class="bubble">晏老师你闭嘴！！</div></div></div>
+                  </div>
+                  <div class="inputbar"><span class="plus">+</span><span class="field" data-ph="说点什么…">说点什么…</span><span class="send"><svg viewBox="0 0 24 24"><path d="M3.4 20.4l17.4-7.5c.8-.4.8-1.5 0-1.8L3.4 3.6c-.7-.3-1.4.3-1.2 1l1.9 6.4 8.4 1-8.4 1-1.9 6.4c-.2.7.5 1.3 1.2 1z"/></svg><i class="stop"></i></span></div>
+                </div>
+
+                <!-- 2 · a voice call the night before the show -->
+                <div class="scene" data-scene="2">
+                  <div class="appbar">
+                    <svg class="ico" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>
+                    <span class="ava" data-who="黎昼"></span>
+                    <div class="title"><b>黎昼</b><small class="online">在线</small></div>
+                    <svg class="ico" viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h14"/></svg>
+                  </div>
+                  <div class="chat body wall" style="--wall: url(img/wall-lizhou.webp)">
+                    <div class="msg ai" data-keep><span class="ava" data-who="黎昼"></span><div class="col"><div class="bubble">今天排练终于没出错！！</div></div></div>
+                    <div class="msg me" data-keep><div class="col"><div class="bubble">厉害，周六稳了</div></div></div>
+                    <div class="msg ai" data-keep><span class="ava" data-who="黎昼"></span><div class="col"><div class="bubble">你周六会来的对吧！！</div></div></div>
+                    <div class="msg ai" data-keep><span class="ava" data-who="黎昼"></span><div class="col"><div class="bubble">不来的话我就天天去店里堵你</div></div></div>
+                  </div>
+                  <div class="inputbar"><span class="plus">+</span><span class="field" data-ph="说点什么…">说点什么…</span><span class="callbtn"><svg viewBox="0 0 24 24"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/></svg></span><span class="send"><svg viewBox="0 0 24 24"><path d="M3.4 20.4l17.4-7.5c.8-.4.8-1.5 0-1.8L3.4 3.6c-.7-.3-1.4.3-1.2 1l1.9 6.4 8.4 1-8.4 1-1.9 6.4c-.2.7.5 1.3 1.2 1z"/></svg><i class="stop"></i></span></div>
+                  <div class="fx callp off">
+                    <div class="call-ava"><span class="ava" data-who="黎昼"></span></div>
+                    <b>黎昼</b>
+                    <small class="call-state">正在接通…</small>
+                    <div class="wave"><i style="--k:0;--c:#4d9a6c"></i><i style="--k:1;--c:#4d9a6c"></i><i style="--k:2;--c:#4d9a6c"></i><i style="--k:3;--c:#c0563a"></i><i style="--k:4;--c:#c0563a"></i><i style="--k:5;--c:#c0563a"></i><i style="--k:6;--c:#d27aa0"></i><i style="--k:7;--c:#d27aa0"></i><i style="--k:8;--c:#d27aa0"></i></div>
+                    <time class="call-time">00:00</time>
+                    <div class="subs"><p class="sub-me"><b>你</b><span></span></p><p class="sub-ai"><b>黎昼</b><span></span></p></div>
+                    <div class="call-btns">
+                      <span><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>静音</span>
+                      <span><svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9zM16.5 8.5a5 5 0 0 1 0 7"/></svg>扬声器</span>
+                      <span class="end"><svg viewBox="0 0 24 24"><path d="M3 14.5c5-4.7 13-4.7 18 0l-2.2 2.2-3.3-1.6v-2.4a11 11 0 0 0-7 0v2.4l-3.3 1.6z"/></svg>结束</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 3 · she remembers -->
+                <div class="scene" data-scene="3">
+                  <div class="appbar">
+                    <svg class="ico" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>
+                    <span class="ava" data-who="姜念禾"></span>
+                    <div class="title"><b>姜念禾</b><small class="online">在线</small></div>
+                    <svg class="ico" viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h14"/></svg>
+                  </div>
+                  <div class="chat body wall" style="--wall: url(img/wall-nianhe.webp)">
+                    <div class="msg ai" data-keep><span class="ava" data-who="姜念禾"></span><div class="col"><div class="bubble">今天这只还挺乖的</div></div></div>
+                    <div class="msg ai" data-keep><span class="ava" data-who="姜念禾"></span><div class="col"><div class="bubble">就是翅膀有点歪</div></div></div>
+                    <div class="stamp" data-keep>22:17</div>
+                  </div>
+                  <div class="inputbar"><span class="plus">+</span><span class="field" data-ph="说点什么…">说点什么…</span><span class="send"><svg viewBox="0 0 24 24"><path d="M3.4 20.4l17.4-7.5c.8-.4.8-1.5 0-1.8L3.4 3.6c-.7-.3-1.4.3-1.2 1l1.9 6.4 8.4 1-8.4 1-1.9 6.4c-.2.7.5 1.3 1.2 1z"/></svg><i class="stop"></i></span></div>
+                  <div class="fx mem-inline off">
+                    <header><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 10h18M9 10v10M9 15h12"/></svg>记忆表格 · 私聊总体大纲</header>
+                    <p>未决线索：你说过想去<mark>看海</mark>，一直没去成。</p>
+                  </div>
+                </div>
+
+                <!-- 4 · the maid does it -->
+                <div class="scene" data-scene="4">
+                  <div class="view list-view">
+                    <div class="appbar">
+                      <div class="title big"><b>消息</b></div>
+                      <svg class="ico" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+                      <svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>
+                    </div>
+                    <div class="list body"></div>
+                    <div class="maid-dock">
+                      <div class="fx run off">
+                        <div class="run-head">
+                          <span class="ring"><svg viewBox="0 0 30 30"><circle class="track" cx="15" cy="15" r="12"/><circle class="bar" cx="15" cy="15" r="12"/></svg><b class="ring-n">3</b></span>
+                          <div class="title"><b>帮我给黎昼画一张周六演出的海报，发给她</b><small class="run-meta"></small></div>
+                          <span class="run-stop"><i></i></span>
+                        </div>
+                        <ol class="steps">
+                          <li><i class="st"></i><span>读取聊天室</span><em>黎昼</em><time></time></li>
+                          <li><i class="st"></i><span>生成海报，发到聊天室</span><em>黎昼</em><time></time></li>
+                          <li><i class="st"></i><span>配一句话发给她</span><em>黎昼</em><time></time></li>
+                        </ol>
+                      </div>
+                      <div class="fx report off"><span class="ava" data-who="女仆"></span><p><b>女仆</b>海报画好了，已经发到黎昼的聊天室。她也回你了，去看看吧。</p></div>
+                      <div class="maid-input"><i class="dots"></i><span class="plus">+</span><span class="field" data-ph="问女仆…">问女仆…</span><svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-2.9-1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 3.1 14H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.3 7.1l-.1-.1A2 2 0 1 1 7 4.2l.1.1A1.7 1.7 0 0 0 10 3.1V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 2.9 1.2l.1-.1A2 2 0 1 1 19.8 7l-.1.1a1.7 1.7 0 0 0 1.2 2.9H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span class="send"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span></div>
+                    </div>
+                    <nav class="tabbar"><span class="on">聊天</span><span>联系人</span><span>动态</span></nav>
+                  </div>
+                  <div class="view room-view off">
+                    <div class="appbar">
+                      <svg class="ico" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>
+                      <span class="ava" data-who="黎昼"></span>
+                      <div class="title"><b>黎昼</b><small class="online">在线</small></div>
+                      <svg class="ico" viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h14"/></svg>
+                    </div>
+                    <div class="chat body wall" style="--wall: url(img/wall-lizhou.webp)"></div>
+                    <div class="inputbar"><span class="plus">+</span><span class="field" data-ph="说点什么…">说点什么…</span><span class="send"><svg viewBox="0 0 24 24"><path d="M3.4 20.4l17.4-7.5c.8-.4.8-1.5 0-1.8L3.4 3.6c-.7-.3-1.4.3-1.2 1l1.9 6.4 8.4 1-8.4 1-1.9 6.4c-.2.7.5 1.3 1.2 1z"/></svg><i class="stop"></i></span></div>
+                  </div>
+                </div>
+
+                <!-- 5 · creative writing: 《雾港来信》 -->
+                <div class="scene cw" data-scene="5">
+                  <div class="appbar">
+                    <span class="ava" data-who="雾港来信"></span>
+                    <div class="title"><b>雾港来信</b><small>创意写作</small></div>
+                    <svg class="ico" viewBox="0 0 24 24"><path d="M4 18l5-12 5 12M5.8 14h6.4M15 18l3-7 3 7"/></svg>
+                    <svg class="ico" viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h14"/></svg>
+                  </div>
+                  <div class="chapter-chip"><span class="seal-mini">序</span><span>开场白</span><span>《迟到的信》</span></div>
+                  <div class="paper">
+                    <div class="prose body">
+                      <section class="opening" data-keep>
+                        <span class="seal-mini">序</span>
+                        <small>序幕</small>
+                        <h3>迟到的信</h3>
+                        <p>午夜的钟声刚敲过第十二下，灯塔邮局的门铃就响了。</p>
+                        <p>雾从门缝里涌进来，带着海盐和煤烟的味道。柜台上多了一封信——没有邮票，没有寄件人，只有一行褪了色的地址：<span class="q">「雾港，钟楼街十七号，给还在等的人」</span>。</p>
+                        <p>老邮差把油灯推到你面前，压低声音说：<span class="q">「这是今晚最后一封。记住，读信之前，别回头。」</span></p>
+                      </section>
+                    </div>
+                  </div>
+                  <div class="ticks"></div>
+                  <div class="inputbar"><span class="plus">+</span><span class="field" data-ph="接下来…">接下来…</span><span class="send"><svg viewBox="0 0 24 24"><path d="M3.4 20.4l17.4-7.5c.8-.4.8-1.5 0-1.8L3.4 3.6c-.7-.3-1.4.3-1.2 1l1.9 6.4 8.4 1-8.4 1-1.9 6.4c-.2.7.5 1.3 1.2 1z"/></svg><i class="stop"></i></span></div>
+                </div>
+
+                <!-- 6 · hopscotch: Agent Center over the writing room -->
+                <div class="scene hop cw" data-scene="6">
+                  <div class="appbar">
+                    <span class="ava" data-who="雾港来信"></span>
+                    <div class="title"><b>雾港来信</b><small>创意写作</small></div>
+                    <svg class="ico" viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h14"/></svg>
+                  </div>
+                  <div class="paper">
+                    <div class="prose body">
+                      <p data-keep>雾港的石板路被夜潮浸得发亮。走过鱼市街时，那股热忽然抽走了——信凉得像刚从水里捞出来，贴着他的肋骨，一冷一冷地跳。他停了一下，没回头。半步之后的脚步声也停了。</p>
+                      <p data-keep>煤气灯一盏接一盏自己亮起，琥珀色的光从雾里浮出来，把他往前送。远处钟楼的黑影浮上雾面，钟面停在十一点差五分，一动不动，像被谁捏住了指针。</p>
+                    </div>
+                  </div>
+                  <div class="inputbar"><span class="plus">+</span><span class="field" data-ph="接下来…">接下来…</span><span class="send"><svg viewBox="0 0 24 24"><path d="M3.4 20.4l17.4-7.5c.8-.4.8-1.5 0-1.8L3.4 3.6c-.7-.3-1.4.3-1.2 1l1.9 6.4 8.4 1-8.4 1-1.9 6.4c-.2.7.5 1.3 1.2 1z"/></svg><i class="stop"></i></span></div>
+                  <div class="fx mem-card off">
+                    <header><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 10h18M9 10v10M9 15h12"/></svg>记忆表格 · 地点</header>
+                    <table><thead><tr><th>地点</th><th>状态</th><th>章</th></tr></thead><tbody><tr><td>灯塔邮局</td><td>午夜仍在收信</td><td>序</td></tr></tbody></table>
+                  </div>
+                  <aside class="ac">
+                    <header class="ac-head">
+                      <span class="ac-mark">A</span>
+                      <div class="ac-title"><b>Agent Center</b><div class="ac-meta"><span class="ac-badge ac-run">运行中 <b>0</b></span><span class="ac-badge">待确认 <b>0</b></span></div></div>
+                      <svg class="ico" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+                    </header>
+                    <nav class="ac-tabs">
+                      <span class="ac-tab on"><svg viewBox="0 0 24 24"><path d="M12 8V4"/><rect x="5" y="8" width="14" height="10" rx="4"/><path d="M9 18v2M15 18v2M9 13h.01M15 13h.01"/></svg>Agent</span>
+                      <span class="ac-tab"><svg viewBox="0 0 24 24"><path d="M4 5h16M4 9h10M4 15h16M4 19h12"/></svg>提示词</span>
+                      <i class="ac-div"></i>
+                      <span class="ac-tab"><svg viewBox="0 0 24 24"><path d="M12 6v6l4 2"/><circle cx="12" cy="12" r="9"/></svg>待处理</span>
+                      <span class="ac-tab"><svg viewBox="0 0 24 24"><path d="M4 12h4l2-6 4 12 2-6h4"/></svg>活动</span>
+                    </nav>
+                    <div class="hop-court-scroll">
+                      <div class="hop-court">
+                        <div class="hop-origin"></div>
+                        <div class="hop-row">
+                          <div class="hop-cells">
+                            <div class="hop-cell hop-fusion-group" data-h="body">
+                              <span class="hop-fusion-caption">融合</span>
+                              <div class="hop-fusion-parts">
+                                <div class="hop-fusion-part" data-hop-part="body"><svg class="hop-glyph" viewBox="0 0 24 24"><path class="hop-glyph-wash" d="m3 10 18-7-7 18-3-8z"/><path d="m3 10 18-7-7 18-3-8zM11 13l5-5"/></svg><span class="hop-number">01</span><span class="hop-title">正文生成</span></div>
+                                <div class="hop-fusion-part" data-hop-part="memory_table"><svg class="hop-glyph" viewBox="0 0 24 24"><rect class="hop-glyph-wash" x="3" y="4" width="18" height="16" rx="3"/><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 10h18M9 10v10M9 15h12"/></svg><span class="hop-title">记忆表格</span></div>
+                                <div class="hop-fusion-part" data-hop-part="image_prompt"><svg class="hop-glyph" viewBox="0 0 24 24"><path class="hop-glyph-wash" d="m4 16 1 4 4-1L20 8l-4-4Z"/><path d="m4 16 1 4 4-1L20 8l-4-4ZM13 7l4 4M4 4v4M2 6h4"/></svg><span class="hop-title">图片提示</span></div>
+                              </div>
+                              <span class="hop-cell-mark">✓</span>
+                            </div>
+                          </div>
+                        </div>
+                        <span class="hop-tick"></span>
+                        <div class="hop-row">
+                          <span class="hop-parallel"><span>并行</span></span>
+                          <div class="hop-cells">
+                            <div class="hop-cell" data-hop-kind="image_generation" data-h="image"><svg class="hop-glyph" viewBox="0 0 24 24"><rect class="hop-glyph-wash" x="3" y="3" width="18" height="18" rx="4"/><rect x="3" y="3" width="18" height="18" rx="4"/><path d="m4 17 5-5 4 4 3-3 5 5"/><circle class="hop-glyph-solid" cx="16" cy="8" r="1.6"/></svg><span class="hop-number">02</span><span class="hop-title">图片生成</span><span class="hop-cell-mark">✓</span></div>
+                            <div class="hop-cell" data-hop-kind="format_review" data-h="review"><svg class="hop-glyph" viewBox="0 0 24 24"><circle class="hop-glyph-wash" cx="10.5" cy="10.5" r="7"/><circle cx="10.5" cy="10.5" r="7"/><path d="m16 16 5 5m-14-10 2.5 2.5 4-4"/></svg><span class="hop-number">03</span><span class="hop-title">格式修复</span><span class="hop-cell-mark">✓</span></div>
+                          </div>
+                        </div>
+                        <span class="hop-tick hop-tail"></span>
+                        <div class="hop-roof"></div>
+                      </div>
+                    </div>
+                  </aside>
+                </div>
+
+                <!-- 7 · lineage graph of this request -->
+                <div class="scene lin" data-scene="7">
+                  <header class="lin-head">
+                    <span class="lin-mark"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg></span>
+                    <div class="title"><b>本次请求</b><small>PROMPT INSPECTOR · READ ONLY</small></div>
+                    <span class="lin-btn">复制</span><span class="lin-btn">关闭</span>
+                  </header>
+                  <nav class="lin-tabs"><span><i>01</i>请求概览</span><span><i>02</i>完整 Prompt</span><span class="on"><i>03</i>血缘图</span></nav>
+                  <div class="lin-board">
+                    <div class="lin-bar"><b>上下文血缘图谱</b><small>CONTEXT LINEAGE GRAPH</small><span class="lin-stat">节点 <b data-stat="n">0</b> · 关系 <b data-stat="e">0</b></span><span class="lin-ready"><i></i>图谱就绪</span></div>
+                    <div class="lin-main">
+                      <aside class="lin-side">
+                        <h4>影响面 TOP 5</h4>
+                        <ol>
+                          <li data-top="wb"><i>1</i><span>世界书 · 雾港来信</span><span class="meter"><b style="--w:100%"></b></span></li>
+                          <li data-top="card"><i>2</i><span>雾港来信 · 角色卡</span><span class="meter"><b style="--w:64%"></b></span></li>
+                          <li data-top="e1"><i>3</i><span>灯塔邮局</span><span class="meter"><b style="--w:30%"></b></span></li>
+                          <li data-top="e2"><i>4</i><span>雾港</span><span class="meter"><b style="--w:26%"></b></span></li>
+                          <li data-top="e3"><i>5</i><span>雾灵</span><span class="meter"><b style="--w:22%"></b></span></li>
+                        </ol>
+                      </aside>
+                      <div class="lin-graph">
+                        <svg class="lin-edges"></svg>
+                        <p class="lin-hint">点击任意节点，追踪它的 <b>上游溯源</b> 与 <b>下游影响</b></p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <!-- cards that float out of the screen -->
+              <div class="pop pop-gen" data-pop="0"><div class="gen-img"><img src="img/latte.webp" alt=""></div><small><i></i><span>实时预览 · 生成中 1/23</span></small></div>
+              <div class="pop pop-subs" data-pop="2"><header><svg viewBox="0 0 24 24"><path d="M4 6h16v10H8l-4 4z"/></svg>实时字幕</header><p class="sub-me"><b>你</b><span></span></p><p class="sub-ai"><b>黎昼</b><span></span></p></div>
+              <div class="pop pop-mem" data-pop="3"><header><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 10h18M9 10v10M9 15h12"/></svg>记忆表格 · 私聊总体大纲</header><b>未决线索</b><p>1. 你借走的浅蓝色伞还没还。<br>2. 你说过想去<mark>看海</mark>，一直没去成。</p></div>
+              <i class="pop-link" data-pop="3"></i>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="film" id="film">
+    <div class="film-head">
+      <h2 data-t="filmTitle">八十秒看完</h2>
+      <span class="meta" data-t="filmNote">1:20 · 中文版</span>
+    </div>
+    <div class="player">
+      <video id="film-video" preload="none" playsinline>
+        <source src="media/omnitavern-zh.mp4" type="video/mp4">
+      </video>
+      <button type="button" class="film-cover" id="film-play" aria-label="播放宣传片" data-t-aria="filmPlay">
+        <img src="img/keyart.webp" alt="">
+        <span class="disc"><svg viewBox="0 0 24 24"><path d="M6 4.2v15.6a1 1 0 0 0 1.5.86l12.6-7.8a1 1 0 0 0 0-1.72L7.5 3.34A1 1 0 0 0 6 4.2z"/></svg></span>
+        <span class="film-cap"><b>OmniTavern</b><span data-t="filmCap">姜念禾、晏知白、黎昼 · 拾光咖啡的一周</span></span>
+      </button>
+    </div>
+  </section>
+
+  <section class="more" id="more">
+    <p class="eyebrow" data-t="more">还有这些</p>
+    <div class="tiles">
+      <figure class="tile" data-tile="moments">
+        <div class="mini" aria-hidden="true">
+          <div class="post">
+            <header><span class="ava" data-who="黎昼"></span><div><b>黎昼</b><small>12:20</small></div></header>
+            <p>排练室打卡！<br>周六晚上八点，午夜汽水第一次正式演出，都给我来！</p>
+            <img class="shot" src="img/moment-lizhou.webp" alt="">
+            <div class="acts">
+              <span class="like"><svg viewBox="0 0 24 24"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></svg><b>17</b></span>
+              <span><svg viewBox="0 0 24 24"><path d="M5 18l1.2-3.4A7 7 0 1 1 9 18.3z"/></svg><b class="cmt-n">1</b></span>
+            </div>
+            <div class="cmts body"><p data-keep><b>姜念禾</b>：应援卡做好了，到时候坐第一排</p></div>
+          </div>
+        </div>
+        <figcaption><b data-t="t1">动态</b><span data-t="t1s">角色也会发动态</span></figcaption>
+      </figure>
+      <figure class="tile" data-tile="lore">
+        <div class="mini" aria-hidden="true">
+          <div class="chat body wall" style="--wall: url(img/wugang.webp)">
+            <div class="msg ai" data-keep><span class="ava" data-who="雾港来信"></span><div class="col"><div class="bubble">柜台上多了一封信，没有邮票，也没有寄件人。</div></div></div>
+          </div>
+          <div class="fx wb-card off">
+            <header><svg viewBox="0 0 24 24"><path d="M5 4h10a4 4 0 0 1 4 4v12H9a4 4 0 0 1-4-4z"/><path d="M5 16a4 4 0 0 1 4-4h10"/></svg>世界书<em>已触发</em></header>
+            <b>余温信</b>
+            <div class="keys"><span>余温</span><span>温的</span><span>余温信</span></div>
+            <p>雾港的信会带着写信人的一缕余温。读信的人，能短暂看到对方写信时的情景。</p>
+          </div>
+          <div class="fx wb-pill off"><i></i>世界书 · 触发 1 条</div>
+        </div>
+        <figcaption><b data-t="t2">世界书</b><span data-t="t2s">提到了，才会想起</span></figcaption>
+      </figure>
+      <figure class="tile" data-tile="prompt">
+        <div class="mini pe" aria-hidden="true">
+          <header class="pe-head"><b>提示词</b><small>雾港来信 · 创意写作</small></header>
+          <ol class="pe-list"></ol>
+          <footer class="pe-foot">合计 <b class="pe-total">2,980</b> tokens</footer>
+        </div>
+        <figcaption><b data-t="t3">提示词</b><span data-t="t3s">每一条都能开关、调整</span></figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="download" id="download">
+    <div class="dl-head">
+      <h2 data-t="dl">下载</h2>
+      <span class="meta" id="dl-version">v0.7.9 · 2026-11-02</span>
+    </div>
+    <div class="dl-grid">
+      <article class="dl" data-platform="android">
+        <svg class="dev" viewBox="0 0 88 88" fill="none" stroke="currentColor" stroke-width="2"><rect x="26" y="6" width="36" height="76" rx="8"/><circle cx="44" cy="12" r="1.6" fill="currentColor"/><rect x="31" y="24" width="18" height="7" rx="3.5" fill="currentColor" stroke="none" opacity=".35"/><rect x="39" y="35" width="18" height="7" rx="3.5" fill="currentColor" stroke="none"/><rect x="31" y="46" width="14" height="7" rx="3.5" fill="currentColor" stroke="none" opacity=".35"/></svg>
+        <div class="dl-body">
+          <h3>Android</h3>
+          <a class="btn" href="https://github.com/dghiffjd7/OmniTavern/releases/download/v0.7.9/OmniTavern_0.7.9.apk"><span data-t="apk">下载 APK</span></a>
+          <span class="meta" data-size="android">203 MB · Android 7.0+</span>
+          <p class="note" data-t="unknown">安装被拦时，允许「安装未知应用」即可。</p>
+        </div>
+      </article>
+      <article class="dl" data-platform="windows">
+        <svg class="dev" viewBox="0 0 88 88" fill="none" stroke="currentColor" stroke-width="2"><rect x="10" y="16" width="68" height="46" rx="5"/><path d="M4 70h80l-5 6H9z"/><rect x="18" y="26" width="16" height="28" rx="2" fill="currentColor" stroke="none" opacity=".35"/><rect x="40" y="28" width="22" height="7" rx="3.5" fill="currentColor" stroke="none"/><rect x="48" y="40" width="22" height="7" rx="3.5" fill="currentColor" stroke="none" opacity=".35"/></svg>
+        <div class="dl-body">
+          <h3>Windows</h3>
+          <a class="btn" href="https://github.com/dghiffjd7/OmniTavern/releases/download/v0.7.9/OmniTavern_0.7.9_x64-setup.exe"><span data-t="exe">下载安装包</span></a>
+          <span class="meta" data-size="windows">36.5 MB · Windows 10 / 11 · x64</span>
+        </div>
+      </article>
+    </div>
+    <p class="local" data-t="local">免费使用。聊天记录和角色卡，只存在你的设备上。</p>
+    <div class="links">
+      <a class="quiet" id="dl-notes" href="https://github.com/dghiffjd7/OmniTavern/releases/tag/v0.7.9" data-t="notes">更新说明</a>
+      <a class="quiet" href="https://github.com/dghiffjd7/OmniTavern/releases" data-t="all">全部版本</a>
+      <a class="quiet" href="https://github.com/dghiffjd7/OmniTavern">GitHub</a>
+    </div>
+  </section>
+
+  <footer>
+    <span>OmniTavern · AGPL-3.0</span>
+    <nav><a class="quiet" href="https://ko-fi.com/illusion7">Ko-fi</a><a class="quiet" href="https://github.com/dghiffjd7/OmniTavern/blob/main/LICENSE" data-t="license">许可证</a></nav>
+  </footer>
+</main>
+
+<nav class="rail" aria-label="章节" data-t-aria="chapters"></nav>
+
+<script>
+(() => {
+  const root = document.documentElement;
+  const still = matchMedia('(prefers-reduced-motion: reduce)');
+  const NARROW = matchMedia('(max-width: 760px), (max-aspect-ratio: 4/5)');
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+
+  // 写在页面里的是最近一次正式版；托管到 GitHub 以外的地方时，会从 GitHub 接口换成最新版
+  const RELEASE = {
+    tag: 'v0.7.9', date: '2026-11-02',
+    android: { size: '203 MB', url: 'https://github.com/dghiffjd7/OmniTavern/releases/download/v0.7.9/OmniTavern_0.7.9.apk' },
+    windows: { size: '36.5 MB', url: 'https://github.com/dghiffjd7/OmniTavern/releases/download/v0.7.9/OmniTavern_0.7.9_x64-setup.exe' },
+  };
+
+  const T = {
+    'zh-CN': {
+      tag: 'AI 角色扮演应用', tag2: '和角色聊天、通话、一起创作', film: '看宣传片', other: '其他平台', dlAny: '下载',
+      heroandroid: '下载 Android 版', herowindows: '下载 Windows 版',
+      c1: '群聊', s1: '像真的在聊天', c2: '通话', s2: '打个电话，直接聊', c3: '长记忆', s3: '记得你说过的话',
+      c4: '女仆', s4: '说一句，女仆来做', c5: '创意写作', s5: '一起写故事', c6: '跳房子', s6: '写完一段，Agent 接力', c7: '血缘图', s7: '每一步都看得见',
+      filmTitle: '八十秒看完', filmNote: '1:20 · 中文版', filmPlay: '播放宣传片', filmCap: '姜念禾、晏知白、黎昼 · 拾光咖啡的一周',
+      more: '还有这些', t1: '动态', t1s: '角色也会发动态', t2: '世界书', t2s: '提到了，才会想起', t3: '提示词', t3s: '每一条都能开关、调整',
+      dl: '下载', apk: '下载 APK', exe: '下载安装包', unknown: '安装被拦时，允许「安装未知应用」即可。',
+      local: '免费使用。聊天记录和角色卡，只存在你的设备上。', notes: '更新说明', all: '全部版本', license: '许可证',
+      nav: ['开场', '群聊', '通话', '长记忆', '女仆', '创意写作', '跳房子', '血缘图', '宣传片', '还有这些', '下载'],
+      settings: '页面设置', lang: '语言', theme: '切换深浅色', chapters: '章节',
+    },
+    'zh-TW': {
+      tag: 'AI 角色扮演應用', tag2: '和角色聊天、通話、一起創作', film: '看宣傳片', other: '其他平台', dlAny: '下載',
+      heroandroid: '下載 Android 版', herowindows: '下載 Windows 版',
+      c1: '群聊', s1: '像真的在聊天', c2: '通話', s2: '打個電話，直接聊', c3: '長記憶', s3: '記得你說過的話',
+      c4: '女僕', s4: '說一句，女僕來做', c5: '創意寫作', s5: '一起寫故事', c6: '跳房子', s6: '寫完一段，Agent 接力', c7: '血緣圖', s7: '每一步都看得見',
+      filmTitle: '八十秒看完', filmNote: '1:20 · 中文版', filmPlay: '播放宣傳片', filmCap: '姜念禾、晏知白、黎晝 · 拾光咖啡的一週',
+      more: '還有這些', t1: '動態', t1s: '角色也會發動態', t2: '世界書', t2s: '提到了，才會想起', t3: '提示詞', t3s: '每一條都能開關、調整',
+      dl: '下載', apk: '下載 APK', exe: '下載安裝檔', unknown: '安裝被攔時，允許「安裝不明應用程式」即可。',
+      local: '免費使用。聊天紀錄和角色卡，只存在你的裝置上。', notes: '更新說明', all: '所有版本', license: '授權條款',
+      nav: ['開場', '群聊', '通話', '長記憶', '女僕', '創意寫作', '跳房子', '血緣圖', '宣傳片', '還有這些', '下載'],
+      settings: '頁面設定', lang: '語言', theme: '切換深淺色', chapters: '章節',
+    },
+    en: {
+      tag: 'An AI roleplay app.', tag2: 'Chat, call and write stories with your characters.', film: 'Watch the film', other: 'Other platforms', dlAny: 'Download',
+      heroandroid: 'Download for Android', herowindows: 'Download for Windows',
+      c1: 'Group chat', s1: 'Feels like a real group chat.', c2: 'Voice calls', s2: 'Call them and just talk.', c3: 'Long memory', s3: 'Remembers what you said.',
+      c4: 'The Maid', s4: 'Say it once. She does the rest.', c5: 'Creative writing', s5: 'Write a story together.', c6: 'Hopscotch', s6: 'Each passage, a relay of agents.', c7: 'Lineage graph', s7: 'See where every line came from.',
+      filmTitle: 'See it in 80 seconds', filmNote: '1:20 · English cut', filmPlay: 'Play the film', filmCap: 'Nina, Ethan and Lia · a week at Glimmer Café',
+      more: 'And more', t1: 'Moments', t1s: 'Characters post too', t2: 'Lorebooks', t2s: 'Mention it, and it remembers', t3: 'Prompt editor', t3s: 'Switch and tune every part',
+      dl: 'Download', apk: 'Download APK', exe: 'Download installer', unknown: 'If Android blocks it, allow “Install unknown apps”.',
+      local: 'Free to use. Your chats and cards stay on your device.', notes: 'Release notes', all: 'All versions', license: 'License',
+      nav: ['Opening', 'Group chat', 'Voice calls', 'Long memory', 'The Maid', 'Creative writing', 'Hopscotch', 'Lineage graph', 'The film', 'And more', 'Download'],
+      settings: 'Page settings', lang: 'Language', theme: 'Toggle light and dark', chapters: 'Chapters',
+    },
+  };
+
+  // 英文版的演示内容：画面里的中文原文 → 英文（cast-en.md）；固定文字切换时逐段替换，动画里的台词经 tr() 取用
+  const EN = new Map([["姜念禾", "Nina"], ["晏知白", "Ethan"], ["黎昼", "Lia"], ["拾光小分队", "Glimmer Crew"], ["拾光小分队(3)", "Glimmer Crew (3)"], ["雾港来信", "Letters from Fog Harbor"], ["女仆", "Maid"], ["你", "You"], ["在线", "Online"], ["3 位角色", "3 characters"], ["说点什么…", "Say something…"], ["问女仆…", "Ask the Maid…"], ["接下来…", "What happens next…"], ["今天的拉花呢？拍给我看看～", "What's today's latte art? Send me a pic~"], ["诶？现在吗", "Oh? Right now?"], ["等一下，我擦擦杯子", "Hold on, let me wipe the cup"], ["<div class=\"gen-img\"><img src=\"img/latte.webp\" alt=\"\"></div><small><i></i><span>生成中 1/23</span></small>", "<div class=\"gen-img\"><img src=\"img/latte.webp\" alt=\"\"></div><small><i></i><span>Generating 1/23</span></small>"], ["已完成", "Done"], ["实时预览 · 已完成", "Live preview · Done"], ["实时预览 · 生成中 1/23", "Live preview · Generating 1/23"], ["好呀，给你留靠窗的位置", "Sure, I'll save you the window seat"], ["今天这只还挺乖的", "This one behaved today"], ["就是翅膀有点歪", "The wings are a little crooked though"], ["只飞了两次，进步了。", "Only twice. That's progress."], ["晏老师你闭嘴！！", "Professor, shut up!!"], ["我在做应援的小卡片了", "I'm making little cheer cards"], ["大家想要什么颜色的？", "What colors do you all want?"], ["周六我们一起去给黎昼加油？", "Shall we all go cheer for Lia on Saturday?"], ["嗯！应援卡都做好了", "Yes! The cheer cards are all done"], ["可以。要占前排就别踩点。", "Fine. If you want the front row, don't cut it close."], ["六点半在楼下集合，我带相机。", "Meet downstairs at 6:30. I'll bring the camera."], ["啊啊啊真的都来啊", "AAAA you're all actually coming"], ["前排我给你们留好了，别磨蹭", "I saved you front-row spots, don't be late"], ["今天排练终于没出错！！", "Rehearsal went with ZERO mistakes today!!"], ["厉害，周六稳了", "Nice, Saturday's in the bag"], ["你周六会来的对吧！！", "You're coming Saturday, right!!"], ["不来的话我就天天去店里堵你", "If you don't, I'm camping out at the café till you show up"], ["正在接通…", "Connecting…"], ["通话中", "In call"], ["静音", "Mute"], ["扬声器", "Speaker"], ["结束", "End"], ["实时字幕", "Live captions"], ["明天就要上台了。紧张不紧张", "Your show's tomorrow. Nervous?"], ["啊啊啊你别提，我现在手心都是汗，但我嘴上当然要说超稳的好吗", "AAAA don't remind me, my palms are all sweaty — but obviously I'm gonna say I'm totally chill, okay?"], ["这周又加班到好晚……好想去看海", "Worked late again all week… I really want to see the sea"], ["又加班到这么晚啊……", "Working this late again…"], ["上次你也说想去看海，一直没去成", "You said you wanted to see the sea last time too, and never got to go"], ["嗯……要不别等了", "Hmm… maybe don't wait"], ["挑个休息日，早点出发，天亮前到海边", "Pick a day off, leave early, and get to the beach before dawn"], ["记忆表格 · 私聊总体大纲", "Memory table · Chat outline"], ["未决线索", "Open threads"], ["未决线索：你说过想去", "Open thread: you said you wanted to "], ["看海", "see the sea"], ["，一直没去成。", ", but never got to go."], ["1. 你借走的浅蓝色伞还没还。", "1. You still haven't returned the light blue umbrella."], ["2. 你说过想去", "2. You said you wanted to "], ["消息", "Chats"], ["聊天", "Chats"], ["联系人", "Contacts"], ["动态", "Moments"], ["帮我给黎昼画一张周六演出的海报，发给她", "Make Lia a poster for Saturday's show and send it to her"], ["读取聊天室", "Read the chat"], ["生成海报，发到聊天室", "Make the poster, send it to the chat"], ["配一句话发给她", "Add a message for her"], ["海报画好了，已经发到黎昼的聊天室。她也回你了，去看看吧。", "The poster's done and sent to Lia's chat. She's replied too — go take a look."], ["执行中", "Running"], ["正在生成图片：一张周六演出的宣传海报…", "Generating an image: a poster for Saturday's show…"], ["啊啊啊你这句话我要截图存起来", "AAAA I'm screenshotting this"], ["周六晚上八点，第一次正式演出，鼓点一响全场都是你的。加油，黎昼！", "Saturday, 8 p.m. — your first real show. The second the drums kick in, the whole room is yours. Good luck, Lia!"], ["鼓点一响全场都是我的…你怎么这么会说话啊", "\"The whole room is yours\"… how are you this good with words"], ["<div class=\"col\"><div class=\"bubble pic\"><img src=\"img/poster.webp\" alt=\"\"></div></div>", "<div class=\"col\"><div class=\"bubble pic\"><img src=\"img/poster-en.webp\" alt=\"\"></div></div>"], ["虽然我也很久没看过日出了", "Not that I've seen a sunrise in ages either"], ["啊啊啊你别提，我现在手心都是汗…", "AAAA don't remind me, my palms are all sweaty…"], ["姜念禾：上面写了名字的", "Nina: it has your name on it"], ["周六演出的位置订好了。第二排。", "Got seats for Saturday's show. Second row."], ["创意写作", "Creative writing"], ["序", "P"], ["开场白", "Opening"], ["《迟到的信》", "The Late Letter"], ["序幕", "PROLOGUE"], ["迟到的信", "The Late Letter"], ["午夜的钟声刚敲过第十二下，灯塔邮局的门铃就响了。", "The midnight bell had just struck its twelfth chime when the bell over the door of the Lighthouse Post Office rang."], ["雾从门缝里涌进来，带着海盐和煤烟的味道。柜台上多了一封信——没有邮票，没有寄件人，只有一行褪了色的地址：", "Fog spilled in through the gap, smelling of sea salt and coal smoke. A letter now lay on the counter — no stamp, no sender, only one faded line of address: "], ["「雾港，钟楼街十七号，给还在等的人」", "“Fog Harbor, 17 Clocktower Street, for the one still waiting.”"], ["。", ""], ["老邮差把油灯推到你面前，压低声音说：", "The old postmaster pushed the oil lamp toward you and lowered his voice. "], ["「这是今晚最后一封。记住，读信之前，别回头。」", "“This is the last one tonight. Remember — until you've read it, don't look back.”"], ["我把信揣进怀里，提着油灯走进雾里，去钟楼街十七号。", "I tuck the letter inside my coat, take the oil lamp, and walk into the fog toward 17 Clocktower Street."], ["油灯的光只够照亮脚前三步，再远就是翻滚的雾。信使把信贴胸揣好，纸页隔着粗布外套透出一层慢慢散开的热，像有人把掌心按在他心口。", "The oil lamp lit three steps ahead and no more; beyond that, the fog rolled. The courier tucked the letter against his chest, and through the rough wool of his coat the paper gave off a slow-spreading warmth, like a palm pressed over his heart."], ["雾港的石板路被夜潮浸得发亮。走过鱼市街时，那股热忽然抽走了——信凉得像刚从水里捞出来，贴着他的肋骨，一冷一冷地跳。他停了一下，没回头。半步之后的脚步声也停了。", "The cobblestones of Fog Harbor gleamed with the night tide. On Fishmarket Lane the warmth was suddenly gone — the letter turned cold as if pulled from the sea, pressed to his ribs, pulsing cold, cold. He paused, and did not look back. Half a step behind him, the footsteps stopped too."], ["煤气灯一盏接一盏自己亮起，琥珀色的光从雾里浮出来，把他往前送。远处钟楼的黑影浮上雾面，钟面停在十一点差五分，一动不动，像被谁捏住了指针。", "One by one the gas lamps lit themselves, amber light surfacing from the fog to carry him on. The black outline of the clocktower rose above the fog, its face stopped at five to eleven, perfectly still, as if someone had pinched the hands."], ["<img src=\"img/writing-1.webp\" alt=\"\"><figcaption>插图 · 生成中</figcaption>", "<img src=\"img/writing-1.webp\" alt=\"\"><figcaption>Illustration · generating</figcaption>"], ["<img src=\"img/writing-2.webp\" alt=\"\"><figcaption>插图 · 生成中</figcaption>", "<img src=\"img/writing-2.webp\" alt=\"\"><figcaption>Illustration · generating</figcaption>"], ["插图", "Illustration"], ["插图 · 图片生成", "Illustration · Image gen"], ["铁栅门锈死在门框里。二楼右侧的窗还亮着——那盏灯不肯睡。", "The iron gate had rusted into its frame. The window on the right of the second floor was still lit — that lamp refused to sleep."], ["他在门口站定，把油灯举高了一点，雾从灯罩外合拢过来。", "He stopped at the door and raised the oil lamp a little higher; the fog closed in around the glass."], ["记忆表格 · 地点", "Memory table · Places"], ["地点", "Place"], ["状态", "Status"], ["章", "Ch."], ["灯塔邮局", "Lighthouse Post Office"], ["午夜仍在收信", "Still taking letters at midnight"], ["<td>钟楼街十七号</td><td></td><td>一</td>", "<td>17 Clocktower St.</td><td></td><td>1</td>"], ["二楼右窗亮着灯", "2nd-floor right window lit"], ["运行中", "Running"], ["待确认", "Pending"], ["提示词", "Prompts"], ["待处理", "Queue"], ["活动", "Activity"], ["融合", "Fused"], ["正文生成", "Story text"], ["记忆表格", "Memory table"], ["图片提示", "Image prompt"], ["并行", "Parallel"], ["图片生成", "Image gen"], ["格式修复", "Format fix"], ["血缘图", "Lineage"], ["本次请求", "This request"], ["复制", "Copy"], ["关闭", "Close"], ["请求概览", "Overview"], ["完整 Prompt", "Full prompt"], ["上下文血缘图谱", "Context lineage graph"], ["节点", "Nodes"], ["· 关系", "· Links"], ["图谱就绪", "Graph ready"], ["影响面 TOP 5", "Top 5 by influence"], ["世界书 · 雾港来信", "Lorebook · Letters from Fog Harbor"], ["雾港来信 · 角色卡", "Letters from Fog Harbor · Card"], ["雾港", "Fog Harbor"], ["雾灵", "Fog wraiths"], ["余温信", "Warm letters"], ["点击任意节点，追踪它的", "Tap a node to trace its"], ["上游溯源", "sources"], ["与", "and"], ["下游影响", "impact"], ["点击任意节点，追踪它的 <b>上游溯源</b> 与 <b>下游影响</b>", "Tap a node to trace its <b>sources</b> and <b>impact</b>"], ["灯塔邮局 · 上游 <b>世界书</b> · 下游 <b>本次 Prompt</b>", "<b>Lorebook</b> → Post Office → <b>This prompt</b>"], ["预设 · 9 段", "Preset · 9 parts"], ["角色卡", "Character card"], ["世界书", "Lorebook"], ["4 条注入", "4 injected"], ["2 行", "2 rows"], ["对话历史", "Chat history"], ["3 轮", "3 turns"], ["世界书条目", "Lorebook entry"], ["本次 Prompt", "This prompt"], ["已发送", "Sent"], ["排练室打卡！", "Rehearsal room check-in!"], ["周六晚上八点，午夜汽水第一次正式演出，都给我来！", "Saturday, 8 p.m. — Midnight Soda's first real show. Everyone. Be. There!"], ["：应援卡做好了，到时候坐第一排", ": Cheer cards are done. We'll be in the front row"], ["<b>我</b>：必到！第一排见", "<b>Me</b>: Wouldn't miss it! See you in the front row"], ["<b>黎昼</b> 回复 <b>我</b>：说好了啊！", "<b>Lia</b> replied to <b>Me</b>: It's a promise!!"], ["<b>晏知白</b>：鼓棒别飞。", "<b>Ethan</b>: Keep the sticks in your hands."], ["柜台上多了一封信，没有邮票，也没有寄件人。", "A letter has appeared on the counter. No stamp, no sender."], ["已触发", "Triggered"], ["余温", "afterwarmth"], ["温的", "warm"], ["雾港的信会带着写信人的一缕余温。读信的人，能短暂看到对方写信时的情景。", "Letters in Fog Harbor carry a trace of their writer's afterwarmth. Whoever reads one briefly sees the moment it was written."], ["世界书 · 触发 1 条", "Lorebook · 1 entry triggered"], ["这封信摸起来是<span class=\"kw\">温的</span>？", "This letter feels <span class=\"kw\">warm</span>?"], ["那是余温。拆开它，你会看见写信的人。", "That's afterwarmth. Open it, and you'll see who wrote it."], ["雾港来信 · 创意写作", "Letters from Fog Harbor · Creative writing"], ["合计", "Total"], ["主提示", "Main prompt"], ["角色：雾港来信", "Card: Letters from Fog Harbor"], ["世界书 · 4 条", "Lorebook · 4 entries"], ["文风：克制，多留白", "Style: restrained, room to breathe"], ["字数 600–900", "Length 400–600 words"]]);
+  const tr = s => (lang === 'en' && typeof s === 'string' && EN.has(s) ? EN.get(s) : s);
+  const L = (zh, en) => (lang === 'en' ? en : zh);
+  const HAN = /[\u3400-\u9fff\u3000-\u303f\uff00-\uffef]/;
+  const ORIG = new WeakMap();
+  // 画面里的固定文字：记住中文原文，按当前语言换成英文或还原
+  function applyStatic() {
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+      acceptNode: n => (n.parentElement?.closest('script, style, title, [data-t]') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+    });
+    for (let n; (n = walker.nextNode());) {
+      let orig = ORIG.get(n);
+      if (orig == null) { if (!HAN.test(n.data)) continue; orig = n.data; ORIG.set(n, orig); }
+      const key = orig.trim();
+      n.data = lang === 'en' && EN.has(key) ? orig.replace(key, EN.get(key)) : orig;
+    }
+    $$('[data-ph]').forEach(f => {
+      f.dataset.phZh ??= f.dataset.ph;
+      f.dataset.ph = tr(f.dataset.phZh);
+      if (!f.classList.contains('has')) f.textContent = f.dataset.ph;
+    });
+  }
+
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+  };
+
+  /* ---------- language, theme, platform, release ---------- */
+  const ua = navigator.userAgent;
+  const platform = /Android/i.test(ua) ? 'android' : /Windows/i.test(ua) ? 'windows' : null;
+  const pickLang = () => {
+    const saved = store.get('omni.lang');
+    if (T[saved]) return saved;
+    const nav = (navigator.language || '').toLowerCase();
+    if (/^zh-(tw|hk|mo|hant)/.test(nav)) return 'zh-TW';
+    return nav.startsWith('zh') ? 'zh-CN' : 'en';
+  };
+  let lang = pickLang();
+  function applyLang() {
+    const t = T[lang];
+    root.lang = lang;
+    applyStatic();
+    $$('[data-t]').forEach(n => { const v = t[n.dataset.t]; if (typeof v === 'string') n.textContent = v; });
+    $$('[data-t-aria]').forEach(n => { const v = t[n.dataset.tAria]; if (v) n.setAttribute('aria-label', v); });
+    $$('[data-lang]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.lang === lang)));
+    $$('.rail button').forEach((b, i) => b.setAttribute('aria-label', t.nav[i]));
+    if (platform) $('#hero-dl-text').textContent = t['hero' + platform];
+    // 宣传片按语言换版本（英文版 media/omnitavern-en.mp4）
+    const film = $('#film-video'), src = lang === 'en' ? 'media/omnitavern-en.mp4' : 'media/omnitavern-zh.mp4';
+    const source = film && film.querySelector('source');
+    if (source && source.getAttribute('src') !== src) {
+      source.setAttribute('src', src);
+      film.load();
+    }
+  }
+  document.addEventListener('click', e => {
+    const b = e.target.closest('[data-lang]');
+    if (!b) return;
+    lang = b.dataset.lang; store.set('omni.lang', lang); applyLang(); fit();
+    sceneRunners[active]?.start();
+  });
+
+  const savedTheme = store.get('omni.theme');
+  if (savedTheme === 'light' || savedTheme === 'dark') root.dataset.theme = savedTheme;
+  $('#theme-toggle').addEventListener('click', () => {
+    const dark = root.dataset.theme ? root.dataset.theme === 'dark' : !matchMedia('(prefers-color-scheme: light)').matches;
+    root.dataset.theme = dark ? 'light' : 'dark';
+    store.set('omni.theme', root.dataset.theme);
+  });
+
+  function applyRelease() {
+    const ver = RELEASE.tag;
+    $('#dl-version').textContent = `${ver} · ${RELEASE.date}`;
+    $('#dl-notes').href = `https://github.com/dghiffjd7/OmniTavern/releases/tag/${ver}`;
+    for (const p of ['android', 'windows']) {
+      const card = $(`.dl[data-platform="${p}"]`);
+      card.querySelector('.btn').href = RELEASE[p].url;
+      const meta = card.querySelector('[data-size]');
+      meta.textContent = meta.textContent.replace(/^[^·]+/, `${RELEASE[p].size} `);
+    }
+    $('#hero-dl-meta').textContent = platform ? `${ver} · ${RELEASE[platform].size}` : `${ver} · Android · Windows`;
+    if (platform) $('#hero-dl').href = RELEASE[platform].url;
+  }
+  if (platform) {
+    const card = $(`.dl[data-platform="${platform}"]`);
+    card.dataset.primary = '';
+    card.querySelector('.btn').classList.add('primary');
+  } else {
+    $('#hero-other').hidden = true;
+  }
+  applyRelease();
+  if (!/claude|anthropic/.test(location.hostname)) {
+    const mb = n => { const v = n / 1048576; return `${v >= 100 ? Math.round(v) : v.toFixed(1)} MB`; };
+    fetch('https://api.github.com/repos/dghiffjd7/OmniTavern/releases/latest')
+      .then(r => (r.ok ? r.json() : null))
+      .then(rel => {
+        if (!rel?.tag_name) return;
+        const apk = rel.assets?.find(a => /\.apk$/i.test(a.name));
+        const exe = rel.assets?.find(a => /setup\.exe$/i.test(a.name));
+        RELEASE.tag = rel.tag_name;
+        RELEASE.date = String(rel.published_at || '').slice(0, 10) || RELEASE.date;
+        if (apk) RELEASE.android = { size: mb(apk.size), url: apk.browser_download_url };
+        if (exe) RELEASE.windows = { size: mb(exe.size), url: exe.browser_download_url };
+        applyRelease();
+      })
+      .catch(() => {});
+  }
+
+  /* ---------- the film ---------- */
+  const video = $('#film-video'), cover = $('#film-play'), film = $('#film');
+  function playFilm() {
+    cover.hidden = true;
+    video.controls = true;
+    video.play().catch(() => {});
+  }
+  cover.addEventListener('click', playFilm);
+  $('#hero-film').addEventListener('click', () => {
+    playFilm();
+    scrollTo({ top: film.offsetTop - 70, behavior: still.matches ? 'auto' : 'smooth' });
+  });
+
+  /* ---------- building blocks for the screens ---------- */
+  const MAID_FACE = "data:image/webp;base64,UklGRrAOAABXRUJQVlA4IKQOAACwMwCdASpgAGAAPkkcikOioaEXjS6EKASEsYBhPCYJi15jyQU4Fu3E53z0gbzR6AH7AdbN/frU13H/mfB/wyeoPbPjweT/xX+u9Cf4/91PzX5m+uPej8KP7v1AvyP+j/6PeOwB/U3/d/3z9yf7t6Of+p6F/Wr/Ye4B/LP6R/qPzc+Jv9z4Jn1z/Uf733Av5l/VP9t/g/y1+Oj/a/yv5ee1z6N/7f+M+Af+X/1P/e/3795f8p/////94f//9s37bf//3QP2Nbz1m50H6YK/y/aNQ4zUxtBfB71RHzDZJ5OpZf9utbcqnpHDFkgZSPqFGvnuZ/3zEa56xcqEbNShvHgaN7HLCO493juiR/FCCYJKdHKYjwDoJuLqqoDS705jECNf7srED7TK1w77agtT6lgLHbGe6o7virjcIOgPx4+rHpRMfnmAMpvCoR7SjtHQCiW6Q/FdFPAgq8E9BtatAYZ9RLoqUQDo8oe8mqQiZk0EoTjLSoEnTgzFW0UYAf4siW02Jw6cYCP0yGz2xwrzqNzOlSaMweJQj9Q4WLC+WFC5mL/wudjaTAD+//4dIFKDhEczKH5SIeefr9tMXnQv2PLHJYLulAICuNiotNcMpOB/AaeYi7maKKz5B5Ydgop80k1MQhlZfuhpGlQWFepnO+5RH7qcd17zIR+a5orC3A1phOAcLRNzubn3ExfPKD4pym7jUkkrFbVstTdZf1yKgrQ7erKNjiSxqXWhW/DPgTFYIC3BRu8PmT0CITW6saiHTeC+QJ3OEzdYFuMG3ZRpxjIk8CLnlEH3MXY9tF1TAMwvflxYrT/rhQOA92ivIQ2Iaz0aXTc8UJ4E4fdUUAHKQhhI0UuO+nLBxxBk2I7XeMnADuSH/7IeGICgCNNejn+RAyrausbCefFwpHzMxtOmWFh2sY7PtYSVxFsM/gfvC3iQvEbKufE+4ivddKS92sZT0rFRyd8PN7r9E9O3iu7H/hDpQaET3xH+9J+K2QotktgvlYnN5u4aQlaNbgZ7sxwgHPbTw/RjFcW50OP+Kx1OS83dbjSFvRD+kiE/Zajtr/nI5sk27i8FjtYFjmq4MO47tgggIFO/cy+aEoOEp/1iwXp3DmFFzyFiUWnjKm21VchWTQWvwq11yqjAznD/CdU1HzsKzDyJQJ/nD+DMk1OIiA1J7irjQ51Kb68WW7pwoO8mStWrfvH39vRx5ADRcOYOq2/ISm5Fw/MqKdj/vJffyibHqCUvvYqq6JQUd6fEdpmuwKu+uw48L1vIhEVfzEei550AJ1FTpjSoaP1WMyGt5Q8RahDyiGdu/b4kVeriD0wZrElMGdbGuALE2iB7k9IlB1jqCp6c2Us1HxACCtDhfgu3VjKTSo7eglkJWzYw9kSiZ6x3YcIY3Z8M3mhUgjYmi3xE/4CfKAuPWl9dlRWaZ0JG/ywXkxd/uhDO6BMHAONb0QvYBy5wPfo/jyCH3+4eaOD/CYPUK7ARDAlY/iS2EbWDtsc4eD+q1YEo8tFEXXl5E008aGtfkV0c5xf1sUyqUblIOmaPoMzy0zlfSe2bFYMBaT8b9kBywmFeDfNY97ofebbskneibGcLvwTafK9V2QeB86h5vpIcIbqtOJVGBhZpU98Hqbtyh16PiVjBTwJM+t2XJh8hnzTnUZI/yQvQIE2ponBCoQETfsCxivXxKsuZpjhgVd3d46I8Cn+YiIubqp3rdkgVm+b2QDCGOP+MYhkK5gRztlXx9OfIObWLJoCTIYMV9+NYzS4qhHCbGylr+yKPCvPKPEpQ2NGFGV1PaA2hz4jSogrbKvxytqxN7DmpGNhdPRJb70w7oLSmndhKH8tZ9vpcc4yvk6fnQUNmbnZawnHuwEK37Xzo60EhbZwQ7IGCPYmKMrt6Vb2ukFP+HJK2ywYgAwcMvCraSXs0KfyLn9xkjp/pahbICe58q8cxGnSR19nJKAKX/h30k+UpGcY+ZiEGHdMSGzGIaN6e/gSvy4tC/uqaUk+P/8VwhRQDLqXA+gyEKhuv7xbIHIQmcHwS68Yj7gnKgEB8JeGHdpRAHVTO0fQ72al/TqG93J430qfkCBYJVV5Vw0Pph2wtdVOgzgjw/ckEVFmHZ1fnPWRVmfK5pBSfVSUuMP+A+7L8yqdfFlWe9nlNyfkCkp+dmhWgTAnKPeIwNe2iGK0fidw4CdjzRt6xiUXddh2crK/2LU1yuVZSGU5A08uFQOTKfCHlgPHTZeJkKRFrb4rPmu1+Sqi1Dh0tFjGRW2jx1FqQ7pnrRrmql4yTrGrZY/u2QTbyMlIrY76JO/lW8VRy/aJ9Z2dWwcD8IRwfZLF6HfyxN2u6M/cb48nTNo1aqF7Sui0LoBTaLIXKiU403POCCu+iKNg08zmK2qsOau+6CV4nYCAv6tLVV1FCsmroLYnnL5i7iARxrc/VL4fUrtJoB1aX8BGXV0PU0+C7t7cCvFD2NDGEXJyNMd4rTMXF0tNEwSI+L+/iVLnjupLy0QWLefgUPjgic/5C0XWFtNmdpOKsKjTv6CtEe/O7UCwSFEmUFH/vRQGsB7IuypH+r+8RjKr/GNIKM5xoau+D1wrAGIQeHDhSfR9u7vRa7jM06na9whqc04zyZOcuGummMsZ9mkD5gZzy8tGQ6n20GSLTDz43kYWrORksqasSJZy6DoUemvscHgkZ2pnwNnuNtqzWhg/qfRQp/glye7taX4RlCNlL3yn47Fz9u1/xJoSz5HkIgYru4ZNfl/CxsOzBeISI2kbS3ZdgstJVw8O0xMTaDPwHgPPurjO1dh8IBNEVPsNZdnx0eVDDhmSZopm2mYUmWY1JntCLp8Ik/c66Gz9gMlWiuE97fdcPwerLZdyIaapQInZoPPVvRJUfvVP9X50V/MpHE+OybntKdOlSu5EZWaxRRyfdQ7Jum/gEsQTH6OnnPqTVP4kwcnUJyEzXgplTNMwLNeklnny65JTv/SSsZ9RhbwnFxfKXa8DZ8B6dhupIvlrrLzq+mgL27/KlXSdj0LZp7fsLkMBgtEBl6ob6d4pKpFu++nThqGcToIfvfMPVvaYVBd1mL+iTG+uonSWhhTrSFdNkx2fqrM7xjS40zhtMuC15vzfV1HW170Z81yat7mxfav/elX8s3u2Jh3/1pDfBSgzYo2GBYoqZfNKoQI2KbAKoFbpOjE8LXyUh6YzkC+mDUPA2335gqGicuJf/bAJFrK9KeVFkTS+ls73HDCVQYn3ILEij1RTdg1Y41spbekPymvBH/vnNFX/5Haap43KHdcKRdEjBJY6M/jQxasyS3lv3ld9zDDoBkhnk356rBCpJz4Bjw3AreqA0g0Uxs3jXLGsTWVWsyIy3VKVfbrSUjULG5we6erMOlOcuX/R8VGPdLkiMxiBvXQNqPYq9bctnBr42Cw1zW11vtzP3ZU+OIEibOhnZz8/gtj+JoVkqJEwJHbhIJv22EUEKmspth0JHF8+LX/jZcMeT4+EvOVUZJGWPDW82qaGSG+X6k+tJig0eKz7nycqClVny+BonXNbR3HoqiDxuC/Z4rhqQInVufLaYGreAjKKPE/Qfr0Th4IxXjKLBYiiXVVslRTBKtPUGlAAmqDfvGfWXbgEL9p70uEu37htIV+gIh1rCa8fLvul+HHWPQPIqCur1Bhc7ugYfYRiF5SBJptjQ3YtQi4jDvuCI0F3v5BFKhgk22XIDRe6V30o9qSUyx+4R7rHd5qxAUQyBOar/uMPCQVuYxOYPL0A9i8UcQJXQOsfIC9JkNSLkb/vxcmkQ0VgfMvv8doHw/uxG+OXvQWTniSzNfd/eWLMJCNL1gn6HxfrkcyDYuqkdFvdeIsG6KfBp5OYt6BGNRI4AkTMFoguRwee9j6DPFXDwJnkj3IHhxzPwDXg799LDIlrZem9uXvZDf3UxtwF2PBZiz0xXsYHF+eCvFgkhrVHlRktWdpn8gs0NOfnAfmnINGcaMHj0i6/oQIjoXp2ltBihiDNBa1UV1bdnCAzjqbnU9WyagS081W9HddhIxQQJQSOZrfPNaOi/iZOdfjO0DTQyo2KuGBSRBwUfINqcoE4MAsbPnFk11O7DJSiuZVlwi34ZYUXaUBIKw3JyfYr9uWwOokDhXfpIXdnVJzHAEMDPlv6Vo5KH/+8pIfFz/1coVMyr33YCOC4ItjCtbLC8CsTUoZ0XmQIOPnl14/OwrAZ/cWY3XhrGE3m5jHwnrCQmQkMOCv/14hd0eUkH7CfPUQ+3IrbW0OkqP20MP2eQa1pu8XJXUxQpLHDsEgKewW1ek8gBO4DOLC1DgTOBaQWmBua4+AjXBgYPYtpXdQ+OlN2NY4o7PUG6JYiVtxKfOkMsuHWEkzVbzGQvoG1cXGgCOy5d3ClSD5SvlF1+n3yApPLMGYYlz2WQF5lVtu5xA88tasL8cr4EIZybcDIifcRplOL4b+xEyOqnMfI06D+eu7yQ0zMlcvPlJam54s4JkQ3qb/buczQRer+QvhnX6CuI62+LfFH/UTXBktToE4lx6kzzYFXhTDZpYpHXw/KJR1POwQWy2oK91MdJI89k6k+vyj7cLqrvJ96uJxOXkyq5rVjfVcL7QU1FgGGNRcO5kqTJnU95l0MlO2CntkBX/QSJX382O7Urfa/qefPmvkLSroCwLUYX7nl4HugsoIUAjfN4jr3bNv10cYp9EGt/ZMxNgi4c1cp2FxUOnstZ/96er/uByHsOZ2oiNk6viYkQqbhh9QPmwJvB/BDl0dbddZcgi3SwldRPV6xMR46TrOot2Sr/1czksaph787kc5d2zxpnD/xWDGtTP1+//Z+7beclliKmhxkQxYaL+IaXuI5W2sgK2L+Kl9hgPusIdMIfouMc+YVjz0JcC/yqitwoAB3WARAllINHyChT+BdbVYLjwmqkksekhKw9wOdFHfbzUNHyhu/zrS3v1TCoLhEKcb8DqKngabxfIT59WMmL8Yury4+hfOnBopOMadD6oc+rHuY6036ZdRDcjNLDIr5UCg4NgAAA";
+  const FACES = { 姜念禾: 'img/nianhe.webp', 晏知白: 'img/zhibai.webp', 黎昼: 'img/lizhou.webp', 雾港来信: 'img/wugang.webp', 女仆: MAID_FACE };
+  const CAST = { 姜念禾: '#c9773a', 晏知白: '#4a86c0', 黎昼: '#b65bd0' };
+  const GROUPS = { 拾光小分队: ['姜念禾', '晏知白', '黎昼'] };
+  function face(node, who) {
+    const group = GROUPS[who];
+    node.classList.toggle('group', Boolean(group));
+    const url = group ? group.map(n => `url("${FACES[n]}")`).join(', ') : FACES[who] && `url("${FACES[who]}")`;
+    if (!url) return;
+    node.style.backgroundImage = url;
+    node.textContent = '';
+  }
+  const STOP = Symbol('stop');
+  const el = (tag, cls, html) => { const n = document.createElement(tag); if (cls) n.className = cls; if (html != null) n.innerHTML = tr(html); return n; };
+  const plain = html => html.replace(/<[^>]+>/g, '');
+  const enter = n => { n.classList.add('in'); return n; };
+  let scale = 1;
+
+  function msg({ me, who, text, named }) {
+    const m = el('div', `msg ${me ? 'me' : 'ai'}`);
+    if (!me) { const a = el('span', 'ava', who[0]); face(a, who); m.append(a); }
+    const col = el('div', 'col');
+    if (named && !me) { const n = el('span', 'name', who); n.style.setProperty('--c', CAST[who]); col.append(n); }
+    col.append(el('div', 'bubble', text));
+    m.append(col);
+    return m;
+  }
+
+  function rowNode(c) {
+    const r = el('div', 'row', `<span class="ava">${c.name[0]}</span><div class="meta-col"><b>${tr(c.label || c.name)}</b><small>${tr(c.last)}</small></div><div class="side"><time>${c.time}</time><span class="badge"${c.n ? '' : ' hidden'}>${c.n || ''}</span></div>`);
+    r.dataset.id = c.id;
+    face($('.ava', r), c.name);
+    return r;
+  }
+
+  // 新消息把联系人顶到最上面，其余行平滑让位
+  function toTop(list, row, fast) {
+    const rows = [...list.children];
+    const before = new Map(rows.map(r => [r, r.getBoundingClientRect().top]));
+    list.prepend(row);
+    if (fast) return;
+    rows.forEach(r => {
+      const dy = (before.get(r) - r.getBoundingClientRect().top) / scale;
+      if (dy) r.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], { duration: 460, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' });
+    });
+  }
+
+  function tap(target) {
+    const t = el('span', 'tap');
+    if (getComputedStyle(target).position === 'static') target.style.position = 'relative';
+    target.append(t);
+    setTimeout(() => t.remove(), 600);
+  }
+
+  // 按打字节奏：字越多，「正在输入」越久
+  async function say(chat, w, who, text, named) {
+    const t = enter(msg({ who, named, text: '<i></i><i></i><i></i>' }));
+    t.classList.add('typing');
+    chat.append(t);
+    await w(Math.min(1700, 560 + plain(tr(text)).length * L(55, 22)));
+    const m = enter(msg({ who, text, named }));
+    t.replaceWith(m);
+    return m;
+  }
+
+  // 在输入框里逐字打出，按下发送；onSend 把这句放进画面
+  async function typeInto(bar, w, fast, text, onSend, gap = 85) {
+    const field = $('.field', bar), btn = $('.send', bar);
+    const words = plain(tr(text));
+    if (lang === 'en') gap = Math.round(gap * 0.4);
+    field.classList.add('has');
+    if (fast) field.textContent = words;
+    else { field.textContent = ''; for (const ch of words) { field.textContent += ch; field.scrollLeft = field.scrollWidth; await w(gap); } }
+    field.scrollLeft = field.scrollWidth;
+    await w(320);
+    btn.classList.add('press');
+    field.textContent = field.dataset.ph; field.classList.remove('has');
+    const sent = onSend?.();
+    await w(200);
+    btn.classList.remove('press');
+    return sent;
+  }
+  const send = (scope, w, fast, text) => typeInto(scope, w, fast, text, () => {
+    const m = enter(msg({ me: true, text }));
+    $('.chat', scope).append(m);
+    return m;
+  });
+
+  async function stream(p, text, w, fast) {
+    text = tr(text);
+    if (fast) { p.textContent = text; return; }
+    const k = L(2, 5);
+    for (let i = k; i < text.length + k; i += k) { p.textContent = text.slice(0, i); await w(55); }
+  }
+
+  // 生图过程：模糊和噪点一步步退掉，同 APP 的实时预览
+  async function develop(nodes, w, fast, label, steps = 23, gap = 105) {
+    for (let k = fast ? steps : 1; k <= steps; k++) {
+      const t = k / steps;
+      nodes.forEach(n => {
+        n.style.setProperty('--b', `${(16 * (1 - t) ** 1.5).toFixed(2)}px`);
+        n.style.setProperty('--nz', ((1 - t) * 0.9).toFixed(3));
+      });
+      label(k, steps);
+      if (k < steps) await w(gap);
+    }
+  }
+
+  // 石子落在哪一行：每次换行都重新落下，和 APP 重绘棋盘时一样
+  function stoneTo(row, hopping) {
+    row.closest('.hop-court').querySelector('.hop-stone')?.remove();
+    row.prepend(el('span', `hop-stone${hopping ? ' is-hopping' : ''}`));
+  }
+  // 棋盘按面板高度整体缩放，同 APP 的 fitCourt
+  function fitCourt(box) {
+    const court = box.firstElementChild;
+    court.style.zoom = '1';
+    const k = Math.min(1, (box.clientHeight - 8) / court.offsetHeight, (box.clientWidth - 8) / court.offsetWidth);
+    court.style.zoom = String(Math.max(0.5, k).toFixed(3));
+  }
+
+  function resetTicks(ticks) {
+    ticks.replaceChildren(...Array.from({ length: 7 }, () => el('i')));
+    ticks.lastElementChild.className = 'now';
+  }
+  function tick(ticks) {
+    $('.now', ticks)?.classList.remove('now');
+    ticks.append(el('i', 'now'));
+    if (ticks.children.length > 10) ticks.firstElementChild.remove();
+  }
+
+  /* ---------- cards beside the phone ---------- */
+  const frame = $('.frame');
+  const POPS = Object.fromEntries($$('.pop').map(p => [p.dataset.pop, p]));
+  const link = $('.pop-link');
+  const showPop = i => { if (!NARROW.matches) POPS[i]?.classList.add('on'); };
+  const hidePops = () => { $$('.pop, .pop-link').forEach(p => p.classList.remove('on')); };
+  // 把记忆卡对齐到她说起旧事的那条气泡，再从气泡拉一条线过去
+  function pinMemory(m) {
+    const fr = frame.getBoundingClientRect(), br = $('.bubble', m).getBoundingClientRect();
+    const y = (br.top + br.height / 2 - fr.top) / scale;
+    const x = (br.right - fr.left) / scale + 8;
+    const left = frame.offsetWidth + 36;
+    POPS[3].style.top = `${Math.round(y - 30)}px`;
+    Object.assign(link.style, { left: `${x}px`, top: `${y - 1}px`, width: `${left - x}px` });
+  }
+
+  /* ---------- the lineage graph ---------- */
+  const ICONS = {
+    feather: '<path d="M20 4c-7 0-12 5-13 13l-3 3M7 17h7c3-2 5-6 6-13"/>',
+    card: '<rect x="5" y="3" width="14" height="18" rx="2"/><circle cx="12" cy="10" r="3"/><path d="M8 17c1-2 7-2 8 0"/>',
+    book: '<path d="M5 4h10a4 4 0 0 1 4 4v12H9a4 4 0 0 1-4-4z"/><path d="M5 16a4 4 0 0 1 4-4h10"/>',
+    table: '<rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 10h18M9 10v10"/>',
+    chat: '<path d="M4 5h16v11H9l-5 4z"/>',
+    target: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/>',
+  };
+  const LIN = [
+    { id: 'preset', k: '#d0587e', tag: 'PRESET', title: '创意写作', sub: '预设 · 9 段', icon: 'feather' },
+    { id: 'card', k: '#d08a2c', tag: 'CARD', title: '雾港来信', sub: '角色卡', icon: 'card' },
+    { id: 'wb', k: '#8b6cf0', tag: 'WORLDBOOK', title: '世界书', sub: '4 条注入', icon: 'book', cnt: '4' },
+    { id: 'mem', k: '#2cad78', tag: 'MEMORY', title: '记忆表格', sub: '2 行', icon: 'table' },
+    { id: 'hist', k: '#1f9fc0', tag: 'HISTORY', title: '对话历史', sub: '3 轮', icon: 'chat' },
+    { id: 'e1', k: '#8b6cf0', tag: 'ENTRY', title: '灯塔邮局', sub: '世界书条目', icon: 'book', entry: true },
+    { id: 'e2', k: '#8b6cf0', tag: 'ENTRY', title: '雾港', sub: '世界书条目', icon: 'book', entry: true },
+    { id: 'e3', k: '#8b6cf0', tag: 'ENTRY', title: '雾灵', sub: '世界书条目', icon: 'book', entry: true },
+    { id: 'e4', k: '#8b6cf0', tag: 'ENTRY', title: '余温信', sub: '世界书条目', icon: 'book', entry: true },
+    { id: 'prompt', k: '#2f9a62', tag: 'PROMPT', title: '本次 Prompt', sub: '已发送', icon: 'target' },
+  ];
+  const SRC = ['preset', 'card', 'wb', 'mem', 'hist'], ENT = ['e1', 'e2', 'e3', 'e4'];
+  const EDGES = [...SRC.map(a => [a, 'prompt']), ...ENT.map(e => ['wb', e]), ...ENT.map(e => [e, 'prompt'])];
+  function linPositions(g) {
+    const W = g.clientWidth, H = g.clientHeight, pos = {};
+    const phone = W < 420;
+    if (!phone) {
+      const w = 150, h = 52, gap = 14;
+      const col = (ids, x) => {
+        const top = Math.round((H - ids.length * h - (ids.length - 1) * gap) / 2) + 14;
+        ids.forEach((id, i) => { pos[id] = { x, y: top + i * (h + gap), w, h }; });
+      };
+      col(SRC, 18);
+      col(ENT, Math.round(W / 2 - w / 2));
+      pos.prompt = { x: W - w - 18, y: Math.round(H / 2 - h / 2) + 14, w, h };
+    } else {
+      const gap = 10, w = Math.floor((W - 3 * gap) / 2), h = 42;
+      const at = (id, c, y) => { pos[id] = { x: c === 0.5 ? Math.round(W / 2 - w / 2) : gap + c * (w + gap), y, w, h }; };
+      at('preset', 0, 50); at('card', 1, 50); at('wb', 0, 102); at('mem', 1, 102); at('hist', 0.5, 154);
+      at('e1', 0, 232); at('e2', 1, 232); at('e3', 0, 284); at('e4', 1, 284);
+      at('prompt', 0.5, Math.max(340, H - h - 18));
+    }
+    return { pos, phone };
+  }
+  function linPath(a, b, phone) {
+    if (!phone) {
+      const x1 = a.x + a.w, y1 = a.y + a.h / 2, x2 = b.x, y2 = b.y + b.h / 2, d = (x2 - x1) / 2;
+      return `M${x1} ${y1}C${x1 + d} ${y1} ${x2 - d} ${y2} ${x2} ${y2}`;
+    }
+    const x1 = a.x + a.w / 2, y1 = a.y + a.h, x2 = b.x + b.w / 2, y2 = b.y, d = (y2 - y1) / 2;
+    return `M${x1} ${y1}C${x1} ${y1 + d} ${x2} ${y2 - d} ${x2} ${y2}`;
+  }
+  function linPlace(s) {
+    const g = $('.lin-graph', s);
+    if (!g.clientWidth || !$('.ln', g)) return;
+    const { pos, phone } = linPositions(g);
+    $('.lin-edges', s).setAttribute('viewBox', `0 0 ${g.clientWidth} ${g.clientHeight}`);
+    LIN.forEach(n => {
+      const node = $(`.ln[data-n="${n.id}"]`, g), p = pos[n.id];
+      Object.assign(node.style, { left: `${p.x}px`, top: `${p.y}px`, width: `${p.w}px` });
+      if (n.entry) { node.style.setProperty('--dx', `${pos.wb.x - p.x}px`); node.style.setProperty('--dy', `${pos.wb.y - p.y}px`); }
+    });
+    EDGES.forEach(([a, b]) => $(`[data-e="${a}>${b}"]`, s).setAttribute('d', linPath(pos[a], pos[b], phone)));
+  }
+  function linBuild(s) {
+    const g = $('.lin-graph', s), svg = $('.lin-edges', s);
+    g.classList.remove('tracing');
+    $$('.ln', g).forEach(n => n.remove());
+    svg.replaceChildren();
+    EDGES.forEach(([a, b]) => {
+      const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      p.setAttribute('class', 'le');
+      p.setAttribute('pathLength', '1');
+      p.dataset.e = `${a}>${b}`;
+      svg.append(p);
+    });
+    LIN.forEach(n => {
+      const node = el('div', `ln${n.entry ? ' entry' : ''}`, `<span class="ln-ico"><svg viewBox="0 0 24 24">${ICONS[n.icon]}</svg></span><div class="ln-t"><small>${n.tag}</small><b>${tr(n.title)}</b><span>${tr(n.sub)}</span></div>${n.cnt ? `<span class="ln-cnt">${n.cnt}</span>` : ''}`);
+      node.dataset.n = n.id;
+      node.style.setProperty('--k', n.k);
+      g.append(node);
+    });
+    $$('.lin-side li', s).forEach(li => li.classList.remove('hot'));
+    $$('.meter b', s).forEach(b => { b.style.width = '0'; });
+    $('[data-stat="n"]', s).textContent = '0';
+    $('[data-stat="e"]', s).textContent = '0';
+    $('.lin-hint', s).innerHTML = tr('点击任意节点，追踪它的 <b>上游溯源</b> 与 <b>下游影响</b>');
+    linPlace(s);
+  }
+
+  /* ---------- what each screen plays ---------- */
+  const MAID_LIST = [
+    { id: 'nianhe', name: '姜念禾', last: '虽然我也很久没看过日出了', time: '14:48' },
+    { id: 'lizhou', name: '黎昼', last: '啊啊啊你别提，我现在手心都是汗…', time: '14:47' },
+    { id: 'group', name: '拾光小分队', label: '拾光小分队(3)', last: '姜念禾：上面写了名字的', time: '14:44' },
+    { id: 'zhibai', name: '晏知白', last: '周六演出的位置订好了。第二排。', time: '10:30' },
+  ];
+  const WRITING = [
+    '油灯的光只够照亮脚前三步，再远就是翻滚的雾。信使把信贴胸揣好，纸页隔着粗布外套透出一层慢慢散开的热，像有人把掌心按在他心口。',
+    '雾港的石板路被夜潮浸得发亮。走过鱼市街时，那股热忽然抽走了——信凉得像刚从水里捞出来，贴着他的肋骨，一冷一冷地跳。他停了一下，没回头。半步之后的脚步声也停了。',
+    '煤气灯一盏接一盏自己亮起，琥珀色的光从雾里浮出来，把他往前送。远处钟楼的黑影浮上雾面，钟面停在十一点差五分，一动不动，像被谁捏住了指针。',
+  ];
+  const PROMPT_ITEMS = [
+    { id: 'main', name: '主提示', n: 620 },
+    { id: 'card', name: '角色：雾港来信', n: 840 },
+    { id: 'wb', name: '世界书 · 4 条', n: 760 },
+    { id: 'mem', name: '记忆表格', n: 540 },
+    { id: 'style', name: '文风：克制，多留白', n: 180 },
+    { id: 'len', name: '字数 600–900', n: 40 },
+  ];
+
+  const SCENES = [
+    {
+      reset() {
+        const p = POPS[0];
+        p.classList.remove('done');
+        p.style.setProperty('--b', '16px');
+        p.style.setProperty('--nz', '0.9');
+      },
+      async play(s, w, fast) {
+        const chat = $('.chat', s), pop = POPS[0];
+        await w(900);
+        await send(s, w, fast, '今天的拉花呢？拍给我看看～');
+        await w(400);
+        await say(chat, w, '姜念禾', '诶？现在吗');
+        await say(chat, w, '姜念禾', '等一下，我擦擦杯子');
+        await w(250);
+        const m = el('div', 'msg ai in');
+        const a = el('span', 'ava'); face(a, '姜念禾'); m.append(a);
+        const card = el('div', 'gen', '<div class="gen-img"><img src="img/latte.webp" alt=""></div><small><i></i><span>生成中 1/23</span></small>');
+        const col = el('div', 'col'); col.append(card); m.append(col);
+        chat.append(m);
+        await w(300);
+        showPop(0);
+        await develop([card, pop], w, fast, (k, n) => {
+          $('small span', card).textContent = `${L('生成中', 'Generating')} ${k}/${n}`;
+          $('small span', pop).textContent = `${L('实时预览 · 生成中', 'Live preview · Generating')} ${k}/${n}`;
+        });
+        card.classList.add('done'); pop.classList.add('done');
+        $('small span', card).textContent = tr('已完成');
+        $('small span', pop).textContent = tr('实时预览 · 已完成');
+        await w(1500);
+        pop.classList.remove('on');
+        await w(200);
+        await say(chat, w, '姜念禾', '今天这只还挺乖的');
+        await say(chat, w, '姜念禾', '就是翅膀有点歪');
+      },
+    },
+    {
+      async play(s, w, fast) {
+        const chat = $('.chat', s);
+        await w(600);
+        await say(chat, w, '姜念禾', '我在做应援的小卡片了', true);
+        await say(chat, w, '姜念禾', '大家想要什么颜色的？', true);
+        await w(300);
+        await send(s, w, fast, '周六我们一起去给黎昼加油？');
+        await w(300);
+        await say(chat, w, '姜念禾', '嗯！应援卡都做好了', true);
+        await say(chat, w, '晏知白', '可以。要占前排就别踩点。', true);
+        const m = await say(chat, w, '晏知白', '六点半在楼下集合，我带相机。', true);
+        await w(400);
+        $('.col', m).append(enter(el('span', 'react', '👍 <b>2</b>')));
+        await w(300);
+        await say(chat, w, '黎昼', '啊啊啊真的都来啊', true);
+        await say(chat, w, '黎昼', '前排我给你们留好了，别磨蹭', true);
+      },
+    },
+    {
+      reset(s) {
+        s._clock = null;
+        s.classList.remove('calling');
+        const p = $('.callp', s);
+        p.classList.add('off');
+        p.classList.remove('speaking', 'live');
+        $('.call-state', s).textContent = tr('正在接通…');
+        $('.call-time', s).textContent = '00:00';
+        $$('.subs span', s).forEach(n => { n.textContent = ''; });
+        $$('span', POPS[2]).forEach(n => { if (!n.children.length) n.textContent = ''; });
+      },
+      async play(s, w, fast) {
+        const p = $('.callp', s), time = $('.call-time', s), pop = POPS[2];
+        const pair = q => [$(`${q} span`, s), $(`${q} span`, pop)];
+        const speak = async (nodes, text) => {
+          text = tr(text);
+          if (fast) { nodes.forEach(n => { n.textContent = text; }); return; }
+          const k = L(1, 3);
+          for (let i = k; i < text.length + k; i += k) { nodes.forEach(n => { n.textContent = text.slice(0, i); }); await w(68); }
+        };
+        await w(800);
+        tap($('.callbtn', s));
+        await w(300);
+        s.classList.add('calling');
+        p.classList.remove('off');
+        await w(1100);
+        $('.call-state', s).textContent = tr('通话中');
+        p.classList.add('live');
+        const clock = {};
+        s._clock = clock;
+        (async () => {
+          for (let sec = 0; s._clock === clock; sec++) { time.textContent = `00:${String(sec).padStart(2, '0')}`; await w(1000); }
+        })().catch(() => {});
+        await w(600);
+        showPop(2);
+        await speak(pair('.sub-me'), '明天就要上台了。紧张不紧张');
+        await w(700);
+        p.classList.add('speaking');
+        await speak(pair('.sub-ai'), '啊啊啊你别提，我现在手心都是汗，但我嘴上当然要说超稳的好吗');
+        p.classList.remove('speaking');
+        await w(1200);
+      },
+    },
+    {
+      reset(s) { $('.mem-inline', s).classList.add('off'); },
+      async play(s, w, fast) {
+        const chat = $('.chat', s);
+        await w(800);
+        await send(s, w, fast, '这周又加班到好晚……好想去看海');
+        await w(400);
+        await say(chat, w, '姜念禾', '又加班到这么晚啊……');
+        const m = await say(chat, w, '姜念禾', '上次你也说想去看海，一直没去成');
+        await w(250);
+        m.classList.add('recall');
+        if (NARROW.matches) {
+          $('.mem-inline', s).classList.remove('off');
+        } else {
+          pinMemory(m);
+          link.classList.add('on');
+          await w(300);
+          showPop(3);
+        }
+        await w(2600);
+        link.classList.remove('on');
+        $('.mem-inline', s).classList.add('off');
+        await say(chat, w, '姜念禾', '嗯……要不别等了');
+        await say(chat, w, '姜念禾', '挑个休息日，早点出发，天亮前到海边');
+      },
+    },
+    {
+      reset(s) {
+        $('.list', s).replaceChildren(...MAID_LIST.map(rowNode));
+        $('.room-view', s).classList.add('off');
+        $$('.fx', s).forEach(n => n.classList.add('off'));
+        const run = $('.run', s);
+        run.classList.remove('ok');
+        $$('.steps li', run).forEach(li => { li.className = ''; $('time', li).textContent = ''; });
+        setRun(run, 0, '执行中', '0/3 · 0.0s');
+      },
+      async play(s, w, fast) {
+        const run = $('.run', s), steps = $$('.steps li', run), list = $('.list', s);
+        const step = (i, state, t) => { steps[i].className = state; if (t) $('time', steps[i]).textContent = t; };
+        await w(700);
+        await typeInto($('.maid-input', s), w, fast, '帮我给黎昼画一张周六演出的海报，发给她', () => run.classList.remove('off'), 75);
+        await w(400);
+        step(0, 'running'); setRun(run, 0, '执行中', '0/3 · 2.1s');
+        await w(800);
+        step(0, 'done', '0.0s'); step(1, 'running'); setRun(run, 1, '执行中', '1/3 · 24.0s');
+        const row = $('[data-id="lizhou"]', list);
+        $('small', row).textContent = tr('正在生成图片：一张周六演出的宣传海报…');
+        row.classList.add('busy');
+        toTop(list, row, fast);
+        await w(2400);
+        step(1, 'done', '52.6s'); step(2, 'running'); setRun(run, 2, '执行中', '2/3 · 58.9s');
+        await w(900);
+        step(2, 'done', '1.3s'); setRun(run, 3, '已完成', '3/3 · 1m 06s');
+        run.classList.add('ok');
+        await w(600);
+        row.classList.remove('busy');
+        $('small', row).textContent = tr('啊啊啊你这句话我要截图存起来');
+        $('time', row).textContent = '14:50';
+        const badge = $('.badge', row);
+        badge.hidden = false; badge.textContent = '2';
+        badge.classList.remove('bump'); void badge.offsetWidth; badge.classList.add('bump');
+        $('.report', s).classList.remove('off');
+        await w(2200);
+        tap(row);
+        await w(350);
+        $('.room-view', s).classList.remove('off');
+        const chat = $('.room-view .chat', s);
+        await w(600);
+        chat.append(enter(el('div', 'msg me', '<div class="col"><div class="bubble pic"><img src="img/poster.webp" alt=""></div></div>')));
+        await w(450);
+        chat.append(enter(msg({ me: true, text: '周六晚上八点，第一次正式演出，鼓点一响全场都是你的。加油，黎昼！' })));
+        await w(500);
+        await say(chat, w, '黎昼', '啊啊啊你这句话我要截图存起来');
+        await say(chat, w, '黎昼', '鼓点一响全场都是我的…你怎么这么会说话啊');
+      },
+    },
+    {
+      reset(s) { resetTicks($('.ticks', s)); },
+      async play(s, w, fast) {
+        const prose = $('.prose', s), ticks = $('.ticks', s);
+        const line = '我把信揣进怀里，提着油灯走进雾里，去钟楼街十七号。';
+        await w(800);
+        await typeInto(s, w, fast, line, () => prose.append(enter(el('p', 'me-line', line))), 60);
+        await w(500);
+        s.classList.add('streaming');
+        for (const text of WRITING) {
+          const p = enter(el('p'));
+          prose.append(p);
+          await stream(p, text, w, fast);
+          tick(ticks);
+          await w(450);
+        }
+        s.classList.remove('streaming');
+        const fig = enter(el('figure', 'illus', '<img src="img/writing-1.webp" alt=""><figcaption>插图 · 生成中</figcaption>'));
+        prose.append(fig);
+        await develop([fig], w, fast, (k, n) => { $('figcaption', fig).textContent = `${L('插图 · 生成中', 'Illustration · generating')} ${k}/${n}`; }, 23, 90);
+        $('figcaption', fig).textContent = tr('插图');
+      },
+    },
+    {
+      reset(s) {
+        s.classList.remove('sheet-up');
+        $('.hop-court', s).classList.remove('is-live');
+        $$('.hop-cell', s).forEach(c => c.classList.remove('is-running', 'is-succeeded'));
+        $('.hop-roof', s).className = 'hop-roof';
+        $('.hop-stone', s)?.remove();
+        const run = $('.ac-badge.ac-run', s);
+        run.classList.remove('has-value');
+        $('b', run).textContent = '0';
+        $('.mem-card', s).classList.add('off');
+        $$('.mem-card tr.new', s).forEach(n => n.remove());
+      },
+      async play(s, w, fast) {
+        const desk = Boolean(s.closest('.is-desk'));
+        const rows = $$('.hop-row', s), roof = $('.hop-roof', s), run = $('.ac-badge.ac-run', s), mem = $('.mem-card', s);
+        const cell = k => $(`[data-h="${k}"]`, s);
+        const set = (k, state) => { cell(k).classList.remove('is-running', 'is-succeeded'); cell(k).classList.add(`is-${state}`); };
+        const running = n => { run.classList.toggle('has-value', n > 0); $('b', run).textContent = String(n); };
+        await w(desk ? 900 : 700);
+        s.classList.add('sheet-up');
+        await w(800);
+        // 第一行：正文和记忆表格、图片提示共用一次请求
+        $('.hop-court', s).classList.add('is-live');
+        roof.classList.add('is-running');
+        stoneTo(rows[0], true);
+        set('body', 'running');
+        running(1);
+        s.classList.add('streaming');
+        await w(1000);
+        for (const text of ['铁栅门锈死在门框里。二楼右侧的窗还亮着——那盏灯不肯睡。', '他在门口站定，把油灯举高了一点，雾从灯罩外合拢过来。']) {
+          const p = enter(el('p'));
+          $('.prose', s).append(p);
+          await stream(p, text, w, fast);
+          await w(350);
+        }
+        await w(300);
+        s.classList.remove('streaming');
+        set('body', 'succeeded');
+        mem.classList.remove('off');
+        const memRow = el('tr', 'new in', '<td>钟楼街十七号</td><td></td><td>一</td>');
+        $('tbody', mem).append(memRow);
+        await w(450);
+        // 第二行并行：生图和格式修复
+        stoneTo(rows[1], true);
+        set('image', 'running');
+        set('review', 'running');
+        running(2);
+        await stream(memRow.children[1], '二楼右窗亮着灯', w, fast);
+        await w(1100);
+        set('review', 'succeeded');
+        running(1);
+        await w(700);
+        mem.classList.add('off');
+        const fig = enter(el('figure', 'illus', '<img src="img/writing-2.webp" alt=""><figcaption>插图 · 生成中</figcaption>'));
+        $('.prose', s).append(fig);
+        await develop([fig], w, fast, (k, n) => { $('figcaption', fig).textContent = `${L('插图 · 生成中', 'Illustration · generating')} ${k}/${n}`; }, 23, 80);
+        $('figcaption', fig).textContent = tr('插图 · 图片生成');
+        set('image', 'succeeded');
+        running(0);
+        stoneTo(rows[1], false);
+        roof.classList.replace('is-running', 'is-succeeded');
+        if (!desk) { await w(1600); s.classList.remove('sheet-up'); }
+      },
+    },
+    {
+      reset(s) { linBuild(s); },
+      async play(s, w) {
+        const g = $('.lin-graph', s);
+        const node = id => $(`.ln[data-n="${id}"]`, g);
+        const edge = (a, b) => $(`[data-e="${a}>${b}"]`, s);
+        const stat = (n, e) => { $('[data-stat="n"]', s).textContent = String(n); $('[data-stat="e"]', s).textContent = String(e); };
+        await w(500);
+        for (const [i, id] of SRC.entries()) { node(id).classList.add('on'); stat(i + 1, 0); await w(120); }
+        node('prompt').classList.add('on'); stat(6, 0);
+        $$('.meter b', s).forEach(b => { b.style.width = b.style.getPropertyValue('--w'); });
+        await w(300);
+        for (const [i, id] of SRC.entries()) { edge(id, 'prompt').classList.add('on'); stat(6, i + 1); await w(130); }
+        await w(1100);
+        tap(node('wb'));
+        await w(300);
+        edge('wb', 'prompt').classList.add('gone');
+        for (const [i, id] of ENT.entries()) { node(id).classList.add('on'); stat(7 + i, 4); await w(90); }
+        await w(450);
+        for (const id of ENT) { edge('wb', id).classList.add('on'); await w(70); }
+        for (const id of ENT) { edge(id, 'prompt').classList.add('on'); await w(70); }
+        stat(10, 12);
+        await w(1300);
+        tap(node('e1'));
+        await w(250);
+        g.classList.add('tracing');
+        ['wb', 'e1', 'prompt'].forEach(id => node(id).classList.add('hot'));
+        edge('wb', 'e1').classList.add('hot');
+        edge('e1', 'prompt').classList.add('hot');
+        $('.lin-side [data-top="e1"]', s).classList.add('hot');
+        $('.lin-hint', s).innerHTML = tr('灯塔邮局 · 上游 <b>世界书</b> · 下游 <b>本次 Prompt</b>');
+      },
+    },
+  ];
+  function setRun(run, done, label, text) {
+    $('.ring .bar', run).style.strokeDashoffset = String(75.4 * (1 - done / 3));
+    $('.ring-n', run).textContent = String(3 - done || 3);
+    $('.run-meta', run).innerHTML = `<em>${tr(label)}</em> · ${text}`;
+  }
+
+  const TILES = {
+    moments: {
+      reset(t) {
+        const like = $('.like', t);
+        like.classList.remove('liked');
+        $('b', like).textContent = '17';
+        $('.cmt-n', t).textContent = '1';
+      },
+      async play(t, w) {
+        const cmts = $('.cmts', t), n = $('.cmt-n', t);
+        const add = html => { cmts.append(enter(el('p', '', html))); n.textContent = String(cmts.children.length); };
+        await w(900);
+        $('.like', t).classList.add('liked');
+        $('.like b', t).textContent = '18';
+        await w(900);
+        add('<b>我</b>：必到！第一排见');
+        await w(1000);
+        add('<b>黎昼</b> 回复 <b>我</b>：说好了啊！');
+        await w(900);
+        add('<b>晏知白</b>：鼓棒别飞。');
+      },
+    },
+    lore: {
+      reset(t) { $$('.fx', t).forEach(n => n.classList.add('off')); },
+      async play(t, w) {
+        const chat = $('.chat', t);
+        await w(900);
+        const m = enter(msg({ me: true, text: '这封信摸起来是<span class="kw">温的</span>？' }));
+        chat.append(m);
+        await w(600);
+        $('.kw', m).classList.add('lit');
+        await w(450);
+        $('.wb-card', t).classList.remove('off');
+        await w(2300);
+        $('.wb-card', t).classList.add('off');
+        await w(250);
+        $('.wb-pill', t).classList.remove('off');
+        $('.kw', m).classList.remove('lit');
+        await w(300);
+        await say(chat, w, '雾港来信', '那是余温。拆开它，你会看见写信的人。');
+      },
+    },
+    prompt: {
+      reset(t) {
+        $('.pe-list', t).replaceChildren(...PROMPT_ITEMS.map(p => {
+          const li = el('li', '', `<i class="grip"></i><span>${tr(p.name)}</span><em>${p.n}</em><b class="tg on"></b>`);
+          li.dataset.p = p.id;
+          return li;
+        }));
+        $('.pe-total', t).textContent = '2,980';
+      },
+      async play(t, w) {
+        const list = $('.pe-list', t), item = id => $(`[data-p="${id}"]`, list), total = $('.pe-total', t);
+        const toggle = (id, on, sum) => { const li = item(id); tap($('.tg', li)); $('.tg', li).classList.toggle('on', on); li.classList.toggle('off', !on); total.textContent = sum; };
+        await w(1000);
+        toggle('mem', false, '2,440');
+        await w(1100);
+        // 拖动「文风」排到主提示后面
+        const li = item('style');
+        li.classList.add('lift');
+        await w(300);
+        const rows = [...list.children], before = new Map(rows.map(r => [r, r.getBoundingClientRect().top]));
+        list.insertBefore(li, item('card'));
+        rows.forEach(r => {
+          const dy = before.get(r) - r.getBoundingClientRect().top;
+          if (dy) r.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], { duration: 480, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' });
+        });
+        await w(600);
+        li.classList.remove('lift');
+        await w(900);
+        toggle('mem', true, '2,980');
+      },
+    },
+  };
+
+  /* ---------- play, hold, rewind, repeat ---------- */
+  function resetEl(node, def) {
+    node.classList.remove('rewind', 'streaming');
+    $$('.body > :not([data-keep])', node).forEach(n => n.remove());
+    $$('.in', node).forEach(n => n.classList.remove('in'));
+    $$('.field', node).forEach(f => { f.textContent = f.dataset.ph; f.classList.remove('has'); });
+    $$('.press, .recall', node).forEach(n => n.classList.remove('press', 'recall'));
+    def.reset?.(node);
+  }
+  function runner(node, def) {
+    let token = 0;
+    return {
+      async start() {
+        const mine = ++token;
+        const fast = still.matches;
+        const w = ms => new Promise((resolve, reject) => {
+          setTimeout(() => (mine === token ? resolve() : reject(STOP)), fast ? 0 : ms);
+        });
+        resetEl(node, def);
+        try {
+          for (;;) {
+            await def.play(node, w, fast);
+            if (fast) return;
+            await w(3600);
+            node.classList.add('rewind');
+            if (node.classList.contains('scene')) hidePops();
+            await w(380);
+            resetEl(node, def);
+          }
+        } catch (error) {
+          if (error !== STOP) throw error;
+        }
+      },
+      stop() { token += 1; },
+    };
+  }
+
+  /* ---------- the stage ---------- */
+  const story = $('.story'), stage = $('.stage'), stageInner = $('.stage-inner');
+  const more = $('#more'), download = $('#download');
+  const labels = $$('.label'), scenes = $$('.scene'), count = scenes.length;
+  const sceneRunners = scenes.map((s, i) => runner(s, SCENES[i]));
+  const DESK = new Set([5, 6, 7]);
+  // 卡片浮出手机右侧时，给它们在版面上留出的宽度（设备坐标）
+  const POP_ROOM = { 0: 210, 2: 250, 3: 330 };
+  const TONES = ['cafe', 'dusk', 'neon', 'cafe', '', 'fog', 'door', ''];
+  const device = $('.device'), area = $('.device-area'), captions = $('.captions');
+  let active = -1;
+
+  function fit() {
+    const narrow = NARROW.matches;
+    const desk = !narrow && DESK.has(active);
+    const [w, h] = desk ? [880, 580] : [320, 680];
+    const capW = narrow ? 0 : labels[Math.max(0, active)].offsetWidth;
+    captions.style.setProperty('--cap-w', `${capW}px`);
+    const room = narrow ? 0 : POP_ROOM[active] || 0;
+    const gap = narrow ? 0 : parseFloat(getComputedStyle(stageInner).columnGap) || 0;
+    const maxW = narrow ? innerWidth - 40 : stageInner.clientWidth - gap - capW - 8;
+    scale = Math.max(0.36, Math.min(area.clientHeight / (h + 12), maxW / (w + 8 + room), desk ? 1.12 : 1.2));
+    frame.classList.toggle('is-desk', desk);
+    device.classList.toggle('desk', desk);
+    frame.style.width = `${w}px`;
+    frame.style.height = `${h}px`;
+    frame.style.transform = `scale(${scale})`;
+    device.style.width = `${w * scale}px`;
+    device.style.height = `${h * scale}px`;
+    area.style.setProperty('--pop-room', `${Math.round(room * scale)}px`);
+  }
+
+  function setActive(i) {
+    if (i === active) return;
+    sceneRunners[active]?.stop();
+    hidePops();
+    active = i;
+    labels.forEach((n, k) => n.classList.toggle('is-on', k === i));
+    scenes.forEach((n, k) => n.classList.toggle('is-on', k === i));
+    $$('.bd').forEach(b => b.classList.toggle('on', b.dataset.tone === TONES[i]));
+    fit();
+    sceneRunners[i].start();
+  }
+
+  const IDS = ['top', 'group', 'call', 'memory', 'maid', 'writing', 'hopscotch', 'lineage', 'film', 'more', 'download'];
+  const tail = [film, more, download];
+  const targetTop = k => (k < count ? story.offsetTop + k * stage.offsetHeight : tail[k - count].offsetTop - 40);
+  const rail = $('.rail');
+  IDS.forEach((id, k) => {
+    const b = el('button', '', '<i></i>');
+    b.type = 'button';
+    b.addEventListener('click', () => scrollTo({ top: targetTop(k), behavior: still.matches ? 'auto' : 'smooth' }));
+    rail.append(b);
+  });
+  const railButtons = $$('button', rail);
+
+  let queued = false;
+  function onScroll() {
+    queued = false;
+    const progress = -story.getBoundingClientRect().top / (stage.offsetHeight || innerHeight);
+    setActive(Math.max(0, Math.min(count - 1, Math.round(progress))));
+    const line = innerHeight * 0.55;
+    let current = active;
+    tail.forEach((n, k) => { if (n.getBoundingClientRect().top < line) current = count + k; });
+    railButtons.forEach((b, k) => {
+      if (k === current) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current');
+    });
+  }
+  addEventListener('scroll', () => { if (!queued) { queued = true; requestAnimationFrame(onScroll); } }, { passive: true });
+  new ResizeObserver(fit).observe(stageInner);
+  document.fonts?.ready.then(fit);
+  const courtFit = new ResizeObserver(entries => entries.forEach(e => fitCourt(e.target)));
+  $$('.hop-court-scroll').forEach(box => courtFit.observe(box));
+  NARROW.addEventListener('change', () => { hidePops(); fit(); });
+  new ResizeObserver(() => linPlace(scenes[7])).observe($('.lin-graph', scenes[7]));
+
+  /* ---------- tiles loop only while they are on screen ---------- */
+  const tileRunners = new Map($$('.tile').map(t => [t, runner($('.mini', t), TILES[t.dataset.tile])]));
+  tileRunners.forEach((r, t) => resetEl($('.mini', t), TILES[t.dataset.tile]));
+  const seen = new IntersectionObserver(entries => {
+    entries.forEach(e => { const r = tileRunners.get(e.target); if (e.isIntersecting) r.start(); else r.stop(); });
+  }, { threshold: 0.35 });
+  tileRunners.forEach((r, t) => seen.observe(t));
+
+  $$('.ava[data-who]').forEach(n => face(n, n.dataset.who));
+  applyLang();
+  onScroll();
+  const deep = IDS.indexOf(location.hash.slice(1));
+  if (deep > 0) { scrollTo({ top: targetTop(deep) }); onScroll(); }
+  requestAnimationFrame(() => { device.classList.add('ready'); captions.classList.add('ready'); area.classList.add('ready'); });
+})();
+</script>
+
