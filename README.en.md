@@ -90,10 +90,9 @@ Generate images in chat, creative writing and the feed, with NovelAI and other p
 ## What's new in 0.7.10
 
 - **Housekeeper**: a small model handles chores — translating messages, turning image descriptions into English tags, naming stickers, summarizing saves — and you can add your own tasks
-- **Maid**: maps and weather (no API key needed), multiple-choice questions and plan confirmation, per-round history management, feed posts with images
-- **Image generation**: live preview while generating, reference images pinned to a chat (including NovelAI Precise Reference), new WaveSpeed provider
+- **Maid**: maps and weather, interactive choice and plan cards, per-round history management, feed posts with images
+- **Image generation**: live preview while generating, reference images pinned to a chat
 - **Context lineage graph**: more sources with key items highlighted; jump to settings, export, and trace paths
-- **Vertex**: save several Service Account JSON keys and switch between them
 
 Full notes: [0.7.10 release](https://github.com/dghiffjd7/OmniTavern/releases/tag/v0.7.10) (in Chinese).
 
