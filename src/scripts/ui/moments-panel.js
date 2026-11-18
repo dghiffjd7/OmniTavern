@@ -404,19 +404,34 @@ export class MomentsPanel {
       this.listEl.appendChild(card);
     });
 
-    if (moments.length > visibleN) {
-      const more = document.createElement('button');
-      more.type = 'button';
-      more.className = 'moment-load-more';
-      more.textContent = `展开更多`;
-      more.addEventListener('click', () => {
-        this.visibleCount = Math.min(moments.length, visibleN + this.pageSize);
-        this.render({ preserveScroll: true });
-      });
-      this.listEl.appendChild(more);
-    } else {
-      this.visibleCount = Math.min(visibleN, moments.length);
+    // 展开更多一次多一页；展开过就能收起回第一页
+    const canMore = moments.length > visibleN;
+    const canLess = Math.min(visibleN, moments.length) > this.pageSize;
+    if (canMore || canLess) {
+      const row = document.createElement('div');
+      row.className = 'moment-load-row';
+      const button = (className, onClick) => {
+        const el = document.createElement('button');
+        el.type = 'button';
+        el.className = className;
+        el.addEventListener('click', onClick);
+        return row.appendChild(el);
+      };
+      if (canMore) {
+        button('moment-load-more', () => {
+          this.visibleCount = Math.min(moments.length, visibleN + this.pageSize);
+          this.render({ preserveScroll: true });
+        }).textContent = '展开更多';
+      }
+      if (canLess) {
+        button('moment-load-more moment-load-less', () => {
+          this.visibleCount = this.pageSize;
+          this.render({ preserveScroll: true });
+        }).textContent = '收起';
+      }
+      this.listEl.appendChild(row);
     }
+    if (!canMore) this.visibleCount = Math.min(visibleN, moments.length);
     if (preserveScroll) this.listEl.scrollTop = prevScroll;
   }
 

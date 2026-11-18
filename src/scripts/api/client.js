@@ -22,6 +22,7 @@ import {
     PollinationsImageProvider,
     StabilityAIImageProvider,
     TogetherAIImageProvider,
+    WaveSpeedImageProvider,
 } from './providers/image-generation-providers.js';
 
 const PROVIDER_CLASSES = Object.freeze({
@@ -41,6 +42,7 @@ const PROVIDER_CLASSES = Object.freeze({
     stability: StabilityAIImageProvider,
     togetherai: TogetherAIImageProvider,
     pollinations: PollinationsImageProvider,
+    wavespeed: WaveSpeedImageProvider,
     automatic1111: Automatic1111ImageProvider,
     a1111: Automatic1111ImageProvider,
     comfyui: ComfyUIImageProvider,

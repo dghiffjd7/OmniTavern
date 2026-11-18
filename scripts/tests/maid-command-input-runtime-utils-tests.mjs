@@ -652,6 +652,76 @@ class FakeDocument {
 }
 
 {
+  // 点别处只是收起：再长按小球打开时，上一轮的回复与结果卡片仍在
+  const documentRef = new FakeDocument();
+  const outsideEl = new FakeElement('main');
+  documentRef.body.appendChild(outsideEl);
+  const card = { id: 'card-1', type: 'random', createdAt: 1, data: { mode: 'dice', sides: 6, rolls: [2, 5], total: 7 } };
+  const runtime = createMaidCommandInputRuntime({
+    documentRef,
+    getViewportSize: () => ({ w: 360, h: 640 }),
+    onSubmit: async () => ({ ok: true, message: '掷出了 7', cards: [card] }),
+    setTimeoutFn: () => 1,
+    clearTimeoutFn: () => {},
+  });
+  runtime.open({ autoFocus: false });
+  runtime.getElements().inputEl.value = '掷两个骰子';
+  await runtime.submit();
+  documentRef.dispatchEvent('pointerdown', { target: outsideEl });
+  assert.equal(runtime.isOpen(), false);
+  runtime.open({ autoFocus: false });
+  assert.deepEqual(runtime.getResultMessages().map(item => item.kind || item.tone), ['success', 'card']);
+  const { rootEl, resultEl } = runtime.getElements();
+  assert.equal(rootEl.classList.contains('has-result'), true);
+  assert.equal(resultEl.children.some(node => node.dataset.cardId === 'card-1'), true, '重开后结果卡片仍显示');
+  console.log('ok - maid command input keeps the latest reply and cards after an outside-pointer close');
+}
+
+{
+  // 模型请求失败：报错原文原样显示；短的直接显示，长的默认折叠、点开看全文
+  const findAll = (node, className, out = []) => {
+    if (String(node.className || '').split(/\s+/).includes(className)) out.push(node);
+    node.children.forEach(child => findAll(child, className, out));
+    return out;
+  };
+  const longDetail = `HTTP 400 ${'{"error":"bad"}'.repeat(30)}`;
+  const replies = [
+    { ok: false, status: 'interrupted', message: '没有完成', errorDetail: 'No candidates returned: PROHIBITED_CONTENT' },
+    { ok: false, status: 'interrupted', message: '又没有完成', errorDetail: longDetail },
+  ];
+  const documentRef = new FakeDocument();
+  const runtime = createMaidCommandInputRuntime({
+    documentRef,
+    getViewportSize: () => ({ w: 360, h: 640 }),
+    onSubmit: async () => replies.shift(),
+    setTimeoutFn: () => 1,
+    clearTimeoutFn: () => {},
+  });
+  runtime.open({ autoFocus: false });
+  runtime.getElements().inputEl.value = '继续';
+  await runtime.submit();
+  let { resultEl } = runtime.getElements();
+  let details = findAll(resultEl, 'mci-result-detail');
+  assert.equal(details.length, 1);
+  assert.equal(details[0].textContent, 'No candidates returned: PROHIBITED_CONTENT', '短报错直接原样显示');
+  assert.equal(findAll(resultEl, 'mci-result-detail-toggle').length, 0);
+
+  runtime.getElements().inputEl.value = '再继续';
+  await runtime.submit();
+  ({ resultEl } = runtime.getElements());
+  assert.equal(findAll(resultEl, 'mci-result-detail').length, 0, '长报错默认折叠');
+  const [toggle] = findAll(resultEl, 'mci-result-detail-toggle');
+  assert.equal(toggle.attributes['aria-expanded'], 'false');
+  toggle.dispatchEvent('click', { preventDefault() {}, stopPropagation() {} });
+  ({ resultEl } = runtime.getElements());
+  details = findAll(resultEl, 'mci-result-detail');
+  assert.equal(details.length, 1);
+  assert.equal(details[0].textContent, longDetail, '展开后是完整原文');
+  assert.equal(findAll(resultEl, 'mci-result-detail-toggle')[0].attributes['aria-expanded'], 'true');
+  console.log('ok - maid command input shows the raw model error, folding long ones');
+}
+
+{
   const documentRef = new FakeDocument();
   const settingsCalls = [];
   const runtime = createMaidCommandInputRuntime({
@@ -1037,4 +1107,101 @@ class FakeDocument {
   runtime.close();
   assert.equal(menuEl.classList.contains('is-open'), false, '关闭输入条时一并收起菜单');
   console.log('ok - maid command input folds image/skills/selection into the plus menu');
+}
+
+{
+  // 前几轮：有本轮结果时顶部可往上翻；不含本轮自己的回合；每次多翻 3 项，位置不跳；可收起；新一轮重新起算
+  // 按钮只放图标，说明放在 aria-label / title
+  class InsertableElement extends FakeElement {
+    insertBefore(child, ref) {
+      child.remove?.();
+      child.parentNode = this;
+      const index = this.children.indexOf(ref);
+      if (index < 0) this.children.push(child);
+      else this.children.splice(index, 0, child);
+      return child;
+    }
+  }
+  class InsertableDocument extends FakeDocument {
+    createElement(tagName) { return new InsertableElement(tagName); }
+  }
+  const T = Date.now();
+  let now = T;
+  const dice = id => ({ id, type: 'random', createdAt: 1, data: { mode: 'dice', sides: 6, rolls: [2, 5], total: 7 } });
+  const turns = [1, 2, 3, 4, 5].map(i => ({ id: `old-${i}`, at: T - (6 - i) * 1000, input: `问题 ${i}`, message: `回答 ${i}`, status: 'succeeded', cards: i === 5 ? [dice('old-card')] : [] }));
+  let historyReads = 0;
+  const cardActions = [];
+  const runtime = createMaidCommandInputRuntime({
+    documentRef: new InsertableDocument(),
+    getViewportSize: () => ({ w: 1280, h: 800 }),
+    onSubmit: async (text) => {
+      // 本轮完成时历史里多了本轮自己这一回合（时间晚于本轮开始）
+      turns.push({ id: `cur-${turns.length}`, at: now + 500, input: text, message: `done ${text}`, status: 'succeeded' });
+      return { ok: true, message: `done ${text}` };
+    },
+    onResultCardAction: async (payload) => {
+      cardActions.push(payload);
+      return { card: { ...payload.card, id: 'reroll-card' } };
+    },
+    listHistoryTurns: () => { historyReads += 1; return turns.map(turn => ({ ...turn })); },
+    nowFn: () => now,
+    setTimeoutFn: () => 1,
+    clearTimeoutFn: () => {},
+  });
+  runtime.open({ autoFocus: false });
+  runtime.getElements().inputEl.value = '第一件事';
+  await runtime.submit();
+  let { resultEl } = runtime.getElements();
+  const walk = function* (node) { yield node; for (const child of node.children) yield* walk(child); };
+  const earlier = () => resultEl.children[0];
+  const nodes = cls => [...walk(earlier())].filter(node => node.className.split(' ').includes(cls));
+  const texts = cls => nodes(cls).map(node => node.textContent);
+  const labels = cls => nodes(cls).map(node => node.attributes['aria-label']);
+  const press = cls => nodes(cls)[0].dispatchEvent('click', { stopPropagation() {} });
+  assert.equal(earlier().dataset.mciEarlier, '1', 'the earlier block sits at the top of the current round');
+  assert.deepEqual(labels('mci-earlier-more'), ['查看前几轮']);
+  assert.equal(nodes('mci-earlier-more')[0].attributes.title, '查看前几轮');
+  assert.match(nodes('mci-earlier-more')[0].innerHTML, /<svg/);
+  assert.equal(nodes('mci-earlier-more')[0].textContent, '', 'icon only, no text label');
+  assert.deepEqual(labels('mci-earlier-fold'), [], 'nothing to fold yet');
+  assert.deepEqual(texts('mh-user'), [], 'nothing is expanded until asked');
+  resultEl.scrollTop = 40;
+  resultEl.scrollHeight = 100;
+  press('mci-earlier-more');
+  assert.deepEqual(texts('mh-user'), ['问题 3', '问题 4', '问题 5'], 'the three latest earlier rounds, oldest on top');
+  assert.deepEqual(labels('mci-earlier-more'), ['再往前翻']);
+  assert.deepEqual(labels('mci-earlier-fold'), ['收起前几轮'], 'expanded rounds can be folded back');
+  assert.deepEqual(texts('mci-earlier-sep'), ['本轮']);
+  press('mci-earlier-more');
+  assert.deepEqual(texts('mh-user'), ['问题 1', '问题 2', '问题 3', '问题 4', '问题 5']);
+  assert.deepEqual(labels('mci-earlier-more'), [], 'no more button once everything is shown');
+  assert.deepEqual(labels('mci-earlier-fold'), ['收起前几轮'], 'the fold button stays once everything is shown');
+  assert.equal(texts('mh-user').includes('第一件事'), false, 'the current round is not listed as earlier');
+  press('mci-earlier-fold');
+  assert.deepEqual(texts('mh-user'), [], 'folding hides every earlier round');
+  assert.deepEqual(texts('mci-earlier-sep'), []);
+  assert.deepEqual(labels('mci-earlier-more'), ['查看前几轮'], 'back to the starting state');
+  assert.deepEqual(labels('mci-earlier-fold'), []);
+  press('mci-earlier-more');
+  press('mci-earlier-more');
+  assert.equal(historyReads, 1, 'history is read once per round');
+
+  // 前几轮里的「再来一次」：新卡排进本轮末尾，历史不改
+  const reroll = [...walk(earlier())].find(node => node.className === 'mrcard-action');
+  reroll.dispatchEvent('click', { preventDefault() {}, stopPropagation() {} });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.deepEqual(cardActions.map(item => item.card.id), ['old-card']);
+  assert.equal(resultEl.children.at(-1).dataset.cardId, 'reroll-card');
+  assert.equal(earlier().dataset.mciEarlier, '1', 'the earlier block stays on top after new items');
+
+  // 下一轮：重新起算，上一轮成了「前几轮」里最新的一项
+  now = T + 10000;
+  runtime.getElements().inputEl.value = '第二件事';
+  await runtime.submit();
+  ({ resultEl } = runtime.getElements()); // 新一轮清空后重建了结果区
+  assert.deepEqual(labels('mci-earlier-more'), ['查看前几轮']);
+  press('mci-earlier-more');
+  assert.deepEqual(texts('mh-user'), ['问题 4', '问题 5', '第一件事']);
+  assert.equal(historyReads, 2);
+  console.log('ok - maid command input pages back through earlier rounds above the current one and folds them again');
 }

@@ -1036,6 +1036,12 @@ body[data-ui-mode='rp'] .rp-toolbar {
   content: '》';
 }
 
+/* 书名号只用于中文界面 */
+:root:not(:lang(zh)) .rp-greeting-trigger-name::before,
+:root:not(:lang(zh)) .rp-greeting-trigger-name::after {
+  content: none;
+}
+
 .rp-greeting-trigger-count {
   flex: 0 0 auto;
   color: #d6d3d1;

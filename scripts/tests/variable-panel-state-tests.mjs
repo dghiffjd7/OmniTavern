@@ -9,9 +9,13 @@ import {
   getVariableRenderSlice,
   inferVariableValueType,
   isVariableValueFilled,
+  readVariablePathValue,
+  removeVariablePathValue,
   resolveNextEnumValue,
   resolveVariablePanelScope,
+  resolveVariablePath,
   variableTreeNodeMatches,
+  writeVariablePathValue,
 } from '../../src/scripts/ui/variable-panel-state-utils.js';
 
 {
@@ -117,11 +121,65 @@ import {
       total: 215,
       hasMore: true,
       nextLimit: 160,
+      canCollapse: false,
     },
   );
+  assert.equal(getVariableRenderSlice({ rows, limit: 160 }).canCollapse, true, 'loaded past the first batch can fold back');
   assert.equal(getVariableRenderSlice({ rows, limit: 240 }).hasMore, false);
+  assert.equal(getVariableRenderSlice({ rows, limit: 240 }).canCollapse, true);
+  assert.equal(getVariableRenderSlice({ rows: rows.slice(0, 50), limit: 160 }).canCollapse, false, 'a short list never shows the fold button');
   assert.equal(resolveNextEnumValue('熟悉', ['陌生', '熟悉', '朋友']), '朋友');
   assert.equal(resolveNextEnumValue('朋友', ['陌生', '熟悉', '朋友']), '陌生');
   assert.equal(resolveNextEnumValue('', []), '');
   console.log('ok - variable panel state caps large lists and cycles enum values');
+}
+
+{
+  const vars = {
+    hp: 1,
+    stat_data: { 角色: { 好感度: 3 }, 背包: [{ name: '木剑' }, { name: '盾' }] },
+    'player.stats': { mp: 8 },
+    cfg: { 'a.b': { c: 1 } },
+  };
+  assert.deepEqual(resolveVariablePath(vars, 'hp'), { rootKey: 'hp', segments: [] });
+  assert.deepEqual(resolveVariablePath(vars, ' stat_data.角色.好感度 '), {
+    rootKey: 'stat_data',
+    segments: ['角色', '好感度'],
+  });
+  assert.deepEqual(resolveVariablePath(vars, 'stat_data.背包[1].name'), {
+    rootKey: 'stat_data',
+    segments: ['背包', 1, 'name'],
+  });
+  assert.deepEqual(resolveVariablePath(vars, 'player.stats.mp'), { rootKey: 'player.stats', segments: ['mp'] });
+  assert.deepEqual(resolveVariablePath(vars, 'cfg.a.b.c'), { rootKey: 'cfg', segments: ['a.b', 'c'] });
+  assert.equal(resolveVariablePath(vars, 'stat_data.角色.不存在'), null);
+  assert.equal(resolveVariablePath(vars, 'stat_data.背包[5]'), null);
+  assert.equal(resolveVariablePath(vars, 'nope'), null);
+  assert.equal(resolveVariablePath(vars, ''), null);
+  assert.deepEqual(
+    resolveVariablePath({ ...vars, 'stat_data.角色.好感度': 99 }, 'stat_data.角色.好感度'),
+    { rootKey: 'stat_data.角色.好感度', segments: [] },
+  );
+  assert.equal(readVariablePathValue(vars, { rootKey: 'stat_data', segments: ['背包', 0, 'name'] }), '木剑');
+  assert.equal(readVariablePathValue(vars, { rootKey: 'hp', segments: [] }), 1);
+  console.log('ok - variable panel state resolves tree paths back to top-level variables');
+}
+
+{
+  const root = { 角色: { 好感度: 3 }, 背包: ['木剑', '盾'] };
+  const written = writeVariablePathValue(root, ['角色', '好感度'], 99);
+  assert.deepEqual(written, { 角色: { 好感度: 99 }, 背包: ['木剑', '盾'] });
+  assert.equal(root.角色.好感度, 3, 'source value stays untouched');
+  const removedKey = removeVariablePathValue(root, ['角色', '好感度']);
+  assert.deepEqual(removedKey, { 角色: {}, 背包: ['木剑', '盾'] });
+  const removedItem = removeVariablePathValue(root, ['背包', 0]);
+  assert.deepEqual(removedItem, { 角色: { 好感度: 3 }, 背包: ['盾'] });
+  assert.deepEqual(
+    writeVariablePathValue(removedItem, ['背包', 0], '木剑', { insert: true }),
+    root,
+    'undo re-inserts a removed array item at its index',
+  );
+  assert.deepEqual(writeVariablePathValue(removedKey, ['角色', '好感度'], 3), root);
+  assert.equal(root.背包.length, 2);
+  console.log('ok - variable panel state writes and removes nested values without mutating the source');
 }

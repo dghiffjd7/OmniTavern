@@ -139,11 +139,12 @@ import { MaidSkillStore } from '../storage/maid-skill-store.js';
 import { createMaidSkillRuntime, createMaidSkillTaskValidator } from './maid-skill-runtime.js';
 import { createMaidSkillPanel } from './maid-skill-panel.js';
 import { createMaidHistoryPanel } from './maid-history-panel.js';
+import { createMaidHistoryRoundActions } from './maid-history-round-actions.js';
 import { createMaidSkillInput } from './maid-skill-ui.js';
 import { appSettings } from '../storage/app-settings.js';
 import { bootstrapAppLanguage } from '../i18n/app-language-bootstrap.js';
 import { requestAppLanguageRestart } from '../i18n/app-language-restart.js';
-import { getCurrentLocale, t, translateUiText } from '../i18n/index.js';
+import { getCurrentLocale, localeColon, t, translateUiText } from '../i18n/index.js';
 import { getLocalizedPromptText } from '../i18n/prompt-locale.js';
 import { chatFcLocalCapabilityStore } from '../storage/chat-fc-local-capability-store.js';
 import { chatStructuredRouteEvidenceStore } from '../storage/chat-structured-route-evidence-store.js';
@@ -403,6 +404,8 @@ import { createCreativeScrubberRuntime } from './chat/creative-scrubber-runtime.
 import { createCreativeThreadOutline } from './chat/creative-thread-outline.js';
 import { createCreativeHistoryWindow } from './chat/creative-history-window.js';
 import { flushLazyRichMounts } from './chat/rich-text-renderer.js';
+import { IMAGE_PREVIEW_JOB_TOKEN, imageGenerationPreviews } from './chat/image-generation-preview.js';
+import { createChatImageReferencePins, mergeChatReferenceImages } from './chat/chat-image-reference-pins.js';
 import { extractRenderedAgentBodyText } from './chat/agent-rendered-body.js';
 import { createDisposableStructuredPreviewRuntime } from './chat/structured-response-preview-runtime.js';
 import {
@@ -583,6 +586,16 @@ import { downloadJsonFile, pickJsonFileText } from '../utils/regex-transfer.js';
 import { createScopedAgentFeatures } from '../agent/scoped-agent-features.js';
 import { createAgentToolsAppRuntime } from './agent-tools-app-runtime.js';
 import { createUtilityAgentRuntime } from '../agent/utility-agent-runtime.js';
+import { STEWARD_CONFIG_ID, normalizeStewardCustomTasks } from '../agent/steward-tasks.js';
+import { buildImageTagsPayload, parseImageTags } from '../agent/steward-text-tasks.js';
+import { selectStickersForKeywords, stickerImageSource } from '../agent/steward-sticker-tasks.js';
+import {
+  createStewardMessageTranslation,
+  createStewardStickerNaming,
+  createStewardToolbox,
+  isStewardToolId,
+  stewardCustomToolId,
+} from './chat/steward-app-runtime.js';
 import { createCustomAgentRequestRuntime } from '../agent/custom-agent-request-runtime.js';
 import { createBubbleSelectionEditRuntime, canEditBubbleText } from './chat/bubble-selection-edit-runtime.js';
 import { bindBubbleTextSelection } from './chat/bubble-text-selection.js';
@@ -593,8 +606,9 @@ import { createAgentReferenceAppRuntime } from './chat/agent-reference-app-runti
 import { createCustomAgentAppRuntime } from './chat/custom-agent-app-runtime.js';
 import { createAgentModelRequest } from '../agent/agent-model-request.js';
 import { createFormatGuideAssistRuntime } from './chat/format-guide-assist-runtime.js';
-import { registerMaidCapabilityAgentTools, listMaidBuiltinCapabilityStates, rerollMaidRandomCard } from '../agent/tools/maid-capability-tools.js';
-import { collectMaidResultCards } from '../agent/maid-result-cards.js';
+import { registerMaidCapabilityAgentTools, listMaidBuiltinCapabilityStates, rerollMaidRandomCard, openMaidMapCard } from '../agent/tools/maid-capability-tools.js';
+import { createMaidWeatherService } from '../agent/maid-weather.js';
+import { collectMaidResultCardsFromResult, formatMaidChoiceAnswer } from '../agent/maid-result-cards.js';
 import { createChatImageJobRuntime } from './chat/chat-image-job-runtime.js';
 import { createInputSuggestionRequest } from './chat/input-suggestion-runtime.js';
 import { createExecutionFlowRuntime } from './chat/execution-flow-runtime-utils.js';
@@ -931,10 +945,11 @@ import { GroupPanel } from './group-panel.js';
 import { MediaPicker } from './media-picker.js';
 import { MemoryTemplatePanel } from './memory-template-panel.js';
 import { createMemoryOverviewRuntime, revealWhenShown } from './memory-overview-runtime.js';
+import { resolveMemoryAutoExtractMode } from './memory-storage-mode-utils.js';
 import { createPromptStewardRuntime } from './prompt-steward-runtime.js';
 import { createAgentDirectoryPanel } from './agent-directory-panel.js';
 import { createMcpServerPanel } from './mcp-server-panel.js';
-import { BUILTIN_TOOL_ACTIONS, getBuiltinToolAction, agentToolAction, userToolIconMarkup, SCRIPT_TOOL_ACTION, pluginToolAction, TOOL_SCRIPT_CAPABILITIES } from './tools/user-tool-actions.js';
+import { BUILTIN_TOOL_ACTIONS, getBuiltinToolAction, agentToolAction, userToolIconMarkup, SCRIPT_TOOL_ACTION, pluginToolAction, stewardToolAction, TOOL_SCRIPT_CAPABILITIES } from './tools/user-tool-actions.js';
 import { createToolResultEffects, createScriptToolExecutor } from './tools/user-tool-script.js';
 import { createUserToolRunner, bindUserToolShortcuts } from './tools/user-tool-runner.js';
 import { bindUserToolGestures } from './tools/user-tool-gestures.js';
@@ -1020,6 +1035,8 @@ import { themeManager } from './theme-manager.js';
 import { resolveRpDialogueTextColor } from './theme-dialogue-color-utils.js';
 import { getDefaultAppIcon } from '../utils/default-icon.js';
 import { initHelpTooltips } from './help-tooltip.js';
+import { computeChatWallpaperTransform, observeChatWallpaperContainer } from './chat/chat-wallpaper-fit-utils.js';
+import { saveMaidMomentImages, generateMaidMomentImage, createMaidKeptMomentImages, buildKeptMomentAlbumAssets } from './chat/maid-moment-image-assets.js';
 
 let appRuntimeReady = false;
 
@@ -1107,18 +1124,16 @@ const initApp = async () => {
   };
   const isSummaryMemoryEnabled = (place = 'chat') => getMemoryStorageMode(place) === 'summary';
   let syncMomentsMemoryMenuItem = () => {};
-  const getMemoryAutoExtractMode = () => {
-    const mode = String(appSettings.get().memoryAutoExtractMode || 'inline').toLowerCase();
-    return mode === 'separate' ? 'separate' : 'inline';
-  };
+  // 写表方式按场景各存一份（写作单独一份，聊天与动态共用）
+  const getMemoryAutoExtractMode = (place = 'chat') => resolveMemoryAutoExtractMode(appSettings.get(), place);
   const isMemoryAutoExtractEnabled = (place = 'chat') => {
     const settings = appSettings.get();
     return getMemoryStorageMode(place) === 'table' && settings.memoryAutoExtract === true;
   };
   const isMemoryAutoExtractInline = (place = 'chat') =>
-    isMemoryAutoExtractEnabled(place) && getMemoryAutoExtractMode() === 'inline';
+    isMemoryAutoExtractEnabled(place) && getMemoryAutoExtractMode(place) === 'inline';
   const isMemoryAutoExtractSeparate = (place = 'chat') =>
-    isMemoryAutoExtractEnabled(place) && getMemoryAutoExtractMode() === 'separate';
+    isMemoryAutoExtractEnabled(place) && getMemoryAutoExtractMode(place) === 'separate';
   const getMemoryRuntimeConfig = () => {
     const settings = appSettings.get();
     let openaiPreset = resolveOpenAIPresetForMemory?.() || {};
@@ -1273,7 +1288,7 @@ const initApp = async () => {
   let imageConfigNeedsReload = false;
   let imagePromptModelHintCache = '';
   const memoryUpdateConfigManager = new ConfigManager();
-  const generalSettingsPanel = new GeneralSettingsPanel();
+  const generalSettingsPanel = new GeneralSettingsPanel({ getMemoryPlace: () => (uiMode === 'rp' ? 'writing' : 'chat') });
   const presetStore = getPresetStore(window.appBridge);
   registerPresetStoreBridgeContract(window.appBridge, {
     getPresetStore: window.appBridge.getPresetStore?.bind(window.appBridge),
@@ -4029,7 +4044,10 @@ const initApp = async () => {
       options: mergeImageGenerationRequestOptions({ config, preset }),
     });
   };
+  // 发附图动态用：与头像／壁纸工具共用的附件池取图函数（注册时由媒体工具提供）
+  let maidMomentImageResolver = null;
   registerMaidMediaAssetTools(agentToolRegistry, {
+    onImageResolverReady: (api) => { maidMomentImageResolver = api; },
     attachmentPersistence: createMaidMediaAttachmentPersistence({
       getReferenceStore: () => imageGenerationReferenceStore,
       listRuns: () => agentRunStore.listRuns({ kind: 'maid_assistant', limit: 0 }), logger,
@@ -4236,7 +4254,11 @@ const initApp = async () => {
     semanticMemoryStore: maidSemanticMemoryStore,
   });
   // 内置能力：开关在女仆设置 → 技能，女仆只能请求开启（用户确认），能力工具执行前再读最新开关
-  registerMaidCapabilityAgentTools(agentToolRegistry, { getSettingsStore: () => maidSettingsStore });
+  // 天气走 Rust 的公网请求（只允许公网地址、限制回应大小），与联网搜索相同
+  const maidWeatherService = createMaidWeatherService({ httpRequest: payload => safeInvoke('public_http_request', payload) });
+  registerMaidCapabilityAgentTools(agentToolRegistry, {
+    getSettingsStore: () => maidSettingsStore, getLocale: getCurrentLocale, getWeatherService: () => maidWeatherService,
+  });
   const maidConversationStore = new MaidConversationStore({
     semanticMemoryStore: maidSemanticMemoryStore,
   });
@@ -4284,9 +4306,54 @@ const initApp = async () => {
     if (!tokenCount) return;
     void maidConversationStore.recordContextInjection(tokenCount);
   };
-  // 结果卡「再来一次」（文字回复区与通话托盘共用）：和工具一样在执行前读最新开关
-  const handleMaidResultCardAction = ({ action, card } = {}) => (action === 'reroll' && card?.type === 'random'
-    ? rerollMaidRandomCard(card, { settingsStore: maidSettingsStore }) : null);
+  // 结果卡「再来一次」「打开地图」（文字回复区、通话托盘与历史共用）：和工具一样在执行前读最新开关
+  // 女仆历史按轮管理（ROADMAP 29-③）：历史面板与输入条「前几轮」共用；重新回答先关掉设定面板，再用同样的话问一次
+  const maidHistoryRoundActions = createMaidHistoryRoundActions({
+    store: maidConversationStore,
+    isBusy: () => Boolean(maidCommandInputRuntime?.isSubmitting?.()),
+    regenerate: async (input) => {
+      try { maidSettingsPanel?.hide?.(); } catch {}
+      void maidCommandInputRuntime?.submitTask?.(input);
+    },
+  });
+  const handleMaidResultCardAction = async ({ action, card, picks } = {}) => {
+    if (action === 'reroll' && card?.type === 'random') return rerollMaidRandomCard(card, { settingsStore: maidSettingsStore });
+    // 选项提问卡：回答作为用户的下一句话送回女仆；通话中送进这通电话（与通话里打字交办同一条路）
+    if (action === 'answer' && card?.type === 'choice') {
+      const answer = formatMaidChoiceAnswer(card, picks);
+      if (!answer) return null;
+      const voice = maidVoiceRuntime?.getState?.() || {};
+      if (voice.call && voice.call !== 'idle') await maidVoiceRuntime.submitText(answer, []);
+      // 输入条：作为新一轮提交（不等这一轮做完，按钮不必一直锁着）
+      else void maidCommandInputRuntime?.submitTask?.(answer);
+      return { answered: true };
+    }
+    // 计划卡（ROADMAP 29-⑨）：「开始做」「不做了」作为用户的下一句送回；开始做时把计划里写明的写入工具带给这一轮，
+    // 本轮这些工具不再逐个确认（通话里交办走通话自己的确认，不带）。「我想改一下」只打开输入条、预填一句交给用户写
+    if (card?.type === 'plan' && ['start', 'revise', 'drop'].includes(action)) {
+      const title = String(card.data?.title || '').trim();
+      const voice = maidVoiceRuntime?.getState?.() || {};
+      const inCall = Boolean(voice.call && voice.call !== 'idle');
+      if (action === 'revise') {
+        maidCommandInputRuntime?.open?.({ initialText: t('计划「{title}」我想改一下：', { title }) });
+        return null;
+      }
+      const text = action === 'start' ? t('开始做「{title}」', { title }) : t('「{title}」先不做了', { title });
+      if (inCall) await maidVoiceRuntime.submitText(text, []);
+      else void maidCommandInputRuntime?.submitTask?.(text, action === 'start'
+        ? { approvedPlan: { cardId: card.id, title, tools: Array.isArray(card.data?.tools) ? card.data.tools.slice() : [] } }
+        : {});
+      return { answered: true };
+    }
+    if (action !== 'open' || card?.type !== 'map') return null;
+    const outcome = await openMaidMapCard(card, {
+      settingsStore: maidSettingsStore,
+      openUrl: url => safeInvoke('open_external_url', { url }).then(() => true, () => false),
+    });
+    // 历史与通话托盘不显示返回的提示，失败统一用 toast
+    if (!outcome.ok && outcome.message) window.toastr?.warning?.(outcome.message);
+    return null;
+  };
   const recordMaidTurnFromResult = async ({
     input = '',
     result = null,
@@ -4299,7 +4366,7 @@ const initApp = async () => {
         status: safeResult.status || (safeResult.ok ? 'succeeded' : 'failed'),
         responseType: safeResult.responseType || '',
         resultBasis: buildMaidResultBasis(safeResult),
-        cards: collectMaidResultCards(safeResult.steps),
+        cards: collectMaidResultCardsFromResult(safeResult),
         message: safeResult.message || safeResult.reason || '',
         toolName: safeResult.plan?.toolName || safeResult.output?.toolName || '',
         featureId: safeResult.plan?.featureId || '',
@@ -4595,6 +4662,7 @@ const initApp = async () => {
   });
   const agentCenterPanel = new AgentCenterPanel({
     getHopscotchPanel: () => hopscotchBoardPanel,
+    getMemoryPlace: () => (uiMode === 'rp' ? 'writing' : 'chat'),
     presetServices: agentPresetServices,
     resolveSessionLabel: resolveSessionDisplayLabel,
     promptSteward: promptStewardController,
@@ -5545,13 +5613,25 @@ const initApp = async () => {
     recordLifecycleEvent: recordMomentLifecycleTraceEvent,
   });
 
+  const maidKeptMomentImages = createMaidKeptMomentImages({
+    loadKv: name => safeInvoke('load_kv', { name }),
+    saveKv: (name, data) => safeInvoke('save_kv', { name, data }),
+    canReadFile: async (asset) => {
+      const sessionId = getMomentImageAttachmentSessionId();
+      const [image] = await imageGenerationReferenceStore.load([{ path: asset.output.path, sessionId }], sessionId);
+      return String(image?.dataUrl || '').startsWith('data:image/');
+    },
+    logger,
+  });
+
   // 女仆工具：以用户身份发布动态（复用手动发布同款链路：normalize → persist → 可选发布后评论）
   registerMomentsAgentTools(agentToolRegistry, {
-    publishMoment: async ({ content = '', generateComments = true } = {}) => {
+    publishMoment: async ({ content = '', generateComments = true, assets = [] } = {}) => {
       const text = String(content || '').trim();
       if (!text) return { ok: false, reason: 'moments_publish_empty', message: '动态正文为空。' };
       const user = getActiveUserProfile();
       const timestamp = Date.now();
+      const momentAssets = Array.isArray(assets) ? assets : [];
       const mentions = buildMomentStructuredMentions({
         text,
         selectedMentions: [],
@@ -5562,7 +5642,7 @@ const initApp = async () => {
         author: getActiveUserName(),
         authorAvatar: getActiveUserAvatar(),
         originSessionId: String(user?.id || '').trim(),
-        content: text,
+        content: buildMomentContentWithGeneratedImages(text, momentAssets),
         mentions,
         time: formatNowTime(),
         timestamp,
@@ -5575,7 +5655,7 @@ const initApp = async () => {
       const persisted = persistComposedMomentRecord({
         momentsStore,
         record,
-        assets: [],
+        assets: momentAssets,
         normalizeGeneratedImageAsset: normalizeMomentGeneratedImageAsset,
       });
       const momentId = String(persisted?.momentId || '').trim();
@@ -5586,6 +5666,7 @@ const initApp = async () => {
           message: '动态发布失败：未能建立动态记录。',
         };
       }
+      void maidKeptMomentImages.remove({ ids: momentAssets.map(asset => asset.id) });
       momentsPanel?.render?.({ preserveScroll: true });
       if (generateComments) {
         void momentCommentRuntime(momentId, '', {
@@ -5609,6 +5690,27 @@ const initApp = async () => {
       }
       return { ok: true, momentId, commentsRequested: generateComments === true };
     },
+    resolveImage: args => maidMomentImageResolver?.resolveImageForMoment?.(args),
+    // 女仆取来的图片存成动态附件，走动态页手动发图的同一条保存路径
+    saveMomentImages: ({ images = [] } = {}) => saveMaidMomentImages({
+      images,
+      saveAttachment: ({ sessionId, dataUrl, fileName }) => safeInvoke('save_attachment', { sessionId, dataUrl, fileName }),
+      sessionId: getMomentImageAttachmentSessionId(),
+      idPrefix: `maid-moment-${Date.now()}`,
+    }),
+    keepMomentImages: args => maidKeptMomentImages.keep(args),
+    loadKeptMomentImage: args => maidKeptMomentImages.load(args),
+    generateMomentImage: async ({ prompt = '', signal = null } = {}) => generateMaidMomentImage({
+      prompt,
+      signal,
+      loadConfig: () => loadImageRuntimeConfig({ includeDraft: true }),
+      canUseConfig: config => canInitClient(config),
+      loadPreset: async () => { await imageGenerationParamsStore.ready; return imageGenerationParamsStore.getActive(); },
+      mergeOptions: ({ config, preset }) => mergeImageGenerationRequestOptions({ config, preset }),
+      generateImage: request => mediaGenerationService.generateImage(request),
+      sessionId: getMomentImageAttachmentSessionId(),
+      scope: { surface: 'moments', targetId: String(momentsStore.scopeId || 'default').trim() || 'default' },
+    }),
   });
 
   const momentSummaryPanel = new MomentSummaryPanel({
@@ -8101,6 +8203,7 @@ const initApp = async () => {
     }))?.dataUrl,
     listReferences: sessionId => collectStoredImageReferences({
       messages: chatStore.getMessages(sessionId) || [],
+      pinned: chatStore.state?.sessions?.[sessionId]?.pinnedImageReferences || [],
       assets: [
         ...(chatStore.state?.sessions?.[sessionId]?.generatedImageAlbum || []),
         ...(momentsStore.list?.() || []).flatMap(moment => moment.generatedImages || []),
@@ -8108,6 +8211,17 @@ const initApp = async () => {
     }),
     logger,
   });
+  // 聊天参考图（固定在聊天上，例如角色三视图）：这个聊天之后的生图（手动与自动配图）都带上
+  const chatImageReferencePins = createChatImageReferencePins({
+    getSession: sessionId => chatStore.state?.sessions?.[sessionId] || null,
+    saveSessions: () => chatStore._persist?.(),
+    referenceStore: imageGenerationReferenceStore,
+    logger,
+  });
+  const loadChatPinnedReferences = async (sessionId, capability = {}) => {
+    if (!capability?.supported || !(Number(capability.max) > 0)) return [];
+    return (await chatImageReferencePins.load(sessionId, { max: Number(capability.max) })).items;
+  };
   const mediaGenerationService = createMediaGenerationService({
     referenceStore: imageGenerationReferenceStore,
     preparePromptRequest: request => imagePromptRuntime.prepare(request),
@@ -8218,6 +8332,9 @@ const initApp = async () => {
       if (Number.isFinite(Number(extra.index))) payload.index = Number(extra.index);
       const pendingToken = String(extra.pendingToken || '').trim();
       if (pendingToken) payload.pendingToken = pendingToken;
+      // 失败时留下的最后一张中间图（未完成），显示在失败提示旁
+      const partialPath = String(extra.partialImage?.path || '').trim();
+      if (partialPath) payload.partial = { path: partialPath, step: Number(extra.partialImage.step) || 0, total: Number(extra.partialImage.total) || 0 };
     }
     return `[img-error-${encodeURIComponent(JSON.stringify(payload))}]`;
   };
@@ -8492,10 +8609,11 @@ const initApp = async () => {
     });
   };
 
-  const loadImageReferenceCapability = async () => {
+  const loadImageReferenceCapability = async (overrides = {}) => {
     try {
       const config = await loadImageRuntimeConfig({ includeDraft: true });
-      return resolveImageReferenceCapability(config || {});
+      await imageGenerationParamsStore.ready;
+      return resolveImageReferenceCapability(config || {}, { ...getParamsForImageConfig(imageGenerationParamsStore.getActive(), config || {}), ...overrides });
     } catch {
       return resolveImageReferenceCapability({});
     }
@@ -8527,6 +8645,12 @@ const initApp = async () => {
   const readImageGenerationReferenceFiles = createImageGenerationReferenceReader({
     readFileAsDataUrl, isGifFile, compressImageDataUrl,
   });
+
+  // 小管家贴图起名：小管家运行时在后面才建立，先放空实现，建立后替换
+  let isStewardStickerNamingReady = () => false;
+  let runStewardStickerNaming = async () => false;
+  // 小管家存档概述：离开聊天室时通知（同样等运行时建立后替换）
+  let noteStewardSessionLeft = () => {};
 
   const ensureStickerKeywords = pack => {
     const next = { ...pack };
@@ -8764,13 +8888,17 @@ const initApp = async () => {
       warnings.forEach(msg => window.toastr?.warning?.(msg));
     }
     let nextPack = { ...pack, stickers };
-    if (nextPack.aiEnabled) {
+    // AI 可用的贴图包要有关键词：小管家可用时不再逐张询问，加完后在后台补上（可一键还原）
+    const autoName = nextPack.aiEnabled && isStewardStickerNamingReady();
+    if (nextPack.aiEnabled && !autoName) {
       const ensured = ensureStickerKeywords(nextPack);
       nextPack = ensured.ok ? ensured.pack : nextPack;
     }
     const nextState = stickerPackStore.updatePack(packId, nextPack);
     syncStickerPackState(nextState);
     renderStickerPanel();
+    const addedIds = stickers.slice(existingPackCount).map(sticker => sticker.id).filter(Boolean);
+    if (autoName && addedIds.length) void runStewardStickerNaming(packId, { stickerIds: addedIds });
   };
 
   const updateStickerPackIcon = async packId => {
@@ -9187,6 +9315,13 @@ const initApp = async () => {
     const show = Boolean(packId);
     stickerPanel.generateBtn.classList.toggle('is-hidden', !show);
   };
+  // 「起名」：当前是有贴图的自建包、且小管家的贴图起名可用时才出现
+  const updateStickerStewardUI = () => {
+    if (!stickerPanel?.stewardNameBtn) return;
+    const packId = getStickerPackIdFromTab(stickerPanelTab);
+    const pack = packId ? getStickerPackById(packId) : null;
+    stickerPanel.stewardNameBtn.classList.toggle('is-hidden', !(pack?.stickers?.length && isStewardStickerNamingReady()));
+  };
   const handleStickerToggle = () => {
     const packId = getStickerPackIdFromTab(stickerPanelTab);
     if (stickerPanelTab === 'recent') return;
@@ -9226,6 +9361,7 @@ const initApp = async () => {
     updateStickerToggleUI();
     updateStickerDeleteUI();
     updateStickerGenerateUI();
+    updateStickerStewardUI();
     const grid = stickerPanel.grid;
     grid.classList.remove('sticker-pages');
     grid.style.transition = 'none';
@@ -11230,6 +11366,10 @@ const initApp = async () => {
             <span class="sticker-ai-generate-icon">✨</span>
             <span>生成</span>
           </button>
+          <button type="button" class="sticker-steward-name is-hidden" aria-label="小管家起名" title="让小管家给没有关键词的贴图起名">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12V4a1 1 0 0 1 1-1h8l9 9-9 9-9-9Z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg>
+            <span>起名</span>
+          </button>
           <button type="button" class="sticker-pack-delete" aria-label="删除贴图包" title="删除贴图包">×</button>
         </div>
       </div>
@@ -11270,6 +11410,7 @@ const initApp = async () => {
       tabWrap: panel.querySelector('.sticker-tabs'),
       toggle: panel.querySelector('.sticker-ai-toggle'),
       generateBtn: panel.querySelector('.sticker-ai-generate'),
+      stewardNameBtn: panel.querySelector('.sticker-steward-name'),
       deleteBtn: panel.querySelector('.sticker-pack-delete'),
     };
   })();
@@ -15445,6 +15586,28 @@ const initApp = async () => {
       ensureStickerAiModal().show({ packId });
     });
   }
+  if (stickerPanel?.stewardNameBtn) {
+    stickerPanel.stewardNameBtn.addEventListener('click', async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const packId = getStickerPackIdFromTab(stickerPanelTab);
+      const pack = packId ? getStickerPackById(packId) : null;
+      if (!pack || stickerPanel.stewardNameBtn.disabled) return;
+      // 默认只补没有关键词的；都有了才问要不要整包重起
+      const all = !selectStickersForKeywords(pack).length;
+      if (all && !await appConfirm({
+        title: t('全部重新起名'),
+        message: t('这个贴图包的贴图都有关键词了，要让小管家全部重新起名吗？之后可以一键还原。'),
+        confirmText: t('全部重新起名'),
+      })) return;
+      stickerPanel.stewardNameBtn.disabled = true;
+      try {
+        await runStewardStickerNaming(packId, { all });
+      } finally {
+        stickerPanel.stewardNameBtn.disabled = false;
+      }
+    });
+  }
   if (stickerPanel?.deleteBtn) {
     stickerPanel.deleteBtn.addEventListener('click', event => {
       event.preventDefault();
@@ -18726,7 +18889,8 @@ const initApp = async () => {
   };
   const showMaidGuideStepBubble = (guide = {}, step = {}, index = 0, total = 1, target = null) => {
     const label = String(step?.label || step || '').trim() || `步骤 ${index + 1}`;
-    const pathText = String(guide?.pathText || (Array.isArray(guide?.steps) ? guide.steps.join(' -> ') : '') || '').trim();
+    const pathText = String(guide?.pathText || (Array.isArray(guide?.steps) ? guide.steps.join(' -> ') : '') || '').trim()
+      .split(' -> ').map(part => t(part.trim())).join(' -> ');
     const targetExpected = Boolean(target || getMaidGuideStepSelectors(guide, step).length);
     const steps = Array.from({ length: Math.max(1, Number(total) || 1) }, (_, stepIndex) => ({
       action: 'observe',
@@ -18734,7 +18898,7 @@ const initApp = async () => {
     }));
     steps[index] = {
       action: targetExpected ? 'click' : 'observe',
-      text: pathText && pathText !== label ? `${label} · 路径：${pathText}` : label,
+      text: pathText && pathText !== t(label) ? `${label} · 路径：${pathText}` : label,
       hint: targetExpected ? '点击高亮位置继续' : '完成后继续',
       ...(targetExpected ? { fallback: { kind: 'click-target' } } : {}),
     };
@@ -19632,6 +19796,8 @@ const initApp = async () => {
   });
   const getChatImagePromptModal = createChatImagePromptModal({
     imagePromptRuntime,
+    // 小管家运行时在后面才建立，用到时再取
+    getImageTagConverter: () => getStewardImageTagConverter(),
     pickFilesFromInput, getReferencePicker: () => chatImageReferencePicker,
     readImageGenerationReferenceFiles, normalizeImageGenerationReferenceItems,
   });
@@ -19934,6 +20100,8 @@ const initApp = async () => {
 	    replaceMessageId = '',
 	    sourceMessageIdOverride = undefined,
 	    replaySnapshot = null,
+	    // 自动配图：没有指定参考图时带上本聊天参考图（手动生图在对话框那边已合并；重试沿用当次的参考图）
+	    usePinnedReferences = false,
 	  } = {}) => {
 	    const imagePrompt = String(prompt || '').trim();
 	    if (!imagePrompt) return false;
@@ -19952,7 +20120,13 @@ const initApp = async () => {
 	      window.toastr?.warning?.(error.message);
 	      return false;
 	    }
-	    const referenceCapability = resolveImageReferenceCapability(config);
+	    // 能不能带参考图要看当次参数（NovelAI 的「精准参考」）：预设＋本次覆盖，重放时用当时的参数
+	    await imageGenerationParamsStore.ready;
+	    const capabilityParams = replaySnapshot
+	      ? (replaySnapshot.generationParams || {})
+	      : { ...getParamsForImageConfig(imageGenerationParamsStore.getActive(), config), ...(generationParamOverrides || {}) };
+	    const referenceCapability = resolveImageReferenceCapability(config, capabilityParams);
+	    if (usePinnedReferences && !referenceImages.length) referenceImages = await loadChatPinnedReferences(sessionId, referenceCapability);
 	    const normalizedReferences = normalizeImageGenerationReferenceItems(referenceImages, referenceCapability);
 	    if (normalizedReferences.length !== referenceImages.length) {
 	      lastChatImageGenerationError = referenceCapability.supported
@@ -20016,6 +20190,10 @@ const initApp = async () => {
 	      ? chatStore.findMessage(replacementMessageId, sessionId)
 	      : null;
 	    const shouldReplaceMessage = Boolean(replacementMessageId && replacementMessage);
+	    // 这条消息上次失败留下的中间图：这次生成结束后不再需要
+	    const previousPartialPath = shouldReplaceMessage
+	      ? String(replacementMessage?.meta?.generatedMedia?.partialImage?.path || '').trim()
+	      : '';
 	    const reuseSourceMessage = Boolean(
 	      autoGenerated && reuseAutoImageSource && sourceMessageId && isAutoImagePromptOnlyMessage(sourceMessage)
 	    );
@@ -20050,7 +20228,7 @@ const initApp = async () => {
 	    const pendingMessage = {
 	      role: sender.role,
 	      type: 'text',
-	      content: `${surfaceCopy.pendingText}：${imagePrompt}`,
+	      content: `${t(surfaceCopy.pendingText)}${localeColon()}${imagePrompt}`,
 	      name: sender.name,
 	      avatar: sender.avatar,
 	      time: formatNowTime(),
@@ -20097,6 +20275,7 @@ const initApp = async () => {
 	        },
 	        options: generationOptions,
 	        signal: controller.signal,
+	        onPreview: preview => imageGenerationPreviews.update(savedPending.id, IMAGE_PREVIEW_JOB_TOKEN, preview),
 	      });
       };
       const asset = autoGenerated
@@ -20169,6 +20348,10 @@ const initApp = async () => {
           !isChatSendTargetAvailable({ sessionId, chatStore, contactsStore });
 	      const briefError = getImageGenerationBriefError(err);
 	      const detailError = getImageGenerationErrorText(err);
+	      // 失败（不是取消）时留下最后一张中间图（media-generation-service 存成文件挂在错误上）
+	      const partialImage = !aborted && err?.partialImage?.path
+	        ? { path: String(err.partialImage.path), mime: String(err.partialImage.mime || ''), step: Number(err.partialImage.step) || 0, total: Number(err.partialImage.total) || 0 }
+	        : undefined;
 	      lastChatImageGenerationError = sessionDeleted
           ? '目标聊天室已删除'
           : (aborted ? '用户中止了图片生成' : (detailError || briefError || String(err?.message || err || '')));
@@ -20187,6 +20370,7 @@ const initApp = async () => {
             ...(savedPending.meta?.generatedMedia || {}),
             status: aborted ? 'cancelled' : 'failed',
             error: aborted ? '' : detailError,
+            partialImage,
           },
         },
 	      }, sessionId);
@@ -20196,6 +20380,10 @@ const initApp = async () => {
 	      }
       return false;
     } finally {
+      imageGenerationPreviews.finish(savedPending.id, IMAGE_PREVIEW_JOB_TOKEN);
+      if (previousPartialPath && chatStore.findMessage(savedPending.id, sessionId)?.meta?.generatedMedia?.partialImage?.path !== previousPartialPath) {
+        maybeDeleteGeneratedImageFileIfUnreferenced({ output: { path: previousPartialPath } }, sessionId);
+      }
       imageWorkLease.settle();
       generationJob.release();
     }
@@ -20345,9 +20533,16 @@ const initApp = async () => {
 	    const seedPrompt = String(initialPrompt || '').trim() || fallbackPrompt;
 	    const referenceCapability = await loadImageReferenceCapability();
 	    const generationParamContext = await loadImageGenerationParamContext();
+	    const pinSessionId = String(chatStore.getCurrent() || '').trim();
+	    const pinnedItems = pinSessionId ? (await chatImageReferencePins.load(pinSessionId)).items : [];
 	      const modalResult = await getChatImagePromptModal().open({
 	      initialPrompt: seedPrompt,
 	      referenceImages: initialReferences,
+	      pinnedReferences: pinSessionId ? {
+	        items: pinnedItems,
+	        pin: item => chatImageReferencePins.pin(pinSessionId, item),
+	        unpin: key => chatImageReferencePins.unpin(pinSessionId, key),
+	      } : null,
 	      title: surfaceCopy.title,
 	      subtitle: surfaceCopy.subtitle,
 	      impactText: surfaceCopy.impactText,
@@ -20367,11 +20562,16 @@ const initApp = async () => {
 	      ? modalResult
 	      : String(modalResult?.prompt || '').trim();
 	    if (!promptText) return false;
-	    const modalReferenceImages = Array.isArray(modalResult?.referenceImages) ? modalResult.referenceImages : [];
-	    const modalNegativePrompt = String(modalResult?.negativePrompt || '').trim();
+	    let modalReferenceImages = Array.isArray(modalResult?.referenceImages) ? modalResult.referenceImages : [];
 	    const modalGenerationParamOverrides = modalResult?.generationParamOverrides && typeof modalResult.generationParamOverrides === 'object'
 	      ? modalResult.generationParamOverrides
 	      : {};
+	    // 本聊天参考图排在前、本次参考图在后，合计不超过当前模型上限
+	    if (modalResult?.usePinnedReferences && pinSessionId) {
+	      const capability = await loadImageReferenceCapability(modalGenerationParamOverrides);
+	      modalReferenceImages = mergeChatReferenceImages(await loadChatPinnedReferences(pinSessionId, capability), modalReferenceImages, capability.max);
+	    }
+	    const modalNegativePrompt = String(modalResult?.negativePrompt || '').trim();
 	    return runChatImageGeneration({
 	      prompt: promptText,
 	      sourceMessage,
@@ -20780,6 +20980,10 @@ const initApp = async () => {
           config,
           preset: imageGenerationParamsStore.getActive(),
         });
+        // 本聊天参考图（固定在聊天上）
+        const pinnedReferences = await loadChatPinnedReferences(sessionId, resolveImageReferenceCapability(config, generationOptions));
+        if (pinnedReferences.length) generationOptions.referenceImages = pinnedReferences.map(reference => reference.dataUrl);
+        if (!isCurrent()) return;
         const asset = await enqueueAutoImageGeneration(() => mediaGenerationService.generateImage({
           signal,
           prompt: item.prompt,
@@ -20791,6 +20995,7 @@ const initApp = async () => {
             sourceMessageId: messageId,
           },
           options: generationOptions,
+          onPreview: preview => imageGenerationPreviews.update(messageId, item.pendingToken, preview),
         }));
         if (!isCurrent()) return;
         const token = buildGeneratedImageToken(asset);
@@ -20853,6 +21058,7 @@ const initApp = async () => {
           index: item.index,
           pendingToken: item.pendingToken,
           source,
+          partialImage: err?.partialImage,
         }), {
           autoImagePromptSourceTag: item.tag,
           autoImagePromptFallbackSource: fallbackSource,
@@ -20875,6 +21081,8 @@ const initApp = async () => {
             logger.debug?.('writing auto image failed callback failed', callbackErr);
           }
         }
+      } finally {
+        imageGenerationPreviews.finish(messageId, item.pendingToken);
       }
     }, 0));
     return true;
@@ -20930,6 +21138,8 @@ const initApp = async () => {
       window.toastr?.warning?.('没有找到失败占位，无法重试');
       return false;
     }
+    // 上次失败留下的中间图不再被正文引用
+    if (payload.partial?.path) maybeDeleteGeneratedImageFileIfUnreferenced({ output: { path: String(payload.partial.path) } }, sid);
     const creativeTaskId = appendCreativeExecutionImageRetryTask({
       sessionId: sid,
       messageId: mid,
@@ -21222,6 +21432,7 @@ const initApp = async () => {
           targetSessionId: sessionId,
           autoGenerated: true,
           reuseAutoImageSource: index === 0,
+          usePinnedReferences: true,
         });
         patchAutoImagePromptSourceMeta(message, sessionId, {
           status: ok ? 'done' : 'failed',
@@ -22044,7 +22255,11 @@ const initApp = async () => {
 	    const mediaSurface = resolveMediaSurfaceForSession(sessionId);
 	    const config = await ensureImageConfigReady();
 	    if (!config) return false;
-	    const referenceCapability = resolveImageReferenceCapability(config);
+	    await imageGenerationParamsStore.ready;
+	    const referenceCapability = resolveImageReferenceCapability(config, {
+	      ...getParamsForImageConfig(imageGenerationParamsStore.getActive(), config),
+	      ...(generationParamOverrides || {}),
+	    });
 	    const normalizedReferences = normalizeImageGenerationReferenceItems(referenceImages, referenceCapability);
 	    if (normalizedReferences.length !== referenceImages.length) {
 	      window.toastr?.warning?.(referenceCapability.supported
@@ -22082,6 +22297,8 @@ const initApp = async () => {
 	          sourceMessageId: messageId,
 	        },
 	        options: generationOptions,
+	        // 旧图先换成中间画面，结束后还原（成功时消息随即重画成新图）
+	        onPreview: preview => imageGenerationPreviews.update(messageId, oldToken, preview),
 	      }));
 	      const token = buildGeneratedImageToken(asset);
 	      if (!token) throw new Error('生成结果缺少图片地址');
@@ -22119,6 +22336,8 @@ const initApp = async () => {
 	      logger.warn('regenerate writing inline image failed', err);
 	      window.toastr?.error?.('重新生成图片失败');
 	      return false;
+	    } finally {
+	      imageGenerationPreviews.finish(messageId, oldToken);
 	    }
 	  };
 	  const openWritingInlineGeneratedImageRegenerationFlow = async ({
@@ -22294,6 +22513,18 @@ const initApp = async () => {
 	    window.toastr?.success?.('动态图片已删除');
 	    return true;
 	  };
+	  const deleteKeptMomentImage = async (asset = {}) => {
+	    const ok = await appConfirm({
+	      title: '删除未发布的配图',
+	      message: '删除这张配图？图片文件也会一起删除，不能恢复。',
+	      danger: true,
+	    });
+	    if (!ok) return false;
+	    await maidKeptMomentImages.remove({ ids: [asset.id] });
+	    maybeDeleteGeneratedImageFileIfUnreferenced(asset, getMomentImageAttachmentSessionId());
+	    window.toastr?.success?.('配图已删除');
+	    return true;
+	  };
 	  const generatedImageAlbumPanel = createGeneratedImageAlbumPanel({
     resolveGeneratedImagePreviewUrl, getGeneratedImageNegativePrompt, formatGeneratedImageAlbumTime,
     openLightbox: url => ui.openLightbox?.(url), escapeHtml, translateUiText,
@@ -22304,17 +22535,22 @@ const initApp = async () => {
 	        title: '动态相册',
 	        subtitle: '当前动态作用域中生成的图片与提示词',
 	        emptyText: '还没有动态生成图片。',
-	        collect: collectMomentImageAlbumAssetsForCurrentScope,
+	        collect: () => [
+	          ...buildKeptMomentAlbumAssets(maidKeptMomentImages.list({ roleCardId: String(personaStore.getActive?.()?.id || '') })),
+	          ...collectMomentImageAlbumAssetsForCurrentScope(),
+	        ],
 	        allowUse: true,
 	        allowDelete: true,
 	        toolbarActionText: '发布动态',
 	        onToolbarAction: () => openMomentComposeModal(),
-	        onUse: async asset => openMomentComposeModal({
-	          initialPrompt: String(asset.prompt || '').trim(),
-	          initialNegativePrompt: getGeneratedImageNegativePrompt(asset),
-	          generationParamOverrides: await buildImageGenerationOverridesFromAsset(asset),
-	        }),
-	        onDelete: asset => deleteGeneratedImageAssetFromMoments(asset),
+	        onUse: async asset => (asset.keptMomentImage
+	          ? openMomentComposeModal({ initialAssets: [asset] })
+	          : openMomentComposeModal({
+	            initialPrompt: String(asset.prompt || '').trim(),
+	            initialNegativePrompt: getGeneratedImageNegativePrompt(asset),
+	            generationParamOverrides: await buildImageGenerationOverridesFromAsset(asset),
+	          })),
+	        onDelete: asset => (asset.keptMomentImage ? deleteKeptMomentImage(asset) : deleteGeneratedImageAssetFromMoments(asset)),
 	      });
 	      return true;
 	    }
@@ -22799,6 +23035,7 @@ const initApp = async () => {
 	        window.toastr?.error?.('动态发布失败：未能建立动态 ID');
 	        return;
 	      }
+	      void maidKeptMomentImages.remove({ ids: assets.map(asset => asset.id) });
 	      momentsPanel?.render?.({ preserveScroll: false });
 	      window.toastr?.success?.('动态已发布，正在生成评论');
 	      close();
@@ -22934,10 +23171,13 @@ const initApp = async () => {
 	        initialPrompt = '',
 	        initialNegativePrompt = '',
 	        generationParamOverrides: initialGenerationParamOverrides = {},
+	        initialAssets = [],
 	      } = {}) {
 	        ensure();
         const version = ++editorVersion; promptEditor?.destroy(); promptEditor = null;
-	        assets = [];
+	        assets = Array.isArray(initialAssets) ? [...initialAssets] : [];
+	        // 带着现成配图打开时，图紧跟在正文下面：提示词编辑器很长，放在后面要往下翻才看得到，容易以为没带上
+	        bodyEl.insertBefore(previewEl, assets.length ? overlay.querySelector('.moment-image-prompt-editor') : statusEl);
 	        generationParamOverrides = initialGenerationParamOverrides && typeof initialGenerationParamOverrides === 'object'
 	          ? { ...initialGenerationParamOverrides }
 	          : {};
@@ -22956,7 +23196,7 @@ const initApp = async () => {
           const draft = await imagePromptRuntime.getDraft({ prompt: initialPrompt, config: context.config, options: initialGenerationParamOverrides, ...(initialNegativePrompt ? { negativePrompt: initialNegativePrompt } : {}) });
           if (version !== editorVersion) return;
           applyGenerationParamContext(context);
-          promptEditor = new ImagePromptEditor({ container: overlay.querySelector('.moment-image-prompt-editor'), document: draft, config: context.config, options: { ...generationParamBase, ...generationParamOverrides } });
+          promptEditor = new ImagePromptEditor({ container: overlay.querySelector('.moment-image-prompt-editor'), document: draft, config: context.config, options: { ...generationParamBase, ...generationParamOverrides }, getTagConverter: () => getStewardImageTagConverter() });
           await promptEditor.ready;
           if (version !== editorVersion) return;
           generateBtn.disabled = false; textArea?.focus();
@@ -22969,12 +23209,14 @@ const initApp = async () => {
 	    initialPrompt = '',
 	    initialNegativePrompt = '',
 	    generationParamOverrides = {},
+	    initialAssets = [],
 	  } = {}) => {
 	    momentComposeModal.open({
 	      initialText,
 	      initialPrompt,
 	      initialNegativePrompt,
 	      generationParamOverrides,
+	      initialAssets,
 	    });
 	    return true;
 	  };
@@ -22997,6 +23239,8 @@ const initApp = async () => {
       refreshChatAndContacts({ immediate: true });
       return { jumpedToTarget: false, stale: false, blocked: true, reason: enterGuard.reason };
     }
+    const leavingSessionId = String(chatStore.getCurrent() || '').trim();
+    if (leavingSessionId && leavingSessionId !== sid) noteStewardSessionLeft(leavingSessionId);
     // Agent navigation can open a normal room directly from creative writing.
     // Align its shell before rendering history; exitRpMode would reopen the old
     // social room concurrently with this explicitly requested destination.
@@ -23180,6 +23424,7 @@ const initApp = async () => {
 	  };
 
 	  const exitChatRoom = (options) => {
+	    noteStewardSessionLeft(chatStore.getCurrent());
 	    chatGeneratedImagePreview.suspendCurrent();
     syncRejectedFormatRepairBanner('');
     syncAgentSuggestionBanner('');
@@ -23341,7 +23586,7 @@ const initApp = async () => {
   const renderRpToolbar = () => {
     if (!rpGreetingName) return;
     const list = getRpGreetings();
-    if (rpGreetingCount) rpGreetingCount.textContent = `${list.length} 篇`;
+    if (rpGreetingCount) rpGreetingCount.textContent = t('{count} 篇', { count: list.length });
     if (!list.length) {
       rpGreetingName.textContent = '无开场白';
       if (rpGreetingTrigger) {
@@ -24599,6 +24844,7 @@ const initApp = async () => {
   };
 
   const exitRpMode = () => {
+    noteStewardSessionLeft(chatStore.getCurrent());
     return runExitRpModeFlow({
       uiMode,
       lastChatState,
@@ -24659,9 +24905,10 @@ const initApp = async () => {
       capabilities: {
         list: () => listMaidBuiltinCapabilityStates(maidSettingsStore),
         setEnabled: (id, enabled) => maidSettingsStore.setBuiltinCapabilityEnabled(id, enabled, { source: 'settings' }),
+        setOption: (id, key, value) => maidSettingsStore.setBuiltinCapabilityOptions(id, { [key]: value }),
         subscribe: listener => maidSettingsStore.subscribeCapabilities(listener),
       } }),
-    historyPanel: createMaidHistoryPanel({ store: maidConversationStore, documentRef: document, onCardAction: handleMaidResultCardAction }),
+    historyPanel: createMaidHistoryPanel({ store: maidConversationStore, documentRef: document, onCardAction: handleMaidResultCardAction, roundActions: maidHistoryRoundActions }),
     onOpenVoiceConfig: mode => maidVoiceRuntime?.openSettings(mode),
     onVoiceModeChanged: () => maidVoiceRuntime?.sync(),
     listModelProfiles: () => (chatConfigManager.getProfiles?.() || []).map(profile => ({
@@ -24949,6 +25196,9 @@ const initApp = async () => {
     getPendingApproval: runId => maidToolConfirmationRuntime.getPendingForRun(runId),
     resolveBoundApproval: (binding, action) => maidToolConfirmationRuntime.resolveBound(binding, action),
     onResultCardAction: handleMaidResultCardAction,
+    // 输入条顶部「查看前几轮」：与女仆设置 → 历史同一来源；按轮管理与历史面板共用一份规则
+    listHistoryTurns: () => maidConversationStore.listHistoryTurns(),
+    historyRoundActions: maidHistoryRoundActions,
     getAppContext: () => ({
       roleCardId: String(personaStore.getActive?.()?.id || ''),
       sessionId: chatStore.getCurrent(),
@@ -27955,11 +28205,23 @@ const initApp = async () => {
   } catch (err) {
     logger.debug('user tool store load skipped', err);
   }
+  // 小管家的工具箱入口（翻译、自定义任务）：小管家运行时在后面才建立，先留空，建立后赋值
+  let stewardToolbox = null;
+  const reportStewardToolResult = (result) => {
+    if (['unavailable', 'failed'].includes(result?.status) && result.message) window.toastr?.warning?.(t(result.message));
+    return result;
+  };
+  const openStewardSettings = () => agentCenterPanel.openFloatingAgentCard(STEWARD_CONFIG_ID, { face: 'config' });
   const userToolsForToolbox = {
-    list: () => userToolStore.listTools().map(tool => ({ id: tool.id, name: tool.name, icon: tool.icon })),
+    list: () => [
+      ...userToolStore.listTools().map(tool => ({ id: tool.id, name: tool.name, icon: tool.icon })),
+      ...(stewardToolbox?.list() || []),
+    ],
     iconMarkup: userToolIconMarkup,
-    run: (id, options) => userToolRunner.run(id, { ...options, trigger: 'toolbox' }),
-    edit: id => userToolSettingsPanel.show({ toolId: id }),
+    run: (id, options) => (isStewardToolId(id)
+      ? Promise.resolve(stewardToolbox?.run(id, options)).then(reportStewardToolResult)
+      : userToolRunner.run(id, { ...options, trigger: 'toolbox' })),
+    edit: id => (isStewardToolId(id) ? openStewardSettings() : userToolSettingsPanel.show({ toolId: id })),
     openSettings: () => userToolSettingsPanel.show(),
   };
   const agentToolsRuntime = createAgentToolsAppRuntime({
@@ -28016,10 +28278,14 @@ const initApp = async () => {
     .map(record => record.config).filter(config => config && config.kind !== 'archive_naming')
     .map(config => agentToolAction(config, { isInputAgent, iconName: getAgentIconName(config) }));
   const listPluginToolActions = () => (pluginRuntime?.listActions?.() || []).map(pluginToolAction);
+  // 小管家自定义任务也能做成工具：列出写了要求的任务（没开时执行会提示原因）
+  const listStewardToolActions = () => normalizeStewardCustomTasks(agentConfigStore.read(STEWARD_CONFIG_ID, getAgentExecutionContext()).config?.customTasks)
+    .filter(task => task.prompt.trim()).map(stewardToolAction);
   const resolveUserToolAction = (source, id) => (source === 'builtin' ? getBuiltinToolAction(id)
     : source === 'agent' ? listAgentToolActions().find(action => action.id === id) || null
-      : source === 'script' ? (id === SCRIPT_TOOL_ACTION.id ? SCRIPT_TOOL_ACTION : null)
-        : source === 'plugin' ? listPluginToolActions().find(action => action.id === id) || null : null);
+      : source === 'steward' ? listStewardToolActions().find(action => action.id === id) || null
+        : source === 'script' ? (id === SCRIPT_TOOL_ACTION.id ? SCRIPT_TOOL_ACTION : null)
+          : source === 'plugin' ? listPluginToolActions().find(action => action.id === id) || null : null);
   const writeComposerText = (text, { mode = 'insert' } = {}) => {
     const input = ui.inputEl;
     if (!input) return;
@@ -28206,6 +28472,11 @@ const initApp = async () => {
         return agentToolsRuntime.toolbox.openTool(action.id, { messageId: context.message?.id || '' })
           ? { status: 'succeeded' } : { status: 'unavailable', message: '这个 Agent 在当前聊天不可用' };
       }
+      if (action.source === 'steward') {
+        return stewardToolbox
+          ? stewardToolbox.run(stewardCustomToolId(action.id), { messageId: context.message?.id || '', selection: context.selection })
+          : { status: 'unavailable', message: '小管家还没准备好' };
+      }
       return { status: 'unavailable', message: '这个工具的动作暂时不能执行' };
     },
     getSessionId: () => (isInChatRoom() ? chatStore.getCurrent() : ''),
@@ -28230,7 +28501,7 @@ const initApp = async () => {
   const userToolSettingsPanel = createUserToolSettingsPanel({
     documentRef: document,
     store: userToolStore,
-    listActions: () => [...BUILTIN_TOOL_ACTIONS, ...listAgentToolActions(), SCRIPT_TOOL_ACTION, ...listPluginToolActions()],
+    listActions: () => [...BUILTIN_TOOL_ACTIONS, ...listAgentToolActions(), ...listStewardToolActions(), SCRIPT_TOOL_ACTION, ...listPluginToolActions()],
     getAction: resolveUserToolAction,
     exportPack: (pack, filename) => downloadJsonFile(pack, filename),
     pickPackText: () => pickJsonFileText(),
@@ -28263,7 +28534,12 @@ const initApp = async () => {
       if (contactSettingsPanel.getSessionId?.() === sessionId) contactSettingsPanel.renderArchives?.();
       if (groupSettingsPanel.groupId === sessionId) groupSettingsPanel.renderArchives?.();
     },
+    onArchiveOverview: ({ sessionId }) => {
+      if (contactSettingsPanel.getSessionId?.() === sessionId) contactSettingsPanel.renderArchives?.();
+      if (groupSettingsPanel.groupId === sessionId) groupSettingsPanel.renderArchives?.();
+    },
   });
+  noteStewardSessionLeft = sessionId => utilityAgentRuntime.noteSessionLeft(sessionId);
   Object.assign(agentConfigurationActions, {
     getAgentPresetServices: () => agentPresetServices,
     runUtilityAgent: options => utilityAgentRuntime.run(options),
@@ -28273,6 +28549,128 @@ const initApp = async () => {
   });
   window.addEventListener('session-changed', utilityAgentRuntime.reconcile);
   window.addEventListener('agent-feature-settings-changed', utilityAgentRuntime.reconcile);
+  // 小管家：消息翻译（长按菜单「翻译」与工具「翻译这条」共用）。译文存在 meta.stewardTranslation，不改原文、不进上下文
+  const stewardTranslationSource = message => String(
+    (message?.role === 'assistant' && message?.meta?.renderRich ? resolveMessagePlainText(message, { depth: 0, preferRawSource: true }) : '')
+    || message?.content || '',
+  ).trim();
+  ui.canTranslateMessage = message => ['user', 'assistant'].includes(message?.role)
+    && String(message?.type || 'text') === 'text'
+    && Boolean(stewardTranslationSource(message))
+    && utilityAgentRuntime.isTaskReady('translate_message', getAgentExecutionContext());
+  // 译文（stewardTranslation）与自定义任务的附注（stewardNote）写在消息 meta；value 为 null 时删除
+  const writeMessageStewardMeta = (messageId, sessionId, key, value) => {
+    const latest = chatStore.findMessage(messageId, sessionId);
+    if (!latest) return false;
+    const meta = { ...(latest.meta || {}) };
+    if (value) meta[key] = value;
+    else delete meta[key];
+    const updated = chatStore.updateMessage(messageId, { meta }, sessionId);
+    if (chatStore.getCurrent() === sessionId) {
+      const [decorated] = decorateMessagesForDisplay([updated || { ...latest, meta }], { sessionId });
+      ui.updateMessage(messageId, decorated || updated || { ...latest, meta });
+    }
+    return true;
+  };
+  const translateMessageWithSteward = createStewardMessageTranslation({
+    runTask: options => utilityAgentRuntime.runTask(options),
+    getContext: getAgentExecutionContext,
+    getLocale: getCurrentLocale,
+    readTaskSettings: context => agentConfigStore.read(STEWARD_CONFIG_ID, context).config?.tasks?.translate_message || {},
+    resolveShown: message => ui.resolveActiveSwipeMessage?.(message) || message,
+    extractText: stewardTranslationSource,
+    messageExists: (messageId, sessionId) => Boolean(chatStore.findMessage(messageId, sessionId)),
+    writeTranslation: (messageId, sessionId, translation) => writeMessageStewardMeta(messageId, sessionId, 'stewardTranslation', translation),
+    notify: message => window.toastr?.info?.(message),
+    warn: message => window.toastr?.warning?.(message),
+  });
+  // 小管家：贴图起名（补上 AI 用的关键词）。流程在 steward-app-runtime；这里提供读图（动图取第一帧，先压小）与其他贴图的关键词
+  const loadStickerImageForSteward = async (sticker) => {
+    const source = stickerImageSource(sticker);
+    if (!source) return '';
+    const dataUrl = await readUrlAsDataUrl(source.startsWith('data:') ? source : resolveLocalStickerUrl(source));
+    if (!dataUrl) return '';
+    try {
+      return (await compressImageDataUrl(dataUrl, { maxDim: 320, quality: 0.82, maxBytes: 90_000 })) || dataUrl;
+    } catch {
+      return dataUrl;
+    }
+  };
+  const listOtherStickerKeywords = (excludeIds = new Set()) => (stickerPackState?.packs || [])
+    .flatMap(pack => (Array.isArray(pack?.stickers) ? pack.stickers : []))
+    .filter(sticker => !excludeIds.has(sticker?.id))
+    .map(sticker => String(sticker?.keyword || '').trim())
+    .filter(Boolean);
+  isStewardStickerNamingReady = () => utilityAgentRuntime.isTaskReady('sticker_keywords', getAgentExecutionContext());
+  runStewardStickerNaming = createStewardStickerNaming({
+    runTask: options => utilityAgentRuntime.runTask(options),
+    getContext: getAgentExecutionContext,
+    getLocale: getCurrentLocale,
+    getPack: getStickerPackById,
+    savePack: (packId, pack) => {
+      syncStickerPackState(stickerPackStore.updatePack(packId, pack));
+      renderStickerPanel();
+    },
+    listOtherKeywords: listOtherStickerKeywords,
+    loadImage: loadStickerImageForSteward,
+    checkModel: (model) => {
+      const capability = getVisionInputCapability({ provider: model.provider, model: model.model, baseUrl: model.baseUrl });
+      if (!capability.supported) throw new Error('小管家的模型不能看图，请在小管家的「贴图起名」里单独指定能看图的模型');
+    },
+    notify: message => window.toastr?.info?.(message),
+    warn: message => window.toastr?.warning?.(message),
+    showUndo: options => showUndoToast(options),
+  });
+  // 小管家：工具箱里的「翻译」与自定义任务（也给「做成工具」用）；弹窗结果用只读文字框（可复制）
+  let stewardResultModal = null;
+  const showStewardResult = ({ title, text }) => {
+    if (!stewardResultModal) {
+      stewardResultModal = createReadonlyTextareaModal({
+        copySuccessMessage: t('已复制'),
+        copyText: value => navigator.clipboard.writeText(value),
+        toastr: window.toastr,
+      });
+    }
+    stewardResultModal.setTitle(title);
+    stewardResultModal.setValue(text);
+    stewardResultModal.show();
+  };
+  stewardToolbox = createStewardToolbox({
+    runTask: options => utilityAgentRuntime.runTask(options),
+    getContext: getAgentExecutionContext,
+    getLocale: getCurrentLocale,
+    readConfig: context => agentConfigStore.read(STEWARD_CONFIG_ID, context).config || {},
+    isTaskReady: (taskId, context) => utilityAgentRuntime.isTaskReady(taskId, context),
+    getSessionId: () => (isInChatRoom() ? chatStore.getCurrent() : ''),
+    getMessages: sessionId => chatStore.getMessages(sessionId) || [],
+    findMessage: (messageId, sessionId) => chatStore.findMessage(messageId, sessionId),
+    findLastReply: (sessionId) => {
+      const messages = chatStore.getMessages(sessionId) || [];
+      for (let i = messages.length - 1; i >= 0; i -= 1) if (messages[i]?.role === 'assistant' && isAgentToolReply(messages[i])) return messages[i];
+      return null;
+    },
+    resolveShown: message => ui.resolveActiveSwipeMessage?.(message) || message,
+    extractText: stewardTranslationSource,
+    speakerOf: message => String(message?.name || '').trim() || (message?.role === 'user' ? 'user' : 'assistant'),
+    getInputText: () => String(ui.inputEl?.value || ''),
+    translateMessage: translateMessageWithSteward,
+    writeNote: (messageId, sessionId, note) => writeMessageStewardMeta(messageId, sessionId, 'stewardNote', note),
+    writeInput: (text, options) => writeComposerText(text, options),
+    showResult: showStewardResult,
+    notify: message => window.toastr?.info?.(message),
+    listToolActions: () => userToolStore.listTools().map(tool => tool.action),
+  });
+  // 小管家：生图描述转英文标签（生图提示词编辑器的按钮）；不可用时返回 null，编辑器就不显示按钮
+  const getStewardImageTagConverter = () => (utilityAgentRuntime.isTaskReady('image_tags', getAgentExecutionContext())
+    ? async (text) => {
+      const outcome = await utilityAgentRuntime.runTask({
+        taskId: 'image_tags', context: getAgentExecutionContext(), targetKey: 'image-prompt',
+        payload: buildImageTagsPayload({ text }), parse: parseImageTags,
+      });
+      if (outcome.status !== 'succeeded') throw new Error(outcome.reason || '转换失败');
+      return outcome.result;
+    }
+    : null);
   syncAgentSuggestionBanner = sid => agentToolsRuntime.suggestionBanner?.sync?.(sid) || false;
   syncAgentSuggestionBanner(chatStore.getCurrent());
   patchDebugUiRegistry(registry => { Object.assign(registry.actions, agentConfigurationActions); registry.stores.agentConfigStore = agentConfigStore; registry.stores.textEditRuntime = textEditRuntime; registry.stores.agentToolsRuntime = agentToolsRuntime; });
@@ -28562,12 +28960,17 @@ const initApp = async () => {
     // 与每轮流程无关的内建 Agent 排进“随时待命”；未放入流程的自定义 Agent 由编排板补在其后
     getStandbyAgents: () => {
       const item = (id, trigger) => { const card = agentCenterPanel.getAgentCardById(id); return card?.implemented ? { id, title: card.title, enabled: card.enabled === true, trigger } : null; };
-      return { standby: [item('archive_naming', t('保存存档时')), item('moment_agent', t('发布或评论动态时'))].filter(Boolean) };
+      return { standby: [item('archive_naming', t('保存存档或按需时')), item('moment_agent', t('发布或评论动态时'))].filter(Boolean) };
     },
     openStandbyAgent: id => agentCenterPanel.openFloatingAgentCard(id),
     getWritePreviewSwitch: () => Boolean(agentCenterPanel.getAgentCardById(AGENT_FEATURE_IDS.writePreview)),
     getEnabled: () => appSettings.get().creativeHopscotchEnabled === true,
     enable: value => appSettings.update({ creativeHopscotchEnabled: value === true }),
+    setMemoryAutoExtractMode: (mode) => {
+      if (appSettings.get().memoryAutoExtractModeWriting === mode) return;
+      appSettings.update({ memoryAutoExtractModeWriting: mode });
+      window.dispatchEvent(new CustomEvent('app-settings-changed', { detail: { key: 'memoryAutoExtractModeWriting', value: mode } }));
+    },
   });
   hopscotchTurnRuntime.subscribe(() => agentToolsRuntime.toolbox.refresh());
   patchDebugUiRegistry((registry) => {
@@ -31197,6 +31600,7 @@ const initApp = async () => {
       buildMemoryUpdatePlan,
       canInitClient,
       createClient: config => new LLMClient(config),
+      getMemoryFillCounter: sid => chatStore.getMemoryFillCounter(sid),
       handleMemoryEditsFromRaw,
       isMemoryAutoExtractSeparate: () => isMemoryAutoExtractSeparate(uiMode === 'rp' ? 'writing' : 'chat'),
       isMemoryUpdateTargetCurrent: (targetSessionId, messageId) => {
@@ -31209,6 +31613,7 @@ const initApp = async () => {
       memoryUpdateConfigManager,
       recordTraceEvent: recordDebugTraceEvent,
       sessionAsyncWorkRuntime,
+      setMemoryFillCounter: (sid, count) => chatStore.setMemoryFillCounter(count, sid),
       syncTurnCheckpointForMessage,
     });
     if (!previewOnly) currentMemoryUpdateRuntime = memoryUpdateRuntime;
@@ -31608,6 +32013,7 @@ const initApp = async () => {
         rpUiMode,
         isGroupChat,
         summaryEnabled: isSummaryMemoryEnabled(),
+        phoneChatFormatActive: window.appBridge.isPhoneChatFormatActive?.(requestPresetContext) === true,
       });
       disableSummaryForThis = protocolFlags.disableSummaryForThis;
       return runAssistantGenerationRequest({
@@ -31965,6 +32371,7 @@ const initApp = async () => {
       rpUiMode,
       isGroupChat,
       summaryEnabled: isSummaryMemoryEnabled(),
+      phoneChatFormatActive: window.appBridge.isPhoneChatFormatActive?.(requestPresetContext) === true,
     });
     const { protocolEnabled } = protocolFlags;
     maidProtocolEnabled = protocolEnabled;
@@ -33678,6 +34085,9 @@ const initApp = async () => {
         parserReport,
       };
     }
+    if (action === 'steward-translate') return translateMessageWithSteward(message, sessionId);
+    if (action === 'steward-translation-remove') return writeMessageStewardMeta(message.id, sessionId, 'stewardTranslation', null);
+    if (action === 'steward-note-remove') return writeMessageStewardMeta(message.id, sessionId, 'stewardNote', null);
     if (action === 'check-format' && message?.role === 'assistant') {
       const current = ensureRenderedCancelledPartialPersisted(message) || chatStore.findMessage(message.id, sessionId) || message;
       return runManualChatFormatGuardianCheck(current, sessionId);
@@ -34889,19 +35299,15 @@ const initApp = async () => {
   const applyWallpaperTransform = (imgEl, containerEl, meta) => {
     if (!imgEl || !containerEl || !meta) return;
     const rect = containerEl.getBoundingClientRect();
-    const cw = rect.width || containerEl.clientWidth || 0;
-    const ch = rect.height || containerEl.clientHeight || 0;
-    const iw = Number(meta.width || imgEl.naturalWidth || 0);
-    const ih = Number(meta.height || imgEl.naturalHeight || 0);
-    if (!cw || !ch || !iw || !ih) return;
-    const baseScale = Math.max(cw / iw, ch / ih);
-    const zoom = Number(meta.zoom || 1);
-    const rotate = Number(meta.rotate || 0);
-    const offsetX = Number(meta.offsetX || 0) * cw;
-    const offsetY = Number(meta.offsetY || 0) * ch;
-    imgEl.style.transform = `translate(-50%, -50%) translate(${offsetX}px, ${offsetY}px) rotate(${rotate}deg) scale(${
-      baseScale * zoom
-    })`;
+    const transform = computeChatWallpaperTransform({
+      containerWidth: rect.width || containerEl.clientWidth || 0,
+      containerHeight: rect.height || containerEl.clientHeight || 0,
+      imageWidth: meta.width || imgEl.naturalWidth || 0,
+      imageHeight: meta.height || imgEl.naturalHeight || 0,
+      meta,
+    });
+    if (!transform) return;
+    imgEl.style.transform = transform;
     imgEl.style.opacity = String(clampWallpaperOpacity(meta.opacity ?? 1));
   };
 
@@ -34997,7 +35403,7 @@ const initApp = async () => {
     scheduleWallpaperIdle();
   };
 
-  window.addEventListener('resize', () => {
+  const refreshActiveWallpaperFit = () => {
     if (!activeWallpaperMeta) return;
     if (!activeWallpaperUrl) return;
     const layerInfo = ensureChatWallpaperLayer();
@@ -35006,7 +35412,10 @@ const initApp = async () => {
       layerInfo.img.src = activeWallpaperUrl;
     }
     applyWallpaperTransform(layerInfo.img, chatRoom, activeWallpaperMeta);
-  });
+  };
+  window.addEventListener('resize', refreshActiveWallpaperFit);
+  // resize 当下聊天室高度可能还是旧的：跟着聊天室本身的尺寸再算一次（键盘收起、旋转、分栏宽度变化）
+  observeChatWallpaperContainer({ containerEl: chatRoom, onResize: refreshActiveWallpaperFit });
 
   const normalizeChatSettings = raw => {
     const base = { ...getChatSettingDefaults(), ...(raw || {}) };

@@ -9,6 +9,8 @@ import { skillElement as el, skillButton as button, skillUserText as userText, i
 // 内置能力图标（线宽 2，和技能页其他图标一样粗）
 const CAPABILITY_ICONS = {
   random: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3.5"/><circle cx="9" cy="9" r="1.1" fill="currentColor"/><circle cx="15" cy="9" r="1.1" fill="currentColor"/><circle cx="12" cy="12" r="1.1" fill="currentColor"/><circle cx="9" cy="15" r="1.1" fill="currentColor"/><circle cx="15" cy="15" r="1.1" fill="currentColor"/></svg>',
+  map: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4.5L3.5 6.5v13L9 17.5l6 2 5.5-2v-13L15 6.5z"/><path d="M9 4.5v13M15 6.5v13"/></svg>',
+  weather: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 3v1.5M3.5 8.5H5M5 5l1 1M13 5l-1 1"/><path d="M5.6 11.3a3.5 3.5 0 1 1 6.3-3"/><path d="M9 20h8.5a3.5 3.5 0 0 0 .3-7 4.8 4.8 0 0 0-9.2 1.3A2.9 2.9 0 0 0 9 20z"/></svg>',
 };
 const formatUsedAt = (at) => {
   const date = new Date(at), today = new Date();
@@ -223,6 +225,30 @@ export const createMaidSkillPanel = ({ store, documentRef: doc = document, listF
         const copy = el(doc, 'div', '', 'maid-skill-copy');
         copy.append(el(doc, 'p', t(item.title), 'maid-skill-capability-title'), el(doc, 'p', t(item.subtitle), 'maid-skill-muted maid-skill-description'));
         if (item.enabled && item.lastUsedAt) copy.append(el(doc, 'p', t('上次使用 · {time}', { time: formatUsedAt(item.lastUsedAt) }), 'maid-skill-muted maid-skill-capability-used'));
+        // 单项设置（例如地图服务）：改了立即保存，不影响开关
+        if (item.options?.length && capabilities.setOption) {
+          const options = el(doc, 'div', '', 'maid-skill-capability-options');
+          const save = (key, value) => run(async () => {
+            try {
+              const result = await capabilities.setOption(item.id, key, value);
+              if (!result?.ok) message(t('保存失败，设置没有改动'), true);
+            } finally { refreshList?.(); }
+          });
+          for (const option of item.options) {
+            if (option.choices) {
+              select(options, t(option.label), option.choices.map(([id, text]) => [id, t(text)]), item.values?.[option.key], value => save(option.key, value));
+              continue;
+            }
+            // 文字设置：输入完（离开输入框或按 Enter）才保存，打字时不重画
+            const wrap = el(doc, 'label', '', 'maid-skill-field'), input = el(doc, 'input');
+            input.type = 'text'; input.value = item.values?.[option.key] || ''; input.dataset.i18nSkip = '';
+            input.placeholder = option.placeholder ? t(option.placeholder) : '';
+            if (option.maxLength) input.maxLength = option.maxLength;
+            input.addEventListener('change', () => { if (input.value.trim() !== (item.values?.[option.key] || '')) save(option.key, input.value); });
+            wrap.append(el(doc, 'span', t(option.label)), input); options.append(wrap);
+          }
+          copy.append(options);
+        }
         const actions = el(doc, 'div', '', 'maid-skill-row-actions');
         const toggle = check(actions, t('启用'), item.enabled, enabled => run(async () => {
           try {

@@ -17,6 +17,8 @@ Private chats · Group chats · Creative writing · Image generation · All data
 
 ### [**Get it from the Releases page**](https://github.com/dghiffjd7/OmniTavern/releases/latest)
 
+Want a look first? [Overview and 80-second video](https://dghiffjd7.github.io/OmniTavern/)
+
 | Platform | Installer |
 | --- | --- |
 | Windows | `OmniTavern_x.x.x_x64-setup.exe` |
@@ -85,19 +87,22 @@ Characters post moments and comment on each other; you can react and reply, and 
 
 Generate images in chat, creative writing and the feed, with NovelAI and other providers, parameter overrides and retry. Generate sticker packs with automatic background removal and slicing, managed per chat room.
 
-## What's new in 0.7.2
+## What's new in 0.7.10
 
-- **Trilingual UI**: English and Traditional Chinese added alongside Simplified Chinese — pick a language on first launch, switch anytime in settings
-- **Renamed to OmniTavern**: formerly AiChat; existing data and old export files remain fully compatible — just install over the old version
-- **Native web search**: direct use of the official search capabilities of Gemini, Claude, OpenAI, DeepSeek, Kimi, GLM and OpenRouter, with an automatic generic fallback for other models
-- Fixes for regex scripts lost on preset re-import, large backup export timeouts, and more
+- **Housekeeper**: a small model handles chores — translating messages, turning image descriptions into English tags, naming stickers, summarizing saves — and you can add your own tasks
+- **Maid**: maps and weather (no API key needed), multiple-choice questions and plan confirmation, per-round history management, feed posts with images
+- **Image generation**: live preview while generating, reference images pinned to a chat (including NovelAI Precise Reference), new WaveSpeed provider
+- **Context lineage graph**: more sources with key items highlighted; jump to settings, export, and trace paths
+- **Vertex**: save several Service Account JSON keys and switch between them
+
+Full notes: [0.7.10 release](https://github.com/dghiffjd7/OmniTavern/releases/tag/v0.7.10) (in Chinese).
 
 ## Supported AI providers
 
 | Type | Providers |
 | --- | --- |
 | Chat models | Google Gemini, OpenAI, Anthropic (Claude), DeepSeek, OpenRouter, Kimi (Moonshot), Zhipu GLM, Ollama (local), and any OpenAI-compatible endpoint |
-| Image generation | NovelAI, plus chat models with image output |
+| Image generation | NovelAI, OpenAI, Google (Gemini / Imagen, Vertex AI), Stability AI, Together AI, WaveSpeed, Pollinations, AUTOMATIC1111, ComfyUI, any OpenAI-compatible endpoint, plus chat models with image output |
 
 Each chat room can use its own API and model.
 

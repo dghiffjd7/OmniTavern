@@ -3,6 +3,7 @@ import { resolveHopscotchBoardSettings } from '../../src/scripts/ui/chat/hopscot
 
 import {
   HOPSCOTCH_LIMITS,
+  applyHopscotchMemoryPlacement,
   buildDefaultHopscotchBoard,
   compileBoardToLaneTasks,
   extractHouseReferences,
@@ -11,6 +12,7 @@ import {
   isHopscotchMaintenanceRunning,
   normalizeCustomHouseConfig,
   normalizeHopscotchBoard,
+  resolveHopscotchBoardMemoryMode,
   validateHopscotchBoard,
 } from '../../src/scripts/ui/chat/hopscotch-board-utils.js';
 
@@ -149,10 +151,10 @@ const bodyRow = (fused = []) => ({ id: 'rb', houses: [{ id: 'body', kind: 'body'
 
 {
   const rows = [bodyRow()];
-  for (let i = 0; i < HOPSCOTCH_LIMITS.maxRows; i += 1) rows.push({ id: `x${i}`, houses: [custom(`c${i}`)] });
+  for (let i = 0; i < 8; i += 1) rows.push({ id: `x${i}`, houses: [custom(`c${i}`)] });
+  assert.equal(validateHopscotchBoard({ rows }).ok, true, '自定义任务可以分在超过六行的顺序流程里');
   const r = validateHopscotchBoard({ rows, policy: { rowConcurrencyMax: 9, houseTimeoutMs: 0 } });
   const got = codes(r);
-  assert.ok(got.includes('too_many_rows'));
   assert.ok(got.includes('invalid_concurrency'));
   assert.equal(r.board.policy.houseTimeoutMs, undefined, '旧板的房子超时字段被忽略');
   const wide = validateHopscotchBoard({ rows: [bodyRow(), { id: 'w', houses: [custom('1'), custom('2'), custom('3'), custom('4'), custom('5')] }] });
@@ -163,6 +165,19 @@ const bodyRow = (fused = []) => ({ id: 'rb', houses: [{ id: 'body', kind: 'body'
   assert.ok(codes(dup).includes('duplicate_house_id'));
   assert.ok(codes(dup).includes('duplicate_row_id'));
   console.log('ok - limits and duplicate ids');
+}
+
+{
+  const original = { rows: [bodyRow(['memory_table']), { id: 'summary', houses: [{ id: 'summary', kind: 'summary_compaction' }] },
+    ...Array.from({ length: 4 }, (_, i) => ({ id: `custom-row-${i}`, houses: [custom(`custom-${i}`)] }))] };
+  assert.equal(validateHopscotchBoard(original).ok, true);
+  const separate = applyHopscotchMemoryPlacement(original, { storageMode: 'table', autoExtract: true, autoExtractMode: 'separate' });
+  assert.equal(separate.rows.length, 7);
+  assert.equal(separate.rows[1].houses[0].kind, 'memory_table');
+  assert.equal(validateHopscotchBoard(separate).ok, true, '拆出记忆不能使原本有效的板失效');
+  assert.deepEqual(compileBoardToLaneTasks(separate).tasks.filter(task => !task.glue).map(task => task.id),
+    ['body', 'memory', 'summary', 'custom-0', 'custom-1', 'custom-2', 'custom-3']);
+  console.log('ok - separate memory preserves valid sequential boards beyond six rows');
 }
 
 {
@@ -223,6 +238,83 @@ const bodyRow = (fused = []) => ({ id: 'rb', houses: [{ id: 'body', kind: 'body'
   assert.equal(byId.img.timeBucket, byId.rev.timeBucket, '同行同 bucket');
   assert.equal(byId.input.glue, true);
   console.log('ok - board compiles to lane tasks with row barriers');
+}
+
+{
+  // 记忆融进正文还是单独房子由写作的写表方式决定；板只保留房子位置。
+  const on = mode => ({ storageMode: 'table', autoExtract: true, autoExtractMode: mode, placeEnabled: true });
+  const kinds = board => board.rows.map(row => row.houses.map(h => h.kind));
+  const bodyOf = board => board.rows.flatMap(row => row.houses).find(h => h.kind === 'body');
+  const custom = (id, prompt = 'x') => ({ id, kind: 'custom_prompt', config: { prompt } });
+
+  // 融合 → 设定改成独立请求：拆成正文下一行的房子，带上原来的启用状态与模型配置
+  const fused = normalizeHopscotchBoard({ rows: [
+    { id: 'r1', houses: [{ id: 'body', kind: 'body', fused: ['memory_table', 'variable'], fusedEnabled: { memory_table: false, variable: true }, fusedMembers: { memory_table: { config: { modelMode: 'profile', modelProfileId: 'p9' } } } }] },
+    { id: 'r2', houses: [custom('h_note')] },
+  ] });
+  const before = JSON.stringify(fused);
+  const separated = applyHopscotchMemoryPlacement(fused, on('separate'));
+  assert.equal(JSON.stringify(fused), before, '不改动传入的板');
+  assert.deepEqual(kinds(separated), [['body'], ['custom_prompt', 'memory_table']]);
+  assert.deepEqual(bodyOf(separated).fused, ['variable']);
+  const memoryHouse = separated.rows[1].houses[1];
+  assert.equal(memoryHouse.enabled, false, '沿用融合项的启用状态');
+  assert.equal(memoryHouse.config.modelProfileId, 'p9', '沿用融合项的模型配置');
+  assert.equal(resolveHopscotchBoardMemoryMode(separated), 'separate');
+  assert.equal(validateHopscotchBoard(separated).ok, true);
+
+  // 房子 → 设定改成同回复：并回正文融合组，空行去掉，其余房子不动
+  const merged = applyHopscotchMemoryPlacement({ rows: [
+    { id: 'r1', houses: [{ id: 'body', kind: 'body', fused: [] }] },
+    { id: 'r2', houses: [{ id: 'mem', kind: 'memory_table', enabled: false }] },
+    { id: 'r3', houses: [{ id: 'compaction', kind: 'summary_compaction' }, custom('h_edit')] },
+  ] }, on('inline'));
+  assert.deepEqual(kinds(merged), [['body'], ['summary_compaction', 'custom_prompt']]);
+  assert.deepEqual(bodyOf(merged).fused, ['memory_table']);
+  assert.equal(bodyOf(merged).fusedEnabled.memory_table, false, '沿用房子的启用状态');
+  assert.equal(resolveHopscotchBoardMemoryMode(merged), 'inline');
+
+  // 已在设定要求的位置：原样保留（房子位置不挪）
+  const kept = { rows: [
+    { id: 'r1', houses: [{ id: 'body', kind: 'body', fused: [] }] },
+    { id: 'r2', houses: [custom('h_a')] },
+    { id: 'r3', houses: [{ id: 'mem', kind: 'memory_table' }] },
+  ] };
+  assert.deepEqual(kinds(applyHopscotchMemoryPlacement(kept, on('separate'))), [['body'], ['custom_prompt'], ['memory_table']]);
+
+  // 设定开着自动写表、板上却没有记忆：补上
+  const bare = { rows: [{ id: 'r1', houses: [{ id: 'body', kind: 'body', fused: [] }] }] };
+  assert.deepEqual(bodyOf(applyHopscotchMemoryPlacement(bare, on('inline'))).fused, ['memory_table']);
+  assert.deepEqual(kinds(applyHopscotchMemoryPlacement(bare, on('separate'))), [['body'], ['memory_table']]);
+
+  // 正文下一行已满 4 格、或该行有摘要压缩：在正文后另开一行，保证压缩在记忆之后
+  const full = applyHopscotchMemoryPlacement({ rows: [
+    { id: 'r1', houses: [{ id: 'body', kind: 'body', fused: [] }] },
+    { id: 'r2', houses: Array.from({ length: HOPSCOTCH_LIMITS.maxHousesPerRow }, (_, i) => custom(`h_${i}`)) },
+  ] }, on('separate'));
+  assert.deepEqual(kinds(full), [['body'], ['memory_table'], Array(HOPSCOTCH_LIMITS.maxHousesPerRow).fill('custom_prompt')]);
+  const withCompaction = applyHopscotchMemoryPlacement({ rows: [
+    { id: 'r1', houses: [{ id: 'body', kind: 'body', fused: ['memory_table'] }] },
+    { id: 'r2', houses: [{ id: 'compaction', kind: 'summary_compaction' }] },
+  ] }, on('separate'));
+  assert.deepEqual(kinds(withCompaction), [['body'], ['memory_table'], ['summary_compaction']]);
+  assert.equal(validateHopscotchBoard(withCompaction).ok, true);
+
+  // 自动写表关着：板上没有记忆就不补；已有的记忆仍按写表方式摆放（显示为停用）
+  const off = { ...on('separate'), autoExtract: false };
+  assert.equal(resolveHopscotchBoardMemoryMode(applyHopscotchMemoryPlacement(bare, off)), '');
+  assert.equal(resolveHopscotchBoardMemoryMode(applyHopscotchMemoryPlacement(fused, off)), 'separate');
+  assert.equal(resolveHopscotchBoardMemoryMode(applyHopscotchMemoryPlacement(bare, { ...on('inline'), placeEnabled: false })), '', '写作未启用记忆表格时不补');
+
+  // 同时融合又有房子（旧数据）：只留设定要求的那一种
+  const both = applyHopscotchMemoryPlacement({ rows: [
+    { id: 'r1', houses: [{ id: 'body', kind: 'body', fused: ['memory_table'] }] },
+    { id: 'r2', houses: [{ id: 'mem', kind: 'memory_table' }] },
+  ] }, on('inline'));
+  assert.deepEqual(kinds(both), [['body']]);
+  assert.equal(resolveHopscotchBoardMemoryMode(both), 'inline');
+  assert.deepEqual(kinds(applyHopscotchMemoryPlacement(kept, {})), [['body'], ['custom_prompt'], ['memory_table']], '没有写表方式（无设定上下文）时不动板');
+  console.log('ok - memory placement on saved boards follows the writing auto-extract mode');
 }
 
 console.log('hopscotch-board-utils tests passed');

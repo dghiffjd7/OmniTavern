@@ -89,7 +89,10 @@ const run = (overrides = {}) => ({
   const folded = resolveMaidRunVisibleRows(model);
   assert.equal(folded.foldedCount, 3, '超过 2 步的已完成部分收成一行');
   assert.deepEqual(folded.rows.map(row => row.id), ['s4']);
-  assert.equal(resolveMaidRunVisibleRows(model, { foldOpen: true }).foldedCount, 0);
+  const unfolded = resolveMaidRunVisibleRows(model, { foldOpen: true });
+  assert.equal(unfolded.foldedCount, 0);
+  assert.equal(unfolded.unfoldedCount, 3, '展开后仍记得有几步可以收回');
+  assert.equal(unfolded.rows.length, 4);
   const failed = buildMaidRunCardModel(projectMaidRunToTraceView(run({
     status: 'failed',
     steps: [{ id: 'f1', status: 'failed', summary: '创建聊天室', errorMessage: '角色卡「夜羽」不存在', input: { toolName: 'session.create', args: { name: '夜羽' } } }],
@@ -152,11 +155,17 @@ const run = (overrides = {}) => ({
 
   card.handleAction('thought');
   assert.match(thoughtEl.innerHTML, /先看看有哪些聊天室/);
+  assert.match(rowsEl.children[0].innerHTML, /aria-expanded="false"/);
   card.handleAction('fold');
-  assert.equal(rowsEl.children.length, 4, '展开折叠后显示全部步骤');
+  assert.equal(rowsEl.children.length, 5, '展开后：收起行 + 全部步骤');
+  assert.match(rowsEl.children[0].innerHTML, /已完成 3 步 · 收起/, '同一位置可以收回');
+  assert.match(rowsEl.children[0].innerHTML, /aria-expanded="true"/);
   card.handleAction('row', 's2');
-  assert.match(rowsEl.children[1].innerHTML, /session\.create/, '展开后显示工具与参数');
-  assert.match(rowsEl.children[1].innerHTML, /2\.1s/);
+  assert.match(rowsEl.children[2].innerHTML, /session\.create/, '展开后显示工具与参数');
+  assert.match(rowsEl.children[2].innerHTML, /2\.1s/);
+  card.handleAction('fold');
+  assert.equal(rowsEl.children.length, 2, '再点一次收回成一行');
+  assert.match(rowsEl.children[0].innerHTML, /已完成 3 步 · 展开/);
 
   card.update(projectMaidRunToTraceView(run({ status: 'waiting_permission' })), {
     approval: { id: 'c1', title: '允许女仆绑定世界书吗？', message: '绑定到 3 个聊天室', items: [{ label: '精灵女王' }], allowAlways: true, confirmLabel: '允许一次', cancelLabel: '取消' },

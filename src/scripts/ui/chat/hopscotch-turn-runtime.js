@@ -6,7 +6,7 @@
 import { t, translateUiText } from '../../i18n/index.js';
 import { cloneData } from '../../utils/clone-data.js';
 import { getActiveHopscotchFused, resolveHopscotchActivation } from './hopscotch-activation-utils.js';
-import { buildDefaultHopscotchBoard, projectHopscotchVariableRules, compileBoardToLaneTasks, findBodyRowIndex, getHopscotchHouseDisplayStatus, isHopscotchMaintenanceRunning, HOPSCOTCH_CUSTOM_HOUSE_DEFAULTS, normalizeCustomHouseConfig } from './hopscotch-board-utils.js';
+import { applyHopscotchMemoryPlacement, buildDefaultHopscotchBoard, projectHopscotchVariableRules, compileBoardToLaneTasks, findBodyRowIndex, getHopscotchHouseDisplayStatus, isHopscotchMaintenanceRunning, HOPSCOTCH_CUSTOM_HOUSE_DEFAULTS, normalizeCustomHouseConfig } from './hopscotch-board-utils.js';
 import { createCreativeTurnOrchestrator } from './creative-turn-orchestrator.js';
 import { estimateTokens } from '../../memory/memory-prompt-utils.js';
 import { getAgentInvocationMode } from '../../agent/agent-invocation.js';
@@ -484,7 +484,9 @@ export const createHopscotchTurnRuntime = ({
     // 聊天不能读到创意写作的自定义板，也不能借此接管聊天发送。
     if (place === 'chat') return { board: derived, source: 'derived' };
     const resolved = boardStore.resolveEffectiveBoard({ sessionId, derivedBoard: derived, scope });
-    const board = projectHopscotchVariableRules(resolved.board, settings?.variables?.activity);
+    // 用户板上记忆的形态跟随写作的写表方式（推导板本来就按设定生成）
+    const placed = resolved.source === 'derived' ? resolved.board : applyHopscotchMemoryPlacement(resolved.board, settings?.memory);
+    const board = projectHopscotchVariableRules(placed, settings?.variables?.activity);
     // 默认的前情提要未删除、也不在用户板上时，补挂在正文旁。
     const recap = agents.find(config => config.id === RECAP_AGENT_ID);
     const bodyIndex = findBodyRowIndex(board);
@@ -496,13 +498,11 @@ export const createHopscotchTurnRuntime = ({
   };
 
   const resolveActivation = (board, sessionId, { place = 'writing', scope = 'effective' } = {}) => resolveHopscotchActivation(board, { ...resolveWritingSettings(sessionId, place, scope), textAgents: getTextAgents(sessionId, place, scope) });
-  const resolveFusionCapabilities = (sessionId, { place = 'writing' } = {}) => {
-    const settings = resolveWritingSettings(sessionId, place);
-    return {
-      memory_table: { reason: settings.memory?.independentModel ? t('记忆使用独立模型配置，需先改为跟随正文') : '' },
-      variable_rules: { reason: t('变量规则按触发阶段独立执行') },
-    };
-  };
+  // 同回复写表就在正文这次请求里完成，用正文的模型；记忆更新的配置档只管独立请求
+  const resolveFusionCapabilities = () => ({
+    memory_table: { reason: '' },
+    variable_rules: { reason: t('变量规则按触发阶段独立执行') },
+  });
   const resolveExecutionPlan = (sessionId, { place = 'writing' } = {}) => {
     const resolved = resolveBoard(sessionId, { place });
     const settings = resolveWritingSettings(sessionId, place);

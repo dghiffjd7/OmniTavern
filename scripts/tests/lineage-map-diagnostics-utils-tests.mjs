@@ -64,6 +64,15 @@ const graph = {
 }
 
 {
+  // 同时有直达与绕行时，只返回最短路径；反向查询也使用同一规则。
+  const direct = { nodes: ['a', 'b', 'c'].map(id => ({ id })), edges: [edge('a', 'c'), edge('a', 'b'), edge('c', 'b')] };
+  assert.deepEqual(findLineagePathBetween(direct, 'a', 'b').paths.map(path => path.nodeIds), [['a', 'b']]);
+  assert.deepEqual(findLineagePathBetween(direct, 'b', 'a').paths.map(path => path.nodeIds), [['a', 'b']]);
+  assert.deepEqual([...buildLineageDiagnostics(direct, { fromId: 'a', toId: 'b' }).pathNodeIds], ['a', 'b']);
+  console.log('ok - longer detours are excluded from shortest paths and highlights');
+}
+
+{
   // 搜索量有上限：稠密图不会卡住
   const nodes = Array.from({ length: 40 }, (_, index) => ({ id: `n${index}`, type: 'rule', label: `n${index}`, status: 'active' }));
   const edges = [];

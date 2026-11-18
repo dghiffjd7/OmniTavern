@@ -27,6 +27,7 @@ const SUPPORTED_PROVIDERS = [
     'stability',
     'togetherai',
     'pollinations',
+    'wavespeed',
     'automatic1111',
     'a1111',
     'comfyui',
@@ -41,6 +42,7 @@ const IMAGE_ONLY_PROVIDERS = new Set([
     'stability',
     'togetherai',
     'pollinations',
+    'wavespeed',
     'automatic1111',
     'a1111',
     'comfyui',
@@ -73,6 +75,24 @@ const KEYRING_STORE_KEY = 'llm_keyring_v1';
 const KEYRING_MASTER_KEY = 'llm_keyring_master_v1';
 const WEB_SEARCH_KEYRING_PREFIX = '__web_search__:';
 const VERTEX_SERVICE_ACCOUNT_KEYRING_PREFIX = '__vertex_service_account__:';
+
+// 检查 Service Account JSON 并取出辨认用的栏位（项目、服务账号邮箱），不留私钥
+const parseVertexServiceAccount = (json = '') => {
+    let parsed = null;
+    try {
+        parsed = JSON.parse(String(json || ''));
+    } catch {
+        throw new Error('Service Account JSON 格式无效');
+    }
+    if (!parsed || typeof parsed !== 'object' || !parsed.client_email || !parsed.private_key) {
+        throw new Error('Service Account JSON 缺少 client_email 或 private_key');
+    }
+    return {
+        projectId: String(parsed.project_id || '').trim(),
+        clientEmail: String(parsed.client_email || '').trim(),
+        canonical: JSON.stringify(parsed),
+    };
+};
 
 const normalizeWebSearchProvider = (value) => {
     const provider = String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
@@ -182,6 +202,7 @@ const normalizeProfile = (p = {}, { touchUpdatedAt = false } = {}) => {
             : {}),
         _saEncrypted: Boolean(p._saEncrypted),
         activeKeyId: p.activeKeyId || null,
+        activeVertexServiceAccountId: p.activeVertexServiceAccountId || null,
         createdAt,
         updatedAt,
     };
@@ -343,15 +364,21 @@ export class ConfigManager {
             updatedAt: Date.now(),
         }, { touchUpdatedAt: true });
 
+        const typedServiceAccount = typeof config.vertexaiServiceAccount === 'string'
+            ? config.vertexaiServiceAccount.trim()
+            : '';
+        // 先检查 JSON，格式不对时什么都不写（包括同时贴上的 API Key）
+        if (typedServiceAccount) parseVertexServiceAccount(typedServiceAccount);
+
         // 如果传入 apiKey（代表用户新输入），保存到 keyring 并设为当前 key
         if (typeof config.apiKey === 'string' && config.apiKey.trim()) {
             const keyId = await this.addKey(nextProfile.id, config.apiKey.trim(), 'API Key');
             nextProfile.activeKeyId = keyId;
         }
 
-        // Service Account JSON 使用与 API Key 相同的 keyring；写入成功后才清理旧字段。
-        if (typeof config.vertexaiServiceAccount === 'string' && config.vertexaiServiceAccount.trim()) {
-            await this.setVertexServiceAccount(nextProfile.id, config.vertexaiServiceAccount);
+        // Service Account JSON 使用与 API Key 相同的 keyring：另存一份并设为当前；写入成功后才清理旧字段。
+        if (typedServiceAccount) {
+            nextProfile.activeVertexServiceAccountId = await this.addVertexServiceAccount(nextProfile.id, typedServiceAccount);
             delete nextProfile.vertexaiServiceAccount;
             nextProfile._saEncrypted = false;
         }
@@ -1001,15 +1028,91 @@ export class ConfigManager {
         return keyId;
     }
 
+    // 同一配置档的 Service Account 记录，最新的在前（同一毫秒存的按存入顺序，后存的在前）
+    sortedVertexServiceAccountRecords(profileId) {
+        const id = String(profileId || '').trim();
+        if (!id) return [];
+        const records = this.keyringStore?.keysByProfile?.[`${VERTEX_SERVICE_ACCOUNT_KEYRING_PREFIX}${id}`] || [];
+        return records
+            .map((record, index) => ({ record, index }))
+            .sort((a, b) => (Number(b.record?.createdAt || 0) - Number(a.record?.createdAt || 0)) || (b.index - a.index))
+            .map(item => item.record);
+    }
+
+    /** 已保存的 Service Account：只回辨认用的标签（项目）和预览（服务账号邮箱），不含凭证内容。 */
+    listVertexServiceAccounts(profileId) {
+        const id = String(profileId || this.getActiveProfileId() || '').trim();
+        return this.sortedVertexServiceAccountRecords(id)
+            .map(({ id: accountId, label, preview, createdAt }) => ({ id: accountId, label, preview, createdAt }));
+    }
+
+    /** 新增一份（已存过同一份就回它的 ID，不重复保存）；不负责设为当前。 */
+    async addVertexServiceAccount(profileId, plainJson, label = '') {
+        await this.ensureStores();
+        const id = String(profileId || '').trim();
+        if (!id) throw new Error('Vertex AI 配置档 ID 为空');
+        const value = String(plainJson || '').trim();
+        const info = parseVertexServiceAccount(value);
+        const pid = `${VERTEX_SERVICE_ACCOUNT_KEYRING_PREFIX}${id}`;
+        for (const record of this.keyringStore.keysByProfile[pid] || []) {
+            let existing = '';
+            try {
+                existing = await this.decryptKey(pid, record.id);
+            } catch {}
+            try {
+                if (existing && JSON.stringify(JSON.parse(existing)) === info.canonical) return record.id;
+            } catch {}
+        }
+        const accountId = await this.addKey(pid, value, String(label || '').trim() || info.projectId || 'Vertex AI Service Account');
+        const record = (this.keyringStore.keysByProfile[pid] || []).find(item => item.id === accountId);
+        if (record) {
+            record.preview = info.clientEmail;
+            await this.persistKeyring();
+        }
+        return accountId;
+    }
+
+    async setActiveVertexServiceAccount(profileId, accountId) {
+        await this.ensureStores();
+        const id = String(profileId || this.getActiveProfileId() || '').trim();
+        const profile = this.profileStore.profiles[id];
+        if (!profile) return;
+        if (!this.sortedVertexServiceAccountRecords(id).some(record => record.id === accountId)) return;
+        profile.activeVertexServiceAccountId = accountId;
+        profile.updatedAt = Date.now();
+        await this.persistProfiles();
+        if (id === this.getActiveProfileId()) {
+            this.config = await this.buildRuntimeConfig(normalizeProfile(profile));
+            this.isLoaded = true;
+        }
+    }
+
+    async removeVertexServiceAccount(profileId, accountId) {
+        await this.ensureStores();
+        const id = String(profileId || this.getActiveProfileId() || '').trim();
+        if (!id) return;
+        const pid = `${VERTEX_SERVICE_ACCOUNT_KEYRING_PREFIX}${id}`;
+        this.keyringStore.keysByProfile[pid] = (this.keyringStore.keysByProfile[pid] || []).filter(record => record.id !== accountId);
+        await this.persistKeyring();
+        const profile = this.profileStore.profiles[id];
+        if (profile && profile.activeVertexServiceAccountId === accountId) {
+            profile.activeVertexServiceAccountId = this.sortedVertexServiceAccountRecords(id)[0]?.id || null;
+            await this.persistProfiles();
+        }
+        if (profile && id === this.getActiveProfileId()) {
+            this.config = await this.buildRuntimeConfig(normalizeProfile(profile));
+            this.isLoaded = true;
+        }
+    }
+
     async getVertexServiceAccount(profileId) {
         await this.ensureStores();
         const id = String(profileId || '').trim();
         if (!id) return '';
         const pid = `${VERTEX_SERVICE_ACCOUNT_KEYRING_PREFIX}${id}`;
-        const records = (this.keyringStore?.keysByProfile?.[pid] || [])
-            .slice()
-            .sort((a, b) => Number(b?.createdAt || 0) - Number(a?.createdAt || 0));
-        const current = records[0];
+        const records = this.sortedVertexServiceAccountRecords(id);
+        const activeId = this.profileStore?.profiles?.[id]?.activeVertexServiceAccountId;
+        const current = records.find(record => record.id === activeId) || records[0];
         if (!current) return '';
         try {
             return await this.decryptKey(pid, current.id);

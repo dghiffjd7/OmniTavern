@@ -14,7 +14,8 @@ export const runBelongsToMaidContext = (run, context = {}) => {
 };
 
 export const classifyMaidRunFollowup = (input = '') => {
-  const text = trim(input).normalize('NFKC').replace(/[。！!？?\s]+$/u, '');
+  // 句尾语气词（继续喵、接着做呀）和标点一样不影响判断；吧、吗、呢已写在各句式里
+  const text = trim(input).normalize('NFKC').replace(/(?:[。！!？?~\s]|[喵呀啊哦喔啦嘛哈])+$/u, '');
   const named = text.match(/^(继续|取消|查看)(?:任务)?[「“"]([^」”"]+)[」”"]$/u);
   if (named) return { 继续: 'resume', 取消: 'cancel', 查看: 'status' }[named[1]];
   if (/^(?:(?:请|麻烦)?(?:继续(?:吧|执行|做|上次的任务|之前的任务|昨天那个)?|接着做)|(?:please\s+)?(?:continue|resume)(?:\s+(?:that|the previous)\s+task)?)$/iu.test(text)) return 'resume';

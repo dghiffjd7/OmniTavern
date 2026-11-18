@@ -1,4 +1,5 @@
 import { normalizeMaidVisualSpecLedger } from './maid-visual-spec.js';
+import { normalizeCarriedMaidWorldbookObservations } from './maid-worldbook-observations.js';
 
 const trim = (value, fallback = '') => {
   const text = String(value ?? '').trim();
@@ -286,6 +287,7 @@ export const normalizeMaidRunContinuationSnapshot = (snapshot = {}) => {
       maxString: 160,
     }) || null,
     visualSpecLedger: normalizeMaidVisualSpecLedger(snapshot.visualSpecLedger),
+    worldbookObservations: normalizeCarriedMaidWorldbookObservations(snapshot.worldbookObservations),
   };
 };
 
@@ -294,6 +296,7 @@ export const buildMaidRunContinuationSnapshot = ({
   result = {},
   previousSnapshot = null,
   visualSpecLedger = null,
+  worldbookObservations = null,
 } = {}) => {
   const previous = normalizeMaidRunContinuationSnapshot(previousSnapshot) || null;
   const sourceRunId = trim(run?.id || result?.runId);
@@ -343,6 +346,8 @@ export const buildMaidRunContinuationSnapshot = ({
     remainingTodos: todoSource.map(normalizeTodo).filter(isRemainingTodo),
     pendingPlan,
     visualSpecLedger: visualSpecLedger || previous?.visualSpecLedger,
+    // 已读记录由调用方按本轮步骤（含上一轮带来的部分）算好；本轮清空过就不再带旧的
+    worldbookObservations,
   });
 };
 
@@ -366,9 +371,11 @@ export const extractMaidResumeRunId = (input = '') => {
 export const buildMaidRunContinuationPromptBlock = (snapshot = {}) => {
   const normalized = normalizeMaidRunContinuationSnapshot(snapshot);
   if (!normalized) return '';
+  // 已读的世界书正文并入 <maid_worldbook_observations>，这里不重复
+  const { worldbookObservations, ...ledger } = normalized;
   return [
     `<maid_run_continuation version="${MAID_RUN_CONTINUATION_VERSION}">`,
-    JSON.stringify(normalized),
+    JSON.stringify(ledger),
     '</maid_run_continuation>',
   ].join('\n');
 };

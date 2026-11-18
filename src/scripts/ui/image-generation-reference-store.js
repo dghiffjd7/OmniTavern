@@ -2,10 +2,14 @@ import { getGeneratedImageReferenceItems, normalizeImageGenerationReferenceItems
 
 // Image bytes live in session attachments. The small session library also finds
 // duplicates whose generation messages have not been paged into memory yet.
-export const collectStoredImageReferences = ({ messages = [], assets = [] } = {}) => [
-  ...assets,
-  ...messages.flatMap(message => [message?.meta?.generatedMedia, ...(message?.meta?.generatedInlineImages || [])]),
-].flatMap(asset => getGeneratedImageReferenceItems(asset));
+export const collectStoredImageReferences = ({ messages = [], assets = [], pinned = [] } = {}) => [
+  // 聊天参考图（session.pinnedImageReferences）本身就是存好的参考图
+  ...pinned.filter(item => item?.path),
+  ...[
+    ...assets,
+    ...messages.flatMap(message => [message?.meta?.generatedMedia, ...(message?.meta?.generatedInlineImages || [])]),
+  ].flatMap(asset => getGeneratedImageReferenceItems(asset)),
+];
 
 const fingerprint = async (dataUrl) => {
   const match = /^data:(image\/[^;,]+);base64,([\s\S]+)$/i.exec(dataUrl);

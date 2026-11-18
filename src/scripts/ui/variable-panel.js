@@ -7,6 +7,10 @@ import {
     formatVariableScopeLabel,
     getVariableRenderSlice,
     isVariableValueFilled,
+    readVariablePathValue,
+    removeVariablePathValue,
+    resolveVariablePath,
+    writeVariablePathValue,
 } from './variable-panel-state-utils.js';
 import {
     renderVariableListView,
@@ -141,12 +145,13 @@ export class VariablePanel extends VariablePanelRuntime {
         this.schemaEditor = new VariableSchemaEditor({
             getContext: () => this.resolveScope(),
             getSchema: key => this.getSchema(key),
-            getValue: key => this.listVars()?.[key],
+            getValue: key => this.getVarValue(key),
             getInitialValue: key => this.getInitialValue(key),
             setSchema: (key, schema) => this.setSchema(key, schema),
             deleteSchema: key => this.deleteSchema(key),
             setVariable: (key, value) => this.setVar(key, value),
             isGlobalScope: () => this.isGlobalScope(),
+            isNestedPath: key => this.isNestedVarPath(key),
             restoreInitialValue: (key, value) => this.setVar(key, value),
             onChange: detail => {
                 if (detail?.key) this.markVariableUpdated(detail.key);
@@ -291,7 +296,10 @@ export class VariablePanel extends VariablePanelRuntime {
                     </div>
                     <div id="var-list-scroll" class="variable-manager-scroll">
                         <div id="var-list" class="variable-list-view"></div>
-                        <button id="var-load-more" type="button" class="variable-load-more" hidden>加载更多</button>
+                        <div class="variable-load-row" hidden>
+                            <button id="var-load-more" type="button" class="variable-load-more" hidden>加载更多</button>
+                            <button id="var-load-less" type="button" class="variable-load-more variable-load-less" hidden>收起</button>
+                        </div>
                     </div>
                 </section>
 
@@ -387,6 +395,7 @@ export class VariablePanel extends VariablePanelRuntime {
             list: query('#var-list'),
             listScroll: query('#var-list-scroll'),
             loadMore: query('#var-load-more'),
+            loadLess: query('#var-load-less'),
             listCount: query('[data-field="list-count"]'),
             cards: query('#var-cards'),
             recovery: query('#var-empty-recovery'),
@@ -451,6 +460,7 @@ export class VariablePanel extends VariablePanelRuntime {
         query('#var-add')?.addEventListener('click', () => this.promptAdd());
         query('#var-more')?.addEventListener('click', event => this.showMoreMenu(event.currentTarget));
         this.elements.loadMore?.addEventListener('click', () => this.loadMoreVariables());
+        this.elements.loadLess?.addEventListener('click', () => this.collapseVariables());
         this.elements.listScroll?.addEventListener('scroll', () => {
             const scroll = this.elements.listScroll;
             if (!scroll || scroll.scrollTop + scroll.clientHeight < scroll.scrollHeight - 120) return;
@@ -713,7 +723,36 @@ export class VariablePanel extends VariablePanelRuntime {
     getInitialValue(key) {
         const { sid } = this.resolveScope();
         if (!sid) return undefined;
-        return this.chatStore?.getInitialVariable?.(String(key || '').trim(), sid);
+        const initial = this.chatStore?.listInitialVariables?.(sid) || {};
+        return readVariablePathValue(initial, resolveVariablePath(initial, key));
+    }
+
+    // 树视图的叶子拿点路径（stat_data.角色.好感度）当 key：顶层变量照旧，嵌套路径改写它所属的顶层变量
+    resolveVarPath(key) {
+        return resolveVariablePath(this.listVars(), key);
+    }
+
+    isNestedVarPath(key) {
+        return Boolean(this.resolveVarPath(key)?.segments.length);
+    }
+
+    getVarValue(key) {
+        const vars = this.listVars();
+        return readVariablePathValue(vars, resolveVariablePath(vars, key));
+    }
+
+    setVar(key, value) {
+        const target = this.resolveVarPath(key);
+        if (!target?.segments.length) return super.setVar(key, value);
+        const root = this.listVars()[target.rootKey];
+        return super.setVar(target.rootKey, writeVariablePathValue(root, target.segments, value));
+    }
+
+    deleteVar(key) {
+        const target = this.resolveVarPath(key);
+        if (!target?.segments.length) return super.deleteVar(key);
+        const root = this.listVars()[target.rootKey];
+        return super.setVar(target.rootKey, removeVariablePathValue(root, target.segments));
     }
 
     renderCards() {
@@ -767,6 +806,7 @@ export class VariablePanel extends VariablePanelRuntime {
                 onCopy: key => this.copyReference(key),
             });
             this.elements.loadMore.hidden = true;
+            if (this.elements.loadLess) this.elements.loadLess.hidden = true;
         } else {
             const slice = getVariableRenderSlice({
                 rows: allRows,
@@ -794,6 +834,11 @@ export class VariablePanel extends VariablePanelRuntime {
             if (slice.hasMore) {
                 this.elements.loadMore.textContent = `加载更多（剩余 ${slice.total - slice.rendered}）`;
             }
+            if (this.elements.loadLess) this.elements.loadLess.hidden = !slice.canCollapse;
+        }
+        const loadRow = this.elements.loadMore?.parentElement;
+        if (loadRow?.classList?.contains('variable-load-row')) {
+            loadRow.hidden = this.elements.loadMore.hidden && this.elements.loadLess?.hidden !== false;
         }
         this.updatePageCounts();
         this.syncSelectedRow();
@@ -806,6 +851,14 @@ export class VariablePanel extends VariablePanelRuntime {
             this.visibleLimit + VARIABLE_LIST_BATCH_SIZE,
         );
         this.renderList();
+    }
+
+    // 收起回第一批并回到列表顶端（停在底部的话，滚动自动加载会马上再展开）
+    collapseVariables() {
+        if (this.viewMode !== 'list') return;
+        this.visibleLimit = VARIABLE_LIST_BATCH_SIZE;
+        this.renderList();
+        if (this.elements.listScroll) this.elements.listScroll.scrollTop = 0;
     }
 
     updatePageCounts() {
@@ -853,7 +906,7 @@ export class VariablePanel extends VariablePanelRuntime {
         this.selectedKey = name;
         this.schemaEditor.show({
             key: name,
-            value: value !== undefined ? value : this.listVars()?.[name],
+            value: value !== undefined ? value : this.getVarValue(name),
             schema: schema || this.getSchema(name),
             mode,
         });
@@ -1022,18 +1075,22 @@ export class VariablePanel extends VariablePanelRuntime {
     deleteKey(rawKey) {
         const key = String(rawKey || '').trim();
         const { sid, vars } = this.getVars();
-        if (!sid || !key || !Object.prototype.hasOwnProperty.call(vars || {}, key)) return false;
-        const schema = this.getSchema(key);
+        const target = sid && key ? resolveVariablePath(vars, key) : null;
+        if (!target) return false;
+        const nested = target.segments.length > 0;
+        const schema = nested ? null : this.getSchema(key);
         const record = {
             kind: 'variable',
             label: key,
             key,
-            value: cloneValue(vars[key]),
+            rootKey: target.rootKey,
+            segments: target.segments,
+            value: cloneValue(readVariablePathValue(vars, target)),
             schema: cloneValue(schema),
             hasSchema: Boolean(schema),
         };
         this.deleteVar(key);
-        this.deleteSchema(key);
+        if (!nested) this.deleteSchema(key);
         this.pushGraveyard(record);
         if (this.selectedKey === key) this.selectedKey = '';
         this.renderList();
@@ -1085,7 +1142,13 @@ export class VariablePanel extends VariablePanelRuntime {
         if (index < 0) return false;
         const [record] = this.graveyard.splice(index, 1);
         if (record.kind === 'variable') {
-            this.setVar(record.key, cloneValue(record.value));
+            if (record.segments?.length) {
+                // 嵌套值删掉后原路径已解析不到，按删除时记下的顶层名和嵌套段写回（数组元素插回原位）
+                const root = this.listVars()[record.rootKey];
+                this.setVar(record.rootKey, writeVariablePathValue(root, record.segments, cloneValue(record.value), { insert: true }));
+            } else {
+                this.setVar(record.key, cloneValue(record.value));
+            }
             if (record.hasSchema) this.setSchema(record.key, cloneValue(record.schema));
             this.markVariableUpdated(record.key);
             this.renderList();

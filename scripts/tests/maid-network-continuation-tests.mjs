@@ -28,6 +28,32 @@ assert(run.metadata.continuationSnapshot.successfulSteps.some(step => step.toolN
 assert.equal(run.metadata.continuationSnapshot.sourceRunId, run.id);
 console.log('ok - real planner request failure preserves completed steps in a resumable run');
 
+// 报错原文原样交给界面并写进执行记录；续跑仍按 metadata.reason 判断中断原因
+assert.equal(result.errorDetail, 'Failed to fetch');
+assert.equal(run.errorMessage, 'Failed to fetch');
+assert.equal(run.metadata.reason, 'provider_request_failed');
+console.log('ok - the provider error text reaches the result and the run record verbatim');
+
+{
+  const longBody = `HTTP 400 ${JSON.stringify({ error: { message: 'x'.repeat(600) } })}`;
+  const bothFail = createMaidModelBackedReActPlanner({
+    resolveRuntimeConfig: async () => ({
+      config: { provider: 'vertexai', model: 'gemini-a' },
+      client: { chat: async () => { throw new Error('No candidates returned: PROHIBITED_CONTENT'); } },
+      fallbackConfig: { provider: 'makersuite', model: 'gemini-b' },
+      fallbackClient: { chat: async () => { throw new Error(longBody); } },
+    }),
+    logger,
+  });
+  const failed = await bothFail('Continue the remaining work');
+  assert.equal(failed.reason, 'provider_request_failed');
+  assert.equal(failed.errorMessage, [
+    '主模型（vertexai / gemini-a）：No candidates returned: PROHIBITED_CONTENT',
+    `备用配置（makersuite / gemini-b）：${longBody}`,
+  ].join('\n'), 'both errors are kept untruncated, each labelled with the profile that raised it');
+  console.log('ok - when the fallback also fails, the primary error is not hidden');
+}
+
 const controller = new AbortController(); controller.abort();
 const aborted = createMaidModelBackedReActPlanner({
   resolveRuntimeConfig: async () => ({ client: { chat: async () => { throw new DOMException('Aborted', 'AbortError'); } } }), logger,

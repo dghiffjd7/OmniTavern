@@ -125,6 +125,7 @@ const IMAGE_PROVIDER_OPTIONS = [
     { value: 'stability', label: 'Stability AI' },
     { value: 'togetherai', label: 'Together AI' },
     { value: 'pollinations', label: 'Pollinations' },
+    { value: 'wavespeed', label: 'WaveSpeed AI' },
     { value: 'automatic1111', label: 'AUTOMATIC1111' },
     { value: 'comfyui', label: 'ComfyUI' },
     { value: 'custom', label: '自定义 OpenAI 兼容 API' },
@@ -808,8 +809,11 @@ export class ConfigPanel {
 
                     <div id="vertexai-service-account-field" class="api-config-field">
                         <label class="api-config-field-label">
-                            <span class="has-help" data-help="粘贴从 Google Cloud 下载的 Service Account JSON；Project ID 会自动识别。凭证保存在本机加密 Keyring。" data-help-mode="tap">Service Account JSON</span>
-                            <button id="toggle-sa" class="api-config-text-action">${API_CONFIG_ICONS.eye}<span>显示</span></button>
+                            <span class="has-help" data-help="粘贴从 Google Cloud 下载的 Service Account JSON；Project ID 会自动识别。凭证保存在本机加密 Keyring，可保存多份并切换当前使用。" data-help-mode="tap">Service Account JSON</span>
+                            <div class="api-config-field-tools">
+                                <button id="toggle-sa" class="api-config-text-action">${API_CONFIG_ICONS.eye}<span>显示</span></button>
+                                <button id="manage-service-accounts" class="api-config-icon-action" title="管理已保存的 Service Account" aria-label="管理已保存的 Service Account">${API_CONFIG_ICONS.key}</button>
+                            </div>
                         </label>
                         <textarea id="config-serviceaccount" data-maid-guide-target="config-service-account-input" placeholder='{"type": "service_account", "project_id": "your-project", ...}'
                                   style="width: 100%; padding: 10px; border-radius: 5px; border: 1px solid var(--app-border-default); font-size: 12px; box-sizing: border-box; font-family: monospace; min-height: 100px; resize: vertical;"></textarea>
@@ -1186,6 +1190,7 @@ export class ConfigPanel {
         this.element.querySelector('#profile-rename').onclick = () => this.renameProfile();
         this.element.querySelector('#profile-delete').onclick = () => this.deleteProfile();
         this.element.querySelector('#toggle-sa')?.addEventListener('click', () => this.toggleServiceAccount());
+        this.element.querySelector('#manage-service-accounts')?.addEventListener('click', () => this.openKeyManager('serviceAccount'));
         this.element.querySelector('#refresh-models').onclick = () => this.refreshModels();
         this.element.querySelector('#refresh-openrouter-providers')?.addEventListener('click', () => {
             void this.refreshOpenRouterProviders();
@@ -1805,6 +1810,11 @@ export class ConfigPanel {
                 baseUrl: 'https://gen.pollinations.ai',
                 model: 'flux',
                 urlHelp: 'Pollinations 图片 API URL'
+            },
+            wavespeed: {
+                baseUrl: 'https://api.wavespeed.ai/api/v3',
+                model: 'bytedance/seedream-v5.5',
+                urlHelp: 'WaveSpeed API URL'
             },
             automatic1111: {
                 baseUrl: 'http://127.0.0.1:7860',
@@ -2973,7 +2983,7 @@ export class ConfigPanel {
         const btn = panel.querySelector('#toggle-sa');
         if (!input || !btn) return;
         if (input.dataset.hasKey === 'true' && input.value === VERTEX_SERVICE_ACCOUNT_MASK) {
-            this.showStatus(t('粘贴新的 Service Account JSON 即可替换已保存凭证'), 'info');
+            this.showStatus(t('粘贴新的 Service Account JSON 保存后会另存一份并设为当前；已保存的可在旁边的管理里切换'), 'info');
             return;
         }
 
@@ -3031,10 +3041,13 @@ export class ConfigPanel {
         this.emitProfileChanged();
     }
 
-    openKeyManager() {
+    // kind：apiKey（API Key）或 serviceAccount（Vertex AI Service Account JSON），两者都是同一配置档存多份、切换当前使用
+    openKeyManager(kind = 'apiKey') {
         if (!this.keyOverlay) {
             this.createKeyManagerUI();
         }
+        this.keyManagerKind = kind === 'serviceAccount' ? 'serviceAccount' : 'apiKey';
+        this.renderKeyManagerBody();
         this.refreshKeyManagerList();
         this.keyOverlay.style.display = 'block';
         this.keyModal.style.display = 'block';
@@ -3043,6 +3056,66 @@ export class ConfigPanel {
     closeKeyManager() {
         if (this.keyOverlay) this.keyOverlay.style.display = 'none';
         if (this.keyModal) this.keyModal.style.display = 'none';
+    }
+
+    getKeyManagerSpec() {
+        const manager = this.configManager;
+        if (this.keyManagerKind === 'serviceAccount') {
+            const list = profileId => manager.listVertexServiceAccounts?.(profileId) || [];
+            return {
+                title: 'Service Account 管理',
+                subtitle: '只显示项目和服务账号，不显示凭证内容；可保存多份并切换当前使用',
+                closeLabel: '关闭 Service Account 管理',
+                listTitle: '已保存的 Service Account',
+                emptyText: '（尚无 Service Account）',
+                addTitle: '新增 Service Account JSON',
+                placeholder: '{"type": "service_account", "project_id": "your-project", ...}',
+                multiline: true,
+                hint: '保存后将自动设为当前使用',
+                emptyWarning: '请粘贴 Service Account JSON',
+                savedToast: 'Service Account 已保存并设为当前',
+                saveFailedToast: '保存 Service Account 失败',
+                defaultLabel: 'Service Account',
+                removeTitle: '删除 Service Account',
+                removeMessage: '删除这份 Service Account JSON？',
+                list,
+                // 旧资料没记当前用哪份时，实际用的是最新那份
+                activeId: profile => profile?.activeVertexServiceAccountId || list(profile?.id)[0]?.id || null,
+                add: async (profileId, value) => {
+                    const accountId = await manager.addVertexServiceAccount(profileId, value);
+                    await manager.setActiveVertexServiceAccount(profileId, accountId);
+                },
+                use: (profileId, accountId) => manager.setActiveVertexServiceAccount(profileId, accountId),
+                remove: (profileId, accountId) => manager.removeVertexServiceAccount(profileId, accountId),
+                syncForm: () => this.syncServiceAccountMaskToForm(),
+            };
+        }
+        return {
+            title: 'Key 管理',
+            subtitle: 'Key 以遮罩显示，不可复制；可保存多个并切换当前使用',
+            closeLabel: '关闭 Key 管理',
+            listTitle: '已保存的 Keys',
+            emptyText: '（尚无 Key）',
+            addTitle: '新增 Key',
+            placeholder: '贴上 API Key',
+            multiline: false,
+            hint: '保存后将自動设为当前 Key',
+            emptyWarning: '请输入 Key',
+            savedToast: 'Key 已保存并设为当前',
+            saveFailedToast: '保存 Key 失败',
+            defaultLabel: 'API Key',
+            removeTitle: '删除 Key',
+            removeMessage: '删除该 Key？',
+            list: profileId => manager.listKeys?.(profileId) || [],
+            activeId: profile => profile?.activeKeyId || null,
+            add: async (profileId, value) => {
+                const keyId = await manager.addKey(profileId, value, 'API Key');
+                await manager.setActiveKey(profileId, keyId);
+            },
+            use: (profileId, keyId) => manager.setActiveKey(profileId, keyId),
+            remove: (profileId, keyId) => manager.removeKey(profileId, keyId),
+            syncForm: () => this.syncMaskedKeyToForm(),
+        };
     }
 
     createKeyManagerUI() {
@@ -3062,52 +3135,58 @@ export class ConfigPanel {
             z-index: 23110; padding:16px;
         `;
         this.keyModal.onclick = (e) => e.stopPropagation();
+
+        document.body.appendChild(this.keyOverlay);
+        document.body.appendChild(this.keyModal);
+    }
+
+    renderKeyManagerBody() {
+        const spec = this.getKeyManagerSpec();
+        const inputHtml = spec.multiline
+            ? `<textarea id="keymgr-input" spellcheck="false" placeholder="${escapeHtml(spec.placeholder)}" style="flex:1; min-height:96px; resize:vertical; padding:10px; border:1px solid var(--app-border-default); border-radius:10px; font-family:monospace; font-size:12px;"></textarea>`
+            : `<input id="keymgr-input" type="password" placeholder="${escapeHtml(spec.placeholder)}" style="flex:1; padding:10px; border:1px solid var(--app-border-default); border-radius:10px;">`;
         this.keyModal.innerHTML = `
             <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
                 <div>
-                    <div style="display:flex; align-items:center; gap:7px; font-weight:800; color:var(--app-text-primary);">${API_CONFIG_ICONS.key}<span>Key 管理</span></div>
-                    <div style="color:var(--app-text-muted); font-size:12px;">Key 以遮罩显示，不可复制；可保存多个并切换当前使用</div>
+                    <div style="display:flex; align-items:center; gap:7px; font-weight:800; color:var(--app-text-primary);">${API_CONFIG_ICONS.key}<span>${escapeHtml(spec.title)}</span></div>
+                    <div style="color:var(--app-text-muted); font-size:12px;">${escapeHtml(spec.subtitle)}</div>
                 </div>
-                <button id="keymgr-close" aria-label="关闭 Key 管理" style="width:32px; height:32px; display:inline-flex; align-items:center; justify-content:center; border:none; border-radius:8px; background:var(--app-surface-subtle); color:var(--app-text-secondary); cursor:pointer;">${API_CONFIG_ICONS.close}</button>
+                <button id="keymgr-close" aria-label="${escapeHtml(spec.closeLabel)}" style="width:32px; height:32px; display:inline-flex; align-items:center; justify-content:center; border:none; border-radius:8px; background:var(--app-surface-subtle); color:var(--app-text-secondary); cursor:pointer;">${API_CONFIG_ICONS.close}</button>
             </div>
             <div style="margin-top:12px; border-top:1px solid var(--app-border-subtle); padding-top:12px;">
-                <div style="font-weight:700; margin-bottom:6px;">已保存的 Keys</div>
+                <div style="font-weight:700; margin-bottom:6px;">${escapeHtml(spec.listTitle)}</div>
                 <ul id="keymgr-list" style="list-style:none; padding:0; margin:0; border:1px solid var(--app-border-subtle); border-radius:10px; overflow:hidden;"></ul>
             </div>
             <div style="margin-top:12px; border-top:1px solid var(--app-border-subtle); padding-top:12px;">
-                <div style="font-weight:700; margin-bottom:6px;">新增 Key</div>
-                <div style="display:flex; gap:8px; align-items:center;">
-                    <input id="keymgr-input" type="password" placeholder="贴上 API Key" style="flex:1; padding:10px; border:1px solid var(--app-border-default); border-radius:10px;">
+                <div style="font-weight:700; margin-bottom:6px;">${escapeHtml(spec.addTitle)}</div>
+                <div style="display:flex; gap:8px; align-items:${spec.multiline ? 'flex-end' : 'center'};">
+                    ${inputHtml}
                     <button id="keymgr-add" style="padding:10px 12px; border:1px solid var(--app-border-default); border-radius:10px; background:var(--app-surface-subtle); cursor:pointer;">保存</button>
                 </div>
-                <small style="color:var(--app-text-muted);">保存后将自動设为当前 Key</small>
+                <small style="color:var(--app-text-muted);">${escapeHtml(spec.hint)}</small>
             </div>
         `;
 
         this.keyModal.querySelector('#keymgr-close').onclick = () => this.closeKeyManager();
         this.keyModal.querySelector('#keymgr-add').onclick = async () => {
             const input = this.keyModal.querySelector('#keymgr-input');
-            const key = (input?.value || '').trim();
-            if (!key) {
-                window.toastr?.warning('请输入 Key');
+            const value = (input?.value || '').trim();
+            if (!value) {
+                window.toastr?.warning(spec.emptyWarning);
                 return;
             }
             const active = this.configManager.getActiveProfile?.();
             try {
-                const keyId = await this.configManager.addKey(active?.id, key, 'API Key');
-                await this.configManager.setActiveKey(active?.id, keyId);
+                await spec.add(active?.id, value);
                 input.value = '';
                 this.refreshKeyManagerList();
-                this.syncMaskedKeyToForm();
+                spec.syncForm();
                 await this.syncRuntimeToAppBridge();
-                window.toastr?.success('Key 已保存并设为当前');
+                window.toastr?.success(spec.savedToast);
             } catch (err) {
-                window.toastr?.error(err.message || '保存 Key 失败');
+                window.toastr?.error(err.message || spec.saveFailedToast);
             }
         };
-
-        document.body.appendChild(this.keyOverlay);
-        document.body.appendChild(this.keyModal);
     }
 
     syncMaskedKeyToForm() {
@@ -3117,6 +3196,18 @@ export class ConfigPanel {
         apiKeyInput.value = masked || '';
         apiKeyInput.dataset.masked = masked || '';
         apiKeyInput.dataset.hasKey = masked ? 'true' : 'false';
+    }
+
+    syncServiceAccountMaskToForm() {
+        const saInput = (this.element || document).querySelector('#config-serviceaccount');
+        if (!saInput) return;
+        // 用户正在框里贴的新 JSON 不动
+        if (saInput.value && saInput.value !== VERTEX_SERVICE_ACCOUNT_MASK) return;
+        const active = this.configManager.getActiveProfile?.();
+        const hasSaved = (this.configManager.listVertexServiceAccounts?.(active?.id) || []).length > 0;
+        saInput.value = hasSaved ? VERTEX_SERVICE_ACCOUNT_MASK : '';
+        saInput.dataset.hasKey = hasSaved ? 'true' : 'false';
+        saInput.style.webkitTextSecurity = hasSaved ? 'disc' : 'none';
     }
 
     async syncRuntimeToAppBridge() {
@@ -3135,13 +3226,15 @@ export class ConfigPanel {
     refreshKeyManagerList() {
         const list = this.keyModal?.querySelector('#keymgr-list');
         if (!list) return;
+        const spec = this.getKeyManagerSpec();
         const active = this.configManager.getActiveProfile?.();
-        const keys = this.configManager.listKeys?.(active?.id) || [];
+        const keys = spec.list(active?.id);
+        const activeId = spec.activeId(active);
         list.innerHTML = '';
         if (!keys.length) {
             const li = document.createElement('li');
             li.style.cssText = 'padding:10px 12px; color:var(--app-text-muted);';
-            li.textContent = '（尚无 Key）';
+            li.textContent = spec.emptyText;
             list.appendChild(li);
             return;
         }
@@ -3149,20 +3242,22 @@ export class ConfigPanel {
             const li = document.createElement('li');
             li.style.cssText = 'padding:10px 12px; border-bottom:1px solid var(--app-surface-hover); display:flex; align-items:center; justify-content:space-between; gap:10px;';
             const left = document.createElement('div');
-            const isActive = active?.activeKeyId === k.id;
-            left.innerHTML = `<div style="font-weight:700; color:var(--app-text-primary);">${k.preview || '••••'}</div><div style="color:var(--app-text-muted); font-size:12px;">${k.label || 'API Key'}${isActive ? ' · 当前' : ''}</div>`;
+            left.style.minWidth = '0';
+            const isActive = activeId === k.id;
+            left.innerHTML = `<div style="font-weight:700; color:var(--app-text-primary); overflow-wrap:anywhere;">${escapeHtml(k.preview || '••••')}</div><div style="color:var(--app-text-muted); font-size:12px;">${escapeHtml(k.label || spec.defaultLabel)}${isActive ? ' · 当前' : ''}</div>`;
             const right = document.createElement('div');
             right.style.display = 'flex';
             right.style.gap = '6px';
+            right.style.flexShrink = '0';
 
             const useBtn = document.createElement('button');
             useBtn.textContent = isActive ? '当前' : '使用';
             useBtn.disabled = isActive;
             useBtn.style.cssText = 'padding:6px 10px; border:1px solid var(--app-border-default); border-radius:10px; background:var(--app-surface-subtle); cursor:pointer;';
             useBtn.onclick = async () => {
-                await this.configManager.setActiveKey(active?.id, k.id);
+                await spec.use(active?.id, k.id);
                 this.refreshKeyManagerList();
-                this.syncMaskedKeyToForm();
+                spec.syncForm();
                 await this.syncRuntimeToAppBridge();
             };
 
@@ -3170,11 +3265,11 @@ export class ConfigPanel {
             delBtn.textContent = '删除';
             delBtn.style.cssText = 'padding:6px 10px; border:1px solid #fca5a5; border-radius:10px; background:#fee2e2; color:#b91c1c; cursor:pointer;';
             delBtn.onclick = async () => {
-                const ok = await appConfirm({ title: '删除 Key', message: '删除该 Key？', danger: true });
+                const ok = await appConfirm({ title: spec.removeTitle, message: spec.removeMessage, danger: true });
                 if (!ok) return;
-                await this.configManager.removeKey(active?.id, k.id);
+                await spec.remove(active?.id, k.id);
                 this.refreshKeyManagerList();
-                this.syncMaskedKeyToForm();
+                spec.syncForm();
                 await this.syncRuntimeToAppBridge();
             };
 

@@ -191,6 +191,7 @@ export const createMaidVoiceOrbUi = ({ documentRef = globalThis.document, window
   let active = false, expanded = false, inputOpen = false, state = { status: 'idle' }, tasks = { active: [], latest: null, recent: [] }, warningText = '', latestText = '';
   let approval = null, dismissedApprovalId = '', failedSeenId = '', doneRingUntil = 0;
   const animatedCardIds = new Set(), rerolledCards = new Map(); // 结果卡：已播过动画的、「再来一次」追加的（按任务）
+  const answeredCardIds = new Set(); // 托盘每次更新都重画：已回答的选项提问卡改为只显示
   let finishTimer = null, ringTimer = null;
   let lastLevels = null, lastOutputAt = 0;
   const paintLevels = () => {
@@ -276,6 +277,7 @@ export const createMaidVoiceOrbUi = ({ documentRef = globalThis.document, window
         const cardEl = renderMaidResultCard(documentRef, card, {
           animate: !animatedCardIds.has(card.id),
           onAction: typeof onResultCardAction === 'function' ? payload => rerollCard(task.task_id, payload) : null,
+          answerable: !answeredCardIds.has(card.id),
         });
         animatedCardIds.add(card.id);
         if (cardEl) holder.appendChild(cardEl);
@@ -286,9 +288,11 @@ export const createMaidVoiceOrbUi = ({ documentRef = globalThis.document, window
   };
   const rerollCard = async (taskId, payload) => {
     const outcome = await onResultCardAction(payload);
-    if (!outcome?.card) return;
+    if (outcome?.answered && payload?.card?.id) answeredCardIds.add(payload.card.id);
+    if (!outcome?.card) return outcome; // 选项提问卡据 answered 判断是否已送出
     rerolledCards.set(taskId, [...(rerolledCards.get(taskId) || []), outcome.card].slice(-4));
     renderTasks();
+    return outcome;
   };
   const renderApproval = () => {
     approvalEl.hidden = !approval;

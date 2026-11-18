@@ -361,9 +361,9 @@ export const createMaidRunCardView = ({
   const isCollapsed = () => (model?.terminal ? (ui.collapsed ?? isMaidRunCollapsedByDefault(model)) : false);
 
   const renderRows = (animate) => {
-    const { foldedCount, rows } = resolveMaidRunVisibleRows(model, { foldOpen: ui.foldOpen });
+    const { foldedCount, unfoldedCount, rows } = resolveMaidRunVisibleRows(model, { foldOpen: ui.foldOpen });
     const desired = [];
-    if (foldedCount > 0) desired.push({ key: '__fold__', fold: foldedCount });
+    if (foldedCount > 0 || unfoldedCount > 0) desired.push({ key: '__fold__', fold: foldedCount || unfoldedCount, open: unfoldedCount > 0 });
     rows.forEach(row => desired.push({ key: row.id, row }));
     const order = desired.map(item => item.key);
     const sameOrder = order.length === rowOrder.length && order.every((key, index) => key === rowOrder[index]);
@@ -378,11 +378,12 @@ export const createMaidRunCardView = ({
         rowNodes.set(item.key, entry);
       }
       const expanded = item.row ? ui.expanded.has(item.row.id) : false;
-      const signature = item.fold ? `fold:${item.fold}` : rowSignature(item.row, expanded);
+      const signature = item.fold ? `fold:${item.fold}:${item.open ? 'open' : 'closed'}` : rowSignature(item.row, expanded);
       if (signature !== entry.signature || isNew) {
         entry.signature = signature;
         if (item.fold) {
-          entry.li.innerHTML = `<button type="button" class="mrc-fold" data-mrc-action="fold"><span class="mrc-row-icon">${MAID_RUN_ICONS.done}</span>${escapeHtml(t('已完成 {count} 步 · 展开', { count: item.fold }))}</button>`;
+          const foldLabel = item.open ? t('已完成 {count} 步 · 收起', { count: item.fold }) : t('已完成 {count} 步 · 展开', { count: item.fold });
+          entry.li.innerHTML = `<button type="button" class="mrc-fold" data-mrc-action="fold" aria-expanded="${item.open ? 'true' : 'false'}"><span class="mrc-row-icon">${MAID_RUN_ICONS.done}</span>${escapeHtml(foldLabel)}</button>`;
         } else {
           entry.li.dataset.status = item.row.status;
           entry.li.dataset.rowId = item.row.id;
@@ -495,7 +496,7 @@ export const createMaidRunCardView = ({
       return true;
     }
     if (action === 'fold') {
-      ui.foldOpen = true;
+      ui.foldOpen = !ui.foldOpen;
       render({ animate: false });
       onLayoutChange?.({ reason: 'fold' });
       return true;

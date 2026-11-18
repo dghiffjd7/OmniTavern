@@ -121,6 +121,8 @@ export const initializeI18n = async ({
 
 export const getI18nState = () => ({ ...runtimeState, catalog: runtimeState.catalog });
 export const getCurrentLocale = () => runtimeState.locale;
+// 「标签：内容」里的冒号：中文界面用全角，其他语言用半角加空格
+export const localeColon = () => (String(runtimeState.locale).startsWith('zh') ? '：' : ': ');
 
 export const formatNumber = (value, options = {}) => {
   try {

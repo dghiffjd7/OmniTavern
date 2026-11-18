@@ -1,4 +1,4 @@
-import { normalizeHopscotchBoard, validateHopscotchBoard } from './hopscotch-board-utils.js';
+import { normalizeHopscotchBoard, placeHopscotchMemoryHouse, validateHopscotchBoard } from './hopscotch-board-utils.js';
 import { applyHopscotchDrop } from './hopscotch-drag-utils.js';
 import { cloneData } from '../../utils/clone-data.js';
 
@@ -36,6 +36,8 @@ export const editHopscotchBoard = (board, action = {}) => {
       break;
     case 'remove':
       if (!house || house.kind === 'body') return { ok: false, reason: 'body_required' };
+      // 记忆的有无由设定（自动写表）决定，板上只能切换融合/单独房子
+      if (house.kind === 'memory_table') return { ok: false, reason: 'memory_follows_settings' };
       if (house.kind === 'variable_rules') next.policy.variableRuleExclusions = [...new Set([...(next.policy.variableRuleExclusions || []), house.config.phase])];
       sourceRow.houses.splice(sourceRow.houses.indexOf(house), 1);
       break;
@@ -46,7 +48,7 @@ export const editHopscotchBoard = (board, action = {}) => {
       break;
     case 'retype':
       // 停用的房子即草稿：原位换成另一种类型，序号、行与 ID 不变，仍保持停用。
-      if (!house || house.kind === 'body' || house.kind === 'variable_rules' || house.enabled !== false) return { ok: false, reason: 'retype_unavailable' };
+      if (!house || house.kind === 'body' || house.kind === 'variable_rules' || house.kind === 'memory_table' || house.enabled !== false) return { ok: false, reason: 'retype_unavailable' };
       sourceRow.houses.splice(sourceRow.houses.indexOf(house), 1, { ...action.house, id: house.id, kind: action.kind, enabled: false });
       if (action.kind === 'variable_rules') next.policy.variableRuleExclusions = (next.policy.variableRuleExclusions || []).filter(phase => phase !== (action.house?.config?.phase || 'after'));
       break;
@@ -76,6 +78,14 @@ export const editHopscotchBoard = (board, action = {}) => {
         if (action.capabilities?.[action.kind]?.reason) return { ok: false, reason: action.capabilities[action.kind].reason };
         body.fused = [...new Set([...body.fused, action.kind])];
         body.fusedEnabled[action.kind] = true;
+      } else if (action.kind === 'memory_table' && body.fused.includes('memory_table')) {
+        // 关掉记忆融合 = 拆出成单独房子（切到独立请求），带上原来的启用状态与模型配置
+        const member = body.fusedMembers?.memory_table;
+        const enabled = body.fusedEnabled?.memory_table !== false;
+        body.fused = body.fused.filter(kind => kind !== 'memory_table');
+        delete body.fusedMembers?.memory_table;
+        delete body.fusedEnabled?.memory_table;
+        placeHopscotchMemoryHouse(next, { id: newId('house'), enabled, ...(member?.config ? { config: member.config } : {}) });
       } else body.fused = body.fused.filter(kind => kind !== action.kind);
       break;
     case 'policy': Object.assign(next.policy, action.patch); break;

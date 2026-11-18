@@ -167,7 +167,7 @@ export const createAppNavigationAgentTools = ({
   {
     name: 'app.search_feature',
     title: 'Search APP features',
-    description: 'Search registered APP capabilities and usage guides by user wording. The catalog is not exhaustive; no match does not mean the APP lacks the feature. Read a matched guide to distinguish APP support from maid execution tools.',
+    description: 'Search registered APP capabilities and usage guides by user wording. Read a matched guide to distinguish APP support from maid execution tools.',
     source: 'maid-app-navigation',
     permissions: [],
     riskLevel: 'low',
@@ -198,18 +198,18 @@ export const createAppNavigationAgentTools = ({
         matchStatus: features.length ? 'matched' : 'no_catalog_match',
         message: features.length
           ? 'Matched registered capabilities or usage guides; each entry describes available maid tools.'
-          : 'No registered catalog entry matched. This does not establish that the APP feature is unsupported; APP support remains unknown.',
+          : 'No registered catalog entry matched.',
         features,
       };
     },
     summarizeResult: result => result?.features?.length
       ? `found ${result.features.length} feature(s)`
-      : 'no catalog match; APP support remains unknown',
+      : 'no catalog match',
   },
   {
     name: 'app.read_feature_doc',
     title: 'Read APP feature doc',
-    description: 'Read a registered APP capability or usage guide. Reading a guide does not execute its UI steps. Missing documentation does not mean the APP lacks the feature.',
+    description: 'Read a registered APP capability or usage guide.',
     source: 'maid-app-navigation',
     permissions: [],
     riskLevel: 'low',
@@ -238,7 +238,7 @@ export const createAppNavigationAgentTools = ({
         reason: 'feature_not_found',
         scope: 'registered_app_feature_catalog',
         exhaustive: false,
-        message: 'No registered documentation matched. This does not establish that the APP feature is unsupported; APP support remains unknown.',
+        message: 'No registered documentation matched.',
       };
       return { ok: true, feature };
     },

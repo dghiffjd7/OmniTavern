@@ -3832,6 +3832,8 @@ export const createAppContentAgentTools = ({
         includeContent: { type: 'boolean' },
         maxEntries: { type: 'integer', minimum: 1, maximum: 200 },
         maxContentLength: { type: 'integer', minimum: 120, maximum: 12000 },
+        // 本任务里同样的读取已经做过、仍要重读时写明原因（女仆执行层据此不再回「已读过」）
+        reread: { type: 'string', maxLength: 200 },
       },
     },
     execute: async (args = {}) => {

@@ -10,6 +10,7 @@ import {
   createCustomHousePresetHandler,
 } from '../../src/scripts/ui/chat/hopscotch-turn-runtime.js';
 import { createHopscotchBoardStore } from '../../src/scripts/storage/hopscotch-board-store.js';
+import { resolveHopscotchBoardSettings } from '../../src/scripts/ui/chat/hopscotch-settings-utils.js';
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 const memoryStorage = () => { const m = new Map(); return { getItem: k => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, v) }; };
@@ -35,7 +36,8 @@ const userBoard = () => ({ rows: [
   { id: 'r4', houses: [{ id: 'compaction', kind: 'summary_compaction' }, { id: 'h_edit', kind: 'custom_prompt', label: '编修', config: { prompt: '建议：{{body}} / {{house:h_analysis}}', includeContext: 'none', output: { mode: 'note' } } }] },
 ] });
 // 自动生图开着：用户板上的图片房子才会执行（设定关掉时一并停用，见 hopscotch-activation-tests）
-const writingSettings = () => ({ place: 'writing', memory: { storageMode: 'table', autoExtract: true, autoExtractMode: 'inline' }, replyCheck: { enabled: true, hasFormatGuide: true, modelMode: 'follow_current' }, autoImage: { enabled: true }, variables: { enabled: false } });
+// 写表方式为独立请求：板上记忆的形态跟随设定，userBoard 的独立记忆房子才保持原位
+const writingSettings = () => ({ place: 'writing', memory: { storageMode: 'table', autoExtract: true, autoExtractMode: 'separate' }, replyCheck: { enabled: true, hasFormatGuide: true, modelMode: 'follow_current' }, autoImage: { enabled: true }, variables: { enabled: false } });
 
 const makeDeps = (overrides = {}) => {
   const log = [];
@@ -421,3 +423,31 @@ const makeDeps = (overrides = {}) => {
 }
 
 console.log('hopscotch-turn-runtime tests passed');
+
+{
+  // 用户板上记忆融进正文还是单独房子，跟随写作的写表方式；存储的板不被改写
+  const store = createHopscotchBoardStore({ storage: memoryStorage(), scopeId: 'p' });
+  await store.setGlobalBoard(userBoard());
+  let mode = 'inline';
+  const settings = () => ({ ...writingSettings(), memory: { ...writingSettings().memory, autoExtractMode: mode } });
+  const runtime = createHopscotchTurnRuntime({ getSettings: () => ({ creativeHopscotchEnabled: true }), boardStore: store, resolveWritingSettings: settings, laneRuntime: fakeLane() });
+  const memoryHouses = plan => plan.board.rows.flatMap(row => row.houses).filter(h => h.kind === 'memory_table');
+  const inline = runtime.resolveExecutionPlan('rp:a');
+  assert.equal(inline.fused.includes('memory_table'), true, '同回复：记忆进正文融合组');
+  assert.equal(memoryHouses(inline).length, 0, '同回复：不再有独立记忆房子');
+  mode = 'separate';
+  const separate = runtime.resolveExecutionPlan('rp:a');
+  assert.equal(separate.fused.includes('memory_table'), false);
+  assert.deepEqual(separate.board.rows[2].houses.map(h => h.kind), ['image_generation', 'format_review', 'memory_table'], '独立请求：沿用板上原来的位置');
+  assert.deepEqual(store.getGlobalBoard().rows[2].houses.map(h => h.kind), ['image_generation', 'format_review', 'memory_table'], '只影响解析结果，不改存储');
+  console.log('ok - custom board memory placement follows the writing auto-extract mode');
+}
+
+{
+  // 同回复写表就在正文这次请求里完成，用的就是正文的模型；记忆更新的「指定配置档」只管独立请求，不挡融合
+  const store = createHopscotchBoardStore({ storage: memoryStorage(), scopeId: 'p' });
+  const settings = () => resolveHopscotchBoardSettings({ settings: { memoryEnabled: true, memoryStorageMode: 'table', memoryAutoExtract: true, memoryUpdateApiMode: 'profile', memoryUpdateProfileId: 'other' } });
+  const runtime = createHopscotchTurnRuntime({ getSettings: () => ({ creativeHopscotchEnabled: true }), boardStore: store, resolveWritingSettings: settings, laneRuntime: fakeLane() });
+  assert.equal(runtime.resolveFusionCapabilities('rp:a').memory_table.reason, '');
+  console.log('ok - memory can fuse into the body even when separate updates use another profile');
+}

@@ -11,8 +11,15 @@ const isPlainObject = value => Boolean(value && typeof value === 'object' && !Ar
 
 const AGENT_CARD_DEFINITIONS = Object.freeze([
   {
-    id: 'archive_naming', title: '小管家', summary: '保存新存档时，在后台为默认名称生成简短标题。',
-    detail: ['手动输入的名称与后续改名不会被覆盖。'], category: 'assistant', accent: 'dialogue', implemented: true,
+    id: 'archive_naming', title: '小管家', summary: '把起名、翻译、转标签这类小任务交给小模型处理。',
+    detail: [
+      '存档命名：保存新存档时为默认名称生成简短标题，手动输入的名称与后续改名不会被覆盖。',
+      '消息翻译：长按气泡选「翻译」，译文显示在气泡下方，不改原文。',
+      '生图描述转英文标签：在生图提示词旁一键转换，按「替换」或「追加」才写入。',
+      '贴图起名：看图给贴图补上 AI 用的关键词（要能看图的模型），写入后可一键还原。',
+      '自定义任务：自己写要求，在 Agent 工具箱里一点就执行；结果弹窗显示、写在气泡下方或填入输入框。',
+      '各任务默认用共用模型，也可以单独指定。',
+    ], category: 'assistant', accent: 'dialogue', implemented: true,
     enabledDefault: false, toggleKind: 'feature', runtimeKinds: ['archive_naming'], promptRefs: [], resourceRefs: [], settingRefs: [],
   },
   {

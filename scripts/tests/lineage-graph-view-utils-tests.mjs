@@ -463,3 +463,27 @@ const collectNodeOverlaps = (nodes = []) => {
   assert.match(pipeline, /阻止 \/ 裁剪 \/ 风险/);
   console.log('ok - lineage readable views render overview and pipeline summaries');
 }
+
+{
+  // 地图上的分层节点名、计数小字与影响排行小字是系统文字，即使在 data-i18n-skip 里也要按界面语言显示
+  const { initializeI18n } = await import('../../src/scripts/i18n/index.js');
+  try {
+    await initializeI18n({
+      preference: 'en',
+      documentLike: null,
+      fetchFn: async () => ({ ok: true, json: async () => ({ 联系人: 'Contacts', '{value} 注入': '{value} Injected', '{value} 候选': '{value} Candidates', '{value} 风险': '{value} risk', '下游影响 {value}': 'Downstream impact {value}' }) }),
+    });
+    const scene = renderLineageMapSceneHtml(graph);
+    assert.match(scene, /data-i18n-skip>Contacts<\/strong>/);
+    assert.doesNotMatch(scene, /data-i18n-skip>联系人<\/strong>/);
+    assert.doesNotMatch(scene, /<small data-i18n-skip>\d+ (注入|候选|风险)<\/small>/);
+    const dock = renderLineageMapDockHtml(graph);
+    assert.doesNotMatch(dock, /下游影响/);
+    const expandedScene = renderLineageMapSceneHtml(graph, { expandedIds: ['contacts'] });
+    assert.match(expandedScene, /<small data-i18n-skip>Contacts<\/small>/);
+    assert.doesNotMatch(expandedScene, /<small data-i18n-skip>联系人<\/small>/);
+  } finally {
+    await initializeI18n({ preference: 'zh-CN', documentLike: null });
+  }
+  console.log('ok - lineage map system labels follow the UI language');
+}

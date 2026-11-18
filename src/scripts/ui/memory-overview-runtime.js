@@ -53,7 +53,7 @@ export const createMemoryOverviewRuntime = ({
       isGroup: sessionId ? isGroupSession(sessionId) === true : false,
       plan: getLastMemoryPlan(),
       storageMode: getStorageMode(place),
-      autoWrite: { enabled: isAutoWriteEnabled(place) === true, mode: getAutoWriteMode() },
+      autoWrite: { enabled: isAutoWriteEnabled(place) === true, mode: getAutoWriteMode(place) },
       pending: listPending(),
     });
     return {

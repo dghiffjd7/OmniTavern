@@ -13,6 +13,7 @@
  */
 
 import { resolveMediaAsset, isLikelyUrl } from '../../utils/media-assets.js';
+import { localeColon, t } from '../../i18n/index.js';
 
 const TOKEN_PATTERN = /^\[(img-error|img|yy|music|zz|bqb)-([\s\S]+)\]$/i;
 const FENCED_CODE_PATTERN = /^```[\s\S]*```$/;
@@ -89,7 +90,7 @@ export function parseSpecialMessage(raw = '') {
             if (isUrl) {
                 return { type: 'image', content: payload };
             }
-            return { type: 'meta', content: `图片：${payload}` };
+            return { type: 'meta', content: `${t('图片')}${localeColon()}${payload}` };
         }
         case 'yy': {
             const resolved = resolveMediaAsset('audio', payload);
@@ -101,7 +102,7 @@ export function parseSpecialMessage(raw = '') {
             if (isUrl) {
                 return { type: 'audio', content: payload };
             }
-            return { type: 'meta', content: `语音：${payload}` };
+            return { type: 'meta', content: `${t('语音')}${localeColon()}${payload}` };
         }
         case 'music': {
             const [title = payload, artist = ''] = payload.split('$');

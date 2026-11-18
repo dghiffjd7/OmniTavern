@@ -13,6 +13,7 @@ import {
 import { normalizeReasoningEffort } from '../api/model-capabilities.js';
 import { withoutPhonePromptTime } from '../utils/phone-format-time-prompt.js';
 import { logger } from '../utils/logger.js';
+import { DEFAULT_SUMMARY_RULES, sanitizeSummaryRulesText } from './summary-rules-defaults.js';
 import {
     normalizePhoneFormatPromptDepth,
     normalizePhoneFormatPromptPosition,
@@ -226,18 +227,7 @@ const DEFAULT_MOMENT_PUBLISH_COMMENT_RULES = `
 - 评论人必须是具体名字（优先从联系人名单中挑选）；不要使用“匿名网友”等敷衍名字。
 `.trim();
 
-// 摘要提示词：每次回复末尾输出 <details><summary>摘要</summary>...</details>（纯中文）
-export const DEFAULT_SUMMARY_RULES = [
-    '每次输出结束后，**紧跟着**以一句话概括本次互动的摘要，确保<details><summary>摘要</summary>',
-    '<内容>',
-    '</details>标签顺序正确，摘要**纯中文输出**，不得夹杂其它语言',
-    '[summary_format]',
-    '摘要格式示例：',
-    '',
-    '<details><summary>摘要</summary>',
-    '',
-    '用一句话概括本条回复的内容，禁止不必要的总结和升华',
-].join('\n').trim();
+export { DEFAULT_SUMMARY_RULES, sanitizeSummaryRulesText };
 
 const DEFAULT_AUTO_IMAGE_PROMPT_RULES = [
     '<generate_img_rule>',
@@ -1428,6 +1418,7 @@ export class PresetStore {
                 }
 
                 if (typeof p.summary_enabled !== 'boolean') p.summary_enabled = true;
+                p.summary_rules = sanitizeSummaryRulesText(p.summary_rules);
                 if (typeof p.summary_position !== 'number') p.summary_position = 1;
                 if (typeof p.summary_rules !== 'string' || !p.summary_rules.trim()) {
                     p.summary_rules = DEFAULT_SUMMARY_RULES;
@@ -1560,6 +1551,7 @@ export class PresetStore {
                 }
 
                 if (typeof p.summary_enabled !== 'boolean') p.summary_enabled = true;
+                p.summary_rules = sanitizeSummaryRulesText(p.summary_rules);
                 if (typeof p.summary_position !== 'number') p.summary_position = 1;
                 else if (p.summary_position === 3 && String(p.summary_rules || '').trim() === DEFAULT_SUMMARY_RULES) p.summary_position = 1;
                 if (typeof p.summary_rules !== 'string' || !p.summary_rules.trim()) {
@@ -1795,7 +1787,9 @@ export class PresetStore {
             const globalId = String(this.state?.active?.[t] || '').trim();
             if (globalId && hasEligiblePreset(globalId)) return result(globalId, 'global');
         }
-        return result(hasEligiblePreset(builtinId) ? builtinId : null, 'builtin');
+        // 内置默认不看适用范围：全新安装时内置预设都是「创意写作」，若照样筛掉，聊天模式就解析不到任何预设
+        // （选单显示「内置默认（X）」实际却没用上，群聊规则、对话规则都不注入）。用户自选的绑定仍照适用范围检查。
+        return result(hasPreset(builtinId) ? builtinId : null, 'builtin');
     }
 
     getResolvedActive(type, context = {}) {

@@ -89,6 +89,19 @@ const makePanel = cards => {
 }
 
 {
+  // 报错原文太长时默认折叠，展开后是完整原文
+  const panel = makePanel([]);
+  const longError = `主模型（vertexai / g）：No candidates returned: PROHIBITED_CONTENT\n备用配置（makersuite / h）：HTTP 400 ${'x'.repeat(300)}`;
+  panel.view = { tabs: [], meta: {}, activity: { meta: {}, runs: [
+    { id: 'c', title: '任务三', kind: 'maid_assistant', status: 'failed', updatedAt: Date.now(), errorMessage: longError },
+  ] } };
+  const html = panel.renderActivity();
+  assert.match(html, /<details class="[^"]*agent-center-error-detail"><summary>错误：<span data-i18n-skip>主模型（vertexai \/ g）：No candidates returned: PROHIBITED_CONTENT…<\/span><\/summary>/);
+  assert.ok(html.includes(`<pre data-i18n-skip>${longError}</pre>`), '折叠内是完整原文');
+  console.log('ok - long run errors fold behind the first line');
+}
+
+{
   // 资源按用途分组，整卡可点
   const panel = makePanel([]);
   panel.view = { resources: [

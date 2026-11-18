@@ -143,6 +143,19 @@ const imageLayer = '需要新图时输出 <image_prompt>完整提示词</image_p
 }
 
 {
+  // 英文摘要提示词的示例标签是 Summary，FC 模式下同样要换成 summary item，不能留下文字格式示例。
+  const semantic = sanitizePhoneBatchSemanticText([
+    'At the end of every reply, add a one-sentence summary.',
+    '<details><summary>Summary</summary>',
+    'One sentence.',
+    '</details>',
+  ].join('\n'));
+  assert.match(semantic, /summary item/u);
+  assert.doesNotMatch(semantic, /<details>|<summary>/u);
+  console.log('ok - semantic sanitizer replaces the English summary example');
+}
+
+{
   const instruction = buildPhoneBatchStructuredTransportInstruction({
     target: {
       ...groupTarget,

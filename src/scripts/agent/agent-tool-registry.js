@@ -355,6 +355,13 @@ const enforceOperationIntentPolicy = async (tool, context = {}) => {
   const policy = isPlainObject(context?.operationIntentPolicy)
     ? context.operationIntentPolicy
     : null;
+  // 规划中（女仆先看再给计划，ROADMAP 29-⑨）：写入一律挡下、不弹确认；用户在计划卡上点「开始做」后另起一轮才执行
+  if (policy?.mode === 'planning' && tool?.capabilities?.write === true) {
+    throw new AgentToolSafetyError(
+      `正在规划：只能读取和查看，写入工具「${tool.name}」要等用户在计划卡上点「开始做」后才能用。请把计划交给用户。`,
+      { code: 'agent_tool_planning_read_only', toolName: tool.name, details: { mode: 'planning', source: trim(policy.source) } },
+    );
+  }
   if (
     policy?.mode !== 'read_only' ||
     tool?.capabilities?.write !== true ||

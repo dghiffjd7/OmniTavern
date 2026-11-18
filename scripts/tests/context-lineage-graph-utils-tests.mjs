@@ -160,3 +160,30 @@ import {
   assert.match(text, /resolveWorldbook/);
   console.log('ok - buildPromptTraceFromRequest creates trace text with lineage graph summary');
 }
+
+{
+  // 程序生成的节点名跟随界面语言；世界书名这类用户内容保持原样
+  const { initializeI18n } = await import('../../src/scripts/i18n/index.js');
+  try {
+    await initializeI18n({
+      preference: 'en',
+      documentLike: null,
+      fetchFn: async () => ({ ok: true, json: async () => ({ '本次 Prompt': 'This Prompt', 角色: 'Character', '{value}世界书 {value2}': '{value} lorebook {value2}' }) }),
+    });
+    const graph = buildContextLineageGraphFromRequest({
+      at: 1760000000000,
+      requestId: 'req-en',
+      session: { id: 'rp:fog', name: 'Fog', isGroup: false },
+      presetContext: { uiMode: 'rp' },
+      messages: [{ role: 'user', content: 'hi' }],
+      worldDebug: { injectedEntries: [{ worldId: '雾港来信', entryId: 'e1', title: 'Fog Harbor', sourceKind: 'role', contentPreview: 'x' }] },
+    });
+    const labels = graph.nodes.map(node => node.label);
+    assert.equal(labels.includes('This Prompt'), true, labels.join(' | '));
+    assert.equal(labels.includes('Character lorebook 雾港来信'), true, labels.join(' | '));
+    assert.equal(labels.includes('Fog Harbor'), true);
+  } finally {
+    await initializeI18n({ preference: 'zh-CN', documentLike: null });
+  }
+  console.log('ok - generated lineage node labels follow the UI language');
+}

@@ -34,7 +34,6 @@ export const HOPSCOTCH_HOUSE_CATALOG = Object.freeze([
 ]);
 
 export const HOPSCOTCH_LIMITS = Object.freeze({
-  maxRows: 6,
   maxHousesPerRow: 4,
   maxCustomHouses: 8,
   minConcurrency: 1,
@@ -185,6 +184,67 @@ export const findBodyRowIndex = (board = {}) => {
   return rows.findIndex(row => (row?.houses || []).some(house => house?.kind === 'body'));
 };
 
+// 板上记忆的形态：正文融合 = 同回复，单独房子 = 独立请求，都没有 = ''。
+export const resolveHopscotchBoardMemoryMode = (input = {}) => {
+  const houses = normalizeHopscotchBoard(input).rows.flatMap(row => row.houses);
+  if (houses.some(house => house.kind === 'body' && house.fused.includes('memory_table'))) return 'inline';
+  if (houses.some(house => house.kind === 'memory_table')) return 'separate';
+  return '';
+};
+
+// 独立记忆房子放进正文下一行；该行满了或有摘要压缩（压缩须在记忆之后）时在正文后另开一行。直接改传入的已归一化板。
+export const placeHopscotchMemoryHouse = (board, house) => {
+  const bodyRow = findBodyRowIndex(board);
+  const ids = new Set(board.rows.flatMap(row => [row.id, ...row.houses.map(item => item.id)]));
+  const uniqueId = base => { let id = base, suffix = 1; while (ids.has(id)) id = `${base}_${suffix++}`; ids.add(id); return id; };
+  const next = { ...house, kind: 'memory_table', id: trim(house?.id) && !ids.has(trim(house.id)) ? trim(house.id) : uniqueId('memory') };
+  const row = board.rows[bodyRow + 1];
+  if (row && row.houses.length < HOPSCOTCH_LIMITS.maxHousesPerRow && !row.houses.some(item => item.kind === 'summary_compaction')) row.houses.push(next);
+  else board.rows.splice(bodyRow + 1, 0, { id: uniqueId('r_memory'), houses: [next] });
+  return board;
+};
+
+const isMemoryAutoWriteOn = memory => trim(memory?.storageMode) === 'table' && memory.autoExtract === true
+  && memory.placeEnabled !== false && memory.writingEnabled !== false;
+
+// 用户板上记忆融进正文还是单独房子，由写作的写表方式决定（与设定页同一份值），板只保留房子位置。
+// 自动写表开着时板上必有记忆；关着时已有的记忆仍按写表方式摆放、由激活判定显示停用，没有就不补。
+export const applyHopscotchMemoryPlacement = (input = {}, memory = {}) => {
+  const board = normalizeHopscotchBoard(input);
+  const bodyRow = findBodyRowIndex(board);
+  // 拿不到写表方式（没有设定上下文）时不动板
+  if (bodyRow < 0 || !trim(memory?.autoExtractMode)) return board;
+  const body = board.rows[bodyRow].houses.find(house => house.kind === 'body');
+  const fused = body.fused.includes('memory_table');
+  const standalone = board.rows.flatMap(row => row.houses).filter(house => house.kind === 'memory_table');
+  if (!fused && !standalone.length && !isMemoryAutoWriteOn(memory)) return board;
+  const target = trim(memory?.autoExtractMode) === 'separate' ? 'separate' : 'inline';
+  if (target === 'inline' ? fused && !standalone.length : standalone.length === 1 && !fused) return board;
+  // 转换时带上原来的启用状态与模型配置
+  const source = standalone[0] || body.fusedMembers?.memory_table || null;
+  const enabled = standalone[0] ? standalone[0].enabled !== false : (fused ? body.fusedEnabled?.memory_table !== false : true);
+  const config = source?.config;
+  if (target === 'inline') {
+    board.rows.forEach((row) => { row.houses = row.houses.filter(house => house.kind !== 'memory_table'); });
+    if (!fused) body.fused = [...body.fused, 'memory_table'];
+    body.fusedEnabled = { ...body.fusedEnabled, memory_table: enabled };
+    if (config) body.fusedMembers = { ...body.fusedMembers, memory_table: { ...(body.fusedMembers?.memory_table || {}), kind: 'memory_table', enabled, config } };
+  } else {
+    body.fused = body.fused.filter(kind => kind !== 'memory_table');
+    const { memory_table: _memoryEnabled, ...restEnabled } = body.fusedEnabled || {};
+    const { memory_table: _memoryMember, ...restMembers } = body.fusedMembers || {};
+    body.fusedEnabled = restEnabled;
+    body.fusedMembers = restMembers;
+    if (standalone.length) {
+      const [keep] = standalone;
+      board.rows.forEach((row) => { row.houses = row.houses.filter(house => house.kind !== 'memory_table' || house === keep); });
+    } else {
+      placeHopscotchMemoryHouse(board, { enabled, ...(config ? { config } : {}) });
+    }
+  }
+  return normalizeHopscotchBoard(board);
+};
+
 // 原生模型规则是真实的独立请求。旧板的变量开关承接到对应触发阶段，读取时仅作投影。
 export const projectHopscotchVariableRules = (input, activity) => {
   const board = normalizeHopscotchBoard(input);
@@ -230,9 +290,6 @@ export const validateHopscotchBoard = (input = {}) => {
     push('unsupported_version', t('不支持的板版本 {value}', { value: board.version }), { field: 'version' });
   }
   if (!board.rows.length) push('empty_board', t('板至少需要一行'));
-  if (board.rows.filter(row => row.houses.some(h => h.kind !== 'variable_rules')).length > HOPSCOTCH_LIMITS.maxRows || board.rows.length > HOPSCOTCH_LIMITS.maxRows + 2) {
-    push('too_many_rows', t('行数超过上限 {value}', { value: HOPSCOTCH_LIMITS.maxRows }), { field: 'rows' });
-  }
   if (board.policy.rowConcurrencyMax < HOPSCOTCH_LIMITS.minConcurrency || board.policy.rowConcurrencyMax > HOPSCOTCH_LIMITS.maxConcurrency) {
     push('invalid_concurrency', t('并发数须为 {value}–{value2} 的整数', { value: HOPSCOTCH_LIMITS.minConcurrency, value2: HOPSCOTCH_LIMITS.maxConcurrency }), { field: 'policy.rowConcurrencyMax' });
   }

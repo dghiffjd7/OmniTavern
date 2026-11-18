@@ -1,6 +1,12 @@
 import { bindBackdropActivation } from './backdrop-activation-utils.js';
 import { appendGeneratedImageReferences } from './chat/generated-image-reference-view.js';
 
+/** 「使用」按钮：普通图要有提示词才能用；自带按钮文字的图（如未发布配图）一律可用。 */
+export const resolveGeneratedImageAlbumUseAction = (asset = {}) => {
+  const text = String(asset?.albumUseText || '').trim();
+  return { text: text || '使用', enabled: Boolean(text || String(asset?.prompt || '').trim()) };
+};
+
 export const createGeneratedImageAlbumPanel = ({
   document = globalThis.document, resolveGeneratedImagePreviewUrl, getGeneratedImageNegativePrompt,
   formatGeneratedImageAlbumTime, openLightbox, escapeHtml, translateUiText = text => text,
@@ -138,7 +144,9 @@ export const createGeneratedImageAlbumPanel = ({
 	        if (detailNegativePromptEl) detailNegativePromptEl.textContent = negativePrompt;
 	        if (detailMetaEl) detailMetaEl.textContent = [model, source, time].filter(Boolean).join(' · ');
 	        if (detailUseBtn) {
-	          detailUseBtn.disabled = !prompt;
+	          const useAction = resolveGeneratedImageAlbumUseAction(asset);
+	          detailUseBtn.textContent = useAction.text;
+	          detailUseBtn.disabled = !useAction.enabled;
 	          detailUseBtn.hidden = lastOptions.allowUse === false;
 	        }
 	        if (detailDeleteBtn) detailDeleteBtn.hidden = lastOptions.allowDelete !== true;
@@ -221,13 +229,16 @@ export const createGeneratedImageAlbumPanel = ({
 		        const source = String(asset.sourceLabel || '').trim();
 		        const showUse = lastOptions.allowUse !== false;
 		        const showDelete = lastOptions.allowDelete === true;
+		        const useAction = resolveGeneratedImageAlbumUseAction(asset);
 		        const useButton = showUse
-		          ? `<button type="button" data-action="use-asset" ${prompt ? '' : 'disabled'}>使用</button>`
+		          ? `<button type="button" data-action="use-asset" ${useAction.enabled ? '' : 'disabled'}>${escapeHtml(useAction.text)}</button>`
 		          : '';
+		        const badge = asset.albumBadge ? `<div class="writing-media-asset-badge">${escapeHtml(asset.albumBadge)}</div>` : '';
 		        return `
 		          <div class="writing-media-asset-card" data-asset-id="${escapeHtml(String(asset.albumId || asset.id || ''))}">
 		            <img src="${escapeHtml(url)}" alt="${escapeHtml(prompt || '生成图片')}" data-preview-url="${escapeHtml(url)}">
 	            <div class="writing-media-asset-meta">
+	              ${badge}
 	              <div class="writing-media-asset-prompt" data-i18n-skip>${escapeHtml(prompt || translateUiText('（无提示词）'))}</div>
 	              ${negative ? `<div class="writing-media-asset-prompt writing-media-asset-negative"><span>负面：</span><span data-i18n-skip>${escapeHtml(negative)}</span></div>` : ''}
 	              <div class="writing-media-asset-model" data-i18n-skip>${escapeHtml([model, source, time].filter(Boolean).join(' · '))}</div>

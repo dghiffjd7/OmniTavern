@@ -3,7 +3,7 @@ import { cloneData } from '../../utils/clone-data.js';
 import { appConfirm } from '../app-confirm.js';
 import { bindBackdropActivation } from '../backdrop-activation-utils.js';
 import { closeCustomSelectMenu, createCustomSelectWrapper, bindCustomSelectButton } from '../custom-select.js';
-import { HOPSCOTCH_HOUSE_CATALOG, HOPSCOTCH_FUSED_KINDS, validateHopscotchBoard, getHopscotchHouseDisplayStatus, isHopscotchMaintenanceRunning } from './hopscotch-board-utils.js';
+import { HOPSCOTCH_HOUSE_CATALOG, HOPSCOTCH_FUSED_KINDS, validateHopscotchBoard, getHopscotchHouseDisplayStatus, isHopscotchMaintenanceRunning, resolveHopscotchBoardMemoryMode } from './hopscotch-board-utils.js';
 import { listHopscotchHouseChoices, checkHopscotchHouseEnable, buildRecapAgentConfig, getHopscotchHouseType, isHopscotchHouseDraft } from './hopscotch-house-types.js';
 import { getAgentInvocationMode } from '../../agent/agent-invocation.js';
 import { RECAP_AGENT_ID } from '../../agent/recap-agent.js';
@@ -54,6 +54,8 @@ export const createHopscotchBoardPanel = ({
   bodyToolTransport = null,
   // 工作流文件导出导入（agent-workflow-transfer-service）；没有时只有板 JSON
   workflowTransfer = null,
+  // 保存时把板上记忆的形态（融合=同回复，房子=独立请求）写回写作的写表方式，与设定页同一份值
+  setMemoryAutoExtractMode = null,
 } = {}) => {
   const doc = documentRef;
   const panel = doc.createElement(embedded ? 'section' : 'dialog');
@@ -389,7 +391,7 @@ export const createHopscotchBoardPanel = ({
     const agentId = house.kind === 'text_edit' ? house.config.agentId : variableCard ? '' : member ? fusedAgents[member] : ({ memory_table: 'memory_table_agent', format_review: 'reply_check', image_generation: 'image_director', image_prompt: 'image_director' })[house.kind];
     const typeChips = editable && !member && isHopscotchHouseDraft(house) ? renderHopscotchTypeTray(id, houseChoices(id)) : '';
     const fields = `<fieldset class="hop-card-fields" data-agent-preset-area ${editable ? '' : 'disabled'}>${typeChips ? `<div class="hop-card-type">${typeChips}</div>` : ''}${content}</fieldset>`;
-    const removeButton = editable && house.kind !== 'body' ? button('remove', t('删除房子'), `class="agent-center-icon-button hop-icon-only hop-remove" title="${e(t('删除房子'))}" aria-label="${e(t('删除房子'))}"`) : '';
+    const removeButton = editable && house.kind !== 'body' && house.kind !== 'memory_table' ? button('remove', t('删除房子'), `class="agent-center-icon-button hop-icon-only hop-remove" title="${e(t('删除房子'))}" aria-label="${e(t('删除房子'))}"`) : '';
     const footer = editable ? `${house.kind === 'custom_prompt' ? button('copy', t('复制'), mountAgentCard ? 'class="agent-center-card-action"' : '') : ''}<span class="hop-spacer"></span>${button('apply', t('完成'), mountAgentCard ? 'class="agent-center-card-action is-primary"' : 'class="hop-primary"')}` : '';
     if (mountAgentCard) {
       releaseSharedConfig();
@@ -621,6 +623,8 @@ export const createHopscotchBoardPanel = ({
       if (epoch !== viewEpoch) return;
       if (!result?.ok) throw new Error(result?.reason || t('保存失败'));
       settleDraftAgents(reset ? new Set() : placedAgents(draft));
+      const memoryMode = !reset && place === 'writing' ? resolveHopscotchBoardMemoryMode(draft) : '';
+      if (memoryMode) setMemoryAutoExtractMode?.(memoryMode);
       if (!reset) await enable(true);
       if (epoch === viewEpoch) loadDraft();
     } catch (err) { if (epoch === viewEpoch) error = err.message || String(err); }
@@ -823,7 +827,7 @@ export const createHopscotchBoardPanel = ({
     }
   };
   const onSettingsChanged = event => {
-    if (/^(memoryEnabled|memoryStorageMode|memoryAutoExtract|memoryAutoExtractMode|memoryTableEnabledChat|memoryTableEnabledWriting)$/.test(event?.detail?.key || '')) refreshSettings();
+    if (/^(memoryEnabled|memoryStorageMode|memoryAutoExtract|memoryAutoExtractMode|memoryAutoExtractModeWriting|memoryTableEnabledChat|memoryTableEnabledWriting)$/.test(event?.detail?.key || '')) refreshSettings();
   };
   doc.defaultView?.addEventListener('app-settings-changed', onSettingsChanged);
   const onInputSuggestionChanged = event => {

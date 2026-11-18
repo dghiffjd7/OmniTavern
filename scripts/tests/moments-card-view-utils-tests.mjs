@@ -178,7 +178,7 @@ import {
     documentLike: null,
     fetchFn: async () => ({
       ok: true,
-      json: async () => ({ 回复: 'Reply', 关闭: 'Close', '写评论…': 'Write a comment…' }),
+      json: async () => ({ 回复: 'Reply', '回复\u0004moment-comment-reply': 'replied to', 关闭: 'Close', '写评论…': 'Write a comment…' }),
     }),
   });
   const threadedHtml = buildMomentThreadedCommentsHtml({
@@ -193,12 +193,45 @@ import {
     replyTarget: { author: '关闭', content: '用户正文' },
     showComposer: true,
   });
-  assert.match(threadedHtml, /moment-comment-reply-label">Reply<\/span>/);
+  assert.match(threadedHtml, /moment-comment-reply-label">replied to<\/span>/);
   assert.match(cardHtml, /moment-reply-label">Reply<\/span>/);
   assert.match(cardHtml, /placeholder="Reply 关闭…"/);
   assert.match(cardHtml, /<b data-i18n-skip>关闭<\/b>/);
   assert.match(cardHtml, /<span data-i18n-skip>用户正文<\/span>/);
   console.log('ok - moment reply UI localizes system labels without translating user names or content');
+}
+
+{
+  await initializeI18n({
+    preference: 'en',
+    documentLike: null,
+    fetchFn: async () => ({
+      ok: true,
+      json: async () => ({ 回复: 'Reply', '回复\u0004moment-comment-reply': 'replied to', 我: 'Me' }),
+    }),
+  });
+  const threadedHtml = buildMomentThreadedCommentsHtml({
+    visibleComments: [],
+    buildThreadedComments: () => ({
+      roots: [{ id: 'c1', author: '我', content: 'See you there' }],
+      repliesByParent: new Map([['c1', [{ id: 'c2', author: '黎昼', content: 'Deal', replyToAuthor: '我' }]]]),
+    }),
+  });
+  const cardHtml = buildMomentCardMarkup({
+    moment: { author: '黎昼' },
+    replyTarget: { author: '我', content: 'See you there' },
+    showComposer: true,
+  });
+  assert.match(threadedHtml, /data-comment-id="c1">Me<\/span>/);
+  assert.match(threadedHtml, /data-comment-id="c2">黎昼<\/span>/);
+  assert.match(threadedHtml, /moment-comment-replyto" data-i18n-skip>Me<\/span>/);
+  assert.match(cardHtml, /placeholder="Reply Me…"/);
+  assert.match(cardHtml, /<b data-i18n-skip>Me<\/b>/);
+  // 楼中楼读作「Lia replied to Me: …」，冒号用半角
+  assert.match(threadedHtml, /moment-comment-reply-label">replied to<\/span>/);
+  assert.match(threadedHtml, /data-comment-id="c1">Me<\/span>: <\/span>/);
+  assert.doesNotMatch(threadedHtml, /：/);
+  console.log("ok - the user's own comment author shows in the UI language while character names stay as-is");
 }
 
 {

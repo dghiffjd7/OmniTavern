@@ -129,3 +129,18 @@ const exported = buildAgentWorkflowPackage({
   assert.equal(bare.board.rows[1].houses[0].config.promptSource, 'prompt', 'without the preset the custom house uses its own prompt');
   console.log('ok - workflow import remaps agent ids, presets and settings into writes');
 }
+
+{
+  // 写表方式按场景分开：写作工作流导出写作那份；旧文件里的共用键导入写作时当作写作那份
+  const split = { memoryAutoExtractMode: 'inline', memoryAutoExtractModeWriting: 'separate' };
+  const writing = buildAgentWorkflowPackage({ board, agents, settings: split, getPreset }).package;
+  assert.equal(writing.settings.memoryAutoExtractModeWriting, 'separate');
+  assert.equal('memoryAutoExtractMode' in writing.settings, false, '写作工作流不带聊天的写表方式');
+  const chat = buildAgentWorkflowPackage({ scope: 'chat', place: 'chat', agents: {}, settings: split, getPreset }).package;
+  assert.equal(chat.settings.memoryAutoExtractMode, 'inline');
+  assert.equal('memoryAutoExtractModeWriting' in chat.settings, false, '聊天工作流不带写作的写表方式');
+  const legacy = parseAgentWorkflowPackage({ ...exported.package, settings: { ...exported.package.settings, memoryAutoExtractMode: 'separate' } }).package;
+  assert.equal(legacy.settings.memoryAutoExtractModeWriting, 'separate', '旧写作工作流的写表方式落到写作那份');
+  assert.equal('memoryAutoExtractMode' in legacy.settings, false, '不顺带改聊天的写表方式');
+  console.log('ok - workflow settings carry the auto-extract mode of their own place');
+}

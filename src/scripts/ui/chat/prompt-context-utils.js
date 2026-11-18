@@ -17,6 +17,14 @@ export const resolveResolvedPreset = (appBridge, presetType, context = {}) => {
   }
 };
 
+// 组提示词（bridge.buildMessages）会不会注入「QQ聊天格式」规则：没被停用、回复对象不是用户、预设没把它关掉
+// （预设缺席或规则为空时用内置种子，见 bridge.buildPhoneFormatPromptEntries）。发送流程据此决定是否按对话协议解析回复。
+export const isPhoneChatFormatInjected = ({ sysp = null, replyTarget = 'character', disablePhoneFormat = false } = {}) => (
+  !disablePhoneFormat
+  && String(replyTarget || '').trim().toLowerCase() !== 'user'
+  && sysp?.phone_format_chat_enabled !== false
+);
+
 export const resolveEnabledPreset = (appBridge, presetType, context = {}) => {
   const type = String(presetType || '').trim();
   if (!type) return {};

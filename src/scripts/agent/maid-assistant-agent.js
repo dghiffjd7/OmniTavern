@@ -66,6 +66,16 @@ import {
 import { getLocalizedPromptText } from '../i18n/prompt-locale.js';
 import { t } from '../i18n/index.js';
 import { buildMaidStepOutcomes } from './maid-run-outcomes.js';
+import {
+  buildMaidWorldbookObservationLedger,
+  normalizeCarriedMaidWorldbookObservations,
+} from './maid-worldbook-observations.js';
+import {
+  inspectMaidWorldbookRead,
+  buildMaidWorldbookAlreadyReadExecution,
+  buildMaidWorldbookReadBlockedExecution,
+  noteMaidWorldbookRepeatedRead,
+} from './maid-worldbook-read-repeats.js';
 
 const trim = (value, fallback = '') => {
   const text = String(value ?? '').trim();
@@ -535,6 +545,12 @@ const createMaidRunTracker = ({ agentTaskRuntime = null, input = '', context = {
           result,
           previousSnapshot: continuation,
           visualSpecLedger: context?.maidVisualSpecLedger,
+          // 「继续」时带上本轮结束时的世界书已读记录（含上一轮带来、本轮仍有效的部分）
+          worldbookObservations: normalizeCarriedMaidWorldbookObservations(buildMaidWorldbookObservationLedger({
+            steps: Array.isArray(result?.steps) ? result.steps : [],
+            context,
+            carried: continuation?.worldbookObservations,
+          })),
         })
       : null;
     const visualSpecLedger = normalizeMaidVisualSpecLedger(context?.maidVisualSpecLedger);
@@ -611,7 +627,7 @@ const createMaidRunTracker = ({ agentTaskRuntime = null, input = '', context = {
     const finishedRun = agentTaskRuntime.finishRun(run.id, {
       status: runStatus,
       summary,
-      errorMessage: ok || cancelled ? '' : truncateForRun(result?.reason || result?.message || ''),
+      errorMessage: ok || cancelled ? '' : (trim(result?.errorDetail) || truncateForRun(result?.reason || result?.message || '')),
       ...(cancelled ? { cancelReason: 'user_cancelled' } : {}),
       usage: runUsage,
       metadata,
@@ -4385,6 +4401,18 @@ export const createMaidAssistantAgent = ({
         plan = discovery;
       }
     }
+    // 先看再给计划（ROADMAP 29-⑨）：本次任务进入规划——之后的决策只拿到只读工具，写入由工具层挡下；
+    // 看完交出计划卡（plan）后停下，用户在卡上点「开始做」另起一轮才执行
+    if (plan?.ok === true && plan?.source === 'maid_provider_fc' && plan?.providerFcControl === 'plan_first'
+      && typeof reactPlanner === 'function') {
+      context.operationIntentPolicy = { mode: 'planning', source: 'maid_plan_first', reason: 'look_before_plan' };
+      plan = await callRoutedPlanner({
+        plannerFn: reactPlanner,
+        phase: 'react',
+        label: 'maid_react',
+        extraContext: { maidReactSteps: [], lastPlan: clone(plan), lastToolOk: true },
+      });
+    }
     if (
       plan?.ok === true &&
       plan?.action === 'final' &&
@@ -4436,6 +4464,7 @@ export const createMaidAssistantAgent = ({
               ok: false,
               status: continuable ? 'interrupted' : 'failed',
               responseType: 'react',
+              ...(trim(decision.errorMessage) ? { errorDetail: trim(decision.errorMessage) } : {}),
               input: trim(input),
               partial: continuable,
               continuable,
@@ -4648,6 +4677,9 @@ export const createMaidAssistantAgent = ({
         });
         // 删除幂等：本轮已删除的目标不再交给工具，全部已删则整步跳过
         const alreadyDeleted = findAlreadyDeletedTargets(currentPlan, steps);
+        // 同一任务里重复读世界书：已在已读记录里的不再返回正文，读太多次就拦下（见 maid-worldbook-read-repeats.js）
+        const worldbookRead = inspectMaidWorldbookRead({ plan: currentPlan, steps, context,
+          carried: context.runContinuation?.worldbookObservations });
         const imageTargetMismatch = findMaidImageTargetMismatch({plan:currentPlan,steps});
         if (imageTargetMismatch) {
           const output = {toolName:currentPlan.toolName,status:'failed',result:imageTargetMismatch,
@@ -4666,6 +4698,10 @@ export const createMaidAssistantAgent = ({
           execution = buildUnchangedTodoExecution();
         } else if (alreadyDeleted && !alreadyDeleted.remaining.length) {
           execution = buildAlreadyDeletedExecution(alreadyDeleted);
+        } else if (worldbookRead?.blocked) {
+          execution = buildMaidWorldbookReadBlockedExecution(worldbookRead);
+        } else if (worldbookRead?.alreadyRead) {
+          execution = buildMaidWorldbookAlreadyReadExecution(worldbookRead);
         } else {
           try {
             loopProbe(`step-${stepIndex}:tool-exec`);
@@ -4684,6 +4720,7 @@ export const createMaidAssistantAgent = ({
                 ? { ...execution, output: appendAlreadyDeletedResults(execution.output, alreadyDeleted) }
                 : appendAlreadyDeletedResults(execution, alreadyDeleted);
             }
+            if (worldbookRead) execution = noteMaidWorldbookRepeatedRead(execution, worldbookRead);
             loopProbe(`step-${stepIndex}:tool-done`);
           } catch (error) {
             if (isMaidAbortError(error, context?.signal)) throw error;
@@ -5222,6 +5259,8 @@ export const createMaidAssistantAgent = ({
           };
         }
         if (!decision?.ok) {
+          // 模型请求失败时的报错原文，界面原样显示、执行记录原样保存
+          const errorDetail = trim(decision?.errorMessage);
           if (ok) {
             const stoppedReason = decision?.reason || 'react_stopped';
             const continuable = isContinuableReactStop(stoppedReason);
@@ -5229,6 +5268,7 @@ export const createMaidAssistantAgent = ({
               ok: false,
               status: 'interrupted',
               responseType: 'react',
+              ...(errorDetail ? { errorDetail } : {}),
               input: trim(input),
               plan: clone(observedPlan),
               output: clone(observedOutput),
@@ -5261,6 +5301,7 @@ export const createMaidAssistantAgent = ({
           return {
             ok: false,
             status: 'failed',
+            ...(errorDetail ? { errorDetail } : {}),
             input: trim(input),
             plan: clone(observedPlan),
             output: clone(observedOutput),

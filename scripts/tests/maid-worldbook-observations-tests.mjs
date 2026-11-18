@@ -58,6 +58,15 @@ test('later indices, equivalent rereads and rolling-window expiry preserve actua
   assert.equal(JSON.stringify(steps), before);
 });
 
+test('disabled entries keep their disabled state after the read leaves the rolling window', () => {
+  const book = read(1, 'book', { entries: [entry('on'), { ...entry('off'), disabled: true }] });
+  const steps = [book, ...Array.from({ length: 5 }, (_, i) => ({ index: i + 2, toolName: 'app.search_feature', status: 'succeeded', output: { features: [] } }))];
+  const user = buildMaidModelReActMessages({ input: '整理这本世界书', steps, features: [], transportMode: 'provider_fc' })[1].content;
+  const entries = evidence(user).find(item => item.id === 'book').entries;
+  assert.equal(entries.find(item => item.id === 'off').disabled, true, '停用条目的正文必须带停用标记');
+  assert.equal(Object.hasOwn(entries.find(item => item.id === 'on'), 'disabled'), false, '启用条目不额外占字数');
+});
+
 test('filtered reads never manufacture a complete snapshot and update only observed IDs', () => {
   const steps = [read(1, 'book', { entries: [entry('a')], total: 2, args: { entryId: 'a' } }), read(2, 'book', { entries: [entry('b')], total: 2, args: { query: 'b' } })];
   let book = buildMaidWorldbookObservationLedger({ steps }).books[0];

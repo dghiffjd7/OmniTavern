@@ -97,6 +97,104 @@ export const buildVariableTree = (variables = {}, limits = VARIABLE_TREE_LIMITS)
   return root;
 };
 
+const cloneVariablePathValue = (value) => {
+  try {
+    return structuredClone(value);
+  } catch {}
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {}
+  return value;
+};
+
+const matchVariablePathKey = (keys, rest) => keys
+  .filter(key => key && (rest === key || (rest.startsWith(key) && (rest[key.length] === '.' || rest[key.length] === '['))))
+  .sort((a, b) => b.length - a.length)[0];
+
+// 树视图把嵌套值显示成点路径（stat_data.角色.好感度、背包[0]），会话变量却只按顶层名存；
+// 读写删前要把路径拆回「顶层变量名 + 嵌套段」，否则会写出扁平的 "a.b.c" 新变量、或删不到。
+// 顶层名和嵌套键本身都可能带点，所以每层按已有的键做最长匹配，不按点硬拆。
+export const resolveVariablePath = (vars = {}, rawPath = '') => {
+  const path = String(rawPath ?? '').trim();
+  const source = vars && typeof vars === 'object' ? vars : {};
+  if (!path) return null;
+  if (Object.prototype.hasOwnProperty.call(source, path)) return { rootKey: path, segments: [] };
+  const rootKey = matchVariablePathKey(Object.keys(source), path);
+  if (rootKey === undefined) return null;
+  const segments = [];
+  let node = source[rootKey];
+  let rest = path.slice(rootKey.length);
+  while (rest) {
+    const index = /^\[(\d+)\]/.exec(rest);
+    if (index) {
+      const position = Number(index[1]);
+      if (!Array.isArray(node) || position >= node.length) return null;
+      segments.push(position);
+      node = node[position];
+      rest = rest.slice(index[0].length);
+      continue;
+    }
+    if (rest[0] !== '.' || !node || typeof node !== 'object' || Array.isArray(node)) return null;
+    rest = rest.slice(1);
+    const key = matchVariablePathKey(Object.keys(node), rest);
+    if (key === undefined) return null;
+    segments.push(key);
+    node = node[key];
+    rest = rest.slice(key.length);
+  }
+  return { rootKey, segments };
+};
+
+export const readVariablePathValue = (vars = {}, target = null) => {
+  if (!target) return undefined;
+  let node = vars?.[target.rootKey];
+  for (const segment of Array.isArray(target.segments) ? target.segments : []) {
+    if (!node || typeof node !== 'object') return undefined;
+    node = node[segment];
+  }
+  return node;
+};
+
+// 返回写入后的新顶层值（不改动传入的值）；insert 用于撤销删除时把数组元素插回原位。
+export const writeVariablePathValue = (rootValue, segments = [], value, { insert = false } = {}) => {
+  const parts = Array.isArray(segments) ? segments : [];
+  if (!parts.length) return cloneVariablePathValue(value);
+  const out = rootValue && typeof rootValue === 'object' ? cloneVariablePathValue(rootValue) : {};
+  let node = out;
+  for (let index = 0; index < parts.length - 1; index += 1) {
+    const part = parts[index];
+    if (!node[part] || typeof node[part] !== 'object') {
+      node[part] = typeof parts[index + 1] === 'number' ? [] : {};
+    }
+    node = node[part];
+  }
+  const last = parts[parts.length - 1];
+  if (insert && Array.isArray(node) && typeof last === 'number') {
+    node.splice(last, 0, cloneVariablePathValue(value));
+  } else {
+    node[last] = cloneVariablePathValue(value);
+  }
+  return out;
+};
+
+export const removeVariablePathValue = (rootValue, segments = []) => {
+  const parts = Array.isArray(segments) ? segments : [];
+  if (!parts.length || !rootValue || typeof rootValue !== 'object') return rootValue;
+  const out = cloneVariablePathValue(rootValue);
+  let node = out;
+  for (let index = 0; index < parts.length - 1; index += 1) {
+    node = node?.[parts[index]];
+    if (!node || typeof node !== 'object') return out;
+  }
+  const last = parts[parts.length - 1];
+  if (Array.isArray(node) && typeof last === 'number') {
+    node.splice(last, 1);
+  } else {
+    delete node[last];
+  }
+  return out;
+};
+
 export const getSortedVariableTreeChildren = (node) => {
   const list = Array.from(node?.children?.values?.() || []);
   return list.sort((left, right) => {
@@ -252,6 +350,8 @@ export const getVariableRenderSlice = ({
     total: list.length,
     hasMore: rendered < list.length,
     nextLimit: Math.min(list.length, normalizedLimit + normalizedBatchSize),
+    // 加载过第一批之后可以收起回第一批
+    canCollapse: rendered > normalizedBatchSize,
   };
 };
 

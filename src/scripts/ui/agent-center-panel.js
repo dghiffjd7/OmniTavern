@@ -37,6 +37,8 @@ import { buildLineDiff } from '../utils/line-diff-utils.js';
 import {
     applyMemoryStorageMode,
     deriveMemoryStorageMode,
+    getMemoryAutoExtractModeKey,
+    resolveMemoryAutoExtractMode,
 } from './memory-storage-mode-utils.js';
 import {
     GLOBAL_SEMANTIC_PROMPT_ANCHORS,
@@ -1264,6 +1266,23 @@ const PANEL_CSS = `
 }
 .agent-center-card-error {
     color: #be123c;
+}
+.agent-center-error-detail span,
+.agent-center-error-detail pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+.agent-center-error-detail > summary {
+    cursor: pointer;
+}
+.agent-center-error-detail pre {
+    max-height: 260px;
+    margin: 6px 0 0;
+    overflow: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11.5px;
+    user-select: text;
+    -webkit-user-select: text;
 }
 .agent-center-review-detail {
     margin-top: 8px;
@@ -3327,6 +3346,8 @@ export class AgentCenterPanel {
         getFailureSeenAt = () => 0,
         markFailureSeen = () => {},
         getHopscotchPanel = () => null,
+        // 写表方式按当前位置（聊天/写作）显示和修改对应的那份
+        getMemoryPlace = () => 'chat',
         resolveSessionLabel = sessionId => sessionId,
         // 提示词管家卡片（prompt-steward-card.js），放在「提示词」页最上方
         promptSteward = null,
@@ -3348,6 +3369,7 @@ export class AgentCenterPanel {
         this.getFailureSeenAt = getFailureSeenAt;
         this.markFailureSeen = markFailureSeen;
         this.getHopscotchPanel = getHopscotchPanel;
+        this.getMemoryPlace = typeof getMemoryPlace === 'function' ? getMemoryPlace : () => 'chat';
         this.agentLibraryOpen = false;
         this.sharedAgentConfig = null;
         this.overlayElement = null;
@@ -4160,7 +4182,7 @@ export class AgentCenterPanel {
         const isTable = memoryMode === 'table';
         const trigger = resolveMemorySummaryCompactionTrigger(settings);
         const fillEveryN = Math.max(1, Math.trunc(Number(settings.memoryFillEveryN)) || 1);
-        const autoMode = String(settings.memoryAutoExtractMode || 'inline').toLowerCase() === 'separate' ? 'separate' : 'inline';
+        const autoMode = resolveMemoryAutoExtractMode(settings, this.getMemoryPlace());
         const number = (key, value, min, max) => `<input class="agent-center-agent-input" type="number" min="${min}"${max ? ` max="${max}"` : ''} inputmode="numeric" data-memory-setting="${key}" value="${escapeHtml(value)}">`;
         const forTrigger = (kind, html, extra = '') => `<div class="agent-center-agent-field${extra}" data-memory-trigger-for="${kind}"${trigger === kind ? '' : ' hidden'}>${html}</div>`;
         return `
@@ -4266,7 +4288,7 @@ export class AgentCenterPanel {
         const settings = this.getMemoryAgentSettings();
         const prompt = this.getMemoryAgentPromptConfig();
         const globalSettings = appSettings.get();
-        const compactionUsesTableModel = globalSettings.memoryAutoExtractMode === 'separate'
+        const compactionUsesTableModel = resolveMemoryAutoExtractMode(globalSettings, this.getMemoryPlace()) === 'separate'
             && String(globalSettings.memoryUpdateApiMode || 'chat').toLowerCase() === 'profile';
         const savedCompactionRules = resolveCustomSummaryCompactionRules(globalSettings.summaryCompactionRules);
         const compactionSource = this.renderCompactionPresetSource('compaction-table');
@@ -5467,8 +5489,9 @@ export class AgentCenterPanel {
         if (!normalize) return;
         const value = normalize();
         if (field.type !== 'checkbox') field.value = String(value);
-        appSettings.update({ [key]: value });
-        globalThis.window?.dispatchEvent?.(new CustomEvent('app-settings-changed', { detail: { key, value } }));
+        const storeKey = key === 'memoryAutoExtractMode' ? getMemoryAutoExtractModeKey(this.getMemoryPlace()) : key;
+        appSettings.update({ [storeKey]: value });
+        globalThis.window?.dispatchEvent?.(new CustomEvent('app-settings-changed', { detail: { key: storeKey, value } }));
         if (key === 'memorySummaryCompactionTrigger') {
             field.closest('[data-memory-trigger-settings]')?.querySelectorAll('[data-memory-trigger-for]')
                 .forEach(node => { node.hidden = node.dataset.memoryTriggerFor !== value; });
@@ -5928,7 +5951,10 @@ export class AgentCenterPanel {
                     <span class="${escapeHtml(statusChipClass(run.status))}">${escapeHtml(displayRunStatusLabel(run))}</span>
                 </div>
                 <div class="agent-center-card-sub agent-center-activity-summary" data-i18n-skip>${escapeHtml(translateUiText(displayRunSummary(run)))}</div>
-                ${failureDetail ? `<div class="agent-center-card-sub agent-center-card-error">${escapeHtml(translateUiText('错误：'))}<span data-i18n-skip>${escapeHtml(failureDetail)}</span></div>` : ''}
+                ${!failureDetail ? '' : failureDetail.length > 240 || failureDetail.split('\n').length > 4
+                    // 报错原文太长时默认折叠，展开看全文
+                    ? `<details class="agent-center-card-sub agent-center-card-error agent-center-error-detail"><summary>${escapeHtml(translateUiText('错误：'))}<span data-i18n-skip>${escapeHtml(failureDetail.split('\n')[0].slice(0, 80))}…</span></summary><pre data-i18n-skip>${escapeHtml(failureDetail)}</pre></details>`
+                    : `<div class="agent-center-card-sub agent-center-card-error agent-center-error-detail">${escapeHtml(translateUiText('错误：'))}<span data-i18n-skip>${escapeHtml(failureDetail)}</span></div>`}
                 <details class="agent-center-activity-more"><summary>${escapeHtml(translateUiText('详情'))}</summary>
                 ${run.goal && run.goal !== run.title ? `<div class="agent-center-card-sub">${escapeHtml(translateUiText('目标：'))}<span data-i18n-skip>${escapeHtml(run.goal)}</span></div>` : ''}
                 ${run.sessionId ? `<div class="agent-center-card-sub" data-i18n-skip>${escapeHtml(translateUiText(`范围：${run.sessionId}`))}</div>` : ''}

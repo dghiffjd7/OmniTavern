@@ -22,6 +22,20 @@ export const deriveMemoryStorageMode = (settings = {}) => {
   return normalizeStoredMode(settings?.memoryStorageMode);
 };
 
+// 写表方式（同回复 / 独立请求）按场景各存一份：写作单独一份，聊天与动态共用原来的键。
+// 设定页与跳房子板读写同一份值，板不再自己保存记忆形态。
+export const getMemoryAutoExtractModeKey = (place = 'chat') => (
+  String(place || '').trim().toLowerCase() === 'writing' ? 'memoryAutoExtractModeWriting' : 'memoryAutoExtractMode'
+);
+
+const normalizeAutoExtractMode = value => (String(value || '').trim().toLowerCase() === 'separate' ? 'separate' : 'inline');
+
+export const resolveMemoryAutoExtractMode = (settings = {}, place = 'chat') => {
+  const key = getMemoryAutoExtractModeKey(place);
+  const value = settings?.[key] ?? settings?.memoryAutoExtractMode;
+  return normalizeAutoExtractMode(value);
+};
+
 export const applyMemoryStorageMode = ({
   mode = 'table',
   appSettings = null,

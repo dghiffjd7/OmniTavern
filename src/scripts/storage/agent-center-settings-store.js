@@ -11,6 +11,7 @@ import {
   reorderGlobalSemanticPromptBlocks,
   upsertGlobalSemanticPromptBlock,
 } from '../agent/global-semantic-prompt-library.js';
+import { sanitizeSummaryRulesText } from './summary-rules-defaults.js';
 
 export const AGENT_CENTER_SETTINGS_STORAGE_KEY = 'agent_center_settings_v1';
 
@@ -241,6 +242,17 @@ const normalizeAgentProfile = (profile = {}) => {
   };
 };
 
+// 预设载入时会把原样没改过的旧默认升级成新默认；这里另存的副本会覆盖预设，也要一起升级，否则请求里仍是旧文字
+const LEGACY_SYSPROMPT_RULE_UPGRADES = Object.freeze({ summary_rules: sanitizeSummaryRulesText });
+
+const upgradeLegacySyspromptRules = (agents = {}) => {
+  SYSPROMPT_AGENT_PROMPT_MAPPINGS.forEach((mapping) => {
+    const upgrade = LEGACY_SYSPROMPT_RULE_UPGRADES[mapping.rulesKey];
+    const prompt = agents[mapping.agentId]?.prompts?.[mapping.promptId];
+    if (upgrade && prompt) prompt.rules = upgrade(prompt.rules);
+  });
+};
+
 const normalizeProfile = (profile = {}) => {
   const src = isPlainObject(profile) ? profile : {};
   const agents = {};
@@ -249,6 +261,7 @@ const normalizeProfile = (profile = {}) => {
     const id = trim(agentId);
     if (id) agents[id] = normalizeAgentProfile(agent);
   });
+  if (trim(src.profileType) === 'sysprompt') upgradeLegacySyspromptRules(agents);
   return {
     profileType: trim(src.profileType),
     presetId: trim(src.presetId),

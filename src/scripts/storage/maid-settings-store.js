@@ -86,8 +86,16 @@ const hasExplicitMemoryExtractionSettings = (raw = {}) => {
 
 // 内置能力（女仆设置 → 技能 → 内置能力）：默认全部关闭。开关每改一次 revision +1，
 // 女仆请求开启的确认按这个版本核对，确认期间用户改过开关就不写，免得迟到的「允许」盖过用户刚做的选择。
-export const MAID_BUILTIN_CAPABILITY_IDS = Object.freeze(['random']);
+export const MAID_BUILTIN_CAPABILITY_IDS = Object.freeze(['random', 'map', 'weather']);
 const CAPABILITY_LOG_LIMIT = 50;
+
+// 单项设置（技能页能力行下方）：改设置不动开关版本，等待中的开启确认不受影响
+const CAPABILITY_OPTION_NORMALIZERS = {
+  map: raw => ({ provider: ['google', 'amap'].includes(raw.provider) ? raw.provider : 'auto' }),
+  weather: raw => ({ defaultCity: [...trim(raw.defaultCity).replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ')].slice(0, 60).join('').trim() }),
+};
+const DEFAULT_CAPABILITY_OPTIONS = Object.fromEntries(Object.entries(CAPABILITY_OPTION_NORMALIZERS).map(([id, normalize]) => [id, normalize({})]));
+const normalizeCapabilityOptions = (id, raw) => (CAPABILITY_OPTION_NORMALIZERS[id] ? CAPABILITY_OPTION_NORMALIZERS[id](isPlainObject(raw) ? raw : {}) : {});
 
 export const normalizeMaidBuiltinCapabilities = (raw = {}) => {
   const src = isPlainObject(raw) ? raw : {};
@@ -97,6 +105,7 @@ export const normalizeMaidBuiltinCapabilities = (raw = {}) => {
       enabled: item.enabled === true,
       lastUsedAt: Number(item.lastUsedAt) > 0 ? Number(item.lastUsedAt) : 0,
       revision: Math.max(0, Math.trunc(Number(item.revision) || 0)),
+      options: normalizeCapabilityOptions(id, item.options),
     }];
   }));
 };
@@ -113,8 +122,8 @@ const normalizeCapabilityLog = raw => (Array.isArray(raw) ? raw : [])
   .filter(item => MAID_BUILTIN_CAPABILITY_IDS.includes(item.id) && item.at > 0)
   .slice(-CAPABILITY_LOG_LIMIT);
 
-const hasCapabilitySettings = raw => Object.values(normalizeMaidBuiltinCapabilities(raw?.builtinCapabilities))
-  .some(item => item.enabled || item.revision > 0);
+const hasCapabilitySettings = raw => Object.entries(normalizeMaidBuiltinCapabilities(raw?.builtinCapabilities))
+  .some(([id, item]) => item.enabled || item.revision > 0 || Object.entries(item.options).some(([key, value]) => DEFAULT_CAPABILITY_OPTIONS[id]?.[key] !== value));
 
 const hasExplicitSettings = (raw = {}) => {
   const src = isPlainObject(raw) ? raw : {};
@@ -521,6 +530,25 @@ export class MaidSettingsStore {
     }
     this.notifyCapabilityListeners(key, capabilities[key]);
     return { ok: true, changed: true, capability: capabilities[key] };
+  }
+
+  // 能力的单项设置（例如地图服务）：只合并已知的键，不改开关与版本；保存失败时内存状态退回原样
+  async setBuiltinCapabilityOptions(id, patch = {}) {
+    this.ensureLoaded();
+    const key = trim(id);
+    const capabilities = normalizeMaidBuiltinCapabilities(this.state.builtinCapabilities);
+    const current = capabilities[key];
+    if (!current || !CAPABILITY_OPTION_NORMALIZERS[key]) return { ok: false, reason: 'unknown_capability' };
+    const options = normalizeCapabilityOptions(key, { ...current.options, ...(isPlainObject(patch) ? patch : {}) });
+    const previous = this.state.builtinCapabilities;
+    capabilities[key] = { ...current, options };
+    this.state.builtinCapabilities = capabilities;
+    if (!await this.write()) {
+      this.state.builtinCapabilities = previous;
+      return { ok: false, reason: 'save_failed', capability: current };
+    }
+    this.notifyCapabilityListeners(key, capabilities[key]);
+    return { ok: true, capability: capabilities[key] };
   }
 
   notifyCapabilityListeners(key, capability) {

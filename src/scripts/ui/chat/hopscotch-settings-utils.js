@@ -1,4 +1,4 @@
-import { deriveMemoryStorageMode } from '../memory-storage-mode-utils.js';
+import { deriveMemoryStorageMode, resolveMemoryAutoExtractMode } from '../memory-storage-mode-utils.js';
 
 // 只解析当前作用域的设置；创意写作的格式要求由当前会话提供。
 export const resolveHopscotchBoardSettings = ({
@@ -14,8 +14,7 @@ export const resolveHopscotchBoardSettings = ({
     memory: {
       storageMode: storageMode === 'table' && !placeEnabled ? 'off' : storageMode,
       autoExtract: settings.memoryAutoExtract === true,
-      autoExtractMode: settings.memoryAutoExtractMode,
-      independentModel: settings.memoryUpdateApiMode === 'profile',
+      autoExtractMode: resolveMemoryAutoExtractMode(settings, scope),
       placeEnabled,
     },
     replyCheck: { ...replyCheck, enabled: replyCheck.enabled === true },

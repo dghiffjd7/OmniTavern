@@ -216,6 +216,82 @@ export const resolveCoverageProtectedHistoryIndexes = ({
     .map(item => item.index);
 };
 
+// 覆盖线护栏（近景优先）：recentResult 是按配额从最新往回保留的窗口，原样保留；
+// 摘要未覆盖的旧楼层只用窗口剩下的配额补回原文，从最靠近窗口的开始补，放不下就停。
+// 不能把空洞设成不可淘汰再按同一配额裁剪——那样被挤掉的是最近楼层。
+export const restoreCoverageHoleHistory = (
+  history = [],
+  recentResult = null,
+  {
+    holeMessageIndexes = [],
+    inputBudgetTokens = null,
+    tokenMode = 'rough',
+    getMessagePrefix = null,
+  } = {},
+) => {
+  const list = Array.isArray(history) ? history : [];
+  const recentIndexes = Array.isArray(recentResult?.stats?.keptOriginalIndexes)
+    ? recentResult.stats.keptOriginalIndexes
+    : [];
+  const recentMessages = Array.isArray(recentResult?.messages) ? recentResult.messages : [];
+  const recentSet = new Set(recentIndexes);
+  const holes = [...new Set(
+    (Array.isArray(holeMessageIndexes) ? holeMessageIndexes : [])
+      .map(value => Math.trunc(Number(value)))
+      .filter(value => Number.isFinite(value) && value >= 0 && value < list.length && !recentSet.has(value)),
+  )].sort((a, b) => a - b);
+  const quota = resolveInputTokenBudget({ userBudgetTokens: inputBudgetTokens }).inputBudgetTokens;
+  const unchanged = () => ({
+    messages: recentMessages,
+    stats: { ...(recentResult?.stats || {}), restoredHoleMessageCount: 0 },
+  });
+  if (!holes.length || quota === null) return unchanged();
+  const prefixTokens = (message, previous = null) => typeof getMessagePrefix === 'function'
+    ? estimateTokens(getMessagePrefix(message, previous), tokenMode)
+    : 0;
+  let leftover = quota - (Number(recentResult?.stats?.usedTokens) || 0);
+  const restoreIndexes = [];
+  for (let i = holes.length - 1; i >= 0; i -= 1) {
+    const index = holes[i];
+    const cost = estimateHistoryMessageTokens(list[index], tokenMode) + prefixTokens(list[index], list[index - 1]);
+    if (cost > leftover) break;
+    leftover -= cost;
+    restoreIndexes.push(index);
+  }
+  if (!restoreIndexes.length) return unchanged();
+
+  const candidateIndexes = [...recentIndexes, ...restoreIndexes].sort((a, b) => a - b);
+  const recentMessageByIndex = new Map(recentIndexes.map((index, position) => [index, recentMessages[position]]));
+  // 时间前缀依赖前一条消息，补回后再按同一配额复核一遍；近景受保护，超出时只会淘汰补回的旧楼层。
+  const merged = limitHistoryByTokenBudget(
+    candidateIndexes.map(index => (recentMessageByIndex.has(index) ? recentMessageByIndex.get(index) : list[index])),
+    {
+      inputBudgetTokens,
+      tokenMode,
+      getMessagePrefix,
+      protectedMessageIndexes: candidateIndexes
+        .map((index, position) => (recentSet.has(index) ? position : -1))
+        .filter(position => position >= 0),
+    },
+  );
+  const keptOriginalIndexes = merged.stats.keptOriginalIndexes.map(position => candidateIndexes[position]);
+  const restoredHoleMessageCount = keptOriginalIndexes.filter(index => !recentSet.has(index)).length;
+  return {
+    messages: merged.messages,
+    stats: {
+      ...merged.stats,
+      originalMessageCount: list.length,
+      keptMessageCount: keptOriginalIndexes.length,
+      droppedMessageCount: list.length - keptOriginalIndexes.length,
+      truncatedMessageCount: Number(recentResult?.stats?.truncatedMessageCount || 0)
+        + Number(merged.stats.truncatedMessageCount || 0),
+      protectedMessageCount: restoredHoleMessageCount,
+      keptOriginalIndexes,
+      restoredHoleMessageCount,
+    },
+  };
+};
+
 export const applyHistoryTokenBudget = (history = [], options = {}) =>
   limitHistoryByTokenBudget(history, options).messages;
 

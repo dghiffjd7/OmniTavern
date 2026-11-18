@@ -62,6 +62,8 @@ export const createBuiltinToolExecutors = ({
       return ok();
     },
     'text.speak': dispatch('speak'),
+    // 小管家翻译：没开、没选模型或失败时，消息动作已提示原因，这里不再重复提示
+    'text.translate': async ({ message }) => ((await dispatchMessageAction('steward-translate', message)) === false ? unavailable('') : ok()),
     'open.panel': async ({ params }) => ((await openPanel(params.panel)) === false ? unavailable('这个功能现在打不开') : ok()),
   };
 };

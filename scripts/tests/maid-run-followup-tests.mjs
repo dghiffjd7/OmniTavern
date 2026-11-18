@@ -113,6 +113,15 @@ test('resume supplied through UI controls cannot cross cards or replay a cancell
   assert.equal(calls, 0);
 });
 
+test('sentence-final particles such as 喵 do not hide a task followup', () => {
+  // 11/14：用户说「继续喵」「请继续喵」被当成新任务，上一轮的待办和已读记录都没接上
+  for (const input of ['继续喵', '请继续喵', '继续喵～', '继续吧喵！', '接着做呀']) assert.equal(classifyMaidRunFollowup(input), 'resume', input);
+  assert.equal(classifyMaidRunFollowup('取消那个任务喵'), 'cancel');
+  assert.equal(classifyMaidRunFollowup('那个任务做好了吗喵'), 'status');
+  assert.equal(classifyMaidRunFollowup('继续任务「换头像」喵'), 'resume');
+  for (const input of ['继续给另一个角色换头像喵', '好的喵！继续扩写其她人喵']) assert.equal(classifyMaidRunFollowup(input), '', input);
+});
+
 test('task followups preserve negation, ordinary chat, voice and ambiguous ownership', () => {
   const { runtime } = makeFixture();
   for (const input of ['不要取消那个任务', '昨天那个弄好了，继续聊吧', '继续给另一个角色换头像', '任务进度怎么样，顺便删掉旧群']) {

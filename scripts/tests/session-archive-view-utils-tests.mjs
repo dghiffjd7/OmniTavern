@@ -302,3 +302,39 @@ const createFakeDocument = () => ({
   assert.equal(exportedCurrent, 1);
   console.log('ok - renderSessionArchivesSection can render export-only current chat row without archives');
 }
+
+{
+  // 小管家的存档概述：存档名下一行（不翻译、可搜索）
+  const documentRef = createFakeDocument();
+  const container = createContainer();
+  container.ownerDocument = documentRef;
+  const rows = [];
+  renderSessionArchivesSection({
+    container,
+    sessionId: 's1',
+    archiveSearchQuery: '灯塔',
+    chatStore: {
+      state: { sessions: { s1: { currentArchiveId: '' } } },
+      getArchives() {
+        return [
+          { id: 'a1', name: '海边', timestamp: 1700000000000, messageCount: 3, stewardOverview: { text: '两人走到灯塔下，约好明天再见', messageCount: 3 } },
+          { id: 'a2', name: '咖啡馆', timestamp: 1700001000000, messageCount: 5 },
+        ];
+      },
+    },
+    createArchiveRow: (payload) => {
+      const row = documentRef.createElement('div');
+      const info = documentRef.createElement('div');
+      rows.push({ payload, row, info });
+      return { row, info };
+    },
+  });
+  const overview = rows[0].info.children[0];
+  assert.equal(overview.className, 'session-archive-overview');
+  assert.equal(overview.textContent, '两人走到灯塔下，约好明天再见');
+  assert.equal(overview.attributes['data-i18n-skip'], '');
+  assert.equal(rows[1].info.children.length, 0, 'archives without an overview get no extra line');
+  assert.equal(rows[0].row.style.display, '', 'the overview is searchable');
+  assert.equal(rows[1].row.style.display, 'none');
+  console.log('ok - renderSessionArchivesSection shows the steward overview under the archive name');
+}

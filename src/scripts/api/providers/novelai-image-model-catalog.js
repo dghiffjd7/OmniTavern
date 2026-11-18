@@ -142,3 +142,7 @@ export const resolveNovelAIImageModelCatalog = async ({
     models: normalizeNovelAIImageModelIds(bundledModels),
   };
 };
+
+// 精准参考（Precise Reference）：官方文档说只在 V4.5 模型上可用、每张图另扣 5 Anlas。
+// V5（nai-diffusion-5-full）带 director_reference_* 会回 500（11-06 实测；NekoAI-JS 也写明 V5 不能用 director references）。
+export const isNovelAIPreciseReferenceModel = (model = '') => /nai-diffusion-4-5\b/i.test(String(model || ''));

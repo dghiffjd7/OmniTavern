@@ -43,11 +43,25 @@ const renderArchiveHit = (entry, snippet, documentRef) => {
   entry.hitText.replaceChildren(snippet.before, mark, snippet.after);
 };
 
+// 小管家写的存档概述：存档名下一行，太长省略，完整内容放在提示里
+const appendArchiveOverview = (info, archive, documentRef) => {
+  const text = String(archive?.stewardOverview?.text || '').trim();
+  if (!text || !info?.appendChild || !documentRef?.createElement) return;
+  const line = documentRef.createElement('div');
+  line.className = 'session-archive-overview';
+  line.setAttribute?.('data-i18n-skip', '');
+  line.title = text;
+  line.textContent = text;
+  line.style.cssText = 'margin-top:2px; font-size:12px; color:var(--app-text-secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;';
+  info.appendChild(line);
+};
+
 const archiveMatchesQuery = ({ archive = {}, dateText = '', messageCount = 0, isCurrent = false } = {}, query = '', contentText = '') => {
   const q = normalizeArchiveQuery(query);
   if (!q) return true;
   const fields = [
     archive.name,
+    archive.stewardOverview?.text,
     archive.id,
     dateText,
     `${messageCount}`,
@@ -394,6 +408,7 @@ export const renderSessionArchivesSection = ({
       },
     });
     if (row) {
+      appendArchiveOverview(info, archive, documentRef);
       entries.push({ row, info, archive, dateText, messageCount, isCurrent });
       container.appendChild(row);
     }

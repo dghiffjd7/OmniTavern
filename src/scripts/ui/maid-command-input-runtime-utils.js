@@ -12,11 +12,14 @@ import { createMaidRunCardView, MAID_RUN_ICONS } from './maid-run-card-dom.js';
 import { renderMaidResultCard } from './maid-result-card-dom.js';
 import { normalizeMaidResultCards } from '../agent/maid-result-cards.js';
 import { createMaidTextApprovalReply, sameMaidTextApprovalScope } from './maid-text-approval-reply.js';
+import { createMaidHistoryEntryRenderer, ensureMaidHistoryStyle, groupMaidHistoryEntries, maidHistoryDayLabel } from './maid-history-panel.js';
 
 const STYLE_ID = 'maid-command-input-runtime-style';
 const FIELD_MIN_HEIGHT = 32;
 const FIELD_MAX_HEIGHT = 76;
 const DEFAULT_MAX_IMAGE_ATTACHMENTS = 4;
+const RESULT_DETAIL_INLINE_MAX_CHARS = 240;
+const RESULT_DETAIL_INLINE_MAX_LINES = 4;
 export const MAID_ATTACHMENT_ACCEPT = [
   'image/*', 'text/*', '.json', 'application/json', '.js', 'text/javascript', 'application/javascript', '.charx',
   '.txt', '.md', '.csv', '.tsv', '.log', '.yaml', '.yml', '.xml', '.html', '.srt', '.ini', '.toml',
@@ -86,6 +89,9 @@ const ICONS = Object.freeze({
   selection: iconSvg('<circle cx="12" cy="12" r="7"/><path d="M12 2v3"/><path d="M12 19v3"/><path d="M2 12h3"/><path d="M19 12h3"/>'),
   image: iconSvg('<rect x="3.5" y="4.5" width="17" height="15" rx="3"/><circle cx="9" cy="10" r="1.6"/><path d="m20.5 16-4.8-4.8a1.5 1.5 0 0 0-2.1 0L5 19.5"/>'),
   paperclip: iconSvg('<path d="m20.5 11.5-8.2 8.2a5.3 5.3 0 0 1-7.5-7.5l8.4-8.4a3.5 3.5 0 0 1 5 5l-8.4 8.4a1.8 1.8 0 0 1-2.5-2.5l7.7-7.7"/>'),
+  // 前几轮：往上翻（内容插在上方）／收起（两个箭头相对）
+  earlierMore: iconSvg('<path d="m6 15 6-6 6 6"/>'),
+  earlierFold: iconSvg('<path d="m7 20 5-5 5 5"/><path d="m7 4 5 5 5-5"/>'),
 });
 
 const injectStyle = (documentRef) => {
@@ -607,6 +613,36 @@ const injectStyle = (documentRef) => {
   font-size: 1em;
   line-height: 1.35;
 }
+.mci-result-detail-toggle {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--app-text-muted, rgba(100, 116, 139, 0.85));
+  font: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.mci-result-detail {
+  max-height: 220px;
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  overflow: auto;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--app-text-primary, #111827) 6%, transparent);
+  color: var(--app-text-secondary, #475569);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
+}
 .mci-result-actions {
   display: flex;
   flex-wrap: wrap;
@@ -678,6 +714,16 @@ const injectStyle = (documentRef) => {
   background: color-mix(in srgb, var(--app-surface-card, #fff) 70%, transparent);
 }
 .mci-live-row .mrc-shimmer { font-size: 12px; }
+/* 前几轮：本轮上方，图标按钮往上翻、收起。指令条浮在页面上方，所有底都要不透明（不能透出底下的正文）；
+   历史项沿用女仆历史的卡片，改虚线边框区分本轮；日期与「本轮」做成小胶囊 */
+.mci-earlier { display: grid; gap: 8px; white-space: normal; }
+.mci-earlier-ctl { display: flex; justify-self: center; gap: 8px; }
+.mci-earlier-ctl > button, .mci-earlier .mh-day, .mci-earlier-sep { width: fit-content; border: 1px solid var(--app-border-default, rgba(148, 163, 184, 0.35)); border-radius: 999px; background: var(--app-surface-card, #fff); box-shadow: var(--app-shadow-sm, 0 1px 4px rgba(15, 23, 42, 0.08)); }
+.mci-earlier-ctl > button { display: grid; place-items: center; width: 32px; height: 32px; padding: 0; color: var(--app-text-secondary, #475569); cursor: pointer; }
+.mci-earlier-ctl > button:hover { background: var(--app-surface-hover, #f1f5f9); }
+.mci-earlier .mh-entry { padding: 10px 12px; border-style: dashed; }
+.mci-earlier .mh-day { justify-self: start; margin: 2px 0 0; padding: 1px 9px; font-size: 11.5px; }
+.mci-earlier-sep { justify-self: center; padding: 1px 10px; font-size: 11px; font-weight: 700; color: var(--app-text-muted, #94a3b8); }
 /* 手机：底部抽屉（预览 / 半屏 / 全屏），输入胶囊固定在抽屉底部 */
 .mci-sheet-handle { display: none; }
 .maid-command-input[data-layout="sheet"] {
@@ -828,6 +874,11 @@ export const createMaidCommandInputRuntime = ({
   onTextApprovalReply = null,
   // 结果卡片的动作（如「再来一次」）：由 APP 复核能力开关后返回 { card } 或 { message }
   onResultCardAction = null,
+  // 女仆历史回合（女仆设置 → 历史的同一来源）：有本轮结果时可在顶部往上翻看前几轮
+  listHistoryTurns = null,
+  // 前几轮的按轮管理（不给女仆看、删除或重新回答最近一轮；见 maid-history-round-actions.js）
+  historyRoundActions = null,
+  nowFn = () => Date.now(),
 } = {}) => {
   let rootEl = null;
   let inputEl = null;
@@ -852,6 +903,11 @@ export const createMaidCommandInputRuntime = ({
   let resultEnterPaceUntil = 0; // 跨渲染的逐卡推出节拍（相邻新卡 ≥150ms，积压封顶 1.2s）
   let liveStatus = null; // 写死的过程提示（progress）：单行原位替换；有运行卡时并入卡内
   const runCards = new Map(); // runId → 运行卡视图
+  // 「前几轮」：本轮开始前的历史项（新的在前，本轮首次显示时取一次），已展开几项
+  let roundStartedAt = 0;
+  let earlierEntries = null;
+  let earlierShown = 0;
+  let earlierEl = null;
   const runThoughts = new Map(); // runId → 女仆过程叙述（思路，默认折叠）
   let pendingThoughts = []; // 当前提交尚未绑定 run 时的叙述
   let layout = 'float';
@@ -1170,6 +1226,107 @@ export const createMaidCommandInputRuntime = ({
     return card;
   };
 
+  const EARLIER_STEP = 3;
+  // 按轮操作改了历史后：重新取本轮之前的历史项、保留已展开的数量与位置
+  const reloadEarlier = () => {
+    if (!earlierEl || !roundStartedAt) return;
+    const beforeTop = Number(resultEl?.scrollTop || 0) || 0;
+    try {
+      earlierEntries = groupMaidHistoryEntries(listHistoryTurns() || []).filter(entry => entry.at < roundStartedAt);
+    } catch {
+      earlierEntries = [];
+    }
+    earlierShown = Math.min(earlierShown, earlierEntries.length);
+    renderEarlierBlock();
+    if (resultEl) resultEl.scrollTop = beforeTop;
+  };
+  const earlierRenderer = typeof listHistoryTurns === 'function'
+    ? createMaidHistoryEntryRenderer({
+      documentRef,
+      onCardAction: typeof onResultCardAction === 'function' ? payload => handleResultCardAction(payload) : null,
+      roundActions: historyRoundActions,
+      onRoundChanged: () => reloadEarlier(),
+    })
+    : null;
+  // 往上翻或收起：上方内容变了，保持当前看到的位置不动
+  const setEarlierShown = (count) => {
+    const beforeHeight = Number(resultEl?.scrollHeight || 0) || 0;
+    const beforeTop = Number(resultEl?.scrollTop || 0) || 0;
+    earlierShown = count;
+    renderEarlierBlock();
+    if (resultEl) resultEl.scrollTop = Math.max(0, beforeTop + (Number(resultEl.scrollHeight || 0) || 0) - beforeHeight);
+  };
+  const earlierButton = (className, label, icon, onClick) => {
+    const button = documentRef.createElement('button');
+    button.type = 'button';
+    button.className = className;
+    button.innerHTML = icon;
+    button.setAttribute('aria-label', label);
+    button.setAttribute('title', label);
+    button.addEventListener('click', (event) => {
+      event?.stopPropagation?.();
+      onClick();
+    });
+    return button;
+  };
+  const renderEarlierBlock = () => {
+    if (!earlierEl) return;
+    const remaining = earlierEntries.length - earlierShown;
+    if (typeof earlierEl.replaceChildren === 'function') earlierEl.replaceChildren();
+    else earlierEl.innerHTML = '';
+    if (!earlierEntries.length) return;
+    const ctl = documentRef.createElement('div');
+    ctl.className = 'mci-earlier-ctl';
+    if (remaining > 0) {
+      ctl.appendChild(earlierButton('mci-earlier-more', earlierShown ? t('再往前翻') : t('查看前几轮'), ICONS.earlierMore,
+        () => setEarlierShown(Math.min(earlierEntries.length, earlierShown + EARLIER_STEP))));
+    }
+    if (earlierShown > 0) ctl.appendChild(earlierButton('mci-earlier-fold', t('收起前几轮'), ICONS.earlierFold, () => setEarlierShown(0)));
+    earlierEl.appendChild(ctl);
+    if (!earlierShown) return;
+    let day = '';
+    earlierEntries.slice(0, earlierShown).reverse().forEach((entry) => {
+      const label = maidHistoryDayLabel(entry.at);
+      if (label !== day) {
+        day = label;
+        const dayEl = documentRef.createElement('h4');
+        dayEl.className = 'mh-day';
+        dayEl.textContent = label;
+        earlierEl.appendChild(dayEl);
+      }
+      earlierEl.appendChild(earlierRenderer(entry));
+    });
+    const sep = documentRef.createElement('div');
+    sep.className = 'mci-earlier-sep';
+    sep.textContent = t('本轮');
+    earlierEl.appendChild(sep);
+  };
+  // 本轮首次显示时记下开始时间、取一次本轮之前的历史项；有更早的才放「查看前几轮」
+  const syncEarlier = () => {
+    if (!earlierRenderer || !resultEl || !roundStartedAt) return;
+    if (!earlierEntries) {
+      try {
+        earlierEntries = groupMaidHistoryEntries(listHistoryTurns() || []).filter(entry => entry.at < roundStartedAt);
+      } catch {
+        earlierEntries = [];
+      }
+    }
+    if (!earlierEntries.length) return;
+    if (!earlierEl) {
+      ensureMaidHistoryStyle(documentRef);
+      earlierEl = documentRef.createElement('div');
+      earlierEl.className = 'mci-earlier';
+      earlierEl.dataset.mciEarlier = '1';
+      renderEarlierBlock();
+    }
+    // 固定在最上面（手机抽屉的把手之后）
+    const first = Array.from(resultEl.children || []).find(child => !child?.dataset?.mciHandle) || null;
+    if (first !== earlierEl) {
+      if (first && typeof resultEl.insertBefore === 'function') resultEl.insertBefore(earlierEl, first);
+      else resultEl.appendChild(earlierEl);
+    }
+  };
+
   const renderResultMessages = ({ forceBottom = false } = {}) => {
     if (!rootEl || !documentRef) return;
     if (!resultMessages.length && !liveStatus) {
@@ -1177,10 +1334,13 @@ export const createMaidCommandInputRuntime = ({
       runCards.clear();
       resultEl?.remove?.();
       resultEl = null;
+      earlierEl = null;
       rootEl.classList.remove('has-result');
       applySheetSnap();
       return;
     }
+    // 本轮从第一次有结果起算（关着时也记，免得重开后把本轮自己算进「前几轮」）
+    if (!roundStartedAt) roundStartedAt = Number(nowFn()) || 0;
     // 隐藏时只更新保存的视图；重开后统一渲染，保留展开状态且不重启后台计时。
     if (!isOpen) return;
     const keepBottom = forceBottom || shouldStickResultToBottom();
@@ -1283,6 +1443,33 @@ export const createMaidCommandInputRuntime = ({
       message.className = 'mci-result-message';
       message.innerHTML = renderMaidMarkdownHtml(item.message);
       bubble.appendChild(message);
+      // 模型／服务商的报错原文：不过 Markdown、不翻译；短的直接显示，长的默认折叠
+      const detail = trim(item.detail);
+      if (detail) {
+        const collapsible = detail.length > RESULT_DETAIL_INLINE_MAX_CHARS
+          || detail.split('\n').length > RESULT_DETAIL_INLINE_MAX_LINES;
+        if (collapsible) {
+          const toggle = documentRef.createElement?.('button');
+          toggle.type = 'button';
+          toggle.className = 'mci-result-detail-toggle';
+          toggle.setAttribute?.('aria-expanded', item.detailOpen ? 'true' : 'false');
+          toggle.textContent = item.detailOpen ? t('收起报错原文') : t('展开报错原文');
+          toggle.addEventListener?.('click', (event) => {
+            event.preventDefault?.();
+            event.stopPropagation?.();
+            item.detailOpen = !item.detailOpen;
+            renderResultMessages({ forceBottom: false });
+          });
+          bubble.appendChild(toggle);
+        }
+        if (!collapsible || item.detailOpen) {
+          const pre = documentRef.createElement?.('pre');
+          pre.className = 'mci-result-detail';
+          pre.setAttribute?.('data-i18n-skip', '');
+          pre.textContent = detail;
+          bubble.appendChild(pre);
+        }
+      }
       const actions = Array.isArray(item.actions) ? item.actions : [];
       if (actions.length) {
         const actionRow = documentRef.createElement?.('div');
@@ -1307,7 +1494,7 @@ export const createMaidCommandInputRuntime = ({
     Array.from(resultEl.children || []).forEach((node) => {
       const key = node?.dataset?.key;
       if (key) existingNodes.set(key, node);
-      else if (!node?.dataset?.mciLive && !node?.dataset?.mciHandle) node.remove?.();
+      else if (!node?.dataset?.mciLive && !node?.dataset?.mciHandle && !node?.dataset?.mciEarlier) node.remove?.();
     });
     // 单次渲染取一次时钟：同批新项的节拍必须相对同一基准
     const renderNowTs = Date.now();
@@ -1363,6 +1550,7 @@ export const createMaidCommandInputRuntime = ({
     } else if (liveEl) {
       liveEl.remove?.();
     }
+    syncEarlier();
     const latest = resultMessages[resultMessages.length - 1] || {};
     resultEl.dataset.tone = latest.tone || 'info';
     resultEl.dataset.count = String(resultMessages.length);
@@ -1374,6 +1562,9 @@ export const createMaidCommandInputRuntime = ({
   const clearResult = () => {
     resultMessages = [];
     liveStatus = null;
+    roundStartedAt = 0;
+    earlierEntries = null;
+    earlierShown = 0;
     restoreResultOnNextOpen = false;
     runThoughts.clear();
     pendingThoughts = [];
@@ -1429,6 +1620,8 @@ export const createMaidCommandInputRuntime = ({
         message: text,
         tone: normalizedTone,
         actions: Array.isArray(options?.actions) ? options.actions : [],
+        detail: trim(options?.detail),
+        detailOpen: false,
       });
     }
     renderResultMessages({ forceBottom: options?.forceBottom !== false });
@@ -1451,6 +1644,7 @@ export const createMaidCommandInputRuntime = ({
     const outcome = await onResultCardAction(payload);
     if (outcome?.card) appendResultCards([outcome.card]);
     else if (outcome?.message) setResult(outcome.message, 'info');
+    return outcome; // 选项提问卡据 answered 判断是否已送出
   };
 
   /* 女仆执行流投影：一次任务一张运行卡，按 runId 原位更新、与汇报气泡按时间交错。
@@ -1646,7 +1840,7 @@ export const createMaidCommandInputRuntime = ({
           setResult(
             result?.message || result?.summary || (ok ? '已完成。' : '执行失败。'),
             cancelled ? 'info' : (ok ? 'success' : 'error'),
-            { actions: result?.actions },
+            { actions: result?.actions, detail: ok || cancelled ? '' : result?.errorDetail },
           );
           appendResultCards(result?.cards);
           entry.resolve(result || { ok });
@@ -1687,7 +1881,8 @@ export const createMaidCommandInputRuntime = ({
         return;
       }
       if (isAppModalPointerTarget(target, path)) return;
-      close();
+      // 点别处只是收起：保留最新一轮的回复与卡片，下次长按小球打开时照常显示
+      close({ preserve: true });
     };
     documentRef.addEventListener('pointerdown', outsidePointerHandler, true);
   };
@@ -2041,7 +2236,10 @@ export const createMaidCommandInputRuntime = ({
     clearCloseTimer();
     restoreResultOnNextOpen = false;
     const wasQueued = isSubmitting || Boolean(activeSubmission);
-    if (!wasQueued) clearResult();
+    if (!wasQueued) {
+      clearResult();
+      roundStartedAt = Number(nowFn()) || 0; // 新一轮从提交时算起
+    }
     sheetSnapTouched = false;
     submissionSeq += 1;
     let resolveSubmission = null;

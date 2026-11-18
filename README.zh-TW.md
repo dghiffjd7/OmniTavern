@@ -17,6 +17,8 @@
 
 ### [**點此前往下載頁（Releases）**](https://github.com/dghiffjd7/OmniTavern/releases/latest)
 
+想先看看？[介紹頁與 80 秒宣傳片](https://dghiffjd7.github.io/OmniTavern/)
+
 | 平台 | 安裝檔 |
 | --- | --- |
 | Windows | `OmniTavern_x.x.x_x64-setup.exe` |
@@ -85,19 +87,22 @@ App 內建的 AI 代理：用自然語言讓她替你建聯絡人 / 群聊 / 世
 
 聊天、創意寫作、動態全場景生圖，支援 NovelAI 等圖片服務、參數覆寫與失敗重試；可生成表情包並自動去背、切割成貼圖，按聊天室綁定管理。
 
-## 0.7.2 更新亮點
+## 0.7.10 更新亮點
 
-- **三語介面**：新增英文與繁體中文，首次啟動可選語言，隨時可在設定中切換
-- **正式更名 OmniTavern**：原 AiChat 更名，舊資料與舊版匯出檔完全相容，覆蓋安裝即可升級
-- **模型原生聯網搜尋**：Gemini、Claude、OpenAI、DeepSeek、Kimi、智譜、OpenRouter 的官方聯網能力直連，其他模型自動退回通用搜尋方案
-- 修復預設重複匯入時正則腳本遺失、大體積資料包匯出逾時等問題
+- **小管家**：用小模型處理翻譯、生圖標籤、貼圖起名、存檔概述等雜務，也可以自建任務
+- **女僕**：地圖與天氣（不用填 Key）、選項提問與計畫確認、歷史按輪管理、發帶圖的動態
+- **生圖**：即時預覽、固定在聊天上的參考圖（含 NovelAI 精準參考）、新增 WaveSpeed 渠道
+- **上下文血緣圖**：來源補齊並標出重點，可跳到設定、匯出與診斷路徑
+- **Vertex**：Service Account JSON 可以存多份並切換
+
+完整內容見 [0.7.10 更新內容](https://github.com/dghiffjd7/OmniTavern/releases/tag/v0.7.10)。
 
 ## 支援的 AI 服務
 
 | 類型 | 服務商 |
 | --- | --- |
 | 對話模型 | Google Gemini、OpenAI、Anthropic (Claude)、DeepSeek、OpenRouter、Kimi (Moonshot)、智譜 GLM、Ollama（本地）以及任意 OpenAI 相容端點 |
-| 圖片生成 | NovelAI 及支援圖片輸出的對話模型 |
+| 圖片生成 | NovelAI、OpenAI、Google（Gemini／Imagen、Vertex AI）、Stability AI、Together AI、WaveSpeed、Pollinations、AUTOMATIC1111、ComfyUI、任意 OpenAI 相容端點，以及支援圖片輸出的對話模型 |
 
 每個聊天室可以單獨指定使用哪個 API 和模型。
 

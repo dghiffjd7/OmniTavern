@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { editHopscotchBoard } from '../../src/scripts/ui/chat/hopscotch-board-editor-utils.js';
-import { buildDefaultHopscotchBoard, compileBoardToLaneTasks, HOPSCOTCH_LIMITS } from '../../src/scripts/ui/chat/hopscotch-board-utils.js';
+import { buildDefaultHopscotchBoard, compileBoardToLaneTasks } from '../../src/scripts/ui/chat/hopscotch-board-utils.js';
 import { resolveHopscotchActivation } from '../../src/scripts/ui/chat/hopscotch-activation-utils.js';
 import { renderHopscotchCourt } from '../../src/scripts/ui/chat/hopscotch-court-view.js';
 
@@ -34,9 +34,11 @@ const initial = buildDefaultHopscotchBoard({});
   assert.doesNotMatch(promoted, /data-hop-anchor=/, '实体行沿用普通行操作');
   assert.equal(editHopscotchBoard(initial, { type: 'add', kind: 'format_review', anchorKind: 'format_review' }).ok, false, '内建 Agent 保持唯一');
   const full = structuredClone(initial);
-  while (full.rows.length < HOPSCOTCH_LIMITS.maxRows) full.rows.push({ id: 'extra-' + full.rows.length, houses: [{ id: 'extra-' + full.rows.length, kind: 'custom_prompt' }] });
-  assert.equal(editHopscotchBoard(full, { type: 'add', kind: 'custom_prompt', anchorKind: 'format_review' }).ok, false, '展示锚点也遵守行数限制');
-  assert.equal(full.rows.length, HOPSCOTCH_LIMITS.maxRows, '失败原子回退');
+  while (full.rows.length < 6) full.rows.push({ id: 'extra-' + full.rows.length, houses: [{ id: 'extra-' + full.rows.length, kind: 'custom_prompt' }] });
+  const extended = editHopscotchBoard(full, { type: 'add', kind: 'custom_prompt', anchorKind: 'format_review' });
+  assert.equal(extended.ok, true, '展示锚点可在第六行之后继续插入');
+  assert.equal(extended.board.rows.length, 7);
+  assert.equal(full.rows.length, 6, '编辑不改写原板');
   assert.deepEqual(initial, original, '浏览、取消或失败均不改写原板');
   console.log('ok - every execution row has add controls; review placeholder promotes atomically with parallel/sequential dependencies and limits');
 }
@@ -114,4 +116,21 @@ console.log('ok - atomic board operations, fusion dependencies, shared safe cour
   assert.match(live, /is-succeeded[^>]*data-hop-house="body"[\s\S]*?hop-cell-mark" aria-hidden="true">✓</, '完成用记号而非文字');
   assert.match(live, /class="hop-roof is-running"/);
   console.log('ok - court shows origin dot, ticks, stone on the running row and glyph statuses');
+}
+
+{
+  // 正文的「融合 · 记忆表格」开关关掉 = 拆出成单独房子（切到独立请求），不是把记忆删掉
+  const fusedBoard = buildDefaultHopscotchBoard({ memory: { storageMode: 'table', autoExtract: true, autoExtractMode: 'inline' }, variables: { enabled: true } });
+  const split = editHopscotchBoard(fusedBoard, { type: 'fuse', kind: 'memory_table', enabled: false });
+  assert.equal(split.ok, true, split.reason);
+  const houses = split.board.rows.flatMap(row => row.houses);
+  assert.equal(houses.find(h => h.kind === 'body').fused.includes('memory_table'), false);
+  assert.equal(houses.filter(h => h.kind === 'memory_table').length, 1, '拆出成一个独立记忆房子');
+  const back = editHopscotchBoard(split.board, { type: 'fuse', kind: 'memory_table', enabled: true });
+  assert.equal(back.ok, true, back.reason);
+  assert.equal(back.board.rows.flatMap(row => row.houses).some(h => h.kind === 'memory_table'), false, '再打开就并回正文');
+  assert.equal(editHopscotchBoard(split.board, { type: 'remove', id: houses.find(h => h.kind === 'memory_table').id }).ok, false, '记忆的有无由设定决定，板上不能删');
+  const other = editHopscotchBoard(fusedBoard, { type: 'fuse', kind: 'variable', enabled: false });
+  assert.equal(other.board.rows.flatMap(row => row.houses).some(h => h.kind === 'variable'), false, '其他融合项关掉仍是移除');
+  console.log('ok - unfusing memory splits it into a standalone house instead of deleting it');
 }

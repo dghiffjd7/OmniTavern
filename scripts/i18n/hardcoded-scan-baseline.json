@@ -997,7 +997,7 @@
   },
   {
     "file": "src/scripts/ui/bridge.js",
-    "text": "</details>标签顺序正确，摘要**纯中文输出**，不得夹杂其它语言",
+    "text": "</details>标签顺序正确，摘要用中文书写，人名等专有名词保留原文",
     "category": "prompt_fallback",
     "reason": "The remaining bridge literals are canonical prompt fallbacks passed through prompt/memory locale helpers or stable protocol examples; all user-visible bridge chrome has moved to the UI catalog."
   },
@@ -1874,12 +1874,6 @@
   {
     "file": "src/scripts/ui/chat/message-interaction-utils.js",
     "text": "[消息]",
-    "category": "protocol_compatibility",
-    "reason": "Remaining strings are message/media sentinels, legacy Chinese parser aliases, stable role names, or embedded bridge contracts; changing them would break existing chats or imports."
-  },
-  {
-    "file": "src/scripts/ui/chat/message-interaction-utils.js",
-    "text": "#0 序章",
     "category": "protocol_compatibility",
     "reason": "Remaining strings are message/media sentinels, legacy Chinese parser aliases, stable role names, or embedded bridge contracts; changing them would break existing chats or imports."
   },

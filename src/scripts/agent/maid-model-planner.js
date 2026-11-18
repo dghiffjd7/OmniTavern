@@ -1,3 +1,4 @@
+import { buildMaidChoiceCard, buildMaidPlanCard, isCatalogWriteTool } from './maid-result-cards.js';
 import {
   findAppFeature,
   getMaidModelFeatureContext,
@@ -38,6 +39,7 @@ import {
 } from './maid-prompt-defaults.js';
 import { buildMaidSelectionPromptBlock } from '../ui/maid-selection-utils.js';
 import { getVisionInputCapability } from '../api/vision-capabilities.js';
+import { t } from '../i18n/index.js';
 import {
   GLOBAL_SEMANTIC_PROMPT_ANCHORS,
   resolveGlobalSemanticPromptPlan,
@@ -206,9 +208,32 @@ const chatWithFallback = async (
       probe.phase = 'fallback-failed';
       probe.error = String(err2?.message || err2).slice(0, 120);
       probe.elapsedMs = Date.now() - startedAt;
+      // 主备都失败：两份原始报错都要留，只抛备用配置的会把主模型的真正原因盖掉
+      if (err2 && typeof err2 === 'object' && !isMaidUserAbort(err2, options?.signal)) {
+        try {
+          err2.maidModelErrors = [
+            [t('主模型'), maidGeneration?.primaryModel, error],
+            [t('备用配置'), maidGeneration?.fallbackModel, err2],
+          ].map(([label, model, failure]) => ({
+            label,
+            name: [trim(model?.provider), trim(model?.model)].filter(Boolean).join(' / '),
+            message: String(failure?.message || failure || ''),
+          }));
+        } catch {}
+      }
       throw err2;
     }
   }
+};
+
+// 模型请求失败时给界面和执行记录看的报错原文：不改写，主备都失败时逐行标明是哪一档报的
+const MAID_MODEL_ERROR_DETAIL_MAX_CHARS = 4000;
+const describeMaidModelRequestError = (error = null) => {
+  const failures = Array.isArray(error?.maidModelErrors) ? error.maidModelErrors : [];
+  const text = failures.length
+    ? failures.map(item => `${item.label}${item.name ? `（${item.name}）` : ''}：${item.message}`).join('\n')
+    : String(error?.message || error || '');
+  return text.length > MAID_MODEL_ERROR_DETAIL_MAX_CHARS ? `${text.slice(0, MAID_MODEL_ERROR_DETAIL_MAX_CHARS)}…` : text;
 };
 
 const maidGenerationFor = (runtime = {}, config = {}) => ({
@@ -468,9 +493,9 @@ export const buildMaidModelPlannerFeatureList = (features = listAppFeatures(), {
 
 // 何时反问：只在目标或关键选择无法判断时问、一次问完；创作细节不追问，直接扩写
 const MAID_CLARIFY_RULE = [
-  'When a request to create a new private contact receives a session.create result with created:false and existing:true, the returned ID belongs to an existing contact, not a newly created character or permission to change it. If the user only wants to open or use a private chat with that contact and supplies no new traits or separate-character request, reuse the observed contact and report or open the existing chat as requested; do not ask for a rename or modification choice. If a new or different character was requested, state the collision and existing description from actual observations; if missing, read that exact session before describing it. Ask one choice: rename the new contact to keep a separate character, or explicitly modify the existing contact. Do not attach requested new traits while that choice is unresolved. A missing independent profile does not mean the contact description is empty. Before changing an existing profile, use contact_profile.read and preserve unchanged fields. If the user already explicitly selected modifying this exact contact, follow that choice without repeating the question, while retaining the existing APP approval. Only created:true items may continue the new-character profile workflow; check each batch item separately.',
+  'When a request to create a new private contact receives a session.create result with created:false and existing:true, the returned ID belongs to an existing contact, not a newly created character or permission to change it. If the user only wants to open or use a private chat with that contact and supplies no new traits or separate-character request, reuse the observed contact and report or open the existing chat as requested; do not ask for a rename or modification choice. If a new or different character was requested, state the collision and existing description from actual observations; if missing, read that exact session before describing it. Ask one choice: rename the new contact to keep a separate character, or explicitly modify the existing contact. Do not attach requested new traits while that choice is unresolved. Before changing an existing profile, use contact_profile.read and preserve unchanged fields. If the user already explicitly selected modifying this exact contact, follow that choice without repeating the question, while retaining the existing APP approval. Only created:true items may continue the new-character profile workflow; check each batch item separately.',
   'For a request containing multiple operations, first perform necessary read-only checks. If a later operation still lacks a required target or parameter that cannot be safely inferred, before the first irreversible operation report the observed results, exact proposed targets, and missing choices together, then ask one clarification. Keep the requested execution order; gathering missing choices is preparation, not executing later steps early. If the user explicitly asks to execute an independent ready step first and discuss the rest afterward, perform that step through the existing APP approval and keep the remaining goals pending. Do not add this clarification for a single operation with complete parameters, when all requested operations have complete parameters, or for optional creative details that can reasonably be supplied. Use the existing clarification response; do not create a todo solely for this check, invent missing parameters, or treat a clarification answer as APP approval.',
-  'When an actual worldbook match belongs to another card and the user has not explicitly named the target book or owner card, use targetSelectionEvidence to state the current card bindingState and ask once with the concrete targetOptions: use_current_binding means its recorded book, create_and_bind means a new book for the current card, and use_observed_worldbook means the matched book and its actual owner card. unknown is not unbound; a recorded binding does not prove that book exists. If the user already named the target book or owner card, use that target without repeating this choice. These observations never grant write permission or replace existing target checks and APP confirmation.',
+  'When an actual worldbook match belongs to another card and the user has not explicitly named the target book or owner card, use targetSelectionEvidence to state the current card bindingState and ask once with the concrete targetOptions: use_current_binding means its recorded book, create_and_bind means a new book for the current card, and use_observed_worldbook means the matched book and its actual owner card. Report bindingState as recorded; name a bound book only after it has been observed. If the user already named the target book or owner card, use that target without repeating this choice. These observations never grant write permission or replace existing target checks and APP confirmation.',
   '只有目标或关键选择确实无法判断、猜错会写到错误位置或难以撤销时才澄清，例如：同名条目已在别的角色卡世界书里；用户可能指的是另一本已有的世界书；有多本世界书都可能是目标。澄清要一次问完全部问题并给出可选项，已问过的不要重复问。',
   '外貌、性格、关系等创作细节描述简略或口语化时不要追问：按用户给出的要点直接扩写成完整正文（世界书条目标 sourceLayer:user_original），完成后简短说明补充了哪些设定。',
   '“新增一个青梅竹马/学妹”这类说法指要新增的人物身份，不是世界书名称；用户未指定世界书时，写入当前角色卡的世界书（worldbook.list/read 结果中 currentCard:true 的那本）；当前角色卡还没有世界书时，不传 name 调用 worldbook.create 会为它新建并绑定一本，完成后要告诉用户新建了哪本世界书。',
@@ -482,10 +507,10 @@ const MAID_DELETE_PREVIEW_RULE = [
   '用户明确要求删除，且真实数据中在对应资源类型及作用域内有唯一准确匹配的 ID 或完整名称时，调用删除工具并省略 preview 或传 preview:false，由 APP 确认面板展示准确目标和影响范围，等待用户实际批准后执行。面板本身就是执行前提醒和确认，不需要额外的文字确认，也不需要先做一次预览。',
   '其他名称只有副本、copy 或编号后缀差异时，不把它们当成准确匹配的歧义：只提交准确目标，并说明未选近似项将保留，不扩大删除范围。存在多个准确匹配、资源类型或作用域未确定时，先读取必要信息；仍无法唯一定位才澄清。',
   '用户只要预览、方案或不执行，或本次请求及已有明确偏好要求先列清单、等文字回复再删时，使用支持预览的删除工具传 preview:true，仅生成结构化待确认清单，再按要求等待用户。普通的“删除前确认”可由 APP 确认面板满足，不自行推断用户要求两轮确认。',
-  '预览成功只说明清单已生成，不代表批准或完成删除。已生成待确认预览时，必须等待用户后续明确确认并沿用 APP 的待确认协议；不得自动把 preview:true 改成实际删除，也不得代替用户批准。',
+  '已生成待确认预览时，必须等待用户后续明确确认并沿用 APP 的待确认协议；不得自动把 preview:true 改成实际删除，也不得代替用户批准。',
 ].join('\n');
 
-const MAID_FEATURE_CATALOG_RULE = 'The APP feature catalog contains registered capabilities and help, not an exhaustive list of everything the APP supports. No catalog match does not mean the APP lacks that feature. Distinguish APP support, actions the maid can perform, and facts not yet checked; use matching read-only feature help to explain manual workflows.';
+const MAID_FEATURE_CATALOG_RULE = 'The APP feature catalog contains registered capabilities and help, not an exhaustive list of everything the APP supports. Distinguish APP support, actions the maid can perform, and facts not yet checked; use matching read-only feature help to explain manual workflows.';
 
 /* 功能目录分层注入：本地检索排名最靠前的少数功能给完整参数，其余全部功能只列“id: 名称”索引。
    模型需要索引里的功能时先用 app.read_feature_doc 读取说明（下一步该功能会进入候选），
@@ -609,14 +634,14 @@ export const buildMaidModelPlannerMessages = ({
         ]),
         '',
         '## 工具与参数规则',
-        '只使用已登记且当前可用的工具。删除、覆盖及配置写入必须符合用户明确请求、实际工具参数和下述 APP 确认协议；只有界面入口而无写入工具的功能，使用该界面入口。工具存在不代表用户已授权执行。',
+        '只使用已登记且当前可用的工具。删除、覆盖及配置写入必须符合用户明确请求、实际工具参数和下述 APP 确认协议；只有界面入口而无写入工具的功能，使用该界面入口。',
         '工具 args 必须是完整、具体、可直接执行的 JSON；不要使用 "__keep_existing"、"同上"、"省略"、"待补" 等占位值。需要旧内容时先调用读取工具。',
         '如果用户询问当前、最新、公开网络资料，允许选择联网搜索工具；如果用户询问 APP 内资料，优先选择 APP 读取工具，不要联网。',
         MAID_FEATURE_CATALOG_RULE,
         MAID_APP_DISCOVERY_RULE,
         MAID_WEB_EVIDENCE_RULE,
         '任务规划判据：todo 只用于跨 3 个及以上不同功能域、且包含写入、生成或较长处理链的复杂任务；多个结构化资源的只读比较不需要 todo，直接选择第一个具体读取工具。打开→检查→点击这类短界面序列也直接执行，不要为它写清单。',
-        '界面呈现原则：普通查询与操作默认在后台执行，不要主动打开面板、进入聊天室或切换页面；查询、查看、检查等词不等于要求打开界面。只有用户明确要求打开、进入、带他去看，或任务本身必须由用户在界面继续填写时才导航。',
+        '界面呈现原则：普通查询与操作默认在后台执行，不要主动打开面板、进入聊天室或切换页面。只有用户明确要求打开、进入、带他去看，或任务本身必须由用户在界面继续填写时才导航。',
         '批量任务即使用户要求展示，也只展示最终的主要结果，不要逐项打开重复或次要页面；带 open 参数的工具默认传 false，明确要求展示时才传 true。',
         '例外：chat.send_message 的 user 消息在 triggerReply:true 时会走正常回复链，当前实现必须进入目标聊天室并传 open:true；只有 triggerReply:false 的纯消息写入才能 open:false 后台追加。',
         '教我、一步步、引导等教学请求与普通展示不同：APP 的内建新手任务由本地流程处理；功能首次引导由执行层处理，不要把普通后台任务改写成界面教学。',
@@ -624,14 +649,15 @@ export const buildMaidModelPlannerMessages = ({
         '调用 media.generate_image 时必须完整传 subject、subjectAliases（提示词使用别名时）、target、purpose、appearance、outfit、style、targetAspectRatio；subject 或别名必须实际出现在 prompt。后续同一主体必须复用 <maid_visual_specs> 的外貌、服装与画风，不得自行改写。',
         MAID_MEDIA_READINESS_RULE,
           '生成头像/壁纸时，target 必须精确对应随后写回的角色、联系人或聊天室；当前生图尺寸与 targetAspectRatio 不符时先停下说明，不要把错误比例图片写回。',
-          'History resultBasis.artifacts records successful image references in turn order, including the observed target and design. For the same subject, retain those identity details unless the user changes them. To reuse the first or a previous image, use that exact attachmentId with the matching target and purpose; do not generate a replacement and call it the original. A recorded reference does not prove current availability or authorize an overwrite: honor tool validation and APP confirmation, and report an unavailable attachment honestly.',
+          'History resultBasis.artifacts records successful image references in turn order, including the observed target and design. For the same subject, retain those identity details unless the user changes them. To reuse the first or a previous image, use that exact attachmentId with the matching target and purpose; do not generate a replacement and call it the original. Honor tool validation and APP confirmation, and report an unavailable attachment honestly.',
+          'History resultBasis.pendingMoment is a moment that was not published, with its text and the images still missing; artifacts with purpose "moment" are the images it kept. To continue it, call moments.publish with that content, the kept attachmentId values in attachmentIds, and imagePrompts only for the missing images.',
         '如果 <user_selection> 提供区域ID，且用户询问图片内容、布局、配色、错位、重叠或遮挡等视觉问题，优先调用 ui.capture_region 查看该区域截图；纯文字和结构化语义已经足够时不要截图。只能传区域ID，不能自行编造坐标。',
         '',
         '## 安全原则',
         getLocalizedMaidOperationSafetyPrompt(),
         MAID_DELETE_PREVIEW_RULE,
         MAID_CLARIFY_RULE,
-        '如果用户只要求查询、查看、检查或确认，禁止调用 writes:true 的功能；权限确认不代表用户授权了原请求之外的写入。',
+        '如果用户只要求查询、查看、检查或确认，禁止调用 writes:true 的功能。',
         '世界书写入必须默认追加或新建；不要使用 replace，除非用户明确要求覆盖，且 APP 会要求用户点击确认。',
         '修改现有世界书条目时，优先选择 worldbook.update_entries 这类按条目更新工具；不要为了改几个条目而整体 replace 世界书，除非用户明确要求整体覆盖。',
         '需要生成较长世界书正文时，把任务拆成小批次工具调用；每次只更新 1-3 个条目，避免在单次 JSON 里输出过长内容。',
@@ -823,7 +849,7 @@ export const buildMaidImportedCardClassificationMessages = ({
         '对输入中的每个 entryId 恰好输出一次 kind：character / setting / format / rule / other。',
         'candidates 只能引用被标为 character 的真实 entryId，需给显示名、0~1 置信度和简短理由；不得伪造 entryId。',
         '“主要人物”是精简建议，不是把所有人物条目全选。优先满足用户指定阵营/团队/范围；低置信度仍可列出，但必须如实降低 confidence。',
-        'disabled 只表示世界书触发状态，不代表该条目不是人物，不能仅因此排除。',
+        '按条目内容分类，不看 disabled。',
         'group.memberEntryIds 只能引用 candidates；若用户不要求群聊则 enabled=false。',
         '输出必须满足任务中给出的 outputSchema；entries 数量必须与输入 entries 数量完全相同。',
       ].join('\n'),
@@ -1051,7 +1077,7 @@ export const buildMaidModelReActMessages = ({
   const successfulReadLedger = buildMaidSuccessfulReadLedger(stepList);
   const stepsText = [
     olderText ? `更早步骤（仅摘要）：\n${olderText}` : '',
-    `最近步骤观察（可能按预算省略；truncated 等字段为工具原始状态，不表示正文已全部呈现）：\n${stringifyRecentStepsForPrompt(recentSteps, 12000) || '[]'}`,
+    `最近步骤观察（可能按预算省略）：\n${stringifyRecentStepsForPrompt(recentSteps, 12000) || '[]'}`,
   ].filter(Boolean).join('\n');
   // 会变的内容（本次候选的完整参数）放在用户消息开头，系统提示保持不变以命中服务商的提示词缓存
   const userText = [
@@ -1073,7 +1099,7 @@ export const buildMaidModelReActMessages = ({
     buildMaidMemoryPromptBlock({ memoryText, historyText }),
     successfulReadLedger ? `成功读取账本：\n${successfulReadLedger}` : '',
     buildMaidWebObservationPromptBlock({ input, steps: stepList }),
-    buildMaidWorldbookObservationPromptBlock({ steps: stepList, context }),
+    buildMaidWorldbookObservationPromptBlock({ steps: stepList, context, carried: context?.runContinuation?.worldbookObservations }),
     context?.maidWebEvidenceFeedback ? `APP evidence feedback (amount coverage only, not a factual verdict): ${JSON.stringify(context.maidWebEvidenceFeedback)}. If these are claimed as current prices, read their source or remove the unsupported claims and state what remains unconfirmed. Historical comparisons, user budgets and calculated totals may be legitimate: distinguish them explicitly and show their basis or calculation instead of inventing a current price.` : '',
     context?.maidDiscoveryRecovery ? MAID_APP_DISCOVERY_RECOVERY_FEEDBACK : '',
     context?.maidContinuationFeedback ? `APP continuation review: ${JSON.stringify(context.maidContinuationFeedback)}. These original obligations are still unresolved. Check actual successful tool results; complete the remaining work or update maid.todo.write with the same content strings and accurate statuses. Never repeat verified writes, drop obligations, or mark them completed without evidence. If blocked, explain what remains.` : '',
@@ -1112,7 +1138,7 @@ export const buildMaidModelReActMessages = ({
         'app.ui.inspect 拿到按钮 ref 后，如果用户要求点击，下一步使用 featureId=app.ui.click、toolName=ui.click_element 并传该 ref；不要改写 featureId，也不要用 todo 代替点击。',
         '最终回答只能陈述已执行工具步骤中真实完成的操作；用户要求的操作（如点击、切换、发送）如果没有对应的成功步骤，就不能说已完成——要么先用工具真正执行，要么如实说明你改用了什么方式（如“从页面统计直接读到了数字，没有切换过滤器”）。',
         '任务规划判据：todo 只用于跨 3 个及以上不同功能域、且包含写入、生成或较长处理链的复杂任务；多个结构化资源的只读比较不需要 todo，打开→检查→点击这类短界面序列也不要写清单。',
-        '界面呈现原则：普通查询与操作默认在后台执行，不要主动打开面板、进入聊天室或切换页面；查询、查看、检查等词不等于要求打开界面。只有用户明确要求打开、进入、带他去看，或任务本身必须由用户在界面继续填写时才导航。',
+        '界面呈现原则：普通查询与操作默认在后台执行，不要主动打开面板、进入聊天室或切换页面。只有用户明确要求打开、进入、带他去看，或任务本身必须由用户在界面继续填写时才导航。',
         '批量任务即使用户要求展示，也只展示最终的主要结果，不要逐项打开重复或次要页面；带 open 参数的工具默认传 false，明确要求展示时才传 true。',
         '例外：chat.send_message 的 user 消息在 triggerReply:true 时会走正常回复链，当前实现必须进入目标聊天室并传 open:true；只有 triggerReply:false 的纯消息写入才能 open:false 后台追加。',
         '教我、一步步、引导等教学请求与普通展示不同；不要在普通后台任务中自行启动或模拟新手引导。',
@@ -1130,7 +1156,7 @@ export const buildMaidModelReActMessages = ({
         MAID_DELETE_PREVIEW_RULE,
         MAID_CLARIFY_RULE,
         MAID_APP_DISCOVERY_RULE,
-        '如果用户只要求查询、查看、检查或确认，禁止调用 writes:true 的功能；权限确认不代表用户授权了原请求之外的写入。',
+        '如果用户只要求查询、查看、检查或确认，禁止调用 writes:true 的功能。',
         '世界书写入必须默认追加或新建；不要使用 replace，除非用户明确要求覆盖，且 APP 会要求用户点击确认。',
         '修改现有世界书条目时，优先使用 worldbook.update_entries 按条目更新；长正文拆成多次小批量工具调用，每次只更新 1-3 个条目。',
         '如果每个世界书条目正文较长，优先每次只更新 1 个条目，后续继续调用工具处理下一条。',
@@ -1413,6 +1439,8 @@ const runMaidProviderFcPlanner = async ({
     generationSettings: runtime?.generationSettings || null,
     onModelUsage: typeof context?.onModelUsage === 'function' ? context.onModelUsage : null,
     allowReadBatch: Boolean(taskState),
+    // 规划中（先看再给计划）：只提供只读工具
+    planning: context?.operationIntentPolicy?.mode === 'planning',
   });
   if (!attempt.ok) {
     if (taskState && attempt.attempted && attempt.reason === 'multiple_tool_calls') {
@@ -1424,6 +1452,14 @@ const runMaidProviderFcPlanner = async ({
 
   let decision = null;
   if (attempt.kind === 'control') {
+    // 停下反问时附的选项：在这里一次生成卡片（含 id），文字回复区、通话托盘与历史拿到的是同一张
+    const choiceCard = trim(attempt.control?.action) === 'clarify' && Array.isArray(attempt.control?.choices)
+      ? buildMaidChoiceCard(attempt.control.choices)
+      : null;
+    // 交出的计划：开始后要用的工具只留 APP 目录里的写入工具
+    const planCard = trim(attempt.control?.action) === 'plan' && isPlainObject(attempt.control?.plan)
+      ? buildMaidPlanCard(attempt.control.plan, { isWriteTool: name => isCatalogWriteTool(listAppFeatures(), name) })
+      : null;
     decision = {
       ok: true,
       action: 'final',
@@ -1431,6 +1467,8 @@ const runMaidProviderFcPlanner = async ({
       source: 'maid_provider_fc',
       providerFcControl: trim(attempt.control?.action, 'no_tool'),
       ...(trim(attempt.control?.reason) ? { reason: trim(attempt.control.reason) } : {}),
+      ...(choiceCard ? { choiceCard } : {}),
+      ...(planCard ? { planCard } : {}),
     };
   } else if (attempt.kind === 'tool') {
     const rawPlan = {
@@ -1901,7 +1939,7 @@ export const createMaidModelBackedReActPlanner = ({
     }, logger);
     return {
       ...unsupportedPlan(modelRequestFailed ? 'provider_request_failed' : error?.message || 'maid_react_failed', '女仆暂时无法继续判断下一步。'),
-      ...(modelRequestFailed ? { errorMessage: truncate(error?.message || error, 240) } : {}),
+      ...(modelRequestFailed ? { errorMessage: describeMaidModelRequestError(error) } : {}),
     };
   }
 };

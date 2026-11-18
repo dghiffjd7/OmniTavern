@@ -1,3 +1,4 @@
+import { isNovelAIPreciseReferenceModel } from '../api/providers/novelai-image-model-catalog.js';
 const toKey = (value) => String(value || '').trim().toLowerCase();
 
 const isObject = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -182,6 +183,13 @@ export const createDefaultImageGenerationPreset = () => ({
       seed: '',
       enhance: '',
     },
+    wavespeed: {
+      n: 1,
+      width: 1024,
+      height: 1024,
+      negativePrompt: '',
+      seed: '',
+    },
     automatic1111: {
       n: 1,
       width: 1024,
@@ -219,6 +227,7 @@ export const normalizeImageProviderKey = (provider = '') => {
   if (p === 'stability' || p === 'stabilityai') return 'stability';
   if (p === 'together' || p === 'togetherai') return 'togetherai';
   if (p === 'pollinations') return 'pollinations';
+  if (p === 'wavespeed') return 'wavespeed';
   if (p === 'automatic1111' || p === 'a1111' || p === 'auto') return 'automatic1111';
   if (p === 'comfy' || p === 'comfyui') return 'comfyui';
   return p || 'custom';
@@ -256,6 +265,7 @@ export const resolveImageNegativePromptCapability = (config = {}) => {
   ].includes(provider)) {
     return supported();
   }
+  if (provider === 'wavespeed') return supported('只有参数里带负面提示词的模型会用到。');
   return unsupported();
 };
 
@@ -317,6 +327,13 @@ const resolveImageProviderParamSchema = (config = {}) => {
             { value: 'auto', label: '自动' },
             { value: 'low', label: '低' },
           ], 'auto'),
+          // OpenAI Docs: partial_images 0–3，每张中间图另计 100 个图片输出 token；默认关（11-05 用户决定）
+          makeSelect('partial_images', '生成过程预览', [
+            { value: '0', label: '关闭' },
+            { value: '1', label: '1 张中间图' },
+            { value: '2', label: '2 张中间图' },
+            { value: '3', label: '3 张中间图' },
+          ], '0', '生成途中先显示中间图（在图片将出现的位置）。每张中间图另计 100 个图片输出 token；中转站不一定支持，不支持时照常等最终图。'),
         ],
       };
     }
@@ -430,6 +447,17 @@ const resolveImageProviderParamSchema = (config = {}) => {
         makeSelect('sm', 'SMEA', BOOLEAN_OPTIONS, ''),
         makeSelect('sm_dyn', 'SMEA DYN', BOOLEAN_OPTIONS, ''),
         makeSelect('decrisper', 'Decrisper', BOOLEAN_OPTIONS, ''),
+        // NovelAI 精准参考（官方文档：V4.5 起；每张图另扣 5 Anlas）：默认关（11-06 用户决定）
+        ...(isNovelAIPreciseReferenceModel(model) ? [
+          makeSelect('preciseReference', '精准参考', [
+            { value: 'off', label: '关闭' },
+            { value: 'character', label: '角色' },
+            { value: 'character&style', label: '角色＋画风' },
+            { value: 'style', label: '画风' },
+          ], 'off', '有参考图（本聊天参考图或本次参考图）时，用第一张做精准参考。每张图另扣 5 Anlas。'),
+          makeNumber('preciseReferenceStrength', '精准参考强度', { min: 0, max: 1, step: 0.05, fallback: 1, integer: false, help: '越高越贴近参考图的外观。' }),
+          makeNumber('preciseReferenceFidelity', '精准参考保真度', { min: 0, max: 1, step: 0.05, fallback: 1, integer: false, help: '越高越严格照参考图；越低越灵活。' }),
+        ] : []),
       ],
     };
   }
@@ -520,6 +548,21 @@ const resolveImageProviderParamSchema = (config = {}) => {
         makeNumber('height', '高度', { min: 64, max: 4096, step: 64, fallback: 1024 }),
         makeText('seed', 'Seed', '', '留空或 -1 则不传 seed；固定 seed 请填 0 或正整数。'),
         makeSelect('enhance', '增强提示词', BOOLEAN_OPTIONS, ''),
+      ],
+    };
+  }
+
+  if (provider === 'wavespeed') {
+    return {
+      provider,
+      model,
+      title: 'WaveSpeed 参数',
+      fields: [
+        makeFixedNegativePromptField(),
+        makeNumber('n', '生成张数', { min: 1, max: 4, fallback: 1, help: '只有支持多张的模型会用到。' }),
+        makeNumber('width', '宽度', { min: 64, max: 4096, step: 64, fallback: 1024, help: '各模型尺寸参数不同：会换成该模型的尺寸，或最接近的比例和清晰度档位；带参考图时比例跟着参考图。' }),
+        makeNumber('height', '高度', { min: 64, max: 4096, step: 64, fallback: 1024 }),
+        makeText('seed', 'Seed', '', '留空或 -1 则不传 seed；固定 seed 请填 0 或正整数。'),
       ],
     };
   }

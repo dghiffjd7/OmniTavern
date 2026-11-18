@@ -332,6 +332,14 @@ export const searchMaidCapabilityConcepts = (
   ) {
     add('maid.random', 100, 'random_choice');
   }
+  // 现实中的地点或路线：明说地图，或问怎么去／怎么走（APP 里的「地图」类功能另有关系图、血缘图，不含「地图」二字）
+  if (hasPositive(/(?:地图|google\s*maps?|谷歌地图|高德|怎么去|怎么走|怎么到|导航(?:到|去)|带我去|路线(?:规划)?)/iu)) {
+    add('maid.map', 100, 'map_place');
+  }
+  // 现实天气（「温度」不算：常指模型参数）
+  if (hasPositive(/(?:天气|气温|下雨|下雪|带伞|冷不冷|热不热|weather|forecast)/iu)) {
+    add('maid.weather', 100, 'weather');
+  }
   const maidMemoryIntent = /(?:女仆(?:自己)?(?:的)?(?:长期)?记忆|你(?:自己)?记得|你记住|你.{0,12}保存的长期(?:语义)?记忆|你的长期(?:语义)?记忆|长期语义记忆|maid(?:\.|\s*)memory)/iu;
   if (
     maidMemoryIntent.test(text) &&

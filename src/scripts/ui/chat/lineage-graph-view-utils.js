@@ -576,7 +576,7 @@ export const renderLineageMapDockHtml = (graph = null, { expandedIds = [] } = {}
               data-lineage-jump-node-id="${escHtml(node?.id)}" data-lineage-layer-id="${escHtml(category.id)}">
               <span class="lineage-impact-rank">${index + 1}</span>
               <span class="lineage-impact-icon" aria-hidden="true">${lineageIconSvg(category.icon)}</span>
-              <span class="lineage-impact-copy"><strong data-i18n-skip>${escHtml(labelOfNode(node))}</strong><small>下游影响 ${score}</small></span>
+              <span class="lineage-impact-copy"><strong data-i18n-skip>${escHtml(labelOfNode(node))}</strong><small>${escHtml(t('下游影响 {value}', { value: score }))}</small></span>
               <span class="lineage-impact-meter"><i style="width:${Math.round(score / maxImpact * 100)}%"></i></span>
             </button>
           `;
@@ -799,7 +799,7 @@ const makeMapNode = ({
 });
 
 // 节点卡片第二行：关系图节点带的数字（如「12 行 · 4 张表」），没有就显示类型
-const mapNodeMeta = node => normalizeString(node?.meta?.stat) || labelFor(NODE_TYPE_LABELS, node?.type);
+const mapNodeMeta = node => normalizeString(node?.meta?.stat) || t(labelFor(NODE_TYPE_LABELS, node?.type));
 
 // 同层同类型的重点：分量 ≥2、不低于同类最大值的四分之一，每类最多 3 个（如预设按共用会话数、正则按规则数各自比）
 const pickKeyNodeIds = (nodes = []) => {
@@ -956,7 +956,7 @@ export const buildLineageMapSceneModel = (graph = null, {
   const rootMapNode = makeMapNode({
     id: rootMapId,
     label: rootNode ? labelOfNode(rootNode) : '当前上下文',
-    meta: rootNode ? labelFor(NODE_TYPE_LABELS, rootNode.type) : '上下文',
+    meta: t(rootNode ? labelFor(NODE_TYPE_LABELS, rootNode.type) : '上下文'),
     kind: 'root',
     status: rootNode ? mapNodeStatus(rootNode, graph) : 'active',
     x: 320,
@@ -976,11 +976,11 @@ export const buildLineageMapSceneModel = (graph = null, {
     cursorY += category.bandHeight;
     const keyNode = category.nodes.find(node => category.keyIds.has(normalizeString(node?.id)));
     const meta = category.counts.risk
-      ? `${category.counts.risk} 风险`
+      ? t('{value} 风险', { value: category.counts.risk })
       : category.counts.injects
-        ? `${category.counts.injects} 注入`
+        ? t('{value} 注入', { value: category.counts.injects })
         : category.counts.candidate
-          ? `${category.counts.candidate} 候选`
+          ? t('{value} 候选', { value: category.counts.candidate })
           : keyNode
             ? t('重点 {name}', { name: truncate(labelOfNode(keyNode), 14) })
             : `${category.nodes.length}`;
@@ -989,7 +989,7 @@ export const buildLineageMapSceneModel = (graph = null, {
     )));
     const categoryNode = makeMapNode({
       id: `category:${category.id}`,
-      label: category.label,
+      label: t(category.label),
       meta,
       kind: 'category',
       status: category.status,

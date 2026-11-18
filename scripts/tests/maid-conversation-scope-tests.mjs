@@ -4,6 +4,7 @@ import { MaidConversationStore } from '../../src/scripts/storage/maid-conversati
 import { selectMaidContextScope } from '../../src/scripts/storage/maid-context-scope.js';
 import { buildMaidModelPlannerMessages, buildMaidModelReActMessages } from '../../src/scripts/agent/maid-model-planner.js';
 import { buildMaidChatResponderMessages } from '../../src/scripts/agent/maid-chat-responder.js';
+import { MAID_MEDIA_READINESS_RULE } from '../../src/scripts/agent/maid-memory-prompt.js';
 
 const makeStore = async () => {
   const store = new MaidConversationStore({ storage: null, loadKv: async () => null, saveKv: async () => {},
@@ -94,8 +95,7 @@ test('card filtering keeps user preferences but excludes foreign or unowned task
 test('actual planner prompts distinguish optional style from preference conflict and preserve standing requirements', () => {
   for (const build of [buildMaidModelPlannerMessages, buildMaidModelReActMessages]) {
     const prompt = build({ input: '给她换个头像' })[0].content;
-    assert.match(prompt, /Missing optional style/);
-    assert.match(prompt, /Before paid generation/);
+    assert.ok(prompt.includes(MAID_MEDIA_READINESS_RULE), 'both planner stages carry the avatar/wallpaper readiness rule');
     assert.match(prompt, /Carry requirements such as counts and format into actual tool arguments/);
   }
   const chat = buildMaidChatResponderMessages({ input: '忘掉我说过的偏好' })[0].content;

@@ -108,6 +108,20 @@ assert.match(html, /id="rp-greeting-trigger"[\s\S]*class="rp-greeting-seal"[\s\S
 assert.match(html, /id="rp-greeting-sheet-count"[\s\S]*扉页 · 每一篇开场白，都是一种故事的开端[\s\S]*id="rp-greeting-sheet-close"/s);
 assert.match(creativeCss, /\.rp-greeting-sheet\.is-opening\s*\{[^}]*animation:\s*rp-greeting-sheet-in/s);
 assert.match(creativeCss, /\.rp-greeting-sheet-item\.active::before\s*\{[^}]*background:\s*#c2482f/s);
+// 书名号《》只在中文界面加；英文等语言不加，印章里的「序」译成单个字母才放得下 27px 方印
+assert.match(creativeCss, /:root:not\(:lang\(zh\)\) \.rp-greeting-trigger-name::before,\s*:root:not\(:lang\(zh\)\) \.rp-greeting-trigger-name::after\s*\{\s*content:\s*none;?\s*\}/);
+{
+  const enCatalog = JSON.parse(fs.readFileSync(new URL('../../src/scripts/i18n/locales/en.json', import.meta.url), 'utf8'));
+  assert.equal([...enCatalog['序']].length, 1, `seal text should be one glyph, got ${enCatalog['序']}`);
+}
+// 开场白篇数用复数词条（1 entry / 2 entries）
+assert.match(appSource, /rpGreetingCount\.textContent = t\('\{count\} 篇', \{ count: list\.length \}\);/);
+{
+  const enCatalog = JSON.parse(fs.readFileSync(new URL('../../src/scripts/i18n/locales/en.json', import.meta.url), 'utf8'));
+  assert.deepEqual(enCatalog['{count} 篇'], { one: '{count} entry', other: '{count} entries' });
+}
+// 女仆首次引导的路径每一段都按界面语言显示（中文原样）
+assert.match(appSource, /\.split\(' -> '\)\.map\(part => t\(part\.trim\(\)\)\)\.join\(' -> '\)/);
 assert.match(creativeCss, /\.is-rp-greeting-message\s+\.QQ_chat_msgdiv\s*\{[^}]*border-radius:\s*26px\s*!important/s);
 assert.match(creativeCss, /\.rp-greeting-editor-overlay:not\(\.is-closing\)\s+\.rp-greeting-editor\s*\{[^}]*animation:\s*rp-greeting-editor-in/s);
 assert.match(

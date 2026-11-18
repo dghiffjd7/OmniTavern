@@ -129,7 +129,7 @@ export const buildOutgoingReplyContexts = (messages = []) => {
     .filter(Boolean);
 };
 
-export const getRpFloorLabel = (floor) => (Number(floor) === 0 ? '#0 序章' : `# ${Number(floor)}`);
+export const getRpFloorLabel = (floor) => (Number(floor) === 0 ? `#0 ${translateUiText('序章')}` : `# ${Number(floor)}`);
 
 // initialFloor：已渲染/已加载范围之前还有多少楼（未加载的较早消息），让编号按整个存档计算。
 export const buildRpFloorAssignments = (messages = [], { initialFloor = -1 } = {}) => {

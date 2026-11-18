@@ -43,7 +43,6 @@ const checks = [
       assert.match(system, /只要预览、方案或不执行/);
       assert.match(system, /明确偏好[^\n]*preview:true/);
       assert.match(system, /多个准确匹配[^\n]*澄清/);
-      assert.match(system, /预览成功[^\n]*不代表批准/);
       assert.match(system, /不得自动[^\n]*preview:true[^\n]*实际删除/);
     }
   }],

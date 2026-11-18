@@ -31,5 +31,5 @@ export const findMaidImageTargetMismatch = ({plan = {}, steps = []} = {}) => {
   if (!observedTargets.length) return null; // A standalone original-character preview has no stored target.
   return {ok:false, reason:'image_target_not_observed', stage:'preflight', localToolExecutionSkipped:true,
     requestedTarget:target, observedTargets:observedTargets.slice(0,10),
-    message:'This target was not found in the actual identity reads for this task. The observedTargets list contains the exact records matching the subject. Use an observed ID or read the intended target; do not retry the same invented ID. No image provider request was sent. This readback does not authorize applying an image.'};
+    message:'This target was not found in the actual identity reads for this task. The observedTargets list contains the exact records matching the subject. Use an observed ID or read the intended target; do not retry the same invented ID. No image provider request was sent.'};
 };

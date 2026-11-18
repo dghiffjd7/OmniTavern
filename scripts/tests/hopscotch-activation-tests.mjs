@@ -127,3 +127,22 @@ console.log('ok - persistent pause, fused members, dependency skip, original geo
   assert.deepEqual(imageRuntime.resolveExecutionPlan('rp:image').fused, ['memory_table', 'image_prompt']);
   console.log('ok - turning off automatic image generation pauses image houses on custom boards');
 }
+
+{
+  // 「AI 自动写入记忆表格」是总开关：关掉时板上的记忆融合项与房子都停用（和自动生图一致）
+  const board = normalizeHopscotchBoard({ rows: [
+    { id: 'body-row', houses: [{ id: 'body', kind: 'body', fused: ['memory_table', 'variable'] }] },
+    { id: 'after', houses: [{ id: 'table', kind: 'memory_table' }] },
+  ] });
+  const off = resolveHopscotchActivation(board, { memory: { storageMode: 'table', autoExtract: false } });
+  assert.equal(off.fused.memory_table.enabled, false);
+  assert.equal(off.fused.memory_table.reason, 'memory_auto_extract_off');
+  assert.equal(off.houses.table.enabled, false);
+  assert.equal(off.houses.table.reason, 'memory_auto_extract_off');
+  assert.equal(getActiveHopscotchFused(board, off).includes('memory_table'), false, '本轮请求不带写表');
+  assert.equal(hopscotchInactiveLabel('memory_auto_extract_off'), 'AI 自动写入记忆表格已关闭');
+  const on = resolveHopscotchActivation(board, { memory: { storageMode: 'table', autoExtract: true } });
+  assert.equal(on.fused.memory_table.enabled, true);
+  assert.equal(on.houses.table.enabled, true);
+  console.log('ok - turning off automatic memory writes pauses memory on custom boards');
+}

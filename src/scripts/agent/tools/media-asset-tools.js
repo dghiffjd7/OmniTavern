@@ -356,6 +356,8 @@ export const createMaidMediaAssetTools = ({
   attachmentPersistence = null,
   now = Date.now,
   preparedImageCache = createPreparedImageCache(),
+  // 其他工具（例如发附图动态）要用同一套附件池取图时，经这里拿到取图函数
+  onImageResolverReady = null,
 } = {}) => {
   // 工具运行期图片池：联网下载与生图写入，头像/壁纸工具经 attachmentId 取用。
   const fetchedImages = [];
@@ -417,6 +419,23 @@ export const createMaidMediaAssetTools = ({
       ...(attachment?.visualSpec ? { visualSpec: clone(attachment.visualSpec) } : {}),
     });
   };
+
+  // 发附图动态：沿用同一个附件池与持久层（用户贴的图、本次下载或生成的图）。
+  // 动态不是把图写回某个角色或聊天，所以不做头像／壁纸的用途与目标核对。
+  const resolveImageForMoment = async ({ attachmentId = '', context = {} } = {}) => {
+    const args = { attachmentId: trim(attachmentId) };
+    const attachment = resolveAttachment(context, args, fetchedImages)
+      || await attachmentPersistence?.load(args.attachmentId, context);
+    if (!attachment?.url) {
+      return { ok: false, reason: 'image_attachment_missing', message: `没有找到图片附件 ${args.attachmentId}。` };
+    }
+    const options = buildPrepareOptions('image', args);
+    const prepared = await prepareImage({ dataUrl: attachment.url, attachment, args, ...options });
+    const dataUrl = trim(prepared?.dataUrl);
+    if (!dataUrl) return { ok: false, reason: 'image_prepare_failed', message: '图片处理失败。' };
+    return { ok: true, dataUrl, name: trim(attachment.name), mime: trim(prepared?.mime, options.mime) };
+  };
+  if (typeof onImageResolverReady === 'function') onImageResolverReady({ resolveImageForMoment });
 
   const resolvePersonaTarget = (args = {}) => {
     const target = trim(args.target || args.personaId || args.id || args.name);

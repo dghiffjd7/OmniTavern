@@ -2376,6 +2376,27 @@ body[data-reduced-motion='on'] .code-viewer-maximize-restore {
 .ac-utility-message { color: var(--app-text-secondary); font-size: 13px; }
 .ac-utility-title { font-size: 15px; font-weight: 800; overflow-wrap: anywhere; }
 .ac-utility-flag { display: inline-flex; align-items: center; min-height: 20px; padding: 0 7px; border-radius: 6px; background: color-mix(in srgb, var(--app-warning-text, #b45309) 12%, transparent); color: var(--app-warning-text, #b45309); font-size: 11px; font-weight: 750; vertical-align: middle; }
+/* 小管家：共用设置＋任务列表 */
+.ac-steward-tasks-title { display: flex; align-items: center; gap: 8px; margin: 6px 2px 0; color: var(--app-text-secondary); font-size: 13px; font-weight: 800; letter-spacing: 0.04em; }
+.ac-steward-tasks-title b { min-width: 20px; padding: 1px 7px; border-radius: 999px; background: var(--app-accent-soft); color: var(--app-accent-primary); font-size: 11.5px; text-align: center; }
+.ac-steward-tasks { display: grid; gap: 12px; }
+.ac-steward-task { gap: 0; }
+.ac-steward-task.is-paused .ac-steward-task-head { opacity: 0.6; }
+.ac-steward-task-head { display: flex; align-items: center; gap: 12px; padding-bottom: 12px; }
+.ac-steward-task-copy { display: grid; gap: 3px; flex: 1 1 auto; min-width: 0; }
+.ac-steward-task-copy strong { color: var(--app-text-primary); font-size: 14.5px; font-weight: 800; }
+.ac-steward-task-copy small { color: var(--app-text-secondary); font-size: 12px; line-height: 1.5; }
+.ac-steward-task .ac-utility-disclosure + .ac-utility-disclosure { margin-top: 12px; }
+.ac-steward-task-body { display: grid; gap: 12px; margin-top: 12px; }
+.ac-steward-task-body .ac-hint { margin: 0; color: var(--app-text-secondary); font-size: 12.5px; line-height: 1.6; }
+.ac-steward-actions small { color: var(--app-text-secondary); font-size: 12px; }
+.ac-steward-run-task { color: var(--app-text-primary); font-size: 12.5px; font-weight: 800; }
+.ac-steward-custom-list { display: grid; gap: 10px; }
+.ac-steward-custom-list:empty { display: none; }
+.ac-steward-custom { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--app-border-subtle); border-radius: 12px; background: var(--app-surface-subtle); }
+.ac-steward-custom-head { display: flex; align-items: center; gap: 10px; }
+.ac-steward-custom-head input[name=custom-name] { flex: 1 1 auto; min-width: 0; font-weight: 700; }
+.ac-steward-custom-head .agent-center-card-action { flex: 0 0 auto; white-space: nowrap; }
 
 .chat-reaction-chip {
   display: inline-flex;
@@ -4302,6 +4323,17 @@ body[data-ui-mode='rp'] .rp-continue-btn {
   font-size: 11px;
 }
 
+.writing-media-asset-badge {
+  width: fit-content;
+  margin-bottom: 5px;
+  padding: 1px 8px;
+  border: 1px solid var(--app-accent-primary);
+  border-radius: 999px;
+  color: var(--app-accent-strong);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .writing-media-asset-actions {
   grid-column: 2;
 }
@@ -4891,7 +4923,8 @@ body[data-ui-mode='rp'] .sticker-panel {
   white-space: nowrap;
 }
 
-.sticker-ai-generate {
+.sticker-ai-generate,
+.sticker-steward-name {
   border: 1px solid rgba(0, 0, 0, 0.12);
   background: rgba(255, 255, 255, 0.9);
   border-radius: 999px;
@@ -4905,8 +4938,25 @@ body[data-ui-mode='rp'] .sticker-panel {
   white-space: nowrap;
 }
 
-.sticker-ai-generate.is-hidden {
+.sticker-ai-generate.is-hidden,
+.sticker-steward-name.is-hidden {
   display: none;
+}
+
+/* 小管家「起名」：与「生成」同款，图标用描边 */
+.sticker-steward-name svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.sticker-steward-name:disabled {
+  opacity: 0.55;
+  cursor: progress;
 }
 
 .sticker-ai-generate-icon {

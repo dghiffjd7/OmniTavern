@@ -172,6 +172,22 @@ test('buildRpFloorAssignments should recompute later floors after a user turn is
   ]);
 });
 
+test('getRpFloorLabel shows the prologue label in the UI language', async () => {
+  const { initializeI18n } = await import('../../src/scripts/i18n/index.js');
+  try {
+    await initializeI18n({
+      preference: 'en',
+      documentLike: null,
+      fetchFn: async () => ({ ok: true, json: async () => ({ 序章: 'Prologue' }) }),
+    });
+    assert.equal(getRpFloorLabel(0), '#0 Prologue');
+    assert.equal(getRpFloorLabel(2), '# 2');
+  } finally {
+    await initializeI18n({ preference: 'zh-CN', documentLike: null });
+  }
+  assert.equal(getRpFloorLabel(0), '#0 序章');
+});
+
 let failed = 0;
 for (const item of tests) {
   try {

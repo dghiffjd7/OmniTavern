@@ -16,6 +16,8 @@ import { readZipManifestFromBlob, readZipRootJsonFromBlob, uploadBlobForImport }
 import {
   applyMemoryStorageMode,
   deriveMemoryStorageMode,
+  getMemoryAutoExtractModeKey,
+  resolveMemoryAutoExtractMode,
 } from './memory-storage-mode-utils.js';
 import {
   THEME_AVATAR_STYLE_OPTIONS,
@@ -290,6 +292,8 @@ export class GeneralSettingsPanel {
     this.customSelectMenuCleanup = null;
     this.customSelectMenuAnchor = null;
     this.configManager = new ConfigManager();
+    // 写表方式按当前位置（聊天/写作）显示和修改对应的那份
+    this.getMemoryPlace = typeof actions.getMemoryPlace === 'function' ? actions.getMemoryPlace : () => 'chat';
     this.setExternalActions(actions);
   }
 
@@ -483,7 +487,7 @@ export class GeneralSettingsPanel {
     if (this.memoryAutoToggle) {
       this.memoryAutoToggle.checked = Boolean(settings.memoryAutoExtract);
     }
-    const memoryAutoMode = String(settings.memoryAutoExtractMode || 'inline').toLowerCase();
+    const memoryAutoMode = resolveMemoryAutoExtractMode(settings, this.getMemoryPlace());
     if (this.memoryAutoModeInline) {
       this.memoryAutoModeInline.checked = memoryAutoMode !== 'separate';
     }
@@ -719,7 +723,7 @@ export class GeneralSettingsPanel {
     const memoryEnabled = memoryMode !== 'off';
     const showMemoryTable = memoryEnabled && memoryMode === 'table';
     const enabled = settings.memoryAutoExtract === true;
-    const mode = String(settings.memoryAutoExtractMode || 'inline').toLowerCase();
+    const mode = resolveMemoryAutoExtractMode(settings, this.getMemoryPlace());
     const showAuto = showMemoryTable && Boolean(enabled);
     if (this.memoryModeSummary) this.memoryModeSummary.disabled = !memoryEnabled;
     if (this.memoryModeTable) this.memoryModeTable.disabled = !memoryEnabled;
@@ -3217,8 +3221,9 @@ export class GeneralSettingsPanel {
     });
     const applyAutoMode = (mode) => {
       const next = mode === 'separate' ? 'separate' : 'inline';
-      appSettings.update({ memoryAutoExtractMode: next });
-      window.dispatchEvent(new CustomEvent('app-settings-changed', { detail: { key: 'memoryAutoExtractMode', value: next } }));
+      const key = getMemoryAutoExtractModeKey(this.getMemoryPlace());
+      appSettings.update({ [key]: next });
+      window.dispatchEvent(new CustomEvent('app-settings-changed', { detail: { key, value: next } }));
       this.updateMemoryAutoVisibility();
     };
     this.memoryAutoModeInline?.addEventListener('change', (e) => {

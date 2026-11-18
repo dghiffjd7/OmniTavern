@@ -149,14 +149,16 @@ export const buildMaidRunCardModel = (view = null) => {
 };
 
 /* 可见行：进行中时把超过阈值的已完成步骤收成一行；失败时同样保留失败步。
-   返回 { foldedCount, rows }，foldedCount>0 时渲染“已完成 N 步”。 */
+   返回 { foldedCount, unfoldedCount, rows }：foldedCount>0 时渲染“已完成 N 步 · 展开”，
+   unfoldedCount>0（已手动展开）时渲染“已完成 N 步 · 收起”。 */
 export const resolveMaidRunVisibleRows = (model = null, { foldOpen = false } = {}) => {
   const rows = Array.isArray(model?.rows) ? model.rows : [];
   const done = rows.filter(row => row.status === 'done');
-  if (foldOpen || model?.state === 'done' || done.length <= MAID_RUN_FOLD_THRESHOLD) {
-    return { foldedCount: 0, rows };
+  if (model?.state === 'done' || done.length <= MAID_RUN_FOLD_THRESHOLD) {
+    return { foldedCount: 0, unfoldedCount: 0, rows };
   }
-  return { foldedCount: done.length, rows: rows.filter(row => row.status !== 'done') };
+  if (foldOpen) return { foldedCount: 0, unfoldedCount: done.length, rows };
+  return { foldedCount: done.length, unfoldedCount: 0, rows: rows.filter(row => row.status !== 'done') };
 };
 
 /* 终态后默认收起步骤，只留头部（汇报气泡在卡外显示）；失败保持展开以便看到原因。 */

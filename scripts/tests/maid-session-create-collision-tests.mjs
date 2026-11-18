@@ -51,8 +51,7 @@ test('captured create collision preserves the existing persona in the actual reg
     { index: 2, toolName: 'session.list', status: 'succeeded', args: {}, output: listed },
   ];
   const messages = buildMaidModelReActMessages({ input: captured.input, features, steps });
-  const marker = '最近步骤观察（可能按预算省略；truncated 等字段为工具原始状态，不表示正文已全部呈现）：\n';
-  const observations = JSON.parse(messages[1].content.split(marker).at(-1));
+  const observations = JSON.parse(messages[1].content.split(/最近步骤观察[^\n]*：\n/u).at(-1));
   const observed = observations[0].output.result;
   assert.equal(observed.created, false);
   assert.equal(observed.existing, true);

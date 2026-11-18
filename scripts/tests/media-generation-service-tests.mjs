@@ -66,6 +66,7 @@ import {
     size: '1024x1024',
     output_format: 'webp',
     output_compression: 80,
+    partial_images: '0', // 生成过程预览默认关
   });
   const merged = mergeImageGenerationRequestOptions({
     config: { provider: 'openai', model: 'gpt-image-2' },
@@ -175,4 +176,38 @@ import {
     ['finishRun', 'run-1', 'succeeded'],
   ]);
   console.log('ok - media generation service records optional agent task lifecycle');
+}
+
+{
+  // 生成失败（不是取消）时，最后一张中间图存成文件挂在错误上；没有中间图或取消时不存
+  const saved = [];
+  let mode = 'fail';
+  const service = createMediaGenerationService({
+    createClient: () => ({
+      generateImage: async (_prompt, options) => {
+        options.onPreview?.({ dataUrl: '', step: 1, total: 28 });
+        options.onPreview?.({ dataUrl: 'data:image/jpeg;base64,cDE=', step: 26, total: 28 });
+        options.onPreview?.({ dataUrl: '', step: 27, total: 28 });
+        if (mode === 'abort') throw Object.assign(new Error('Aborted'), { name: 'AbortError' });
+        throw new Error('stream cut');
+      },
+    }),
+    saveDataUrl: async (dataUrl, fileName) => { saved.push({ dataUrl, fileName }); return { path: `/tmp/${fileName}` }; },
+    now: () => 789,
+    logger: { warn: () => {} },
+  });
+  const seen = [];
+  const config = { provider: 'novelai', model: 'nai-diffusion-4-5-full' };
+  const failure = await service.generateImage({ prompt: 'fox', config, sessionId: 's1', agentTask: false, onPreview: p => seen.push(p.step) }).catch(error => error);
+  assert.equal(failure.message, 'stream cut');
+  assert.deepEqual(seen, [1, 26, 27], 'the caller still receives every preview');
+  assert.deepEqual(failure.partialImage, { path: '/tmp/generated_partial_789_1.jpg', mime: 'image/jpeg', step: 26, total: 28 });
+  assert.deepEqual(saved, [{ dataUrl: 'data:image/jpeg;base64,cDE=', fileName: 'generated_partial_789_1.jpg' }]);
+  mode = 'abort';
+  const cancelled = await service.generateImage({ prompt: 'fox', config, sessionId: 's1', agentTask: false, onPreview() {} }).catch(error => error);
+  assert.deepEqual([cancelled.name, cancelled.partialImage, saved.length], ['AbortError', undefined, 1], 'a cancelled run keeps nothing');
+  mode = 'fail';
+  const unwatched = await service.generateImage({ prompt: 'fox', config, sessionId: 's1', agentTask: false }).catch(error => error);
+  assert.deepEqual([unwatched.partialImage, saved.length], [undefined, 1], 'no previews, nothing to keep');
+  console.log('ok - media generation service keeps the last partial image when a watched generation fails');
 }

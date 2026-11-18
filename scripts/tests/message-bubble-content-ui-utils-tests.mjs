@@ -319,9 +319,12 @@ const createFakeDocument = () => {
     renderRichText: () => { throw Error('image prompt must not use stale rich content'); },
     renderSwipeDraftPlaceholder: () => { throw Error('image attempt owns the placeholder'); },
   });
-  assert.equal(bubble.textContent, message.content);
+  // 生成中：只放预览占位（流式渠道的中间画面会显示在这里），文字是当前提示词原文
   assert.equal(bubble.style.whiteSpace, 'pre-wrap');
-  assert.equal(bubble.children.length, 0);
+  assert.equal(bubble.children.length, 1);
+  const [placeholder] = bubble.children;
+  assert.deepEqual([placeholder.className, placeholder.dataset.imagePreviewToken], ['image-gen-preview', 'job']);
+  assert.equal(placeholder.children.find(child => child.className === 'image-gen-preview-label').textContent, message.content);
   assert.deepEqual(message, before);
   console.log('ok - running image attempt shows its literal current prompt ahead of retained RP rich/raw metadata');
 }
@@ -357,6 +360,32 @@ const createFakeDocument = () => {
   assert.equal(withoutPrompt.children[0].children[0].children.length, 1);
   assert.equal(withoutPrompt.children[0].children[0].children[0].textContent, 'Image generation interrupted');
   console.log('ok - failed/cancelled/interrupted image attempts retain parameters and expose retry, with details only for an error');
+}
+
+{
+  // 失败时留下的最后一张中间图：放在失败卡后面（错误详情收起也看得到），点开看大图；取消的不显示
+  const documentLike = createFakeDocument();
+  const opened = [];
+  const render = (status) => {
+    const bubble = documentLike.createElement('div');
+    renderMessageBubbleContentCore({ bubble, documentLike, openLightbox: src => opened.push(src),
+      message: { type: 'text', role: 'assistant', content: '图片生成失败：stream cut', meta: { generatedMedia: {
+        kind: 'image', status, error: 'stream cut', prompt: 'fox', partialImage: { path: 'C:\\imgs\\generated_partial_1.jpg', step: 26, total: 28 },
+      } } } });
+    return bubble;
+  };
+  const bubble = render('failed');
+  assert.equal(bubble.children.length, 2);
+  const [card, figure] = bubble.children;
+  assert.match(card.className, /generated-media-error-card/);
+  assert.equal(figure.className, 'generated-media-partial');
+  const [img, caption] = figure.children;
+  assert.equal(img.src, 'file:///C:/imgs/generated_partial_1.jpg');
+  assert.equal(caption.textContent, '未完成的中间图 · 26/28');
+  img.emit('click');
+  assert.deepEqual(opened, ['file:///C:/imgs/generated_partial_1.jpg']);
+  assert.equal(render('cancelled').children.length, 1, 'cancelled attempts keep no partial image');
+  console.log('ok - failed image attempts show their last partial image below the error card');
 }
 
 {

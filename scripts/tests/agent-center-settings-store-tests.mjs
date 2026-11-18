@@ -545,3 +545,54 @@ const { getCanonicalBuiltinPromptDefaults } = await import('../../src/scripts/st
   assert.equal(readDepth(hydratedFresh), 7, '较新的盘态照常采用');
   console.log('ok - hydrate keeps the newer of local vs KV agent-center settings');
 }
+
+{
+  // Agent 中心另存了一份摘要规则，实际请求用的是这份；预设里升级了旧默认，这份也要跟着升级
+  const { DEFAULT_SUMMARY_RULES } = await import('../../src/scripts/storage/preset-store.js');
+  const officialPromptDefaults = getCanonicalBuiltinPromptDefaults();
+  const legacy = DEFAULT_SUMMARY_RULES.replace('摘要用中文书写，人名等专有名词保留原文', '摘要**纯中文输出**，不得夹杂其它语言');
+  assert.notEqual(legacy, DEFAULT_SUMMARY_RULES);
+  const summaryPrompt = rules => ({ enabled: true, prompts: { summary: { enabled: true, position: 1, depth: 1, role: 0, rules } } });
+  const stored = {
+    profiles: {
+      'sysprompt:Neutral - Chat': {
+        profileType: 'sysprompt', presetId: 'Neutral - Chat', presetName: 'Neutral - Chat', source: 'preset',
+        agents: { summary_agent: summaryPrompt(legacy) },
+      },
+      'sysprompt:mine': {
+        profileType: 'sysprompt', presetId: 'mine', presetName: 'mine', source: 'preset',
+        agents: { summary_agent: summaryPrompt('我自己写的摘要规则，纯中文') },
+      },
+    },
+  };
+  const preset = { name: 'Neutral - Chat', summary_enabled: true, summary_rules: DEFAULT_SUMMARY_RULES };
+
+  setPromptLocale('zh-CN');
+  assert.equal(resolveAgentSyspromptPreset(stored, { presetId: 'Neutral - Chat', preset, officialPromptDefaults }).summary_rules, DEFAULT_SUMMARY_RULES);
+  assert.equal(
+    resolveAgentSyspromptPreset(stored, { presetId: 'mine', preset, officialPromptDefaults }).summary_rules,
+    '我自己写的摘要规则，纯中文',
+    '用户自己改过的摘要规则不动',
+  );
+
+  setPromptLocale('en');
+  const english = resolveAgentSyspromptPreset(stored, { presetId: 'Neutral - Chat', preset, officialPromptDefaults }).summary_rules;
+  assert.match(english, /<summary>Summary<\/summary>/);
+  assert.doesNotMatch(english, /纯中文/);
+  setPromptLocale('zh-CN');
+
+  const memory = new Map([['agent_center_settings_v1', JSON.stringify(stored)]]);
+  const store = createAgentCenterSettingsStore({
+    storage: { getItem: k => memory.get(k) ?? null, setItem: (k, v) => memory.set(k, v), removeItem: k => memory.delete(k) },
+    loadKv: async () => null,
+    saveKv: async () => true,
+    officialPromptDefaults,
+  });
+  await store.hydrate();
+  assert.equal(
+    store.getSettings().profiles['sysprompt:Neutral - Chat'].agents.summary_agent.prompts.summary.rules,
+    DEFAULT_SUMMARY_RULES,
+    '载入后存下来的也是新默认',
+  );
+  console.log('ok - agent center copies of the legacy default summary rules are upgraded like the preset');
+}

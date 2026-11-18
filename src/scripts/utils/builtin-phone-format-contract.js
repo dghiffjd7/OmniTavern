@@ -473,7 +473,7 @@ const collectPostamble = (source, addIssue) => {
   const specs = [
     { id: 'tableEdit', order: 10, pattern: /^<tableEdit\b[^>]*>[\s\S]*?<\/tableEdit\s*>/i },
     { id: 'variableUpdate', order: 20, pattern: /^<UpdateVariable\b[^>]*>[\s\S]*?<\/UpdateVariable\s*>/i },
-    { id: 'summary', order: 30, pattern: /^<details\b[^>]*>\s*<summary\b[^>]*>\s*摘要\s*<\/summary\s*>[\s\S]*?<\/details\s*>/i },
+    { id: 'summary', order: 30, pattern: /^<details\b[^>]*>\s*<summary\b[^>]*>\s*(?:摘要|Summary)\s*<\/summary\s*>[\s\S]*?<\/details\s*>/i },
   ];
   const blocks = [];
   let rest = String(source || '').trim();

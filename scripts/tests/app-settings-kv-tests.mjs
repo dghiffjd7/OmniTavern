@@ -125,4 +125,29 @@ const { appSettings } = await import('../../src/scripts/storage/app-settings.js'
   console.log('ok - structured thinking preference survives KV persistence and module reload');
 }
 
+{
+  // 写表方式按场景分开：写作那份第一次从旧的共用值补出，补出后与聊天互不影响。
+  globalThis.__quotaFull = false;
+  storageMap.delete('app_settings_v1');
+  const kvMap = new Map([
+    ['app_settings_v1', { memoryAutoExtractMode: 'separate', __updatedAt: 99999 }],
+  ]);
+  const legacyModule = await import('../../src/scripts/storage/app-settings.js?memory-mode-split=1');
+  await legacyModule.appSettings.hydrate({
+    loadKv: async key => kvMap.get(key) || null,
+    saveKv: async (key, data) => { kvMap.set(key, data); },
+  });
+  assert.equal(legacyModule.appSettings.get().memoryAutoExtractMode, 'separate');
+  assert.equal(legacyModule.appSettings.get().memoryAutoExtractModeWriting, 'separate', '旧设定迁移：写作沿用原来的共用值');
+  legacyModule.appSettings.update({ memoryAutoExtractMode: 'inline' });
+  assert.equal(legacyModule.appSettings.get().memoryAutoExtractMode, 'inline');
+  assert.equal(legacyModule.appSettings.get().memoryAutoExtractModeWriting, 'separate', '改聊天不带动写作');
+  legacyModule.appSettings.update({ memoryAutoExtractModeWriting: 'inline' });
+  legacyModule.appSettings.update({ memoryAutoExtractMode: 'separate' });
+  assert.equal(legacyModule.appSettings.get().memoryAutoExtractModeWriting, 'inline', '改写作后两份各自独立');
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(kvMap.get('app_settings_v1')?.memoryAutoExtractModeWriting, 'inline', '写作那份落盘');
+  console.log('ok - memory auto extract mode splits into chat and writing with legacy migration');
+}
+
 console.log('app-settings-kv-tests passed');

@@ -1,6 +1,7 @@
 export const extractSummaryBlock = (text) => {
   const raw = String(text ?? '');
-  const re = /<details>\s*<summary>\s*摘要\s*<\/summary>\s*([\s\S]*?)<\/details>/gi;
+  // 中文提示词用「摘要」，英文提示词用「Summary」
+  const re = /<details>\s*<summary>\s*(?:摘要|Summary)\s*<\/summary>\s*([\s\S]*?)<\/details>/gi;
   let match;
   let last = null;
   while ((match = re.exec(raw))) last = { index: match.index, full: match[0], inner: match[1] };
@@ -10,9 +11,7 @@ export const extractSummaryBlock = (text) => {
   const plain = inner.replace(/<[^>]+>/g, ' ');
   const summary = plain
     .trim()
-    .replace(/\s+/g, ' ')
-    .replace(/[A-Za-z]+/g, '')
-    .trim();
+    .replace(/\s+/g, ' ');
   const stripped = (raw.slice(0, last.index) + raw.slice(last.index + last.full.length))
     .replace(/\n{3,}/g, '\n\n')
     .trim();

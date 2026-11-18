@@ -1097,10 +1097,20 @@ button.variable-reference-chip {
   text-align: center;
 }
 
+.variable-load-row {
+  display: flex;
+  gap: 8px;
+  margin: 0 20px 20px;
+}
+
+.variable-load-row[hidden] {
+  display: none;
+}
+
 .variable-load-more {
   display: block;
-  width: calc(100% - 40px);
-  margin: 0 20px 20px;
+  flex: 1;
+  min-width: 0;
   padding: 9px;
   color: var(--vm-text-secondary);
   font-size: 11px;
@@ -2377,8 +2387,7 @@ button.variable-reference-chip {
     pointer-events: auto;
   }
 
-  .variable-load-more {
-    width: calc(100% - 24px);
+  .variable-load-row {
     margin-right: 12px;
     margin-left: 12px;
   }

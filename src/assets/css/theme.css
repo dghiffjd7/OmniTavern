@@ -1961,7 +1961,7 @@ body[data-theme-mode='dark'] .chat-action-btn[data-action='document']::before {
   background-image: url('../external/action-attach.svg') !important;
 }
 
-body[data-theme-mode='dark'] :is(.sticker-tab, .sticker-ai-toggle, .sticker-ai-generate, .sticker-pack-delete) {
+body[data-theme-mode='dark'] :is(.sticker-tab, .sticker-ai-toggle, .sticker-ai-generate, .sticker-steward-name, .sticker-pack-delete) {
   background: rgba(var(--app-tint-neutral-rgb), 0.08) !important;
   color: var(--app-text-primary) !important;
   border-color: var(--app-border-default) !important;
@@ -7044,6 +7044,28 @@ body[data-theme-mode='dark'] #preset-panel .pp-reasoning-card :is(.pp-field-labe
 
 .generated-media-error-card .card-subtitle {
   color: #7f1d1d !important;
+}
+
+/* 生图失败时留下的最后一张中间图（未完成） */
+.generated-media-partial {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+  max-width: min(320px, 100%);
+}
+
+.generated-media-partial-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 12px;
+  border: 1px dashed var(--app-border-strong, var(--app-border-default));
+  cursor: zoom-in;
+}
+
+.generated-media-partial-caption {
+  font-size: 12px;
+  color: var(--app-text-secondary);
 }
 
 body[data-theme-mode='dark'] .generated-media-error-card {

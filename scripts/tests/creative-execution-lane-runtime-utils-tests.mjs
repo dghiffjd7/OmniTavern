@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
 
 import {
   buildCreativeExecutionDefaultTasks,
@@ -236,4 +237,20 @@ import {
     '非创意写作模式不得参与共享容器仲裁',
   );
   console.log('ok - 创意泳道向共享容器提供独立投影快照');
+}
+
+{
+  // 执行流程标题是拼出来的中文（状态 · 当前任务）；英文界面靠目录里的模板词条整句翻译
+  const { initializeI18n, translateUiText } = await import('../../src/scripts/i18n/index.js');
+  const englishCatalog = JSON.parse(await fs.readFile(new URL('../../src/scripts/i18n/locales/en.json', import.meta.url), 'utf8'));
+  try {
+    await initializeI18n({ preference: 'en', documentLike: null, fetchFn: async () => ({ ok: true, json: async () => englishCatalog }) });
+    assert.equal(translateUiText('执行中 · 正文生成'), 'Running · Body generation');
+    assert.equal(translateUiText('准备中 · 准备执行'), 'Preparing · Ready to Execute');
+    assert.doesNotMatch(translateUiText('执行中 · 记忆表 等 2 项'), /\p{Script=Han}/u);
+    assert.equal(translateUiText('失败 · 正文生成'), 'Failed · Body generation');
+  } finally {
+    await initializeI18n({ preference: 'zh-CN', documentLike: null });
+  }
+  console.log('ok - running and preparing lane titles translate as a whole in English');
 }

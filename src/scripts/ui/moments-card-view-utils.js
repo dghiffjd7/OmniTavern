@@ -1,4 +1,4 @@
-import { translateUiText } from '../i18n/index.js';
+import { localeColon, t, translateUiText } from '../i18n/index.js';
 
 const momentIconSvg = (body) => `
   <svg class="moment-icon" viewBox="0 0 24 24" aria-hidden="true">
@@ -14,6 +14,9 @@ const MOMENT_ICONS = Object.freeze({
   send: momentIconSvg('<path d="M22 2 11 13"></path><path d="m22 2-7 20-4-9-9-4Z"></path>'),
 });
 
+// 用户自己的留言以内部标记「我」存储（判断归属都靠它），显示时按界面语言翻译；角色名照原样显示
+const displayCommentAuthor = (name = '') => (name === '我' ? translateUiText('我') : name);
+
 export const buildMomentThreadedCommentsHtml = ({
   visibleComments = [],
   buildThreadedComments = () => ({ roots: [], repliesByParent: new Map() }),
@@ -21,7 +24,9 @@ export const buildMomentThreadedCommentsHtml = ({
   renderMomentTextWithStickers = (value) => String(value ?? ''),
   resolveMomentDisplayText = (value) => String(value?.content ?? ''),
 } = {}) => {
-  const replyLabel = escapeHtml(translateUiText('回复'));
+  // 楼中楼「甲 回复 乙：」：英文读作「Lia replied to Me: 」，与回复按钮的「Reply」分开翻译
+  const replyLabel = escapeHtml(t('回复', {}, { context: 'moment-comment-reply' }));
+  const colon = escapeHtml(localeColon());
   const { roots: commentRoots, repliesByParent } = buildThreadedComments(visibleComments);
   const collectReplies = (parentId, seen = new Set()) => {
     const id = String(parentId || '').trim();
@@ -47,7 +52,7 @@ export const buildMomentThreadedCommentsHtml = ({
           const replyToName = String(reply?.replyToAuthor || '').trim() || author;
           return `
                         <div class="moment-comment moment-comment-reply" data-comment-id="${escapeHtml(replyId)}">
-                            <span class="comment-user"><span class="comment-author moment-comment-author" role="button" tabindex="0" data-i18n-skip data-comment-id="${escapeHtml(replyId)}">${escapeHtml(replyAuthor)}</span> <span class="moment-comment-reply-label">${replyLabel}</span> <span class="comment-replyto moment-comment-replyto" data-i18n-skip>${escapeHtml(replyToName)}</span>：</span>
+                            <span class="comment-user"><span class="comment-author moment-comment-author" role="button" tabindex="0" data-i18n-skip data-comment-id="${escapeHtml(replyId)}">${escapeHtml(displayCommentAuthor(replyAuthor))}</span> <span class="moment-comment-reply-label">${replyLabel}</span> <span class="comment-replyto moment-comment-replyto" data-i18n-skip>${escapeHtml(displayCommentAuthor(replyToName))}</span>${colon}</span>
                             <span class="comment-text" data-i18n-skip>${renderMomentTextWithStickers(replyContent)}</span>
                         </div>
                     `;
@@ -55,7 +60,7 @@ export const buildMomentThreadedCommentsHtml = ({
         .join('');
       return `
                         <div class="moment-comment" data-comment-id="${escapeHtml(commentId)}">
-                            <span class="comment-user"><span class="comment-author moment-comment-author" role="button" tabindex="0" data-i18n-skip data-comment-id="${escapeHtml(commentId)}">${escapeHtml(author)}</span>：</span>
+                            <span class="comment-user"><span class="comment-author moment-comment-author" role="button" tabindex="0" data-i18n-skip data-comment-id="${escapeHtml(commentId)}">${escapeHtml(displayCommentAuthor(author))}</span>${colon}</span>
                             <span class="comment-text" data-i18n-skip>${renderMomentTextWithStickers(content)}</span>
                         </div>
                         ${replyHtml}
@@ -83,7 +88,7 @@ export const buildMomentCardMarkup = ({
   const userLiked = Boolean(target.userLiked);
   const replyLabel = translateUiText('回复');
   const commentPlaceholder = replyTarget
-    ? `${replyLabel} ${String(replyTarget.author || '')}…`
+    ? `${replyLabel} ${displayCommentAuthor(String(replyTarget.author || ''))}…`
     : translateUiText('写评论…');
   return `
                 <div class="moment-header">
@@ -120,7 +125,7 @@ export const buildMomentCardMarkup = ({
                         <div class="moment-replying${replyTarget ? '' : ' hidden'}">
                             <div class="moment-replying-body">
                                 <div class="moment-replying-text">
-                                    <span class="moment-reply-label">${escapeHtml(replyLabel)}</span> <b data-i18n-skip>${escapeHtml(replyTarget?.author || '')}</b><span>：</span><span data-i18n-skip>${escapeHtml(resolveMomentDisplayText(replyTarget).slice(0, 120))}</span>
+                                    <span class="moment-reply-label">${escapeHtml(replyLabel)}</span> <b data-i18n-skip>${escapeHtml(displayCommentAuthor(replyTarget?.author || ''))}</b><span>${escapeHtml(localeColon())}</span><span data-i18n-skip>${escapeHtml(resolveMomentDisplayText(replyTarget).slice(0, 120))}</span>
                                 </div>
                                 <button class="moment-reply-cancel" data-action="cancel-reply" type="button">×</button>
                             </div>

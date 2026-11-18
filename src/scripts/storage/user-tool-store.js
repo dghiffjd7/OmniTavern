@@ -5,7 +5,7 @@
 
 export const USER_TOOLS_KEY = 'user_tools_v1';
 export const USER_TOOL_LIMIT = 60;
-export const USER_TOOL_SOURCES = Object.freeze(['builtin', 'agent', 'script', 'plugin']);
+export const USER_TOOL_SOURCES = Object.freeze(['builtin', 'agent', 'steward', 'script', 'plugin']);
 // 工具脚本可声明的能力（保存时由用户确认，approved 与 capabilities 一致才可执行）
 export const USER_TOOL_SCRIPT_CAPABILITIES = Object.freeze(['read', 'input', 'edit', 'model']);
 export const USER_TOOL_SCRIPT_MAX_CHARS = 20000;

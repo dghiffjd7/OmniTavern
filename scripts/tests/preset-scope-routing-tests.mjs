@@ -241,4 +241,32 @@ const makeBundledDefaults = () => Object.fromEntries(TYPES.map(type => [type, {
   console.log('ok - new presets default to creative and persist scope independently');
 }
 
+{
+  // 全新安装：内置预设一律是「创意写作」适用范围。聊天模式没有绑定时仍要用内置默认（选单上的「内置默认（X）」），
+  // 不能因适用范围解析成空：否则群聊规则（群名、成员）与对话规则都不会注入，模型自编群名，整轮被丢。
+  const store = Object.create(PresetStore.prototype);
+  store.state = migratePresetScopeState(makeState(), {
+    builtinActive: Object.fromEntries(TYPES.map(type => [type, 'builtin'])),
+    existingInstall: false,
+  });
+  store.isLoaded = true;
+  store.ready = Promise.resolve(store.state);
+  store.persist = async () => store.state;
+  for (const type of TYPES) {
+    store.state.presets[type].builtin.app_scope = PRESET_APP_SCOPES.creative;
+    store.state.presets[type].custom.app_scope = PRESET_APP_SCOPES.creative;
+  }
+
+  const chat = store.getResolvedActiveId('sysprompt', { sessionId: 'alice', uiMode: 'chat' });
+  assert.deepEqual([chat.presetId, chat.source, chat.isBuiltinDefault], ['builtin', 'builtin', true]);
+  assert.equal(store.getResolvedActive('sysprompt', { sessionId: 'alice', uiMode: 'chat' }).preset?.name, 'sysprompt builtin');
+
+  // 用户选的（会话绑定）照旧检查适用范围：绑一个只适用创意写作的预设，聊天模式不会用它，退回内置默认
+  store.state.bindings.byType.sysprompt = { ...(store.state.bindings.byType.sysprompt || {}), sessions: { alice: 'custom' } };
+  assert.equal(store.getResolvedActiveId('sysprompt', { sessionId: 'alice', uiMode: 'chat' }).presetId, 'builtin');
+  // 创意写作照旧走全局当前预设
+  assert.equal(store.getResolvedActiveId('sysprompt', { sessionId: 'rp:hero', uiMode: 'rp' }).presetId, 'custom');
+  console.log('ok - a fresh install still uses the built-in default in chat mode while user choices keep their scope');
+}
+
 console.log('preset-scope-routing-tests passed');

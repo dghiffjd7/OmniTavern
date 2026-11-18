@@ -35,6 +35,7 @@ export const createMemoryUpdateRuntime = ({
   buildMemoryUpdatePlan,
   canInitClient,
   createClient,
+  getMemoryFillCounter = null,
   handleMemoryEditsFromRaw,
   isMemoryAutoExtractSeparate,
   isMemoryUpdateTargetCurrent = async () => true,
@@ -43,12 +44,21 @@ export const createMemoryUpdateRuntime = ({
   memoryUpdateConfigManager,
   recordTraceEvent = null,
   sessionAsyncWorkRuntime = null,
+  setMemoryFillCounter = null,
   syncTurnCheckpointForMessage,
 } = {}) => {
   const memoryUpdateRunning = new Set();
   const memoryUpdateAbortControllers = new Map();
   const memoryUpdateQueues = new Map();
+  // 填表频率计数要跨 runtime 实例与重启保留（app.js 每次发送都会新建 runtime），由调用方注入会话存储；
+  // 未注入时退回本实例内存。
   const memoryFillSessionCounters = new Map();
+  const readFillCounter = typeof getMemoryFillCounter === 'function'
+    ? sessionId => getMemoryFillCounter(sessionId)
+    : sessionId => memoryFillSessionCounters.get(sessionId) || 0;
+  const writeFillCounter = typeof setMemoryFillCounter === 'function'
+    ? (sessionId, value) => setMemoryFillCounter(sessionId, value)
+    : (sessionId, value) => memoryFillSessionCounters.set(sessionId, value);
 
   const toAgentStatus = (status = '') => {
     const token = String(status || '').trim().toLowerCase();
@@ -305,10 +315,10 @@ export const createMemoryUpdateRuntime = ({
     if (!sessionId) return;
     const trigger = resolveMemoryUpdateTrigger(
       appSettings.get(),
-      memoryFillSessionCounters.get(sessionId) || 0,
+      readFillCounter(sessionId),
     );
     if (!trigger.shouldRun) {
-      memoryFillSessionCounters.set(sessionId, trigger.nextCounter);
+      writeFillCounter(sessionId, trigger.nextCounter);
       emitMemoryRuntimeTrace(recordTraceEvent, buildMemoryUpdateTaskSkippedTraceEvent({
         sessionId,
         reason: 'cadence',
@@ -321,7 +331,7 @@ export const createMemoryUpdateRuntime = ({
       }
       return;
     }
-    memoryFillSessionCounters.set(sessionId, trigger.nextCounter);
+    writeFillCounter(sessionId, trigger.nextCounter);
     const checkpointMessageId = String(options?.checkpointMessageId || '').trim();
     const completion = enqueueMemoryUpdate(sessionId, isGroup, baseContext, checkpointMessageId);
     if (options?.forceSeparate === true) return completion;

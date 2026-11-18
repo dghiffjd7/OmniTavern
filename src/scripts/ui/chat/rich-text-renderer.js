@@ -26,6 +26,7 @@ import {
 } from './rich-render-routing.js';
 import { hideCreativeContentTagsForDisplay } from './creative-content-display-utils.js';
 import { mergeRichCompatInputText } from './rich-input-compat.js';
+import { buildImagePreviewPlaceholderHtml, createImagePreviewPlaceholder } from './image-generation-preview.js';
 import { segmentDialogueRuns, segmentDialogueText } from './dialogue-segment-utils.js';
 import { createRpMessageIconMarkup } from './rp-message-actions-ui-utils.js';
 import {
@@ -130,6 +131,9 @@ const decodeRichImageErrorPayload = (encoded = '') => {
             prompt: String(parsed?.prompt || '').trim(),
             source: String(parsed?.source || '').trim(),
             index: Number.isFinite(Number(parsed?.index)) ? Number(parsed.index) : undefined,
+            partial: String(parsed?.partial?.path || '').trim()
+                ? { path: String(parsed.partial.path).trim(), step: Number(parsed.partial.step) || 0, total: Number(parsed.partial.total) || 0 }
+                : null,
         };
     } catch {
         return { brief: raw || '图片生成失败', detail: '' };
@@ -144,9 +148,21 @@ const isRenderableRichImageRef = (value = '') => {
         || raw.startsWith('./')
         || raw.startsWith('../');
 };
+// 生图失败时留下的最后一张中间图（未完成）：接在失败提示后面
+const richPartialCaption = partial => '未完成的中间图' + (partial.total > 0 ? ` · ${Math.min(partial.step, partial.total)}/${partial.total}` : '');
+const buildRichPartialImageHtml = (partial) => {
+    const src = partial ? (resolveLocalFileLikeUrl(partial.path) || partial.path) : '';
+    if (!src) return '';
+    return `<span class="generated-media-partial"><img class="previewable generated-media-partial-image" alt="未完成的中间图" loading="lazy" decoding="async" src="${escapeHtmlText(src)}"><span class="generated-media-partial-caption">${escapeHtmlText(richPartialCaption(partial))}</span></span>`;
+};
+// 自动配图生成中的占位记号 [img-图片生成中 N]：显示成预览占位（中间画面到了就原位显示）
+const RICH_IMAGE_PENDING_RE = /^图片生成中(?: \d+)?$/;
 const buildRichImageTokenHtml = (type = '', body = '', fullToken = '') => {
     const tokenType = String(type || '').toLowerCase();
     const token = String(fullToken || '');
+    if (tokenType === 'img' && RICH_IMAGE_PENDING_RE.test(String(body || '').trim())) {
+        return buildImagePreviewPlaceholderHtml(token);
+    }
     if (tokenType === 'img-error') {
         const payload = decodeRichImageErrorPayload(body);
         const attrs = [
@@ -156,7 +172,7 @@ const buildRichImageTokenHtml = (type = '', body = '', fullToken = '') => {
             payload.prompt ? `data-prompt="${escapeHtmlText(payload.prompt)}"` : '',
             payload.detail ? `title="${escapeHtmlText(payload.detail)}"` : '',
         ].filter(Boolean).join(' ');
-        return `<span ${attrs}><span class="chat-inline-image-error-label">图片生成失败：${escapeHtmlText(payload.brief)}</span></span>`;
+        return `<span ${attrs}><span class="chat-inline-image-error-label">图片生成失败：${escapeHtmlText(payload.brief)}</span></span>${buildRichPartialImageHtml(payload.partial)}`;
     }
     const ref = String(body || '').trim();
     if (!isRenderableRichImageRef(ref)) return token;
@@ -255,10 +271,36 @@ const appendRichTextInlineMedia = (containerEl, text = '', {
             retry.textContent = '重试图片';
             chip.appendChild(retry);
             containerEl.appendChild(chip);
+            const partialSrc = payload.partial ? (resolveLocalFileLikeUrl(payload.partial.path) || payload.partial.path) : '';
+            if (partialSrc) {
+                const figure = document.createElement('span');
+                figure.className = 'generated-media-partial';
+                const partialImg = document.createElement('img');
+                partialImg.className = 'previewable generated-media-partial-image';
+                partialImg.alt = '未完成的中间图';
+                partialImg.src = partialSrc;
+                partialImg.addEventListener?.('click', () => {
+                    if (typeof openLightbox === 'function') openLightbox(partialImg.currentSrc || partialImg.src);
+                });
+                const caption = document.createElement('span');
+                caption.className = 'generated-media-partial-caption';
+                caption.textContent = richPartialCaption(payload.partial);
+                figure.appendChild(partialImg);
+                figure.appendChild(caption);
+                containerEl.appendChild(figure);
+            }
             didMedia = true;
             continue;
         }
         const ref = String(body || '').trim();
+        if (String(type || '').toLowerCase() === 'img' && RICH_IMAGE_PENDING_RE.test(ref)) {
+            const placeholder = createImagePreviewPlaceholder(document, full);
+            if (placeholder) {
+                containerEl.appendChild(placeholder);
+                didMedia = true;
+                continue;
+            }
+        }
         if (!isRenderableRichImageRef(ref)) {
             appendText(full);
             continue;

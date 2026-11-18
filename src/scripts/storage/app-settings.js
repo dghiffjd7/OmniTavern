@@ -88,6 +88,7 @@ const defaults = {
   memoryTableEnabledWriting: true,
   memoryAutoExtract: true,
   memoryAutoExtractMode: 'inline',
+  memoryAutoExtractModeWriting: 'inline',
   memoryInjectDefaultD0Migrated: true,
   memoryInjectDefaultLatestUserMigrated: true,
   memoryUpdateApiMode: 'chat',
@@ -214,6 +215,10 @@ const migrateSettings = (settings = {}) => {
         ? 'en'
         : 'system';
   next.languageSetupCompleted = next.languageSetupCompleted === true;
+  // 写表方式按场景分开（聊天/动态沿用原键，写作单独一份）：写作那份第一次从原来的共用值补出
+  if (next.memoryAutoExtractModeWriting !== 'inline' && next.memoryAutoExtractModeWriting !== 'separate') {
+    next.memoryAutoExtractModeWriting = String(next.memoryAutoExtractMode || '').trim().toLowerCase() === 'separate' ? 'separate' : 'inline';
+  }
   if (next.memoryUpdateContextRounds == null && next.memoryUpdateContextCount != null) {
     const raw = Math.trunc(Number(next.memoryUpdateContextCount));
     const safe = Number.isFinite(raw) ? Math.max(0, raw) : defaults.memoryUpdateContextRounds;

@@ -389,6 +389,8 @@ const create = (documentRef, tag, className = '', text = '') => {
 };
 
 const clamp = (value, min, max) => Math.min(Math.max(Number(value) || 0, min), Math.max(min, max));
+// 小球移动的过渡是 0.22 秒（qq-legacy.css .mode-switch），停稳后再对齐气泡
+const HINT_ANCHOR_SETTLE_MS = 260;
 
 export const createMaidOnboardingEntryUi = ({
   documentRef = globalThis?.document || null,
@@ -404,6 +406,8 @@ export const createMaidOnboardingEntryUi = ({
   let toastTimer = null;
   let positionTimer = null;
   let positionBound = false;
+  let anchorObserver = null;
+  let anchorSettleTimer = null;
 
   const getViewport = () => ({
     width: Number(windowRef?.visualViewport?.width || windowRef?.innerWidth || documentRef?.documentElement?.clientWidth || 0) || 0,
@@ -469,7 +473,31 @@ export const createMaidOnboardingEntryUi = ({
     windowRef?.visualViewport?.[method]?.('resize', onViewportChange);
   };
 
+  // 首次开 APP 时气泡出现得比小球就位早：小球先在画面中央，之后才移到底部（top/left 带 0.22 秒过渡），
+  // 拖动后也会换位置。气泡显示期间跟着小球的 style/class 变化，等它停稳再对齐。
+  const unwatchHintAnchor = () => {
+    anchorObserver?.disconnect?.();
+    anchorObserver = null;
+    if (anchorSettleTimer != null) clearTimeoutFn?.(anchorSettleTimer);
+    anchorSettleTimer = null;
+  };
+
+  const watchHintAnchor = () => {
+    unwatchHintAnchor();
+    const Observer = windowRef?.MutationObserver;
+    if (!hintAnchorEl || typeof Observer !== 'function') return;
+    anchorObserver = new Observer(() => {
+      if (anchorSettleTimer != null) clearTimeoutFn?.(anchorSettleTimer);
+      anchorSettleTimer = setTimeoutFn?.(() => {
+        anchorSettleTimer = null;
+        positionHint();
+      }, HINT_ANCHOR_SETTLE_MS) ?? null;
+    });
+    anchorObserver.observe(hintAnchorEl, { attributes: true, attributeFilter: ['style', 'class'] });
+  };
+
   const hideHint = () => {
+    unwatchHintAnchor();
     hintEl?.remove?.();
     hintEl = null;
     hintAnchorEl = null;
@@ -521,6 +549,7 @@ export const createMaidOnboardingEntryUi = ({
     documentRef.body.appendChild(hintEl);
     syncPositionBinding();
     refreshPosition();
+    watchHintAnchor();
     return true;
   };
 

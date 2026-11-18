@@ -14,6 +14,7 @@ import {
   getI18nState,
   initializeI18n,
   localizeDomSubtree,
+  localeColon,
   t,
   translateUiText,
 } from '../../src/scripts/i18n/index.js';
@@ -224,5 +225,14 @@ try {
 assert.equal(getI18nState().requestedLocale, 'zh-TW');
 assert.equal(getI18nState().locale, 'zh-CN');
 assert.match(getI18nState().loadError, /catalog load failed/);
+
+{
+  // 「标签：内容」的冒号随界面语言：中文用全角，其他语言用半角加空格
+  await initializeI18n({ preference: 'zh-CN', documentLike: null });
+  assert.equal(localeColon(), '：');
+  await initializeI18n({ preference: 'en', documentLike: null, fetchFn: async () => ({ ok: true, json: async () => ({}) }) });
+  assert.equal(localeColon(), ': ');
+  await initializeI18n({ preference: 'zh-CN', documentLike: null });
+}
 
 console.log('i18n-runtime-tests passed');

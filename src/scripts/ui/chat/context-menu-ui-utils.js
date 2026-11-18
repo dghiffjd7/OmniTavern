@@ -1,3 +1,5 @@
+import { getMessageTranslation } from './message-translation-ui-utils.js';
+
 const INLINE_GENERATED_IMAGE_TOKEN_RE = /\[(?:img|img-error)-[^\]\n]+\]/i;
 
 const hasInlineGeneratedImageToken = value => INLINE_GENERATED_IMAGE_TOKEN_RE.test(String(value || ''));
@@ -55,6 +57,7 @@ export const buildContextMenuActions = (message, {
   isThreadingEnabled = false,
   inlineGeneratedImage = null,
   canCheckFormat = false,
+  canTranslate = false,
 } = {}) => {
   const actions = [];
   const inlineGeneratedAsset = resolveInlineGeneratedImageAsset(message, inlineGeneratedImage);
@@ -99,6 +102,10 @@ export const buildContextMenuActions = (message, {
         : '以此生成图片',
       group: 'main',
     });
+  }
+  // 小管家翻译：已有对得上的译文时改成「重新翻译」（是否可用由 app 判断：小管家与任务开着、有文字）
+  if (canTranslate === true && message?.status !== 'pending' && message?.status !== 'sending') {
+    actions.push({ key: 'steward-translate', label: getMessageTranslation(message) ? '重新翻译' : '翻译', group: 'main' });
   }
   if (message?.role === 'assistant') {
     // 朗读入口改为菜单顶部的复合行（朗读 + 最近声音 chips + ⋯），不再占动作清单

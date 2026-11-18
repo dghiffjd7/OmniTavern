@@ -35,15 +35,17 @@ const searchPaths = (outEdges, start, goal, { maxDepth, maxPaths, maxVisits }) =
   const paths = [];
   const queue = [{ nodeId: start, edges: [], visited: new Set([start]) }];
   let visits = 0;
+  let shortestDepth = maxDepth;
   while (queue.length && paths.length < maxPaths && visits < maxVisits) {
     const current = queue.shift();
     visits += 1;
-    if (current.edges.length >= maxDepth) continue;
+    if (current.edges.length >= shortestDepth) continue;
     for (const edge of outEdges.get(current.nodeId) || []) {
       const next = trim(edge?.target);
       if (current.visited.has(next)) continue;
       const pathEdges = [...current.edges, edge];
       if (next === goal) {
+        shortestDepth = pathEdges.length;
         paths.push(pathEdges);
         if (paths.length >= maxPaths) break;
         continue;

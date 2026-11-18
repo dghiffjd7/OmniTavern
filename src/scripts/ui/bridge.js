@@ -87,6 +87,7 @@ import {
 import {
   applyPromptPostProcessing,
   buildPendingUserTextWithScenarioReminder,
+  isPhoneChatFormatInjected,
   normalizePromptPostProcessingMode,
   resolveOpenAIPresetFormatReminderState,
 } from './chat/prompt-context-utils.js';
@@ -241,6 +242,7 @@ import {
   limitHistoryByTokenBudget,
   mapHistoryMessagesToTurns,
   resolveCoverageProtectedHistoryIndexes,
+  restoreCoverageHoleHistory,
 } from './chat/llm-history-utils.js';
 import {
   HISTORY_TIMESTAMP_FIELD,
@@ -494,7 +496,7 @@ const normalizeHistoryLineBreaks = (content, role, { preserveParagraphs = false 
 const SUMMARY_REQUEST_NOTICE = [
   '每次输出结束后，**紧跟着**以一句话概括本次互动的摘要，确保<details><summary>摘要</summary>',
   '<内容>',
-  '</details>标签顺序正确，摘要**纯中文输出**，不得夹杂其它语言',
+  '</details>标签顺序正确，摘要用中文书写，人名等专有名词保留原文',
   '[summary_format]',
   '摘要格式示例：',
   '',
@@ -2679,6 +2681,33 @@ class AppBridge {
     return raw;
   }
 
+  // 这次聊天请求会不会注入「QQ聊天格式」：与 buildMessages 相同的预设解析（会话→模式→内置，含 Agent 套用的预设）与回复对象。
+  // 发送流程据此决定是否按对话协议解析回复。全新安装时内置系统提示词只适用创意写作，聊天模式解析不到预设，
+  // 但这里仍会用内置种子注入格式；只看预设的对话规则开关会误判成「不用协议」，模型照格式回的整段就原样显示。
+  isPhoneChatFormatActive(context = {}) {
+    try {
+      const sessionId = String(context?.sessionId || '').trim();
+      const presetUiMode = normalizeBridgePresetUiMode(String(context?.uiMode || '').trim().toLowerCase(), { sessionId });
+      const presetContext = { sessionId, uiMode: presetUiMode };
+      const withAgentPreset = (actionName, resolved) => {
+        const preset = resolved?.preset || null;
+        const action = this.debugUiRegistry?.actions?.[actionName];
+        if (!preset || typeof preset !== 'object' || typeof action !== 'function') return preset;
+        try {
+          const next = action({ presetId: String(resolved?.presetId || '').trim(), preset, sessionId, uiMode: presetUiMode });
+          return next && typeof next === 'object' ? next : preset;
+        } catch {
+          return preset;
+        }
+      };
+      const sysp = withAgentPreset('resolveAgentSyspromptPresetSync', this.presets.getResolvedActive('sysprompt', presetContext));
+      const openai = withAgentPreset('resolveAgentOpenAIPresetSync', this.presets.getResolvedActive('openai', presetContext));
+      return isPhoneChatFormatInjected({ sysp, replyTarget: resolvePresetReplyTarget(openai, presetUiMode) });
+    } catch {
+      return false;
+    }
+  }
+
   buildPhoneFormatPromptEntries(preset = null, options = {}) {
     const source = (preset && typeof preset === 'object') ? preset : {};
     const seed = getBuiltinPhoneFormatPromptSeed(BUILTIN_PHONE_FORMAT_WORLDBOOK);
@@ -3968,7 +3997,6 @@ class AppBridge {
           let finalHistory = firstPass;
           let coverageLine = null;
           let oldestRecentTurn = null;
-          let protectedMessageIndexes = [];
           if (memoryPlan?.enabled) {
             const totalTurns = Math.max(
               0,
@@ -3990,15 +4018,15 @@ class AppBridge {
               fromTurn: 1,
               toTurn: Math.max(0, oldestRecentTurn - 1),
             });
-            protectedMessageIndexes = resolveCoverageProtectedHistoryIndexes({
+            const holeMessageIndexes = resolveCoverageProtectedHistoryIndexes({
               history: originalHistory,
               holes: coverageLine.holes,
               lastTurn: historyLastTurn,
             });
-            if (protectedMessageIndexes.length) {
-              finalHistory = limitHistoryByTokenBudget(originalHistory, {
+            if (holeMessageIndexes.length) {
+              finalHistory = restoreCoverageHoleHistory(originalHistory, firstPass, {
+                holeMessageIndexes,
                 inputBudgetTokens: recentQuota,
-                protectedMessageIndexes,
                 tokenMode: preliminaryTokenMode,
                 getMessagePrefix: historyTimeBudgetFormatter?.prefixFor,
               });
@@ -4015,7 +4043,7 @@ class AppBridge {
               ? {
                   ...coverageLine,
                   oldestRecentTurn,
-                  protectedMessageCount: protectedMessageIndexes.length,
+                  protectedMessageCount: finalHistory.stats.restoredHoleMessageCount || 0,
                 }
               : null,
           };

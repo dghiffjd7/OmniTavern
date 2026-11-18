@@ -91,6 +91,24 @@ const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
 }
 
 {
+  // 现实中的地点与路线检索到地图；问 APP 功能「在哪里」不算
+  for (const query of ['打开地图找故宫', '怎么去台北 101', '用高德导航到西湖', '在 Google 地图上找一下这家店']) {
+    assert.equal(searchAppFeatures(query, { limit: 3 })[0]?.id, 'maid.map', query);
+  }
+  assert.notEqual(searchAppFeatures('世界书在哪里', { limit: 3 })[0]?.id, 'maid.map');
+  console.log('ok - place and route requests retrieve the map capability');
+}
+
+{
+  // 天气的口语说法检索到天气；「温度」多指模型参数，不算
+  for (const query of ['台北今天天气怎么样', '明天会下雨吗', '要不要带伞', '东京这周气温']) {
+    assert.equal(searchAppFeatures(query, { limit: 3 })[0]?.id, 'maid.weather', query);
+  }
+  assert.notEqual(searchAppFeatures('把温度调到 0.7', { limit: 3 })[0]?.id, 'maid.weather');
+  console.log('ok - weather requests retrieve the weather capability');
+}
+
+{
   const results = searchAppFeatures('帮我联网搜索最新资讯', { limit: 3 });
   assert.equal(results[0].id, 'web.search');
   assert.deepEqual(results[0].tools, ['web.search', 'web.fetch_url', 'web.research', 'web.search_images']);
@@ -692,6 +710,11 @@ const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
   // 内置能力：目录测试按已开启处理（开关与确认在 maid-capability-tools-tests 里测）
   const capabilityTools = createMaidCapabilityAgentTools({
     getSettingsStore: () => ({ getBuiltinCapability: () => ({ enabled: true, revision: 1, lastUsedAt: 0 }), setBuiltinCapabilityEnabled: async () => ({ ok: true }), markBuiltinCapabilityUsed: async () => null }),
+    getWeatherService: () => ({ lookup: async () => ({
+      ok: true, fetchedAt: 1,
+      place: { name: '台北', region: '台湾', country: '台湾' },
+      forecast: { timezone: 'Asia/Taipei', localTime: '2026-11-02T20:00', current: { temperature: 23, feelsLike: null, humidity: null, wind: null, code: 0, isDay: true }, daily: [{ date: '2026-11-02', code: 0, max: 26, min: 20, rain: null }] },
+    }) }),
   });
   const mcpTools = createMcpAgentTools({
     getServer: id => (id === 'srv' ? { id, name: '目录 MCP', url: 'http://127.0.0.1:3917/mcp', revision: 1 } : null),
@@ -1187,8 +1210,13 @@ const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
       if (feature.id === 'attachment.import') assert.deepEqual([result.worldbookId, result.verified], ['目录测试', true]);
       return;
     }
-    if (feature.id === 'maid.random' || feature.id === 'maid.capability.request_enable') {
-      const args = feature.id === 'maid.random' ? { mode: 'choose', options: ['正面', '反面'] } : { capabilityId: 'random' };
+    if (['maid.random', 'maid.map', 'maid.weather', 'maid.capability.request_enable'].includes(feature.id)) {
+      const args = {
+        'maid.random': { mode: 'choose', options: ['正面', '反面'] },
+        'maid.map': { mode: 'search', query: '台北 101' },
+        'maid.weather': { city: '台北' },
+        'maid.capability.request_enable': { capabilityId: 'random' },
+      }[feature.id];
       const result = await getTool(tools, feature.directAction).execute(args, {});
       assert.equal(result.ok, true, `${feature.id} direct action should succeed: ${JSON.stringify(result).slice(0, 200)}`);
       return;

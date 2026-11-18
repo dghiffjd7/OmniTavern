@@ -12,7 +12,7 @@ const parsed = JSON.parse(formatMaidTaskUpdate(update));
 assert.equal(parsed.resultBasis.kind, 'tool_execution');
 assert.equal(parsed.resultBasis.recordedAt, 1000);
 assert.equal(parsed.resultBasis.sources.length, 3);
-assert.match(maidTaskUpdateText(update), /not independently verified facts/);
+assert.ok(maidTaskUpdateText(update).includes(formatMaidTaskUpdate(update)), 'the spoken result carries the recorded basis');
 assert.equal(JSON.parse(formatMaidTaskUpdate({ status: 'succeeded' })).resultBasis, null);
 assert.equal(JSON.parse(formatMaidTaskUpdate({ resultBasis: buildMaidResultBasis({ responseType: 'chat' }) })).resultBasis.kind, 'explanation');
 

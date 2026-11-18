@@ -1,4 +1,5 @@
 import { appSettings } from '../storage/app-settings.js';
+import { resolveMemoryAutoExtractMode } from './memory-storage-mode-utils.js';
 import {
   isRpSessionId,
   tableMatchesMemoryContext,
@@ -921,7 +922,7 @@ export class MemoryTableEditor {
     const memoryInjectPosition = String(settings.memoryInjectPosition || 'before_latest_user').toLowerCase();
     const memoryInjectDepthRaw = Math.trunc(Number(settings.memoryInjectDepth));
     const memoryInjectDepth = Number.isFinite(memoryInjectDepthRaw) ? Math.max(0, memoryInjectDepthRaw) : 4;
-    const memoryAutoMode = String(settings.memoryAutoExtractMode || 'inline').toLowerCase();
+    const memoryAutoMode = resolveMemoryAutoExtractMode(settings, isMoments ? 'moments' : (isRp ? 'writing' : 'chat'));
     const memoryPlaceEnabled = isMoments
       ? settings.memoryTableEnabledMoments !== false
       : isRp

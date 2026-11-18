@@ -13,6 +13,7 @@ export const hopscotchInactiveLabel = reason => ({
   no_variable_updates: t('当前变量暂无更新请求'),
   independent_variable_rules: t('此角色使用独立变量规则'),
   memory_disabled: t('记忆表格功能已关闭'),
+  memory_auto_extract_off: t('AI 自动写入记忆表格已关闭'),
   memory_summary_mode: t('摘要模式：摘要随正文一起生成，不更新记忆表格'),
   image_prompt_disabled: t('图片提示已停用'),
   auto_image_disabled: t('自动生图已关闭'),
@@ -29,9 +30,12 @@ export const resolveHopscotchActivation = (board, settings = {}) => {
   const all = (board?.rows || []).flatMap(row => row.houses || []);
   const body = all.find(house => house.kind === 'body');
   const prompt = all.find(house => house.kind === 'image_prompt');
-  const memoryOff = settings.memory && (settings.memory.storageMode !== 'table' || settings.memory.placeEnabled === false || settings.memory.writingEnabled === false);
+  const memoryTableOff = settings.memory && (settings.memory.storageMode !== 'table' || settings.memory.placeEnabled === false || settings.memory.writingEnabled === false);
+  // 「AI 自动写入记忆表格」是总开关：关掉时板上的记忆同样停用（与自动生图一致）
+  const memoryAutoWriteOff = Boolean(settings.memory) && !memoryTableOff && settings.memory.autoExtract === false;
+  const memoryOff = memoryTableOff || memoryAutoWriteOff;
   // 摘要模式下表格更新同样不运行，但要标明是摘要模式而不是被停用。
-  const memoryReason = settings.memory?.storageMode === 'summary' ? 'memory_summary_mode' : 'memory_disabled';
+  const memoryReason = settings.memory?.storageMode === 'summary' ? 'memory_summary_mode' : (memoryAutoWriteOff ? 'memory_auto_extract_off' : 'memory_disabled');
   const variable = settings.variables?.activity;
   // 自动生图的开关在设定（与 AC 生图 Agent 卡同一个）；关掉时图片提示与图片生成跟着停用，和记忆、变量一样以设定为准
   const imageOff = settings.autoImage && settings.autoImage.enabled !== true;

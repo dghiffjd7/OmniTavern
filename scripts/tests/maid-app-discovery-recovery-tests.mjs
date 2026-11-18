@@ -179,7 +179,6 @@ test('both planner stages explain actual cross-card target choices without treat
     assert.match(prompt, /use_current_binding/);
     assert.match(prompt, /create_and_bind/);
     assert.match(prompt, /use_observed_worldbook/);
-    assert.match(prompt, /unknown is not unbound/);
     assert.match(prompt, /user already named the target book or owner card/);
     assert.match(prompt, /never grant write permission/);
   }

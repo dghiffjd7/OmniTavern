@@ -26,6 +26,7 @@ import {
   runSendCatchFlow,
   runSendFinallyFlow,
 } from '../../src/scripts/ui/chat/send-flow-utils.js';
+import { isPhoneChatFormatInjected } from '../../src/scripts/ui/chat/prompt-context-utils.js';
 
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
@@ -1254,6 +1255,34 @@ test('resolveSyspromptProtocolFlags lets moment creation override chat mode and 
       disableSummaryForThis: true,
     },
   );
+});
+
+test('resolveSyspromptProtocolFlags parses the reply as protocol whenever the chat format guide was injected', () => {
+  // 全新安装：内置系统提示词只适用创意写作，聊天模式解析不到预设（sysp 为空），
+  // 但组提示词时仍会注入内置的 QQ聊天格式，模型照格式回复；不按协议解析就会整段原样显示。
+  const flags = resolveSyspromptProtocolFlags({ sysp: {}, rpUiMode: false, isGroupChat: false, summaryEnabled: true, phoneChatFormatActive: true });
+  assert.equal(flags.protocolEnabled, true);
+  assert.equal(resolveSyspromptProtocolFlags({ sysp: {}, rpUiMode: false, isGroupChat: true, phoneChatFormatActive: true }).protocolEnabled, true, 'group chats use the same chat format guide');
+  assert.equal(resolveSyspromptProtocolFlags({ sysp: {}, rpUiMode: true, phoneChatFormatActive: true }).protocolEnabled, false, 'creative writing never parses the phone protocol');
+  assert.equal(resolveSyspromptProtocolFlags({ sysp: {}, rpUiMode: false }).protocolEnabled, false, 'without the format guide nothing changes');
+});
+
+test('isPhoneChatFormatInjected mirrors when buildMessages adds the built-in chat format guide', () => {
+  assert.equal(isPhoneChatFormatInjected({ sysp: null }), true, 'no preset resolved: the built-in guide is used');
+  assert.equal(isPhoneChatFormatInjected({ sysp: {} }), true);
+  assert.equal(isPhoneChatFormatInjected({ sysp: { phone_format_chat_enabled: true, phone_format_chat_rules: '' } }), true, 'empty rules fall back to the built-in seed');
+  assert.equal(isPhoneChatFormatInjected({ sysp: { phone_format_chat_enabled: false } }), false, 'turned off in the preset');
+  assert.equal(isPhoneChatFormatInjected({ sysp: {}, replyTarget: 'user' }), false, 'replying as the user drops the phone format');
+  assert.equal(isPhoneChatFormatInjected({ sysp: {}, disablePhoneFormat: true }), false);
+});
+
+test('chat send asks the bridge whether the chat format guide is injected before choosing the protocol path', async () => {
+  const appSource = await readFile(new URL('../../src/scripts/ui/app.js', import.meta.url), 'utf8');
+  const bridgeSource = await readFile(new URL('../../src/scripts/ui/bridge.js', import.meta.url), 'utf8');
+  const calls = appSource.match(/resolveSyspromptProtocolFlags\(\{[\s\S]*?\}\)/g) || [];
+  assert.ok(calls.length >= 2);
+  calls.forEach(call => assert.match(call, /phoneChatFormatActive:\s*window\.appBridge\.isPhoneChatFormatActive\?\.\(requestPresetContext\)\s*===\s*true/));
+  assert.match(bridgeSource, /isPhoneChatFormatActive\(context = \{\}\) \{[\s\S]*?getResolvedActive\('sysprompt', presetContext\)[\s\S]*?isPhoneChatFormatInjected\(/);
 });
 
 test('isChatSendTargetAvailable rejects a deleted target and accepts stored or contact-only sessions', () => {

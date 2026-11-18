@@ -61,6 +61,11 @@ export const injectMaidSkillStyle = doc => {
 .maid-skill-row.is-disabled .maid-skill-capability-icon {background:var(--app-surface-subtle,#f1f5f9);color:var(--app-text-muted,#94a3b8)}
 .maid-skill-copy .maid-skill-capability-title {margin:0;font-size:14px;font-weight:800;line-height:1.45}
 .maid-skill-row.is-disabled .maid-skill-capability-title {opacity:.62}
+.maid-skill-capability-options {display:flex;flex-wrap:wrap;gap:8px 14px;margin-top:8px}
+.maid-skill-capability-options .maid-skill-field {display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;max-width:100%;min-width:0}
+.maid-skill-capability-options .maid-skill-field>span {font-size:12px;font-weight:700;white-space:nowrap}
+.maid-skills .maid-skill-capability-options select,.maid-skills .maid-skill-capability-options input[type=text] {width:auto;min-width:140px;max-width:100%;padding-top:5px;padding-bottom:5px;font-size:13px}
+.maid-skills .maid-skill-capability-options input[type=text] {width:220px;min-width:0}
 .maid-skill-row {display:flex;align-items:flex-start;gap:12px;padding:14px 16px;border:1px solid var(--skill-line);border-radius:16px;background:var(--app-surface-card,#fff);box-shadow:0 1px 2px rgba(15,23,42,.03);transition:border-color 160ms ease,box-shadow 160ms ease}
 .maid-skill-row:hover {border-color:rgba(var(--skill-accent-rgb),.28)}
 .maid-skill-row.is-disabled .maid-skill-title,.maid-skill-row.is-disabled .maid-skill-description {opacity:.62}

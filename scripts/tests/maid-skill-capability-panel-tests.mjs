@@ -48,6 +48,7 @@ const panel = createMaidSkillPanel({
   capabilities: {
     list: () => listMaidBuiltinCapabilityStates(settings),
     setEnabled: (id, enabled) => settings.setBuiltinCapabilityEnabled(id, enabled, { source: 'settings' }),
+    setOption: (id, key, value) => settings.setBuiltinCapabilityOptions(id, { [key]: value }),
     subscribe: listener => settings.subscribeCapabilities(listener),
   },
 });
@@ -85,7 +86,8 @@ panel.mount(root);
   const search = walk(root).find(node => node.tagName === 'INPUT' && node.type === 'search');
   const capabilityGroup = byClass(root, 'maid-skill-capabilities')[0];
   const groupTitles = () => byClass(root, 'maid-skill-group-title').map(node => node.hidden);
-  for (const [filter, shown] of [['custom', 0], ['builtin', 1], ['enabled', 1], ['disabled', 0], ['all', 1]]) {
+  // 随机互动已在上一段开启，地图与天气仍关闭
+  for (const [filter, shown] of [['custom', 0], ['builtin', 3], ['enabled', 1], ['disabled', 2], ['all', 3]]) {
     select.value = filter;
     select.dispatch('change');
     assert.equal(capabilityGroup.children.length, shown, `filter ${filter}`);
@@ -97,7 +99,44 @@ panel.mount(root);
   search.value = '世界书';
   search.dispatch('input');
   assert.equal(capabilityGroup.children.length, 0);
+  search.value = '';
+  search.dispatch('input');
   console.log('ok - skill filters and search apply to built-in capabilities too');
+}
+
+{
+  // 地图行下方有「地图服务」选单：默认跟随界面语言，改了立即保存，不动开关
+  const mapRow = () => byClass(root, 'is-capability').find(row => byClass(row, 'maid-skill-capability-title')[0]?.textContent === '地图');
+  const picker = () => walk(byClass(mapRow(), 'maid-skill-capability-options')[0]).find(node => node.tagName === 'SELECT');
+  assert.ok(picker(), 'the map row shows its option');
+  assert.deepEqual(picker().children.map(option => [option.value, option.textContent]), [['auto', '跟随界面语言'], ['google', 'Google 地图'], ['amap', '高德地图']]);
+  assert.equal(picker().value, 'auto');
+  assert.equal(byClass(byClass(root, 'is-capability')[0], 'maid-skill-capability-options').length, 0, 'capabilities without options show none');
+  picker().value = 'google';
+  picker().dispatch('change');
+  await flush();
+  assert.deepEqual([settings.getBuiltinCapability('map').options.provider, settings.getBuiltinCapability('map').enabled], ['google', false]);
+  assert.equal(picker().value, 'google', 'the row re-renders with the saved value');
+  console.log('ok - the map row lets the user choose the map service');
+}
+
+{
+  // 天气行的默认城市：输入完（change）才保存，没改就不存
+  const weatherRow = () => byClass(root, 'is-capability').find(row => byClass(row, 'maid-skill-capability-title')[0]?.textContent === '天气');
+  const cityInput = () => walk(byClass(weatherRow(), 'maid-skill-capability-options')[0]).find(node => node.tagName === 'INPUT');
+  assert.equal(cityInput().placeholder, '没说城市时用这里，例如：台北');
+  let saves = 0;
+  const unsubscribe = settings.subscribeCapabilities(() => { saves += 1; });
+  cityInput().value = '';
+  cityInput().dispatch('change');
+  await flush();
+  assert.equal(saves, 0, 'an unchanged value is not saved');
+  cityInput().value = '高雄';
+  cityInput().dispatch('change');
+  await flush();
+  unsubscribe();
+  assert.deepEqual([settings.getBuiltinCapability('weather').options.defaultCity, cityInput().value], ['高雄', '高雄']);
+  console.log('ok - the weather row saves the default city when editing finishes');
 }
 
 {

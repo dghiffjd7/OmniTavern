@@ -7,6 +7,22 @@ import {
 
 const fallbackEscapeSelector = (value) => String(value || '').replace(/["\\]/g, '\\$&');
 
+export const createSwipeRegenerationHandler = (handler) => {
+  if (typeof handler !== 'function') return handler;
+  let running = false;
+  return async function (...args) {
+    // Snapshot/rollback await before the send flow owns activeGeneration. Reserve
+    // the whole branch operation synchronously, including its final commit/restore.
+    if (running) return false;
+    running = true;
+    try {
+      return await handler.apply(this, args);
+    } finally {
+      running = false;
+    }
+  };
+};
+
 const resolveSelectorId = (msgId, escapeSelector) => {
   const raw = String(msgId || '').trim();
   if (!raw) return '';

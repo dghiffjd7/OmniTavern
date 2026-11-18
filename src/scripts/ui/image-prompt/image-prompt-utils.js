@@ -39,7 +39,7 @@ export const resolveImagePromptCapabilities = (config = {}, options = {}) => {
   const novelVersion = provider === 'novelai' ? (/^nai-diffusion-5(?:-|$)/.test(model) ? 5 : (!model || /^nai-diffusion-4(?:-|$)/.test(model) ? 4 : 0)) : 0;
   let negative = ['novelai', 'stability', 'automatic1111'].includes(provider);
   let negativeReason = '当前模型使用正向画面描述';
-  if (['togetherai', 'pollinations'].includes(provider)) {
+  if (['togetherai', 'pollinations', 'wavespeed'].includes(provider)) {
     negative = /(?:stable.?diffusion|sdxl|sd3|playground|dreamshaper)/.test(model);
     negativeReason = '仅在已确认支持负向的模型中使用';
   }

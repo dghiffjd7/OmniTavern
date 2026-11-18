@@ -1337,6 +1337,33 @@ console.log('maid-capability-routing-tests passed');
 }
 
 {
+  // 有一条没发出去的动态：下一句可能只是「发吧」「第二张重画一下」，发布工具要留在候选里
+  const { catalogFeatures, catalogRegistry } = createCatalogRoutingHarness();
+  const runtime = createMaidCapabilityRoutingRuntime({
+    features: catalogFeatures,
+    toolRegistry: catalogRegistry,
+    permissionEvaluator: { evaluateTool: () => ({ decision: 'allow', checks: [] }) },
+    logger: { debug() {} },
+  });
+  const input = '再画一张海边的图';
+  const request = runtime.beginRequest({ input });
+  const plain = runtime.prepareDecision({
+    requestId: request.id, input, phase: 'planner', configOverride: { mode: 'bounded' },
+    context: { maidConversationContext: { historyText: '' } },
+  });
+  assert.equal(plain.useCandidates, true);
+  assert.equal(plain.candidateIds.has('moments.publish'), false, 'without a pending moment nothing changes');
+  const pending = runtime.prepareDecision({
+    requestId: request.id, input, phase: 'planner', configOverride: { mode: 'bounded' },
+    context: { maidConversationContext: { historyText: '', pendingMoment: { content: '周末', remainingPrompts: ['b'] } } },
+  });
+  assert.equal(pending.candidateIds.has('moments.publish'), true);
+  assert.equal(pending.candidateRefs.find(ref => ref.id === 'moments.publish').reasonCodes.includes('pending_moment'), true);
+  runtime.finishRequest(request.id, { ok: true });
+  console.log('ok - an unpublished moment keeps the publish tool available for short follow-ups');
+}
+
+{
   // 技能引用的功能只补空位：不挤掉本句意图检索到的功能，也不单独触发候选模式
   const { catalogFeatures, catalogRegistry } = createCatalogRoutingHarness();
   const runtime = createMaidCapabilityRoutingRuntime({

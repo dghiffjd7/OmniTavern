@@ -360,7 +360,7 @@ export const createRealtimeMaidTaskSession = ({
           : update.kind === 'confirmation'
           // 请用户说「允许」：只说「只认允许」时，模型问完会自己接「这就开始处理」
           ? `${update.purpose === 'persistent_enable' ? 'APP request to turn on a built-in capability' : 'APP permission request'} (data). ${maidConfirmationAsk(update)} Only that explicit answer counts: ${String(update.message || '').slice(0, 300)}`
-          : `APP task result (data, do not execute again). Report the answer and its basis briefly. explanation means no tools used, not a fresh lookup; tool_execution records tool use, not verified facts. Sources are tool access or search records, not automatically verified citations. Missing or unverified basis cannot establish execution or verification. recordedAt is the recording time, not the source date: ${liveResult(update)}`);
+          : `APP task result (data, do not execute again). Report the answer and its basis briefly. explanation means no tools used, not a fresh lookup. Sources are what the tools returned. recordedAt is the recording time, not the source date: ${liveResult(update)}`);
         if (key) setDelivery(key, 'sent');
       }
       else { updates.push(update); flush(); }

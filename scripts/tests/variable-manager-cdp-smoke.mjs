@@ -271,6 +271,25 @@ const inspectDesktopExpression = String.raw`(() => {
   };
 })()`;
 
+// 加载更多 → 出现收起 → 收起回第一批并回到列表顶端
+const pagingExpression = String.raw`(async () => {
+  const shell = window.__variableManagerCdpProbe.panel.panel;
+  const frame = () => new Promise(resolve => requestAnimationFrame(() => resolve()));
+  const rows = () => shell.querySelectorAll('.variable-row').length;
+  const visible = selector => !shell.querySelector(selector).hidden;
+  const scroll = shell.querySelector('#var-list-scroll');
+  const before = { rows: rows(), less: visible('#var-load-less') };
+  shell.querySelector('#var-load-more').click();
+  await frame();
+  const expanded = { rows: rows(), more: visible('#var-load-more'), less: visible('#var-load-less') };
+  scroll.scrollTop = 600;
+  shell.querySelector('#var-load-less').click();
+  await frame();
+  await frame();
+  const folded = { rows: rows(), more: visible('#var-load-more'), less: visible('#var-load-less'), scrollTop: scroll.scrollTop };
+  return { before, expanded, folded };
+})()`;
+
 const exerciseExpression = String.raw`(async () => {
   const probe = window.__variableManagerCdpProbe;
   const panel = probe.panel;
@@ -442,6 +461,11 @@ try {
   assert.equal(report.desktop.loadMoreVisible, true);
   assert.equal(report.desktop.railDisplay, 'flex');
   assert.equal(report.desktop.mobileTabsDisplay, 'none');
+
+  report.paging = await evaluate(pagingExpression);
+  assert.deepEqual(report.paging.before, { rows: 80, less: false });
+  assert.deepEqual(report.paging.expanded, { rows: 160, more: true, less: true });
+  assert.deepEqual(report.paging.folded, { rows: 80, more: true, less: false, scrollTop: 0 });
 
   report.exercise = await evaluate(exerciseExpression);
   assert.ok(report.exercise.treeGroups >= 2);

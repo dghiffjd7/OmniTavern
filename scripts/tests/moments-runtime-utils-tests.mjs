@@ -739,9 +739,13 @@ import {
 {
   assert.equal(
     extractMomentSummaryText('<details><summary>摘要</summary> Hello <b>世界</b> ABC </details>'),
-    '世界',
+    'Hello 世界 ABC',
   );
-  console.log('ok - extractMomentSummaryText strips html and latin text from summary block');
+  assert.equal(
+    extractMomentSummaryText('<details><summary>Summary</summary> Alice posted a photo from Tokyo. </details>'),
+    'Alice posted a photo from Tokyo.',
+  );
+  console.log('ok - extractMomentSummaryText strips html, keeps English words and reads the Summary label');
 }
 
 {

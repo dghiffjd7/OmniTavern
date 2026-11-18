@@ -232,6 +232,8 @@ const createChatReader = deps => async (args = {}) => {
   if (!sid) return { ok: false, resource: 'chat', reason: 'missing_session_id' };
   const limit = clampAppResourceLimit(args.limit, 20, 100);
   const maxTextLength = Number(args.maxTextLength || 4000) || 4000;
+  // 没打开过的会话消息还没载入；先载入最近的分片，否则读到的是空的。载入会顺手建会话，所以只对已有会话做
+  if (await callMethod(chatStore, 'hasSession', sid)) await callMethod(chatStore, 'ensureRecentMessagesLoaded', sid);
   const messages = asArray(await callMethod(chatStore, 'getMessages', sid))
     .slice(-limit)
     .map(message => summarizeAppChatMessage(message, maxTextLength));
@@ -507,12 +509,14 @@ const createSessionReader = deps => async (args = {}) => {
     // Production getters lazily create a chat. Merely reading a newly added
     // contact must leave its first session and settings uncreated.
     const messages = hasChatSession ? asArray(await callMethod(chatStore, 'getMessages', id)) : [];
+    // 没打开过的会话消息还没载入，getMessages 是空的；总数以存储记的为准
+    const storedTotal = hasChatSession ? Number(await callMethod(chatStore, 'getMessageTotal', id)) || 0 : 0;
     const projected = {
       id,
       name: contact?.name || id,
       isGroup: contact?.isGroup === true,
       hasAvatar: Boolean(contact?.avatar),
-      messageCount: messages.length,
+      messageCount: Math.max(messages.length, storedTotal),
       settings: hasChatSession ? await callMethod(chatStore, 'getSessionSettings', id) || null : null,
     };
     if (includeDescription) {

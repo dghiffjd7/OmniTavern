@@ -5,11 +5,13 @@ import { createChatImageJobRuntime } from '../../src/scripts/ui/chat/chat-image-
 import { createSessionAsyncWorkRuntime } from '../../src/scripts/ui/chat/session-async-work-runtime-utils.js';
 import { buildGeneratedImageMessagePatch } from '../../src/scripts/ui/media-generation-adapter-utils.js';
 import { resolveImageReferenceCapability } from '../../src/scripts/ui/media-generation-service.js';
-import { createDefaultImageGenerationPreset, mergeImageGenerationRequestOptions, resolveImageNegativePromptCapability } from '../../src/scripts/ui/image-generation-params-utils.js';
+import { createDefaultImageGenerationPreset, getParamsForImageConfig, mergeImageGenerationRequestOptions, resolveImageNegativePromptCapability } from '../../src/scripts/ui/image-generation-params-utils.js';
 import { createImagePromptRuntime } from '../../src/scripts/ui/image-prompt/image-prompt-runtime.js';
 import { normalizeImageGenerationReferenceItems, getGeneratedImageReferenceItems } from '../../src/scripts/ui/image-generation-reference-utils.js';
 import { createImageGenerationReferenceStore } from '../../src/scripts/ui/image-generation-reference-store.js';
 import { createImageGenerationReplayRuntime, resolveImageGenerationReplayConfig } from '../../src/scripts/ui/chat/image-generation-replay-runtime.js';
+import { IMAGE_PREVIEW_JOB_TOKEN, createImageGenerationPreviews } from '../../src/scripts/ui/chat/image-generation-preview.js';
+import { localeColon, t } from '../../src/scripts/i18n/index.js';
 
 const source = await readFile(new URL('../../src/scripts/ui/app.js', import.meta.url), 'utf8');
 const extract = (start, end) => {
@@ -26,6 +28,8 @@ const loadSource = extract('const ensureRecentMessagesAndWorlds =', 'const refre
 const cancelSource = extract("if (action === 'cancel-media-generation')", "if (action === 'generate-image')");
 const contextSource = source.match(/const getChatImageJobContextKey =[^\n]+/)?.[0];
 assert(contextSource, 'The app must capture both storage scope and archive identity');
+// 生成中的占位消息：前缀与冒号随界面语言（中文仍是「正在生成插图：…」）
+assert.match(runSource, /content: `\$\{t\(surfaceCopy\.pendingText\)\}\$\{localeColon\(\)\}\$\{imagePrompt\}`/);
 const clone = value => JSON.parse(JSON.stringify(value));
 const deferred = () => {
   let resolve, reject;
@@ -82,7 +86,14 @@ const fixture = ({ configGate = null, worldGate = null, imageConfig = null } = {
   let config = imageConfig || { provider: 'novelai', model: 'nai-diffusion-4-5-full' };
   const noop = () => {};
   const work = createSessionAsyncWorkRuntime();
+  const previews = createImageGenerationPreviews({ documentRef: null, schedule: () => {} });
+  const deletedFiles = [];
   const sandbox = {
+    imageGenerationPreviews: previews, IMAGE_PREVIEW_JOB_TOKEN, t, localeColon,
+    maybeDeleteGeneratedImageFileIfUnreferenced: (asset, room) => deletedFiles.push([asset?.output?.path, room]),
+    // 本聊天参考图：按模型上限截断
+    loadChatPinnedReferences: async (_room, capability) => [{ dataUrl: 'data:image/png;base64,cGlu', name: '三视图' }, { dataUrl: 'data:image/png;base64,cGluMg==', name: '服装' }]
+      .slice(0, capability?.supported ? capability.max : 0),
     AbortController, console, chatStore, chatImageJobs: jobs, contactsStore: {},
     window: { toastr: Object.fromEntries(['info', 'success', 'warning', 'error'].map(name => [name, text => toasts.push([name, text])])) },
     logger: { warn: noop },
@@ -91,7 +102,7 @@ const fixture = ({ configGate = null, worldGate = null, imageConfig = null } = {
     normalizeImageGenerationReferenceItems, getGeneratedImageReferenceItems,
     createImageGenerationReplayRuntime, resolveImageGenerationReplayConfig,
     imageGenerationReferenceStore: createImageGenerationReferenceStore({}),
-    imageGenerationParamsStore: paramsStore, mergeImageGenerationRequestOptions,
+    imageGenerationParamsStore: paramsStore, mergeImageGenerationRequestOptions, getParamsForImageConfig,
     imagePromptRuntime: createImagePromptRuntime({ paramsStore }),
     sessionAsyncWorkRuntime: work,
     isChatSendTargetAvailable: () => true,
@@ -137,7 +148,7 @@ const fixture = ({ configGate = null, worldGate = null, imageConfig = null } = {
       negativePrompt: call.options.options.negativePrompt, generationParams,
       output: { path: `D:\\images\\result-${suffix}.png`, mime: 'image/png' } });
   };
-  return { sid, jobs, work, chatStore, calls, writes, rendered, toasts, preset, config, api: sandbox.api, complete, list,
+  return { sid, jobs, work, chatStore, calls, writes, rendered, toasts, preset, config, api: sandbox.api, complete, list, previews, deletedFiles,
     put: message => rows.set(key(message.id), message),
     setArchive: value => { archive = value; },
     setConfig: value => { config = value; },
@@ -151,8 +162,12 @@ const fixture = ({ configGate = null, worldGate = null, imageConfig = null } = {
   await tick();
   assert.deepEqual(clone(f.calls[0].options.options.referenceImages), references.map(item => item.dataUrl));
   const mid = f.list()[0].id;
+  // 生成中的中间画面按这条消息记录（原位显示），结束后清掉
+  f.calls[0].options.onPreview({ dataUrl: 'data:image/jpeg;base64,cA==', step: 3, total: 28 });
+  assert.equal(f.previews.get(mid, IMAGE_PREVIEW_JOB_TOKEN).step, 3);
   f.calls[0].reject(new Error('fixture image provider failure'));
   assert.equal(await originalRun, false);
+  assert.equal(f.previews.get(mid, IMAGE_PREVIEW_JOB_TOKEN), null);
   assert.deepEqual(clone(f.chatStore.findMessage(mid).meta.generatedMedia.generationParams.referenceImages), references.map(item => item.dataUrl));
   const retry = f.api.retry({ sessionId: f.sid, messageId: mid });
   await tick();
@@ -165,6 +180,53 @@ const fixture = ({ configGate = null, worldGate = null, imageConfig = null } = {
   assert.deepEqual(getGeneratedImageReferenceItems(clone(f.chatStore.findMessage(mid).meta.generatedMedia))
     .map(({ dataUrl, name }) => ({ dataUrl, name })), references);
   console.log('ok - failed image retry resends its original reference images');
+}
+
+{
+  // 失败（不是取消）时留下最后一张中间图；重试结束后旧的中间图文件不再需要
+  const f = fixture({ imageConfig: { provider: 'novelai', model: 'nai-diffusion-4-5-full' } });
+  const run = f.api.run({ prompt: 'fox', surface: 'writing' });
+  await tick();
+  const mid = f.list()[0].id;
+  f.calls[0].reject(Object.assign(new Error('stream cut'), { partialImage: { path: 'D:\\images\\generated_partial_1.jpg', mime: 'image/jpeg', step: 26, total: 28 } }));
+  assert.equal(await run, false);
+  assert.deepEqual(clone(f.chatStore.findMessage(mid).meta.generatedMedia.partialImage), { path: 'D:\\images\\generated_partial_1.jpg', mime: 'image/jpeg', step: 26, total: 28 });
+  const retry = f.api.retry({ sessionId: f.sid, messageId: mid });
+  await tick();
+  assert.equal(f.chatStore.findMessage(mid).meta.generatedMedia.partialImage, undefined, 'a new attempt starts without the old partial image');
+  f.complete(1, 'after-partial');
+  assert.equal(await retry, true);
+  assert.deepEqual(f.deletedFiles, [['D:\\images\\generated_partial_1.jpg', f.sid]]);
+
+  const cancelled = f.api.run({ prompt: 'fox 2', surface: 'writing' });
+  await tick();
+  const cancelledId = f.list().at(-1).id;
+  f.calls.at(-1).reject(Object.assign(new Error('Aborted'), { name: 'AbortError', partialImage: { path: 'x' } }));
+  assert.equal(await cancelled, false);
+  assert.equal(f.chatStore.findMessage(cancelledId).meta.generatedMedia.partialImage, undefined, 'a cancelled run keeps no partial image');
+  console.log('ok - failed image jobs keep their last partial image and drop it once retried');
+}
+
+{
+  // 自动配图带上本聊天参考图；指定了参考图（手动、重试）时不另外加；模型不支持参考图时不带
+  const f = fixture({ imageConfig: { provider: 'custom', model: 'reference-fixture' } });
+  const auto = f.api.run({ prompt: 'fox', surface: 'writing', autoGenerated: true, usePinnedReferences: true });
+  await tick();
+  assert.deepEqual(clone(f.calls[0].options.options.referenceImages), ['data:image/png;base64,cGlu', 'data:image/png;base64,cGluMg==']);
+  f.complete(0, 'auto-pinned');
+  assert.equal(await auto, true);
+  const manual = f.api.run({ prompt: 'fox', surface: 'writing', referenceImages: [{ dataUrl: 'data:image/png;base64,bWFu', name: 'm' }], usePinnedReferences: true });
+  await tick();
+  assert.deepEqual(clone(f.calls[1].options.options.referenceImages), ['data:image/png;base64,bWFu']);
+  f.complete(1, 'manual');
+  await manual;
+  const plain = fixture({ imageConfig: { provider: 'novelai', model: 'nai-diffusion-4-5-full' } });
+  const run = plain.api.run({ prompt: 'fox', surface: 'writing', autoGenerated: true, usePinnedReferences: true });
+  await tick();
+  assert.equal(plain.calls[0].options.options.referenceImages, undefined, 'a model without reference support gets none');
+  plain.complete(0, 'nai');
+  await run;
+  console.log('ok - automatic images carry the chat reference images');
 }
 
 {

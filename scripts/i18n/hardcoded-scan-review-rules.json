@@ -8,7 +8,8 @@
     "agent_semantic_source": "Stable Maid/App Knowledge, planner, tool-observation, or retrieval semantics. This source is intentionally not mechanically translated; English output is enforced separately.",
     "canonical_localized_default": "Canonical built-in content retained for identity/migration comparison and localized through a stable content or prompt ID before use.",
     "storage_internal": "Persistence sentinel, legacy-data identity, migration message, or storage diagnostic; visible product chrome is covered by the UI catalog.",
-    "compatibility_guidance": "Compatibility-specific diagnostic text whose complete user-facing error is localized as a catalog template."
+    "compatibility_guidance": "Compatibility-specific diagnostic text whose complete user-facing error is localized as a catalog template.",
+    "native_language_name": "Language names written in their own language (such as 繁體中文 or 日本語) so speakers of that language can find them; they are shown as-is in every interface language and are not translated."
   },
   "rules": [
     {

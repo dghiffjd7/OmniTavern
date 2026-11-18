@@ -53,6 +53,24 @@ const normalizeArtifacts = values => {
   return artifacts;
 };
 
+// A moment that was not published: the planner needs its text and undrawn images
+// to continue it. Kept image IDs are recorded in artifacts.
+const normalizePendingMoment = raw => {
+  const content = text(raw?.content, 2000);
+  if (!content) return null;
+  return { content, remainingPrompts: list(raw?.remainingPrompts).map(value => text(value, 2000)).filter(Boolean).slice(0, 4) };
+};
+
+// The newest moments.publish in recent turns decides: other tools in between
+// (redrawing an image, say) do not settle it, and publishing clears it.
+const PENDING_MOMENT_TURN_WINDOW = 6;
+export const findMaidPendingMoment = (turns = []) => {
+  for (const turn of list(turns).slice(-PENDING_MOMENT_TURN_WINDOW).reverse()) {
+    if (list(turn?.resultBasis?.tools).some(tool => tool?.name === 'moments.publish')) return turn.resultBasis.pendingMoment || null;
+  }
+  return null;
+};
+
 const normalizeTool = raw => {
   const tool = raw && typeof raw === 'object' ? raw : {};
   return {
@@ -75,6 +93,7 @@ export const normalizeMaidResultBasis = raw => {
     Math.min(10000, Math.floor(Number(raw.succeededToolCount) || 0)),
   ));
   const artifacts = normalizeArtifacts(raw.artifacts);
+  const pendingMoment = normalizePendingMoment(raw.pendingMoment);
   return {
     kind: succeededToolCount ? 'tool_execution'
       : raw.kind === 'explanation' && !toolCount ? 'explanation' : 'unverified',
@@ -87,6 +106,7 @@ export const normalizeMaidResultBasis = raw => {
     tools,
     sources: normalizeSources(list(raw.sources)),
     ...(artifacts.length ? { artifacts } : {}),
+    ...(pendingMoment ? { pendingMoment } : {}),
   };
 };
 
@@ -108,6 +128,7 @@ export const buildMaidResultBasis = (result = {}, { traceView = null, recordedAt
   const steps = useResultSteps ? resultSteps : retainPrevious ? previous.tools : traceSteps;
   const usedTraceIndexes = new Set();
   const tools = [], sources = [], artifacts = [], appliedTargets = new Map();
+  let pendingMoment = useResultSteps ? null : previous?.pendingMoment;
   for (const [stepIndex, step] of steps.entries()) {
     const output = stepOutput(step);
     if (output.localToolExecutionSkipped === true || step?.status === 'skipped') continue;
@@ -130,6 +151,14 @@ export const buildMaidResultBasis = (result = {}, { traceView = null, recordedAt
       }
     }
     tools.push(tool);
+    // These images exist and were paid for even though the post stopped, so the
+    // step's own status does not decide whether they are recorded.
+    if (tool.name === 'moments.publish') {
+      for (const kept of list(output.keptImages)) {
+        artifacts.push({ attachmentId: kept?.attachmentId, subject: kept?.prompt, purpose: 'moment' });
+      }
+      pendingMoment = output.ok === false ? output : null;
+    }
     if (tool.status === 'succeeded') {
       if (tool.name === 'media.generate_image' && output.ok === true) {
         artifacts.push({ ...output.visualSpec, attachmentId: output.attachmentId });
@@ -175,5 +204,6 @@ export const buildMaidResultBasis = (result = {}, { traceView = null, recordedAt
     sources: useResultSteps ? sources : [...sources, ...list(previous?.sources)],
     artifacts: (useResultSteps ? artifacts : [...artifacts, ...list(previous?.artifacts)])
       .map(artifact => ({ ...artifact, target: appliedTargets.get(artifact.attachmentId) || artifact.target })),
+    pendingMoment,
   });
 };

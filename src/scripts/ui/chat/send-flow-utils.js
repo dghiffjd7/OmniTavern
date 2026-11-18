@@ -1145,6 +1145,8 @@ export const resolveSyspromptProtocolFlags = ({
   rpUiMode = false,
   isGroupChat = false,
   summaryEnabled = false,
+  // 这次请求注入了 QQ聊天格式（bridge.isPhoneChatFormatActive）：模型会照协议回复，要按协议解析
+  phoneChatFormatActive = false,
 } = {}) => {
   const dialogueEnabled = isEnabledPromptRule(sysp?.dialogue_enabled, sysp?.dialogue_rules);
   const groupEnabled = isEnabledPromptRule(sysp?.group_enabled, sysp?.group_rules);
@@ -1158,7 +1160,7 @@ export const resolveSyspromptProtocolFlags = ({
     groupEnabled,
     momentCreateEnabled,
     protocolEnabled:
-      !rpUiMode && (momentCreateEnabled || (isGroupChat ? groupEnabled : dialogueEnabled)),
+      !rpUiMode && (momentCreateEnabled || phoneChatFormatActive === true || (isGroupChat ? groupEnabled : dialogueEnabled)),
     disableSummaryForThis: !summaryEnabled,
   };
 };

@@ -17,6 +17,14 @@ const ACTION_ICON_MAP = {
 
 const DANGER_ACTIONS = new Set(['delete', 'cancel-media-generation']);
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
+const TRANSLATE_ICON_PATHS = Object.freeze([
+  'M4 5h9',
+  'M8.5 3v2',
+  'M11 5c-1 4-3.5 7-7 9',
+  'M6 9c1.5 2.5 3.5 4 6 5',
+  'm13 21 4-9 4 9',
+  'M14.5 18h5',
+]);
 const CHECK_FORMAT_ICON_PATHS = Object.freeze([
   'M4 6h10',
   'M4 12h7',
@@ -185,6 +193,8 @@ export const createContextMenuActionButton = ({
     icon.textContent = String(action.icon);
   } else if (key === 'check-format') {
     icon.appendChild(createStrokeIcon(documentLike, CHECK_FORMAT_ICON_PATHS));
+  } else if (key === 'steward-translate') {
+    icon.appendChild(createStrokeIcon(documentLike, TRANSLATE_ICON_PATHS));
   } else if (key === 'speak') {
     icon.appendChild(createStrokeIcon(documentLike, SPEAK_ICON_PATHS));
   } else {

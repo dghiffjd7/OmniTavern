@@ -216,6 +216,13 @@ const parse = (raw, userName = '我') => {
   assert.equal(validateBuiltinPhoneFormat(wrongPlacement, { surface: 'private_chat' }).valid, false);
   assert.ok(validateBuiltinPhoneFormat(wrongPlacement, { surface: 'private_chat' }).issues.includes('function_block.invalid_position'));
   console.log('ok - validator enforces inline image and ordered postamble placement');
+
+  // 英文提示词要求的 Summary 标签也是摘要块，不算多余文字
+  const englishSummary = raw.replace('<details><summary>摘要</summary>', '<details><summary>Summary</summary>');
+  assert.notEqual(englishSummary, raw);
+  const englishValidation = validateBuiltinPhoneFormat(englishSummary, { surface: 'private_chat' });
+  assert.equal(englishValidation.valid, true, englishValidation.issues.join(', '));
+  console.log('ok - validator accepts the English Summary label');
 }
 
 {

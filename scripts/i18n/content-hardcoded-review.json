@@ -12,6 +12,12 @@
     "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
   },
   {
+    "file": "src/scripts/agent/agent-tool-registry.js",
+    "text": "正在规划：只能读取和查看，写入工具「\u0000」要等用户在计划卡上点「开始做」后才能用。请把计划交给用户。",
+    "category": "agent_semantic_source",
+    "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
+  },
+  {
     "file": "src/scripts/agent/app-feature-catalog.js",
     "text": "用户明确要求删除且目标准确唯一时，省略 preview 或传 preview:false，由 APP 确认通过后才删除；preview:true 仅用于预览、方案或明确先看清单再回复的偏好，不执行删除。",
     "category": "agent_semantic_source",
@@ -1645,7 +1651,7 @@
   },
   {
     "file": "src/scripts/agent/app-feature-catalog.js",
-    "text": "name/worldbookId/id 指定世界书；省略时读取当前会话世界书；默认返回条目索引和短预览；需要正文时传 includeContent:true、entryId、entryTitle 或 query；maxEntries/maxContentLength 控制返回量",
+    "text": "name/worldbookId/id 指定世界书；省略时读取当前会话世界书；默认返回条目索引和短预览；需要正文时传 includeContent:true、entryId、entryTitle 或 query；maxEntries/maxContentLength 控制返回量；本任务里同样的读取已做过时只回条目信息，",
     "category": "agent_semantic_source",
     "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
   },
@@ -1843,13 +1849,13 @@
   },
   {
     "file": "src/scripts/agent/app-feature-catalog.js",
-    "text": "以用户身份在动态页发布一条动态；发布后角色们可自动前来评论。",
+    "text": "以用户身份在动态页发布一条动态，可以附图；发布后角色们可自动前来评论。",
     "category": "agent_semantic_source",
     "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
   },
   {
     "file": "src/scripts/agent/app-feature-catalog.js",
-    "text": "content 必填：动态正文（以用户口吻撰写，不要写成女仆的口吻；文内可用 @联系人名 提及联系人）；generateComments 默认 true 会让角色们自动评论（调用模型），用户明确说不要评论时传 false。发布成功即完成，不需要跳转页面或再次确认。",
+    "text": "content 必填：动态正文（以用户口吻撰写，不要写成女仆的口吻；文内可用 @联系人名 提及联系人）；generateComments 默认 true 会让角色们自动评论（调用模型），用户明确说不要评论时传 false。附图（合计最多 9 张）：attachmentIds 放用户这次贴给你的图（id、文件名或第几张）",
     "category": "agent_semantic_source",
     "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
   },
@@ -3451,7 +3457,7 @@
   },
   {
     "file": "src/scripts/agent/app-feature-catalog.js",
-    "text": "内置能力（目前有随机互动）默认关闭。用户需要时由女仆请求开启，用户在 APP 里确认后持久开启，可在 女仆设置 → 技能 随时关闭；不提供始终允许。",
+    "text": "内置能力（目前有随机互动、地图、天气）默认关闭。用户需要时由女仆请求开启，用户在 APP 里确认后持久开启，可在 女仆设置 → 技能 随时关闭；不提供始终允许。",
     "category": "agent_semantic_source",
     "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
   },
@@ -4369,7 +4375,7 @@
   },
   {
     "file": "src/scripts/agent/app-feature-catalog.js",
-    "text": "按用户说法检索已登记的 APP 能力和使用说明，返回候选条目和对应工具；目录并非完整 APP 功能清单，无匹配不能说明 APP 不支持。应区分 APP 功能是否存在、女仆是否有执行工具、是否已核实。",
+    "text": "按用户说法检索已登记的 APP 能力和使用说明，返回候选条目和对应工具。应区分 APP 功能是否存在、女仆是否有执行工具、是否已核实。",
     "category": "agent_semantic_source",
     "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
   },
@@ -4543,7 +4549,7 @@
   },
   {
     "file": "src/scripts/agent/app-feature-catalog.js",
-    "text": "目录范围：已登记的 APP 能力和使用说明，非穷尽；无匹配不能判断 APP 不支持。",
+    "text": "目录范围：已登记的 APP 能力和使用说明，非穷尽。",
     "category": "agent_semantic_source",
     "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
   },
@@ -5473,7 +5479,7 @@
   },
   {
     "file": "src/scripts/agent/maid-model-planner.js",
-    "text": "预览成功只说明清单已生成，不代表批准或完成删除。已生成待确认预览时，必须等待用户后续明确确认并沿用 APP 的待确认协议；不得自动把 preview:true 改成实际删除，也不得代替用户批准。",
+    "text": "已生成待确认预览时，必须等待用户后续明确确认并沿用 APP 的待确认协议；不得自动把 preview:true 改成实际删除，也不得代替用户批准。",
     "category": "agent_semantic_source",
     "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
   },
@@ -5599,7 +5605,7 @@
   },
   {
     "file": "src/scripts/agent/maid-model-planner.js",
-    "text": "只使用已登记且当前可用的工具。删除、覆盖及配置写入必须符合用户明确请求、实际工具参数和下述 APP 确认协议；只有界面入口而无写入工具的功能，使用该界面入口。工具存在不代表用户已授权执行。",
+    "text": "只使用已登记且当前可用的工具。删除、覆盖及配置写入必须符合用户明确请求、实际工具参数和下述 APP 确认协议；只有界面入口而无写入工具的功能，使用该界面入口。",
     "category": "agent_semantic_source",
     "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
   },
@@ -5623,7 +5629,7 @@
   },
   {
     "file": "src/scripts/agent/maid-model-planner.js",
-    "text": "界面呈现原则：普通查询与操作默认在后台执行，不要主动打开面板、进入聊天室或切换页面；查询、查看、检查等词不等于要求打开界面。只有用户明确要求打开、进入、带他去看，或任务本身必须由用户在界面继续填写时才导航。",
+    "text": "界面呈现原则：普通查询与操作默认在后台执行，不要主动打开面板、进入聊天室或切换页面。只有用户明确要求打开、进入、带他去看，或任务本身必须由用户在界面继续填写时才导航。",
     "category": "agent_semantic_source",
     "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
   },
@@ -5677,7 +5683,7 @@
   },
   {
     "file": "src/scripts/agent/maid-model-planner.js",
-    "text": "如果用户只要求查询、查看、检查或确认，禁止调用 writes:true 的功能；权限确认不代表用户授权了原请求之外的写入。",
+    "text": "如果用户只要求查询、查看、检查或确认，禁止调用 writes:true 的功能。",
     "category": "agent_semantic_source",
     "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
   },
@@ -5797,7 +5803,7 @@
   },
   {
     "file": "src/scripts/agent/maid-model-planner.js",
-    "text": "disabled 只表示世界书触发状态，不代表该条目不是人物，不能仅因此排除。",
+    "text": "按条目内容分类，不看 disabled。",
     "category": "agent_semantic_source",
     "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
   },
@@ -5857,7 +5863,7 @@
   },
   {
     "file": "src/scripts/agent/maid-model-planner.js",
-    "text": "最近步骤观察（可能按预算省略；truncated 等字段为工具原始状态，不表示正文已全部呈现）： \u0000",
+    "text": "最近步骤观察（可能按预算省略）： \u0000",
     "category": "agent_semantic_source",
     "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
   },
@@ -7099,7 +7105,7 @@
   },
   {
     "file": "src/scripts/agent/tools/maid-capability-tools.js",
-    "text": "「随机互动」没有开启；需要时先用 maid.capability.request_enable 请用户开启",
+    "text": "「\u0000」没有开启；需要时先用 maid.capability.request_enable 请用户开启",
     "category": "agent_semantic_source",
     "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
   },
@@ -7645,7 +7651,7 @@
   },
   {
     "file": "src/scripts/storage/maid-conversation-store.js",
-    "text": "用户偏好指示（来自对话，不代表已写入长期记忆）",
+    "text": "用户偏好指示（来自对话）",
     "category": "agent_semantic_source",
     "reason": "These are structured Maid memory/history labels supplied back to the planner, not UI locale strings; output language is separately constrained."
   },
@@ -7782,6 +7788,18 @@
     "reason": "These are structured Maid memory/history labels supplied back to the planner, not UI locale strings; output language is separately constrained."
   },
   {
+    "file": "src/scripts/storage/maid-conversation-store.js",
+    "text": "给用户的选项: \u0000",
+    "category": "agent_semantic_source",
+    "reason": "These are structured Maid memory/history labels supplied back to the planner, not UI locale strings; output language is separately constrained."
+  },
+  {
+    "file": "src/scripts/storage/maid-conversation-store.js",
+    "text": "给用户的计划: \u0000",
+    "category": "agent_semantic_source",
+    "reason": "These are structured Maid memory/history labels supplied back to the planner, not UI locale strings; output language is separately constrained."
+  },
+  {
     "file": "src/scripts/storage/mcp-server-store.js",
     "text": "最多配置 \u0000 个 MCP 服务",
     "category": "storage_internal",
@@ -7836,31 +7854,43 @@
     "reason": "Official default records remain canonical Chinese for migration/equality checks and are localized by stable prompt IDs only when they are still unmodified."
   },
   {
-    "file": "src/scripts/storage/preset-store.js",
+    "file": "src/scripts/storage/summary-rules-defaults.js",
     "text": "每次输出结束后，**紧跟着**以一句话概括本次互动的摘要，确保<details><summary>摘要</summary>",
     "category": "canonical_localized_default",
     "reason": "Official default records remain canonical Chinese for migration/equality checks and are localized by stable prompt IDs only when they are still unmodified."
   },
   {
-    "file": "src/scripts/storage/preset-store.js",
+    "file": "src/scripts/storage/summary-rules-defaults.js",
     "text": "<内容>",
     "category": "canonical_localized_default",
     "reason": "Official default records remain canonical Chinese for migration/equality checks and are localized by stable prompt IDs only when they are still unmodified."
   },
   {
-    "file": "src/scripts/storage/preset-store.js",
-    "text": "</details>标签顺序正确，摘要**纯中文输出**，不得夹杂其它语言",
+    "file": "src/scripts/storage/summary-rules-defaults.js",
+    "text": "</details>标签顺序正确，摘要用中文书写，人名等专有名词保留原文",
     "category": "canonical_localized_default",
     "reason": "Official default records remain canonical Chinese for migration/equality checks and are localized by stable prompt IDs only when they are still unmodified."
   },
   {
-    "file": "src/scripts/storage/preset-store.js",
+    "file": "src/scripts/storage/summary-rules-defaults.js",
+    "text": "摘要用中文书写，人名等专有名词保留原文",
+    "category": "canonical_localized_default",
+    "reason": "Official default records remain canonical Chinese for migration/equality checks and are localized by stable prompt IDs only when they are still unmodified."
+  },
+  {
+    "file": "src/scripts/storage/summary-rules-defaults.js",
+    "text": "摘要**纯中文输出**，不得夹杂其它语言",
+    "category": "canonical_localized_default",
+    "reason": "Official default records remain canonical Chinese for migration/equality checks and are localized by stable prompt IDs only when they are still unmodified."
+  },
+  {
+    "file": "src/scripts/storage/summary-rules-defaults.js",
     "text": "摘要格式示例：",
     "category": "canonical_localized_default",
     "reason": "Official default records remain canonical Chinese for migration/equality checks and are localized by stable prompt IDs only when they are still unmodified."
   },
   {
-    "file": "src/scripts/storage/preset-store.js",
+    "file": "src/scripts/storage/summary-rules-defaults.js",
     "text": "用一句话概括本条回复的内容，禁止不必要的总结和升华",
     "category": "canonical_localized_default",
     "reason": "Official default records remain canonical Chinese for migration/equality checks and are localized by stable prompt IDs only when they are still unmodified."
@@ -8260,5 +8290,203 @@
     "text": "不是预设设定档格式",
     "category": "canonical_localized_default",
     "reason": "Official default records remain canonical Chinese for migration/equality checks and are localized by stable prompt IDs only when they are still unmodified."
+  },
+  {
+    "file": "src/scripts/agent/steward-tasks.js",
+    "text": "简体中文",
+    "category": "native_language_name",
+    "reason": "Translation target names in the Housekeeper settings are written in their own language and shown unchanged in every interface language."
+  },
+  {
+    "file": "src/scripts/agent/steward-tasks.js",
+    "text": "繁體中文",
+    "category": "native_language_name",
+    "reason": "Translation target names in the Housekeeper settings are written in their own language and shown unchanged in every interface language."
+  },
+  {
+    "file": "src/scripts/agent/steward-tasks.js",
+    "text": "日本語",
+    "category": "native_language_name",
+    "reason": "Translation target names in the Housekeeper settings are written in their own language and shown unchanged in every interface language."
+  },
+  {
+    "file": "src/scripts/agent/app-feature-catalog.js",
+    "text": "开启地图",
+    "category": "agent_semantic_source",
+    "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
+  },
+  {
+    "file": "src/scripts/agent/app-feature-catalog.js",
+    "text": "打开地图",
+    "category": "agent_semantic_source",
+    "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
+  },
+  {
+    "file": "src/scripts/agent/app-feature-catalog.js",
+    "text": "在地图上找",
+    "category": "agent_semantic_source",
+    "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
+  },
+  {
+    "file": "src/scripts/agent/app-feature-catalog.js",
+    "text": "导航到",
+    "category": "agent_semantic_source",
+    "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
+  },
+  {
+    "file": "src/scripts/agent/app-feature-catalog.js",
+    "text": "怎么去",
+    "category": "agent_semantic_source",
+    "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
+  },
+  {
+    "file": "src/scripts/agent/app-feature-catalog.js",
+    "text": "怎么走",
+    "category": "agent_semantic_source",
+    "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
+  },
+  {
+    "file": "src/scripts/agent/app-feature-catalog.js",
+    "text": "谷歌地图",
+    "category": "agent_semantic_source",
+    "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
+  },
+  {
+    "file": "src/scripts/agent/app-feature-catalog.js",
+    "text": "高德",
+    "category": "agent_semantic_source",
+    "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
+  },
+  {
+    "file": "src/scripts/agent/app-feature-catalog.js",
+    "text": "按地点名生成地图卡片：搜索地点，或从起点（不填就是当前位置）到目的地的路线（开车／步行／骑车／公共交通）。用户点卡片上的按钮才在 Google 地图或高德地图打开（女仆设置 → 技能 → 地图 可选地图服务，默认跟随界面语言）。只做跳转，拿不到距离、时间、评分或营业时间。高德只能搜索地点，路线会改成搜索终点。属于内置能",
+    "category": "agent_semantic_source",
+    "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
+  },
+  {
+    "file": "src/scripts/agent/app-feature-catalog.js",
+    "text": "mode 填 search 或 route；search 用 query（地点名，知道城市就带上），route 用 destination，origin 留空表示当前位置，travelMode 可选 driving／walking／bicycling／transit",
+    "category": "agent_semantic_source",
+    "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
+  },
+  {
+    "file": "src/scripts/agent/app-feature-catalog.js",
+    "text": "开启天气",
+    "category": "agent_semantic_source",
+    "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
+  },
+  {
+    "file": "src/scripts/agent/app-feature-catalog.js",
+    "text": "天气预报",
+    "category": "agent_semantic_source",
+    "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
+  },
+  {
+    "file": "src/scripts/agent/app-feature-catalog.js",
+    "text": "气温",
+    "category": "agent_semantic_source",
+    "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
+  },
+  {
+    "file": "src/scripts/agent/app-feature-catalog.js",
+    "text": "会下雨吗",
+    "category": "agent_semantic_source",
+    "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
+  },
+  {
+    "file": "src/scripts/agent/app-feature-catalog.js",
+    "text": "下雨吗",
+    "category": "agent_semantic_source",
+    "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
+  },
+  {
+    "file": "src/scripts/agent/app-feature-catalog.js",
+    "text": "要不要带伞",
+    "category": "agent_semantic_source",
+    "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
+  },
+  {
+    "file": "src/scripts/agent/app-feature-catalog.js",
+    "text": "冷不冷",
+    "category": "agent_semantic_source",
+    "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
+  },
+  {
+    "file": "src/scripts/agent/app-feature-catalog.js",
+    "text": "热不热",
+    "category": "agent_semantic_source",
+    "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
+  },
+  {
+    "file": "src/scripts/agent/app-feature-catalog.js",
+    "text": "明天天气",
+    "category": "agent_semantic_source",
+    "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
+  },
+  {
+    "file": "src/scripts/agent/app-feature-catalog.js",
+    "text": "这周天气",
+    "category": "agent_semantic_source",
+    "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
+  },
+  {
+    "file": "src/scripts/agent/app-feature-catalog.js",
+    "text": "查询城市现在的天气与今天起 4 天的预报（Open-Meteo，免 key），APP 显示成天气卡片（当地时间、温度、体感、湿度、风、逐日高低温与降水概率，注明来源与获取时间）。没说城市时用女仆设置 → 技能 → 天气 的默认城市；同名地点分不清会返回候选，要问用户再带 region 重查。查询失败要如实说，不能编天气",
+    "category": "agent_semantic_source",
+    "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
+  },
+  {
+    "file": "src/scripts/agent/app-feature-catalog.js",
+    "text": "city 填城市名（留空用默认城市）；region 填省／州／国家，用来区分同名地点",
+    "category": "agent_semantic_source",
+    "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
+  },
+  {
+    "file": "src/scripts/agent/maid-worldbook-read-repeats.js",
+    "text": "同样的读取在第 \u0000 步做过，之后没有写入；这 \u0000 条正文在 <maid_worldbook_observations> 里已有这次读取会返回的全部内容，这里只回条目信息。确实需要重读时（例如书可能在别处被改过），传 reread 写明原因。",
+    "category": "agent_semantic_source",
+    "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
+  },
+  {
+    "file": "src/scripts/agent/maid-worldbook-read-repeats.js",
+    "text": "同样的读取在第 \u0000 步做过：没有匹配的条目，之后也没有写入。确实需要重读时，传 reread 写明原因。",
+    "category": "agent_semantic_source",
+    "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
+  },
+  {
+    "file": "src/scripts/agent/maid-worldbook-read-repeats.js",
+    "text": "同一本书同样的筛选（不计条数和长度参数）在本次任务里已经读了 \u0000 次（最近在第 \u0000 步），之间没有写入，相同的读取不会再执行。",
+    "category": "agent_semantic_source",
+    "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
+  },
+  {
+    "file": "src/scripts/agent/maid-worldbook-read-repeats.js",
+    "text": "同一本书同样的筛选（不计条数和长度参数），这是本次任务第 \u0000 次读取（上次在第 \u0000 步），之间没有写入。",
+    "category": "agent_semantic_source",
+    "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
+  },
+  {
+    "file": "src/scripts/agent/maid-result-cards.js",
+    "text": "，可多选",
+    "category": "agent_semantic_source",
+    "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
+  },
+  {
+    "file": "src/scripts/agent/maid-result-cards.js",
+    "text": "步骤：\u0000",
+    "category": "agent_semantic_source",
+    "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
+  },
+  {
+    "file": "src/scripts/agent/maid-result-cards.js",
+    "text": "会改动：\u0000",
+    "category": "agent_semantic_source",
+    "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
+  },
+  {
+    "file": "src/scripts/agent/maid-result-cards.js",
+    "text": "开始后用到的写入工具：\u0000",
+    "category": "agent_semantic_source",
+    "reason": "Agent-layer Han text is stable App Knowledge, intent detection, planner/tool semantics, or deterministic observations. It is not UI-copy source; English Maid responses are enforced by the prompt output-language guard and its tests."
   }
 ]

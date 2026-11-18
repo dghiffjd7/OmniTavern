@@ -1,3 +1,5 @@
+import { t } from '../../i18n/index.js';
+
 export const LINEAGE_NODE_TYPES = Object.freeze({
   PERSONA_CARD: 'persona_card',
   PRIVATE_CHAT: 'private_chat',
@@ -204,7 +206,7 @@ const addWorldEntryLineage = ({
   builder.addNode({
     id: worldNodeId,
     type: LINEAGE_NODE_TYPES.WORLDBOOK,
-    label: `${sourceLabel}世界书 ${worldId}`,
+    label: t('{value}世界书 {value2}', { value: t(sourceLabel), value2: worldId }),
     scopeId,
     meta: { worldId, sourceKind },
   });
@@ -298,7 +300,7 @@ const addDynamicWorldLineage = ({ builder, dynamicWorld, promptId, scopeId }) =>
       builder.addNode({
         id: worldNodeId,
         type: LINEAGE_NODE_TYPES.WORLDBOOK,
-        label: `会话世界书 ${worldId}`,
+        label: t('会话世界书 {value}', { value: worldId }),
         scopeId,
         meta: { worldId, sourceKind: 'session' },
       });
@@ -476,7 +478,7 @@ export const buildContextLineageGraphFromRequest = (request = null, {
   builder.addNode({
     id: promptId,
     type: LINEAGE_NODE_TYPES.PROMPT,
-    label: '本次 Prompt',
+    label: t('本次 Prompt'),
     scopeId: graphScopeId,
     meta: {
       requestId: normalizeString(req?.requestId),

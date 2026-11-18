@@ -3,7 +3,9 @@
 // 能力工具在真正执行前再读一次最新开关：路由过滤只用来挑能力，不能代替执行期检查。
 
 import { t } from '../../i18n/index.js';
-import { maidRandomCardRerollArgs } from '../maid-result-cards.js';
+import { maidRandomCardRerollArgs, normalizeMaidResultCard } from '../maid-result-cards.js';
+import { MAID_MAP_PROVIDER_LABELS, MAID_MAP_TRAVEL_MODES, buildMaidMapUrl, resolveMaidMapProvider } from '../maid-map-links.js';
+import { MAID_WEATHER_CITY_MAX_LENGTH, cleanMaidWeatherText, describeMaidWeatherCode, isLatinMaidWeatherQuery } from '../maid-weather.js';
 
 const trim = value => String(value ?? '').trim();
 
@@ -17,13 +19,39 @@ export const MAID_BUILTIN_CAPABILITIES = Object.freeze({
     network: '',
     tools: Object.freeze(['maid.random']),
   }),
+  map: Object.freeze({
+    id: 'map',
+    title: '地图',
+    subtitle: 'Google 地图 · 高德地图',
+    purpose: '按地点名打开地图搜索或路线（只做跳转，不读取地图数据）',
+    network: '',
+    tools: Object.freeze(['maid.map']),
+    // 技能页能力行下方的单项设置（值存在 maid-settings-store 的 options）
+    options: Object.freeze([
+      Object.freeze({ key: 'provider', label: '地图服务', choices: Object.freeze([['auto', '跟随界面语言'], ['google', 'Google 地图'], ['amap', '高德地图']]) }),
+    ]),
+  }),
+  weather: Object.freeze({
+    id: 'weather',
+    title: '天气',
+    subtitle: 'Open-Meteo · 联网',
+    purpose: '查询城市现在的天气和未来 3 天的预报',
+    network: 'Open-Meteo (open-meteo.com)',
+    tools: Object.freeze(['maid.weather']),
+    options: Object.freeze([
+      Object.freeze({ key: 'defaultCity', label: '默认城市', type: 'text', placeholder: '没说城市时用这里，例如：台北', maxLength: MAID_WEATHER_CITY_MAX_LENGTH }),
+    ]),
+  }),
 });
 
 export const describeMaidBuiltinCapability = id => MAID_BUILTIN_CAPABILITIES[trim(id)] || null;
 
 // 技能页「内置能力」分组：说明 + 设置里的开关状态
-export const listMaidBuiltinCapabilityStates = settingsStore => Object.values(MAID_BUILTIN_CAPABILITIES)
-  .map(info => ({ ...info, enabled: false, lastUsedAt: 0, ...(settingsStore?.getBuiltinCapability?.(info.id) || {}) }));
+// values 是单项设置的当前值（键见 info.options）
+export const listMaidBuiltinCapabilityStates = settingsStore => Object.values(MAID_BUILTIN_CAPABILITIES).map((info) => {
+  const { options: values = {}, ...state } = settingsStore?.getBuiltinCapability?.(info.id) || {};
+  return { ...info, enabled: false, lastUsedAt: 0, ...state, values };
+});
 
 // 均匀的随机整数 [0, max)：拒绝采样，避免取模偏差
 const randomInt = (max, random = globalThis.crypto) => {
@@ -65,13 +93,13 @@ export const buildMaidRandomCard = (result, { now = Date.now } = {}) => ({
     : { mode: result.mode, options: result.options, picked: result.picked },
 });
 
-const capabilityOffResult = () => ({ ok: false, reason: 'capability_disabled', capabilityId: 'random', message: '「随机互动」没有开启；需要时先用 maid.capability.request_enable 请用户开启' });
+const capabilityOffResult = (id = 'random') => ({ ok: false, reason: 'capability_disabled', capabilityId: id, message: `「${MAID_BUILTIN_CAPABILITIES[id].title}」没有开启；需要时先用 maid.capability.request_enable 请用户开启` });
+// 结果卡上的动作（再来一次、打开地图）在能力已关时给用户看的提示
+const capabilityOffCardResult = id => ({ ...capabilityOffResult(id), message: t('「{name}」已关闭，可在女仆设置 → 技能重新开启', { name: t(MAID_BUILTIN_CAPABILITIES[id].title) }) });
 
 /** 结果卡「再来一次」：和工具走同一个执行期检查（读最新开关），产生新卡，不改旧卡。 */
 export const rerollMaidRandomCard = async (card, { settingsStore = null, random = globalThis.crypto, now = Date.now } = {}) => {
-  if (!settingsStore?.getBuiltinCapability?.('random')?.enabled) {
-    return { ...capabilityOffResult(), message: t('「{name}」已关闭，可在女仆设置 → 技能重新开启', { name: t(MAID_BUILTIN_CAPABILITIES.random.title) }) };
-  }
+  if (!settingsStore?.getBuiltinCapability?.('random')?.enabled) return capabilityOffCardResult('random');
   const args = maidRandomCardRerollArgs(card);
   const result = args ? rollMaidRandom(args, { random }) : { ok: false, reason: 'invalid_card' };
   if (!result.ok) return result;
@@ -79,8 +107,51 @@ export const rerollMaidRandomCard = async (card, { settingsStore = null, random 
   return { ok: true, card: buildMaidRandomCard(result, { now }) };
 };
 
+// 地图卡：只存地点名与方式，网址打开时再按卡上的字段生成（见 maid-map-links.js）
+export const buildMaidMapCard = ({ provider, mode, query = '', origin = '', destination = '', travelMode = '' }, { now = Date.now } = {}) => normalizeMaidResultCard({
+  id: createCardId(),
+  type: 'map',
+  createdAt: now(),
+  data: mode === 'route' ? { provider, mode, origin, destination, travelMode } : { provider, mode, query },
+});
+
+/** 结果卡「打开」：读最新开关，按卡上的字段重新生成网址，交给 openUrl（返回是否打开成功）。 */
+export const openMaidMapCard = async (card, { settingsStore = null, openUrl = async () => false } = {}) => {
+  if (!settingsStore?.getBuiltinCapability?.('map')?.enabled) return capabilityOffCardResult('map');
+  const data = normalizeMaidResultCard(card)?.type === 'map' ? normalizeMaidResultCard(card).data : null;
+  const link = data ? buildMaidMapUrl(data) : null;
+  if (!link) return { ok: false, reason: 'invalid_card' };
+  if (!await openUrl(link.url)) return { ok: false, reason: 'open_failed', message: t('打不开地图链接') };
+  return { ok: true, url: link.url };
+};
+
+// 天气卡：地名、当地时间、当前天气与逐日预报，注明获取时间（来源 Open-Meteo 由渲染写上）
+export const buildMaidWeatherCard = ({ place, forecast, fetchedAt }, { now = Date.now } = {}) => normalizeMaidResultCard({
+  id: createCardId(),
+  type: 'weather',
+  createdAt: now(),
+  data: {
+    place: { name: place.name, region: place.region, country: place.country },
+    timezone: forecast.timezone,
+    localTime: forecast.localTime,
+    fetchedAt,
+    current: forecast.current,
+    daily: forecast.daily,
+  },
+});
+
+// 天气查询失败时给模型的说明（找不到且不是英文名：请模型改用英文名再查，见 maid-weather.js 的地名接口限制）
+const WEATHER_FAILURES = Object.freeze({
+  city_not_found: 'No place with that name was found; ask the user to check the city name.',
+  city_not_found_local: 'No match for this name; call again with the city\'s English name (for example Taipei, Tokyo or Kaohsiung).',
+  city_ambiguous: 'Several places match; ask the user which one they mean, then call again with region.',
+  weather_unavailable: 'The weather service did not respond; tell the user and do not guess the weather. You may offer a web search instead.',
+});
+
 export const createMaidCapabilityAgentTools = ({
   getSettingsStore = () => null,
+  getLocale = () => '',
+  getWeatherService = () => null,
   random = globalThis.crypto,
   now = Date.now,
 } = {}) => {
@@ -176,7 +247,7 @@ export const createMaidCapabilityAgentTools = ({
     execute: async (args = {}) => {
       const settings = store();
       // 执行期检查：读最新开关，不信任路由时的快照
-      if (!settings?.getBuiltinCapability?.('random')?.enabled) return capabilityOffResult();
+      if (!settings?.getBuiltinCapability?.('random')?.enabled) return capabilityOffResult('random');
       const result = rollMaidRandom(args, { random });
       if (!result.ok) return result;
       await settings.markBuiltinCapabilityUsed?.('random');
@@ -185,7 +256,94 @@ export const createMaidCapabilityAgentTools = ({
     summarizeResult: result => (result?.ok ? `random ${trim(result.mode)}: ${result.mode === 'dice' ? result.rolls.join(',') : result.picked.join(',')}` : `random failed: ${trim(result?.reason)}`),
   };
 
-  return [requestEnableTool, randomTool];
+  const mapTool = {
+    name: 'maid.map',
+    title: 'Open a place or directions in a map app',
+    description: 'Make a card that opens a place search (mode search: query) or directions (mode route: destination, optional origin and travelMode) in the user\'s map app; the user taps Open on the card. '
+      + 'Use place names, adding the city when known; leave origin empty for the user\'s current location. '
+      + 'You get no map data: do not state distances, travel times, ratings or opening hours. Summarize in one sentence.',
+    source: 'maid-builtin-capability', permissions: [], riskLevel: 'low',
+    capabilities: { read: true, write: false, network: false, cost: 'none', undo: 'none', modelContext: 'none', confirmation: 'none' },
+    schema: {
+      type: 'object', additionalProperties: false, required: ['mode'],
+      properties: {
+        mode: { type: 'string', enum: ['search', 'route'] },
+        query: { type: 'string', maxLength: 120 },
+        destination: { type: 'string', maxLength: 120 },
+        origin: { type: 'string', maxLength: 120 },
+        travelMode: { type: 'string', enum: [...MAID_MAP_TRAVEL_MODES] },
+      },
+    },
+    execute: async (args = {}) => {
+      const settings = store();
+      const capability = settings?.getBuiltinCapability?.('map');
+      if (!capability?.enabled) return capabilityOffResult('map');
+      const mode = args.mode === 'route' ? 'route' : 'search';
+      const provider = resolveMaidMapProvider(capability.options?.provider, getLocale());
+      const link = buildMaidMapUrl({ ...args, mode, provider });
+      if (!link) return { ok: false, reason: 'missing_place', message: mode === 'route' ? 'destination is empty' : 'query is empty' };
+      const card = buildMaidMapCard({ ...args, mode, provider }, { now });
+      await settings.markBuiltinCapabilityUsed?.('map');
+      return {
+        ok: true, mode, provider: MAID_MAP_PROVIDER_LABELS[provider], card,
+        ...(link.routeFallback ? { note: 'AMap links can only search a place, so the card opens a search for the destination; tell the user to tap Route in AMap.' } : {}),
+      };
+    },
+    summarizeResult: result => (result?.ok ? `map ${trim(result.mode)} card (${trim(result.provider)})` : `map failed: ${trim(result?.reason)}`),
+  };
+
+  const weatherTool = {
+    name: 'maid.weather',
+    title: 'Current weather and 3-day forecast',
+    description: 'Look up the current weather and the forecast for today and the next 3 days in a city (data from Open-Meteo). '
+      + 'Pass city as the city\'s English name (for example Taipei, Tokyo, Kaohsiung): the place search matches English names reliably, and the card still shows names in the user\'s language. '
+      + 'Add region (province, state, country or country code) when the user gave one or picked from options. Leave city empty to use the user\'s default city. '
+      + 'The APP shows the details as a card; reply in one or two sentences with only the key numbers. If the lookup fails, say so and never guess the weather.',
+    source: 'maid-builtin-capability', permissions: [], riskLevel: 'low',
+    capabilities: { read: true, write: false, network: true, cost: 'none', undo: 'none', modelContext: 'none', confirmation: 'none' },
+    schema: {
+      type: 'object', additionalProperties: false,
+      properties: {
+        city: { type: 'string', maxLength: MAID_WEATHER_CITY_MAX_LENGTH, description: 'English city name, e.g. Taipei' },
+        region: { type: 'string', maxLength: MAID_WEATHER_CITY_MAX_LENGTH },
+      },
+    },
+    execute: async (args = {}) => {
+      const settings = store();
+      const capability = settings?.getBuiltinCapability?.('weather');
+      if (!capability?.enabled) return capabilityOffResult('weather');
+      const city = cleanMaidWeatherText(args.city) || cleanMaidWeatherText(capability.options?.defaultCity);
+      if (!city) return { ok: false, reason: 'city_missing', message: 'No city was given and no default city is set; ask the user which city.' };
+      const service = getWeatherService();
+      const found = service ? await service.lookup({ city, region: cleanMaidWeatherText(args.region), locale: getLocale() }) : { ok: false, reason: 'weather_unavailable' };
+      // 查询期间能力被关掉：不产出结果
+      if (!settings.getBuiltinCapability?.('weather')?.enabled) return capabilityOffResult('weather');
+      if (!found.ok) {
+        const local = found.reason === 'city_not_found' && !isLatinMaidWeatherQuery(city);
+        const usedDefault = !cleanMaidWeatherText(args.city);
+        return {
+          ok: false, reason: found.reason, city, ...(found.options ? { options: found.options } : {}),
+          message: `${usedDefault ? `This was the user's default city "${city}". ` : ''}${WEATHER_FAILURES[local ? 'city_not_found_local' : found.reason] || WEATHER_FAILURES.weather_unavailable}`,
+        };
+      }
+      const card = buildMaidWeatherCard(found, { now });
+      if (!card) return { ok: false, reason: 'weather_unavailable', city, message: WEATHER_FAILURES.weather_unavailable };
+      await settings.markBuiltinCapabilityUsed?.('weather');
+      const { place, current, daily, localTime } = card.data;
+      return {
+        ok: true,
+        place: [place.name, place.region, place.country].filter(Boolean).join(', '),
+        localTime,
+        current: { temperatureC: current.temperature, feelsLikeC: current.feelsLike, condition: describeMaidWeatherCode(current.code).english, humidityPercent: current.humidity, windKmh: current.wind },
+        days: daily.map(day => ({ date: day.date, condition: describeMaidWeatherCode(day.code).english, minC: day.min, maxC: day.max, rainChancePercent: day.rain })),
+        source: 'Open-Meteo',
+        card,
+      };
+    },
+    summarizeResult: result => (result?.ok ? `weather ${trim(result.place)}: ${result.current?.temperatureC}C ${trim(result.current?.condition)}` : `weather failed: ${trim(result?.reason)}`),
+  };
+
+  return [requestEnableTool, randomTool, mapTool, weatherTool];
 };
 
 export const registerMaidCapabilityAgentTools = (registry, deps = {}) => {

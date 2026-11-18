@@ -36,7 +36,8 @@ for (const transport of ['provider_fc', 'prompted_json']) for (const scenario of
     const registry = createAgentToolRegistry({ logger });
     for (const name of toolNames) registry.register({ name, schema: schemas[name], riskLevel: 'low', permissions: [],
       capabilities: { read: true, write: false, network: false }, execute: async args => {
-        const observed = reads[executed.length];
+        // 按模型第几次决定对应录下来的读取：内容仍在已读记录里的重读不会走到工具
+        const observed = reads[requests.length - 1];
         assert.equal(name, observed.toolName);
         assert.deepEqual(args, observed.args);
         executed.push({ name, args });
@@ -45,7 +46,7 @@ for (const transport of ['provider_fc', 'prompted_json']) for (const scenario of
     const config = { provider: 'deepseek', model: 'deepseek-flash', baseUrl: 'https://api.deepseek.com' };
     const client = { async chat(messages, options) {
       requests.push(messages);
-      const read = reads[executed.length];
+      const read = reads[requests.length - 1];
       if (!options.tools?.length) return JSON.stringify(read
         ? { ok: true, action: 'tool', toolName: read.toolName, featureId, args: read.args }
         : { ok: true, action: 'final', message: draft });
@@ -65,7 +66,10 @@ for (const transport of ['provider_fc', 'prompted_json']) for (const scenario of
     const result = await agent.runPrompt(input, { roleCardId, submissionId: `${transport}-${scenario}`, uiMode: 'chat',
       capabilitySnapshot: { id: 'presentation-contract', useCandidates: true, candidateFeatures: [feature], promptFeatures: [feature] } });
     assert.equal(result.ok, true);
-    assert.equal(executed.length, reads.length, 'presentation adds no tool call or write');
+    const answeredFromLedger = result.steps.filter(step => step.output?.alreadyRead).map(step => step.index);
+    // 录下的 Gemini 那轮第 5、6 步只改 maxEntries 又读了一遍两本书，正文都还在已读记录里
+    assert.deepEqual(answeredFromLedger, scenario === 'worldbook' ? [3, 4] : []);
+    assert.equal(executed.length + answeredFromLedger.length, reads.length, 'presentation adds no tool call or write');
     assert.equal(requests.length, reads.length + 1, 'presentation adds no model call');
     assert.equal(result.finalDecision.message, draft, 'raw model output remains available for diagnosis/scoring');
     assert.equal(result.finalDecision.source, transport === 'provider_fc' ? 'maid_provider_fc' : 'model_react');

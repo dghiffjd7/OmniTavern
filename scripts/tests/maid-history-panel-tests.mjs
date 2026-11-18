@@ -98,9 +98,16 @@ const now = Date.now();
   assert.deepEqual(byClass(rerolled, 'mrcard').map(card => card.dataset.cardId), ['card-1', 'card-2'], 'the new card follows the old one');
   assert.deepEqual(turns[1].cards.map(card => card.id), ['card-1'], 'the saved history is not changed');
 
+  assert.equal(byClass(root, 'mh-less').length, 0, 'nothing to fold on the first page');
   await byClass(root, 'mh-more')[0].dispatch('click');
   assert.equal(byClass(root, 'mh-entry').length, 43);
   assert.equal(byClass(root, 'mh-more').length, 0);
+  // 显示过更早的记录后可以收起回第一页
+  await byClass(root, 'mh-less')[0].dispatch('click');
+  assert.equal(byClass(root, 'mh-entry').length, 30);
+  assert.equal(byClass(root, 'mh-less').length, 0);
+  assert.equal(byClass(root, 'mh-more').length, 1);
+  await byClass(root, 'mh-more')[0].dispatch('click');
 
   const search = walk(root).find(node => node.tagName === 'INPUT');
   search.value = '骰子';

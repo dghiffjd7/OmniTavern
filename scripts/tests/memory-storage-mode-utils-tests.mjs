@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
   applyMemoryStorageMode,
   deriveMemoryStorageMode,
+  getMemoryAutoExtractModeKey,
+  resolveMemoryAutoExtractMode,
 } from '../../src/scripts/ui/memory-storage-mode-utils.js';
 
 {
@@ -55,4 +57,19 @@ import {
     { type: 'app-settings-changed', detail: { key: 'memoryStorageMode', value: 'table' } },
   ]);
   console.log('ok - memory storage mode applies existing fields and dispatches one unified event triplet');
+}
+
+{
+  assert.equal(getMemoryAutoExtractModeKey('writing'), 'memoryAutoExtractModeWriting');
+  assert.equal(getMemoryAutoExtractModeKey('chat'), 'memoryAutoExtractMode');
+  assert.equal(getMemoryAutoExtractModeKey('moments'), 'memoryAutoExtractMode', '动态跟聊天共用一份');
+  assert.equal(getMemoryAutoExtractModeKey(), 'memoryAutoExtractMode');
+  const settings = { memoryAutoExtractMode: 'separate', memoryAutoExtractModeWriting: 'inline' };
+  assert.equal(resolveMemoryAutoExtractMode(settings, 'writing'), 'inline');
+  assert.equal(resolveMemoryAutoExtractMode(settings, 'chat'), 'separate');
+  assert.equal(resolveMemoryAutoExtractMode(settings, 'moments'), 'separate');
+  assert.equal(resolveMemoryAutoExtractMode({ memoryAutoExtractMode: 'separate' }, 'writing'), 'separate', '写作那份缺失时沿用旧的共用值');
+  assert.equal(resolveMemoryAutoExtractMode({ memoryAutoExtractMode: 'weird', memoryAutoExtractModeWriting: 'weird' }, 'writing'), 'inline');
+  assert.equal(resolveMemoryAutoExtractMode({}, 'chat'), 'inline');
+  console.log('ok - memory auto extract mode is stored per place (chat/moments vs writing)');
 }

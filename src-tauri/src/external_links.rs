@@ -47,8 +47,30 @@ fn is_allowed_release_url(url: &str) -> bool {
     true
 }
 
+// 女仆「地图」能力：只放行 Google 地图的搜索／路线与高德的搜索网址；地点名都在查询参数里（前端已编码），
+// 网址规范化后必须与原样一致，不带账号、端口与片段。
+fn is_allowed_map_url(url: &str) -> bool {
+    let Ok(parsed) = reqwest::Url::parse(url) else {
+        return false;
+    };
+    if parsed.as_str() != url
+        || parsed.scheme() != "https"
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.port().is_some()
+        || parsed.fragment().is_some()
+        || parsed.query().map_or(true, str::is_empty)
+    {
+        return false;
+    }
+    matches!(
+        (parsed.host_str(), parsed.path()),
+        (Some("www.google.com"), "/maps/search/" | "/maps/dir/") | (Some("uri.amap.com"), "/search")
+    )
+}
+
 fn is_allowed_external_url(url: &str) -> bool {
-    ALLOWED_EXTERNAL_URLS.contains(&url) || is_allowed_release_url(url)
+    ALLOWED_EXTERNAL_URLS.contains(&url) || is_allowed_release_url(url) || is_allowed_map_url(url)
 }
 
 #[tauri::command]
@@ -79,6 +101,37 @@ mod tests {
             "https://github.com/dghiffjd7/OmniTavern/issues"
         ));
         assert!(!is_allowed_external_url("https://example.com/dghiffjd7"));
+    }
+
+    #[test]
+    fn allows_only_map_search_and_route_links() {
+        assert!(is_allowed_external_url(
+            "https://www.google.com/maps/search/?api=1&query=%E5%8F%B0%E5%8C%97%20101"
+        ));
+        assert!(is_allowed_external_url(
+            "https://www.google.com/maps/dir/?api=1&destination=Macy%27s&travelmode=walking"
+        ));
+        assert!(is_allowed_external_url(
+            "https://uri.amap.com/search?keyword=%E6%95%85%E5%AE%AB&view=map&src=omnitavern&callnative=1"
+        ));
+        for url in [
+            "https://www.google.com/maps/search/",
+            "https://www.google.com/maps/search/?",
+            "http://www.google.com/maps/search/?api=1&query=x",
+            "https://www.google.com/maps/place/?api=1&query=x",
+            "https://www.google.com/search?q=x",
+            "https://maps.google.com/maps/search/?api=1&query=x",
+            "https://www.google.com.evil.com/maps/search/?api=1&query=x",
+            "https://user@www.google.com/maps/search/?api=1&query=x",
+            "https://www.google.com:8443/maps/search/?api=1&query=x",
+            "https://www.google.com/maps/search/?api=1&query=x#frag",
+            "https://www.google.com/maps/search/../../url?q=x",
+            "https://www.google.com/maps/search/?api=1&query=it's",
+            "https://uri.amap.com/navigation?to=1,2",
+            "https://amap.com/search?keyword=x",
+        ] {
+            assert!(!is_allowed_external_url(url), "{url}");
+        }
     }
 
     #[test]

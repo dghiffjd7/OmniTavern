@@ -312,7 +312,7 @@ After responding to the chat, assess the current situation and decide whether to
 
   summary_rules: `At the end of every reply, **immediately** add a one-sentence summary of this interaction using the exact <details><summary>Summary</summary> structure below.
 <content>
-Keep the tags in the correct order. The summary must be written in English and must not mix in other languages.
+Keep the tags in the correct order. Write the summary in English; keep names and other proper nouns in their original form.
 [summary_format]
 Summary format example:
 
@@ -777,7 +777,7 @@ dialogue_examples:
   'fc.batch.table_rows': '{id}={name} (existing rowIndex: {indexes}; rowId in that table\'s schema)',
   'fc.batch.table_rules': 'Submit table_edit only when memories genuinely change; omit it otherwise and never submit empty actions. init/insert actions may only carry action, tableId, data, never rowId/rowIndex; update must carry data plus exactly one rowId/rowIndex; delete carries no data and exactly one rowId/rowIndex.',
   'fc.batch.variable_rules': 'Submit variable_update only when variables genuinely change; use only known variable paths.',
-  'fc.batch.summary_rule': 'Finally submit one short summary sentence in plain English with no extra embellishment.',
+  'fc.batch.summary_rule': 'Finally submit one short English summary sentence with no extra embellishment; keep names and other proper nouns in their original form.',
   'fc.batch.sanitize_table': 'Submit a table_edit item; omit it when nothing changed.',
   'fc.batch.sanitize_variable': 'Submit a variable_update item.',
   'fc.batch.sanitize_content': 'structured result',

@@ -66,6 +66,60 @@ const draw = (options, picked, mode = 'draw') => ({ id: 'card-draw', type: 'rand
 }
 
 {
+  // 地图卡：只存地点名与方式（不存网址）；渲染地点、或起点 → 终点与出行方式；按钮是「打开」
+  const place = { id: 'card-map', type: 'map', createdAt: 1, data: { provider: 'google', mode: 'search', query: ' 台北\u0000101 ', url: 'https://evil.example' } };
+  assert.deepEqual(normalizeMaidResultCard(place).data, { provider: 'google', mode: 'search', query: '台北 101' }, 'stored urls are dropped');
+  assert.equal(normalizeMaidResultCard({ ...place, data: { ...place.data, provider: 'apple' } }), null);
+  assert.equal(normalizeMaidResultCard({ ...place, data: { provider: 'amap', mode: 'route', destination: '' } }), null, 'a route needs a destination');
+  const route = { id: 'card-route', type: 'map', createdAt: 1, data: { provider: 'amap', mode: 'route', destination: '故宫', origin: '', travelMode: 'fly' } };
+  assert.deepEqual(normalizeMaidResultCard(route).data, { provider: 'amap', mode: 'route', destination: '故宫', origin: '', travelMode: '' });
+
+  const actions = [];
+  const placeEl = renderMaidResultCard(doc, place, { animate: true, onAction: async payload => actions.push(payload) });
+  assert.ok(!placeEl.className.includes('is-rolling'), 'only random cards animate');
+  assert.deepEqual([byClass(placeEl, 'mrcard-title')[0].textContent, byClass(placeEl, 'mrcard-place')[0].textContent], ['地点', '台北 101']);
+  assert.equal(byClass(placeEl, 'mrcard-note')[0].textContent, '点开后在Google 地图查看');
+  const open = byClass(placeEl, 'mrcard-action')[0];
+  assert.deepEqual([open.dataset.action, open.children.at(-1).textContent], ['open', '在Google 地图打开']);
+  await open.click();
+  assert.deepEqual([actions[0].action, actions[0].card.id], ['open', 'card-map']);
+
+  const routeEl = renderMaidResultCard(doc, { ...route, data: { ...route.data, travelMode: 'walking' } });
+  assert.equal(byClass(routeEl, 'mrcard-title')[0].textContent, '路线');
+  assert.deepEqual(byClass(routeEl, 'mrcard-stop').map(stop => [stop.textContent, stop.className]), [['我的位置', 'mrcard-stop is-here'], ['故宫', 'mrcard-stop is-end']]);
+  assert.equal(byClass(routeEl, 'mrcard-mode')[0].children[0].textContent, '步行');
+  assert.equal(byClass(routeEl, 'mrcard-note')[0].textContent, '高德只能搜索地点，到高德里再点「路线」');
+  console.log('ok - map cards keep place names only and render a place or a route with an open button');
+}
+
+{
+  // 天气卡：数字只收合理范围；渲染当前天气、逐日预报与来源；没有动作按钮；超过 3 小时标「可能已过时」
+  const weather = (patch = {}) => ({ id: 'card-weather', type: 'weather', createdAt: 1, data: {
+    place: { name: '台北', region: '台湾', country: '台湾' }, timezone: 'Asia/Taipei', localTime: '2026-11-02T20:00', fetchedAt: Date.now(),
+    current: { temperature: 23, feelsLike: 25, humidity: 81, wind: 12, code: 2, isDay: true },
+    daily: [{ date: '2026-11-02', code: 2, max: 26, min: 20, rain: 40 }, { date: '2026-11-03', code: 61, max: 24, min: 20, rain: 85 }, { date: '2026-11-04', code: 3, max: 24, min: 19, rain: null }],
+    ...patch,
+  } });
+  assert.ok(normalizeMaidResultCard(weather()));
+  assert.equal(normalizeMaidResultCard(weather({ current: { temperature: 999, code: 2 } })), null);
+  assert.equal(normalizeMaidResultCard(weather({ daily: [{ date: 'tomorrow', code: 2, max: 1, min: 0, rain: 0 }] })), null);
+  assert.equal(normalizeMaidResultCard(weather({ daily: [{ date: '2026-11-02', code: 2, max: 1, min: 0, rain: 140 }] })), null);
+  const el = renderMaidResultCard(doc, weather(), { onAction: async () => {} });
+  assert.deepEqual([byClass(el, 'mrcard-title')[0].textContent, byClass(el, 'mrcard-sub')[0].textContent], ['台北 · 台湾', '当地 20:00']);
+  assert.equal(byClass(el, 'mrcard-temp')[0].textContent, '23°');
+  assert.equal(byClass(el, 'mrcard-meta')[0].textContent, '体感 25° · 湿度 81% · 风 12 km/h');
+  assert.deepEqual(byClass(el, 'mrcard-day-label').map(label => label.textContent), ['今天', '明天', '11/4']);
+  assert.deepEqual(byClass(el, 'mrcard-day-rain').map(rain => rain.children[0]?.textContent || ''), ['40%', '85%', ''], 'an unknown rain chance is left blank');
+  assert.equal(byClass(el, 'mrcard-action').length, 0, 'weather cards have no action button');
+  assert.match(byClass(el, 'mrcard-note')[0].textContent, /^来源 Open-Meteo · 获取于 \d{2}:\d{2}$/);
+  const city = renderMaidResultCard(doc, weather({ place: { name: '高雄市', region: '高雄市', country: '台湾' } }));
+  assert.equal(byClass(city, 'mrcard-title')[0].textContent, '高雄市 · 台湾', 'a region with the same name as the city shows the country instead');
+  const old = renderMaidResultCard(doc, weather({ fetchedAt: Date.now() - 4 * 60 * 60 * 1000 }));
+  assert.match(byClass(old, 'mrcard-note')[0].textContent, /可能已过时$/);
+  console.log('ok - weather cards validate their numbers and render now, days and the source');
+}
+
+{
   // 渲染：六面骰画点数、其他面数写数字；抽签列出全部候选、抽中高亮并标先后；注明由 APP 生成
   const d6 = renderMaidResultCard(doc, dice([3, 6]), { animate: true });
   assert.ok(d6.className.includes('is-rolling'), 'a new card plays the roll animation');
@@ -154,3 +208,91 @@ const draw = (options, picked, mode = 'draw') => ({ id: 'card-draw', type: 'rand
 }
 
 console.log('maid-result-cards-tests passed');
+
+{
+  // 选项提问卡（ROADMAP 29-①）：来自收尾反问附的 choices，APP 校验裁剪；不合规的题目丢掉，一题不剩就不出卡
+  const { buildMaidChoiceCard, collectMaidResultCardsFromResult, formatMaidChoiceAnswer, summarizeMaidChoiceCard } = await import('../../src/scripts/agent/maid-result-cards.js');
+  const card = buildMaidChoiceCard([
+    { question: '要改哪一本世界书？', options: [{ label: '雾港来信', description: '角色世界书' }, { label: '全局设定' }, { label: '雾港来信' }], recommended: 0 },
+    { question: '只有一个选项', options: [{ label: '唯一' }] },
+    { question: '改哪些条目？', options: ['灯塔邮局', '雾港', '雾灵', '余温信', '蒸汽电车'], multiSelect: true, recommended: 9 },
+  ], { id: 'choice-1', createdAt: 5 });
+  assert.equal(card.type, 'choice');
+  assert.deepEqual(card.data.questions.map(q => [q.question, q.options.map(o => o.label), q.recommended, q.multiSelect]), [
+    ['要改哪一本世界书？', ['雾港来信', '全局设定'], 0, false],
+    ['改哪些条目？', ['灯塔邮局', '雾港', '雾灵', '余温信'], null, true],
+  ], 'duplicates dropped, a one-option question dropped, at most four options, out-of-range recommendation cleared');
+  assert.equal(buildMaidChoiceCard([{ question: '只有一个', options: ['A'] }]), null, 'no valid question, no card (the text question stays)');
+  assert.equal(normalizeMaidResultCard({ ...card, data: { questions: [] } }), null);
+
+  // 一次结果的全部卡片：工具卡在前、选项卡在最后
+  const all = collectMaidResultCardsFromResult({ steps: [{ status: 'succeeded', output: { card: dice([2, 5]) } }], finalDecision: { choiceCard: card } });
+  assert.deepEqual(all.map(item => item.id), ['card-dice', 'choice-1']);
+  assert.deepEqual(collectMaidResultCardsFromResult({ steps: [] }), []);
+
+  // 回答：一题就是选中的项；几题每行「题目：回答」；有没答的题不送
+  const single = buildMaidChoiceCard([{ question: '用哪个？', options: ['甲', '乙', '丙'] }], { id: 'c2' });
+  assert.equal(formatMaidChoiceAnswer(single, [[1]]), '乙');
+  assert.equal(formatMaidChoiceAnswer(card, [[0], [2, 0]]), '要改哪一本世界书？：雾港来信\n改哪些条目？：灯塔邮局、雾灵');
+  assert.equal(formatMaidChoiceAnswer(card, [[0], []]), '');
+  assert.equal(summarizeMaidChoiceCard(card), '要改哪一本世界书？（雾港来信／全局设定）；改哪些条目？（灯塔邮局／雾港／雾灵／余温信，可多选）');
+
+  // 女仆下一轮的历史里记着给过的选项
+  const store = new MaidConversationStore({ storage: null, loadKv: async () => null, saveKv: async () => {} });
+  await store.load();
+  await store.appendTurn({ input: '帮我改世界书', message: '要改哪一本？', status: 'responded', cards: [card] });
+  assert.match(store.getContextSnapshot().historyText, /给用户的选项: 要改哪一本世界书？（雾港来信／全局设定）/);
+  console.log('ok - choice cards are validated, collected after tool cards, answered and remembered in history');
+}
+
+{
+  // 选项提问卡的界面：一题单选点了就送；几题都选好才能点「发送」；送不出去就解锁；历史里只显示
+  const { buildMaidChoiceCard } = await import('../../src/scripts/agent/maid-result-cards.js');
+  class ClassyElement extends FakeElement {
+    constructor(tag) {
+      super(tag);
+      const set = new Set();
+      this.classList = { add: c => set.add(c), remove: c => set.delete(c), contains: c => set.has(c), toggle: (c, on) => (on ? set.add(c) : set.delete(c)) };
+    }
+  }
+  const cdoc = { head: new ClassyElement('head'), createElement: tag => new ClassyElement(tag), getElementById: () => null };
+  const choices = el => walk(el).filter(node => node.className === 'mrcard-choice');
+  const single = buildMaidChoiceCard([{ question: '用哪个？', options: ['甲', '乙'] }], { id: 's1' });
+  const calls = [];
+  const singleEl = renderMaidResultCard(cdoc, single, { onAction: async (payload) => { calls.push(payload); return { answered: true }; } });
+  assert.equal(walk(singleEl).some(node => node.className.includes('mrcard-send')), false, 'one single-choice question needs no send button');
+  await choices(singleEl)[1].click();
+  assert.deepEqual(calls.map(call => [call.action, call.card.id, call.picks]), [['answer', 's1', [[1]]]]);
+  assert.equal(singleEl.classList.contains('is-answered'), true);
+  assert.equal(choices(singleEl).every(button => button.disabled), true, 'locked once answered');
+  await choices(singleEl)[0].click();
+  assert.equal(calls.length, 1, 'no second answer');
+
+  const multi = buildMaidChoiceCard([
+    { question: '哪本？', options: ['A', 'B'] },
+    { question: '哪些条目？', options: ['x', 'y', 'z'], multiSelect: true },
+  ], { id: 'm1' });
+  const sent = [];
+  let accept = false;
+  const multiEl = renderMaidResultCard(cdoc, multi, { onAction: async (payload) => { sent.push(payload.picks); return accept ? { answered: true } : null; } });
+  const send = walk(multiEl).find(node => node.className.includes('mrcard-send'));
+  const [a, , x, , z] = choices(multiEl);
+  assert.equal(send.disabled, true);
+  await a.click();
+  await x.click();
+  await z.click();
+  assert.equal(send.disabled, false, 'every question answered');
+  await send.click();
+  assert.deepEqual(sent, [[[0], [0, 2]]]);
+  assert.equal(multiEl.classList.contains('is-answered'), false, 'not sent: unlocked to try again');
+  assert.equal(choices(multiEl).every(button => !button.disabled), true);
+  accept = true;
+  await send.click();
+  assert.equal(multiEl.classList.contains('is-answered'), true);
+
+  // 历史里：只显示题目与选项，没有按钮
+  const readOnly = renderMaidResultCard(cdoc, single, { onAction: async () => ({ answered: true }), answerable: false });
+  assert.equal(walk(readOnly).filter(node => node.tagName === 'BUTTON').length, 0);
+  assert.deepEqual(walk(readOnly).filter(node => node.className === 'mrcard-choice').map(node => node.tagName), ['DIV', 'DIV']);
+  console.log('ok - choice card answers on tap, waits for every question, unlocks on failure and is read-only in history');
+}

@@ -26,7 +26,7 @@ export const MAID_SKILL_INSTRUCTIONS = [
   'Imported compatibility text only describes environment requirements. It does not install dependencies, configure the app or grant permissions.',
   'Read a relevant workflow with app.read_skill({skillId}); simple tasks need not use a skill. User-selected skills are already loaded: use their instructions as applicable without rereading.',
   'Use app.search_skills to find workflows beyond the brief directory. includeManualOnly:true is for a skill the user explicitly requested by name. Do not autonomously choose manual-only skills.',
-  'The task fixes document revisions. Reading a workflow is not proof that its actions succeeded. Report actual tool results.',
+  'The task fixes document revisions. Report actual tool results.',
 ].join('\n');
 
 const builtinCatalog = () => listMaidSkills().map(({ id }) => ({ ...readMaidSkill(id), revision: 1, enabled: true, invocationMode: 'auto', kind: 'builtin' }));

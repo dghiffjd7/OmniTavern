@@ -17,6 +17,8 @@
 
 ### [**点此前往下载页（Releases）**](https://github.com/dghiffjd7/OmniTavern/releases/latest)
 
+想先看看？[介绍页与 80 秒宣传片](https://dghiffjd7.github.io/OmniTavern/)
+
 | 平台 | 安装包 |
 | --- | --- |
 | Windows | `OmniTavern_x.x.x_x64-setup.exe` |
@@ -85,23 +87,22 @@ App 内置的 AI 代理：用自然语言让她替你建联系人 / 群聊 / 世
 
 聊天、创意写作、动态全场景生图，支持 NovelAI 等图片服务、参数覆盖与失败重试；可生成表情包并自动去背景、切割成贴图，按聊天室绑定管理。
 
-## 0.7.9 更新亮点
+## 0.7.10 更新亮点
 
-- **自定义工具与手势**：常用操作做成一键工具，可绑定快捷键或手势，工具包可导出导入
-- **MCP 服务**：女仆可以调用外部 MCP 服务里的工具
-- **女仆处理文件**：可以读 PDF、看压缩包里的图片，产出的文件可以保存到 APP 外
-- **Agent 资源中心与 Agent 目录**：记忆总览、记忆管家、提示词管家，统一查看所有 Agent 与女仆技能
-- **变量管理器**：注入总览（可模拟）与模板测试
-- **格式修复「辅助填写」**
+- **小管家**：用小模型处理翻译、生图标签、贴图起名、存档概述等杂务，也可以自建任务
+- **女仆**：地图与天气（不用填 Key）、选项提问与计划确认、历史按轮管理、发带图的动态
+- **生图**：实时预览、固定在聊天上的参考图（含 NovelAI 精准参考）、新增 WaveSpeed 渠道
+- **上下文血缘图**：来源补齐并标出重点，可跳到设置、导出与诊断路径
+- **Vertex**：Service Account JSON 可以存多份并切换
 
-完整内容见 [0.7.9 更新内容](https://github.com/dghiffjd7/OmniTavern/releases/tag/v0.7.9)。
+完整内容见 [0.7.10 更新内容](https://github.com/dghiffjd7/OmniTavern/releases/tag/v0.7.10)。
 
 ## 支持的 AI 服务
 
 | 类型 | 服务商 |
 | --- | --- |
 | 对话模型 | Google Gemini、OpenAI、Anthropic (Claude)、DeepSeek、OpenRouter、Kimi (Moonshot)、智谱 GLM、Ollama（本地）以及任意 OpenAI 兼容端点 |
-| 图片生成 | NovelAI 及支持图片输出的对话模型 |
+| 图片生成 | NovelAI、OpenAI、Google（Gemini／Imagen、Vertex AI）、Stability AI、Together AI、WaveSpeed、Pollinations、AUTOMATIC1111、ComfyUI、任意 OpenAI 兼容端点，以及支持图片输出的对话模型 |
 
 每个聊天室可以单独指定使用哪个 API 和模型。
 

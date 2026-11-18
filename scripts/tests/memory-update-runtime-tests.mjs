@@ -108,6 +108,30 @@ const createDeps = (overrides = {}) => {
 }
 
 {
+  // app.js 每次发送都会新建 runtime；计数必须存在注入的会话存储里，否则 N>=2 永远数不到
+  const counters = new Map();
+  const counterDeps = {
+    appSettings: {
+      get: () => ({
+        memoryFillEveryN: 3,
+        memoryUpdateApiMode: 'chat',
+      }),
+    },
+    getMemoryFillCounter: sessionId => counters.get(sessionId) || 0,
+    setMemoryFillCounter: (sessionId, value) => counters.set(sessionId, value),
+  };
+  const planCounts = [];
+  for (let turn = 1; turn <= 6; turn += 1) {
+    const { calls, runtime } = createDeps(counterDeps);
+    await runtime.runMemoryUpdateAfterChat('s-fresh', false, {}, { checkpointMessageId: `m${turn}` });
+    planCounts.push(calls.plans.length);
+  }
+  assert.deepEqual(planCounts, [0, 0, 1, 0, 0, 1]);
+  assert.equal(counters.get('s-fresh'), 0);
+  console.log('ok - createMemoryUpdateRuntime keeps fill cadence across runtime instances via injected counter store');
+}
+
+{
   const { calls, runtime } = createDeps({
     isMemoryUpdateTargetCurrent: async (sessionId, messageId) => {
       calls.validated = [sessionId, messageId];

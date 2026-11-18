@@ -86,7 +86,7 @@ import {
   resolveSwipeIndicatorState,
   syncSwipeIndicatorElement,
 } from './swipe-ui-utils.js';
-import { createSwipeUiRuntime } from './swipe-runtime-utils.js';
+import { createSwipeRegenerationHandler, createSwipeUiRuntime } from './swipe-runtime-utils.js';
 import {
   createRpMessageActionsUiRuntime,
   dispatchRpMessageQuickAction,
@@ -156,6 +156,7 @@ import { renderTextWithStickersCore } from './sticker-text-ui-utils.js';
 import { renderMessageBubbleContentCore } from './message-bubble-content-ui-utils.js';
 import { buildAgentMessageSidecarElement } from './agent-message-sidecar-ui-utils.js';
 import { buildMessageSourcesElement } from './message-sources-ui-utils.js';
+import { buildMessageStewardNoteElement, buildMessageTranslationElement } from './message-translation-ui-utils.js';
 import {
   buildChatFormatGuardianApplyRepairPayload,
   buildChatFormatGuardianRetryPlan,
@@ -377,6 +378,7 @@ export class ChatUI {
     this.dialogueHighlightResolver = () => false;
     this.speakQuickVoicesResolver = () => [];
     this.canCheckFormatForMessage = () => false;
+    this.canTranslateMessage = () => false;
     this.replyCancelHandler = null;
     this.providerContinuationCommitContext = {
       chatStore: null,
@@ -694,7 +696,7 @@ export class ChatUI {
     });
   }
 
-  onSwipeRegen(handler) { this._swipeRegenHandler = handler; }
+  onSwipeRegen(handler) { this._swipeRegenHandler = createSwipeRegenerationHandler(handler); }
   onSwipeChange(handler) { this._swipeChangeHandler = handler; }
 
   normalizeAssistantStreamState(state = {}) {
@@ -1948,13 +1950,21 @@ export class ChatUI {
           onChatFormatGuardianAction: request => this.handleChatFormatGuardianAction(request),
         });
         const sourcesSidecar = buildMessageSourcesElement(payload);
-        if (!agentSidecar) return sourcesSidecar;
-        if (!sourcesSidecar) return agentSidecar;
+        // 小管家译文与附注排在最前（紧贴气泡）；删除走消息动作分发
+        const translationSidecar = buildMessageTranslationElement({
+          ...payload,
+          onRemove: messageValue => this.actionHandler?.('steward-translation-remove', messageValue),
+        });
+        const noteSidecar = buildMessageStewardNoteElement({
+          ...payload,
+          onRemove: messageValue => this.actionHandler?.('steward-note-remove', messageValue),
+        });
+        const sidecars = [translationSidecar, noteSidecar, agentSidecar, sourcesSidecar].filter(Boolean);
+        if (sidecars.length <= 1) return sidecars[0] || null;
         const stack = payload.documentLike.createElement('div');
         stack.className = 'chat-message-sidecars';
         stack.style.cssText = 'width:100%;display:grid;gap:6px;';
-        stack.appendChild(agentSidecar);
-        stack.appendChild(sourcesSidecar);
+        sidecars.forEach(sidecar => stack.appendChild(sidecar));
         return stack;
       },
       buildReactionSummaryElement: nextMessage => this.buildReactionSummaryElement(nextMessage),
@@ -3081,6 +3091,7 @@ export class ChatUI {
       resolveContextMenuContext,
       buildContextMenuActions,
       canCheckFormatForMessage: nextMessage => this.canCheckFormatForMessage?.(nextMessage) === true,
+      canTranslateMessage: nextMessage => this.canTranslateMessage?.(nextMessage) === true,
       isThreadingEnabledForMessage: nextMessage => this.isThreadingEnabledForMessage(nextMessage),
       normalizeReactionEntries,
       createContextMenuReactionRow,

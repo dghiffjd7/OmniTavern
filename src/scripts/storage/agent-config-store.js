@@ -6,6 +6,7 @@ import { normalizeAgentGenerationSettings } from '../agent/agent-generation-sett
 import { RECAP_AGENT_ID, buildRecapAgentConfig } from '../agent/recap-agent.js';
 import { normalizeFormatRepairProfiles, mergeFormatRepairProfiles, diffFormatRepairProfiles, resolveFormatRepairProfile, formatRepairProfileTooLong } from '../agent/format-repair-profiles.js';
 import { normalizeFormatGuideSource } from '../agent/format-guide-assist.js';
+import { normalizeStewardCustomTasks, normalizeStewardTasks } from '../agent/steward-tasks.js';
 export const AGENT_CONFIG_KEY = 'agent_config_library_v1';
 export const CONFIGURABLE_AGENT_IDS = ['text_completion', 'reply_check', 'archive_naming'];
 const clone = value => value == null ? value : JSON.parse(JSON.stringify(value));
@@ -56,9 +57,12 @@ export const normalizeAgentConfiguration = (value = {}, id = value.id) => ({
   promptSource: value.promptSource === 'preset' ? 'preset' : 'prompt',
   presetId: text(value.presetId),
   ...normalizeAgentGenerationSettings(value, id),
+  // archive_naming 即小管家：enabled／模型为整体开关与共用模型，tasks 是各任务的开关与单独模型
   ...(id === 'archive_naming' ? {
     invocationMode: 'auto', triggerMode: 'auto',
     ...normalizeAgentGenerationSettings({ reasoningMode: 'off', maxTokens: 128, ...value }, id),
+    tasks: normalizeStewardTasks(value.tasks),
+    customTasks: normalizeStewardCustomTasks(value.customTasks),
   } : {}),
   updatedAt: Number(value.updatedAt) || 0,
   ...(id === 'reply_check' ? { repairProfiles: normalizeFormatRepairProfiles(value.repairProfiles, value), repairCheckType: value.repairCheckType === 'tableEdit' ? 'tableEdit' : 'custom', formatGuideSource: normalizeFormatGuideSource(value.formatGuideSource) } : {}),

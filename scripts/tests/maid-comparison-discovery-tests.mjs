@@ -64,7 +64,6 @@ test('registered contact comparison documentation distinguishes identity, eviden
   for (const fact of ['ID', 'description', 'messageCount', '聊天', '归档', '确认']) {
     assert.ok(result.feature.doc.includes(fact), `workflow must explain ${fact}`);
   }
-  assert.match(result.feature.doc, /同名.*不|不.*同名/);
   assert.match(result.feature.doc, /建议|方案/);
   assert.deepEqual(fixture.effects, []);
 });
@@ -134,7 +133,6 @@ test('missing catalog matches remain unknown and existing destructive capabiliti
   assert.deepEqual(found.features, []);
   assert.equal(found.matchStatus, 'no_catalog_match');
   assert.equal(found.exhaustive, false);
-  assert.match(found.message, /does not establish.*unsupported/);
   const missing = await fixture.call('app.read_feature_doc', { featureId: 'unregistered.merge' });
   assert.equal(missing.reason, 'feature_not_found');
   for (const id of ['worldbook.update_entries', 'worldbook.delete_many', 'session.delete_many']) {

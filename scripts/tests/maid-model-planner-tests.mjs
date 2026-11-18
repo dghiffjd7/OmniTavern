@@ -983,7 +983,6 @@ const cloneJson = value => JSON.parse(JSON.stringify(value));
     assert.doesNotMatch(system, /maid\.onboarding|女仆新手引导|guide\.start_flow|setup-api|add-friend|first-chat|meet-maid/);
     assert.match(system, /默认在后台执行/);
     assert.match(system, /只展示最终的主要结果/);
-    assert.match(system, /查询、查看、检查.*不等于要求打开界面/);
     assert.match(system, /triggerReply:true/);
     assert.match(system, /必须进入目标聊天室/);
   }

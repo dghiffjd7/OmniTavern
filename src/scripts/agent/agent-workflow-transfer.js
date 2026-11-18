@@ -10,7 +10,7 @@ export const AGENT_WORKFLOW_VERSION = 1;
 export const AGENT_WORKFLOW_CONFIGURABLE_IDS = Object.freeze(['text_completion', 'reply_check', 'archive_naming', 'text-edit:recap']);
 // 跟写作工作流有关的设定（白名单）；不整份导出 app 设定（里面有联网搜索密钥、实时语音设置档 ID 等）
 export const AGENT_WORKFLOW_SETTING_KEYS = Object.freeze([
-  'memoryEnabled', 'memoryStorageMode', 'memoryTableEnabledWriting', 'memoryAutoExtract', 'memoryAutoExtractMode',
+  'memoryEnabled', 'memoryStorageMode', 'memoryTableEnabledWriting', 'memoryAutoExtract', 'memoryAutoExtractModeWriting',
   'memoryUpdateApiMode', 'memoryUpdateContextRounds', 'memoryInjectPosition', 'memoryInjectDepth', 'memoryBudgetMode',
   'memoryInputBudgetTokens', 'memoryMaxRows', 'memoryMaxTokens', 'memoryAutoConfirm', 'memoryAutoStepByStep',
   'memoryFillEveryN', 'memorySummaryRowLimit', 'memorySummaryCompactionAuto', 'memorySummaryCompactionTrigger',
@@ -204,6 +204,10 @@ export const parseAgentWorkflowPackage = (input) => {
   settingKeysOf(place).forEach((key) => {
     if (isPlainObject(data.settings) && data.settings[key] !== undefined) settings[key] = data.settings[key];
   });
+  // 写表方式按场景分开前导出的写作工作流只有共用键：当作写作那份，不顺带改聊天
+  if (place === 'writing' && settings.memoryAutoExtractModeWriting === undefined && isPlainObject(data.settings) && data.settings.memoryAutoExtractMode !== undefined) {
+    settings.memoryAutoExtractModeWriting = data.settings.memoryAutoExtractMode;
+  }
   const cards = {};
   if (place === 'chat') {
     AGENT_WORKFLOW_CHAT_CARD_IDS.forEach((id) => {

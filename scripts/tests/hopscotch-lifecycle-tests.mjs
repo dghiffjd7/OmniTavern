@@ -271,7 +271,6 @@ console.log('ok - stopping the turn while later rows run also cancels background
 
 for (const options of [
   { changeBoard: board => { delete board.policy.tableSummaryMaintenance; } },
-  { changeBoard: board => { board.rows[0].houses[0].fused = []; } },
   { storageMode: 'off' },
   { storageMode: 'summary' },
   { placeEnabled: false },
@@ -282,7 +281,13 @@ for (const options of [
 ]) {
   const { turn, events } = await savedTableTurn(options);
   await turn.turnPromise;
-  assert.equal(events.includes('compaction'), false, '旧板/移除表格/模式关闭/未写表不能偷偷增加请求');
+  assert.equal(events.includes('compaction'), false, '旧板/模式关闭/未写表不能偷偷增加请求');
+}
+{
+  // 记忆的有无与形态跟随设定：旧板把记忆从正文移除，自动写表开着时按写表方式补回正文，表格维护照常
+  const { turn, events } = await savedTableTurn({ changeBoard: board => { board.rows[0].houses[0].fused = []; } });
+  await turn.turnPromise;
+  assert.equal(events.filter(e => e === 'compaction').length, 1);
 }
 {
   const { turn, events } = await savedTableTurn({ changeBoard: board => {

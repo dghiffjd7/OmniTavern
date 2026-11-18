@@ -1,5 +1,6 @@
 import { buildAgentMessageSidecarSignature } from './agent-message-sidecar-ui-utils.js';
 import { buildMessageSourcesSignature } from './message-sources-ui-utils.js';
+import { buildMessageTranslationSignature } from './message-translation-ui-utils.js';
 
 export const createMessagePatchUiRuntime = ({
   normalizeReplyTarget,
@@ -34,6 +35,7 @@ export const createMessagePatchUiRuntime = ({
       reasoningHidden: meta.reasoningHidden === true,
       summary: typeof meta.summary === 'string' ? meta.summary : '',
       sources: buildMessageSourcesSignature(msg),
+      translation: buildMessageTranslationSignature(msg),
       agentMessageParts: buildAgentMessageSidecarSignature(msg),
       replyTo: normalizeReplyTarget?.(meta.replyTo) ?? null,
       reactions: normalizeReactionEntries?.(meta.reactions) ?? [],

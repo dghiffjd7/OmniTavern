@@ -148,7 +148,7 @@ export const createPresetPreviewDiscoveryGuide = ({
     avatar.className = 'preset-preview-discovery-guide-avatar';
     avatar.classList?.add?.('preset-preview-discovery-guide-avatar');
     avatar.setAttribute?.('aria-hidden', 'true');
-    applyMaidGuideExpression(avatar, 'point', { variant: 'compact' });
+    applyMaidGuideExpression(avatar, 'point');
 
     const copy = documentRef.createElement('span');
     copy.className = 'preset-preview-discovery-guide-copy';

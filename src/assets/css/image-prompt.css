@@ -42,6 +42,16 @@
 .ip-prompt-heading .ip-badge { font-weight: 400; }
 .ip-prompt-surface { overflow: hidden; margin: 0; }
 .ip-prompt-surface.is-unused { border-style: dashed; }
+/* 小管家：中文描述转英文标签（按钮在正向提示词标题旁，结果是建议，按了才写进去） */
+.ip-steward-tags { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; padding: 4px 10px; border: 1px solid color-mix(in srgb, var(--app-accent-primary) 34%, var(--app-border-default)); border-radius: 999px; background: color-mix(in srgb, var(--app-accent-soft) 60%, var(--app-surface-card)); color: var(--app-accent-primary); font: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer; }
+.ip-steward-tags svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.ip-steward-tags:hover { background: var(--app-accent-soft); border-color: var(--app-accent-primary); }
+.ip-steward-tags:disabled { opacity: 0.55; cursor: progress; }
+.ip-steward-suggestion { display: grid; gap: 8px; margin-top: 10px; padding: 11px 12px; border: 1px solid color-mix(in srgb, var(--app-accent-primary) 30%, var(--app-border-subtle)); border-radius: 12px; background: color-mix(in srgb, var(--app-accent-soft) 45%, var(--app-surface-card)); }
+.ip-steward-suggestion-label { color: var(--app-accent-primary); font-size: 11.5px; font-weight: 700; }
+.ip-steward-suggestion-text { margin: 0; color: var(--app-text-primary); font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
+.ip-steward-suggestion-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.ip-steward-suggestion-actions .ip-button { min-height: 32px; padding: 5px 12px; }
 .ip-prompt-part { padding: 10px 12px; }
 .ip-prompt-part + .ip-prompt-part { border-top: 1px dashed var(--app-border-default); }
 .ip-prompt-part.is-fixed { background: color-mix(in srgb, var(--app-text-muted) 3%, transparent); }
@@ -117,3 +127,57 @@
   .chat-image-gen-modal.has-prompt-editor, .moment-compose-modal.has-prompt-editor { width: calc(100vw - 20px); }
 }
 @media (prefers-reduced-motion: reduce) { .ip-editor * { transition: none !important; } }
+
+/* 本聊天参考图（固定在聊天上，这个聊天的生图都带上） */
+.chat-image-gen-pins { margin-top: 12px; padding: 10px 12px; display: grid; gap: 8px; border: 1px solid color-mix(in srgb, var(--app-accent-primary) 22%, var(--app-border-subtle)); border-radius: 14px; background: color-mix(in srgb, var(--app-accent-soft) 38%, var(--app-surface-card)); }
+.chat-image-gen-pins[hidden] { display: none; }
+.chat-image-gen-pins-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.chat-image-gen-pins-title { font-size: 13px; font-weight: 800; color: var(--app-text-primary); }
+.chat-image-gen-pins-use { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; color: var(--app-text-secondary); cursor: pointer; }
+.chat-image-gen-pins-use input { accent-color: var(--app-accent-primary); margin: 0; }
+.chat-image-gen-pins-list { display: flex; gap: 8px; flex-wrap: wrap; transition: opacity var(--app-dur-quick, 160ms) ease; }
+.chat-image-gen-pins.is-off .chat-image-gen-pins-list { opacity: .45; }
+.chat-image-gen-pins-hint { font-size: 12px; color: var(--app-text-muted); }
+.chat-image-gen-ref-item.is-pinned img { border-color: color-mix(in srgb, var(--app-accent-primary) 45%, transparent); }
+/* 图钉：左上角小圆钮（与右上角 × 对称，不盖住缩略图） */
+.chat-image-gen-ref-pin { position: absolute; top: -6px; left: -6px; width: 22px; height: 22px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--app-border-subtle); border-radius: 50%; background: var(--app-surface-card); color: var(--app-accent-strong, var(--app-accent-primary)); cursor: pointer; box-shadow: 0 1px 3px color-mix(in srgb, var(--app-text-primary) 18%, transparent); transition: background var(--app-dur-quick, 160ms) ease, border-color var(--app-dur-quick, 160ms) ease; }
+.chat-image-gen-ref-pin svg { width: 13px; height: 13px; }
+.chat-image-gen-ref-pin:hover, .chat-image-gen-ref-pin:focus-visible { background: color-mix(in srgb, var(--app-accent-soft) 70%, var(--app-surface-card)); border-color: color-mix(in srgb, var(--app-accent-primary) 45%, transparent); }
+
+/* 生成对话框「高级参数」：分组卡片、分段按钮、滑杆、−／＋，覆盖过的项目标点并可单项恢复；高度固定成生成页 */
+.chat-image-gen-modal.is-advanced { display: flex; flex-direction: column; }
+.chat-image-gen-modal.is-advanced .chat-image-gen-advanced { flex: 1 1 auto; min-height: 0; max-height: none; overflow: hidden; display: flex; flex-direction: column; }
+.chat-image-gen-modal.is-advanced .chat-image-gen-advanced-fields { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.chat-image-gen-modal .chat-image-gen-advanced-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border: 1px solid var(--app-border-subtle); border-radius: 14px; background: var(--app-surface-subtle); }
+.igp-adv-summary-copy { display: grid; gap: 2px; min-width: 0; }
+.igp-adv-summary-copy strong { font-size: 13.5px; color: var(--app-text-primary); }
+.igp-adv-summary-copy span { font-size: 12px; color: var(--app-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.igp-adv-summary-pill { flex: 0 0 auto; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; color: var(--app-text-secondary); background: var(--app-surface-card); border: 1px solid var(--app-border-subtle); }
+.igp-adv-summary-pill.is-active { color: var(--app-accent-strong, var(--app-accent-primary)); background: color-mix(in srgb, var(--app-accent-soft) 60%, var(--app-surface-card)); border-color: color-mix(in srgb, var(--app-accent-primary) 30%, transparent); }
+.chat-image-gen-modal .chat-image-gen-advanced-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; align-items: start; padding: 2px; }
+.igp-adv-group { display: grid; gap: 14px; padding: 12px 14px 14px; border: 1px solid var(--app-border-subtle); border-radius: 16px; background: var(--app-surface-card); }
+.igp-adv-group-title { margin: 0; font-size: 12px; font-weight: 800; letter-spacing: .04em; color: var(--app-text-muted); }
+.igp-adv-row { display: grid; gap: 6px; }
+.igp-adv-row[hidden] { display: none; }
+.igp-adv-row-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 22px; }
+.igp-adv-row .chat-image-gen-param-label { margin: 0; font-size: 13px; font-weight: 700; color: var(--app-text-primary); }
+.igp-adv-row.is-overridden .chat-image-gen-param-label::after { content: ''; display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--app-accent-primary); vertical-align: middle; }
+.igp-adv-reset { display: none; padding: 2px 6px; border: none; border-radius: 8px; background: transparent; color: var(--app-accent-strong, var(--app-accent-primary)); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.igp-adv-reset:hover { background: color-mix(in srgb, var(--app-accent-soft) 50%, transparent); }
+.igp-adv-row.is-overridden .igp-adv-reset { display: inline-flex; }
+.igp-segmented { display: flex; flex-wrap: wrap; gap: 3px; padding: 3px; border: 1px solid var(--app-border-subtle); border-radius: 12px; background: var(--app-surface-subtle); }
+.igp-segment { flex: 1 1 auto; min-height: 32px; padding: 4px 10px; border: none; border-radius: 9px; background: transparent; color: var(--app-text-secondary); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; transition: background var(--app-dur-quick, 160ms) ease, color var(--app-dur-quick, 160ms) ease; }
+.igp-segment:hover:not(:disabled):not(.is-selected) { color: var(--app-text-primary); }
+.igp-segment.is-selected { background: var(--app-surface-card); color: var(--app-accent-strong, var(--app-accent-primary)); box-shadow: 0 1px 3px color-mix(in srgb, var(--app-text-primary) 14%, transparent); }
+.igp-segment:disabled { opacity: .4; cursor: not-allowed; }
+.igp-slider { display: flex; align-items: center; gap: 12px; }
+.igp-slider-input { flex: 1 1 auto; min-width: 0; accent-color: var(--app-accent-primary); }
+.igp-slider-value { min-width: 2.6em; text-align: right; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--app-text-primary); }
+.igp-stepper { display: inline-flex; align-items: center; gap: 6px; }
+.igp-stepper-btn { width: 32px; height: 32px; border: 1px solid var(--app-border-subtle); border-radius: 50%; background: var(--app-surface-card); color: var(--app-text-primary); font: inherit; font-size: 16px; font-weight: 700; cursor: pointer; }
+.igp-stepper-btn:hover { border-color: color-mix(in srgb, var(--app-accent-primary) 40%, transparent); }
+.chat-image-gen-modal .igp-stepper .igp-stepper-value { width: 64px; text-align: center; padding: 6px 8px; }
+@media (max-width: 600px) {
+  .chat-image-gen-modal .chat-image-gen-advanced-fields { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) { .igp-segment { transition: none; } }

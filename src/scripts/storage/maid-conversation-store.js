@@ -1,8 +1,8 @@
 import { safeInvoke } from '../utils/tauri.js';
 import { estimateTokens } from '../memory/memory-prompt-utils.js';
 import { formatMaidMemoryDate, isExplicitMaidPreferenceInstruction } from '../agent/maid-memory-prompt.js';
-import { normalizeMaidResultBasis } from '../agent/maid-result-basis.js';
-import { normalizeMaidResultCards } from '../agent/maid-result-cards.js';
+import { findMaidPendingMoment, normalizeMaidResultBasis } from '../agent/maid-result-basis.js';
+import { normalizeMaidResultCards, summarizeMaidChoiceCard, summarizeMaidPlanCard } from '../agent/maid-result-cards.js';
 import { selectMaidContextScope } from './maid-context-scope.js';
 
 export const MAID_CONVERSATION_STORE_KEY = 'maid_conversation_store_v1';
@@ -177,7 +177,8 @@ const isAutomaticMaidReceipt = context => context?.realtimeRole === 'assistant'
 // Only an explicit whole-caption classification may remove a transcript from
 // prompt/memory projections. Scheduling an acknowledgement response alone does
 // not prove that the generated speech contains no substantive conversation.
-const isProjectableMaidTurn = turn => !(isRealtimeTranscript(turn)
+// 用户在历史里设了「不给女仆看」（ROADMAP 29-③）的轮次：不进提示词历史、不参与整理进记忆与语义抽取；记录照样保留
+const isProjectableMaidTurn = turn => turn?.hiddenFromMaid !== true && !(isRealtimeTranscript(turn)
   && turn.context?.realtimeRole === 'assistant'
   && ['ack', 'status'].includes(turn.context?.maidTranscriptKind)
   && turn.context?.maidTranscriptAutomatic === true
@@ -205,6 +206,7 @@ const formatMaidResultBasisContext = (turn = {}, indent = '') => {
     ...(basis?.recordedAt ? { recordedAt: basis.recordedAt } : {}),
     sources,
     ...(basis?.artifacts?.length ? { artifacts: basis.artifacts } : {}),
+    ...(basis?.pendingMoment ? { pendingMoment: basis.pendingMoment } : {}),
   })}`;
 };
 
@@ -220,6 +222,10 @@ const formatMaidHistoryTurn = (turn = {}) => [
   turn.continuable ? '  可继续: 是' : '',
   turn.continueHint ? `  继续提示: ${turn.continueHint}` : '',
   turn.message ? `  ${isRealtimeTranscript(turn) ? '女仆（语音）' : '结果'}: ${turn.message}` : '',
+  // 选项提问卡：记下给过的选项，用户下一句只回一个选项时也知道指的是什么
+  ...(Array.isArray(turn.cards) ? turn.cards : []).filter(card => card?.type === 'choice').map(card => `  给用户的选项: ${summarizeMaidChoiceCard(card)}`),
+  // 计划卡：用户下一句「开始做」时照这份计划执行
+  ...(Array.isArray(turn.cards) ? turn.cards : []).filter(card => card?.type === 'plan').map(card => `  给用户的计划: ${summarizeMaidPlanCard(card)}`),
 ].filter(Boolean).join('\n');
 
 const estimateMaidTurnsTokens = (turns = []) => estimateTokens(
@@ -454,7 +460,7 @@ const buildMaidWorkingContextPlan = ({
     .filter(turn => !turn?.compacted && !isRealtimeTranscript(turn) && isExplicitMaidPreferenceInstruction(turn?.input))
     .slice(-4)
     .forEach(turn => candidates.push({ id: trim(turn.id), type: 'turn', at: Number(turn.at || 0),
-      label: '用户偏好指示（来自对话，不代表已写入长期记忆）', content: trim(turn.input) }));
+      label: '用户偏好指示（来自对话）', content: trim(turn.input) }));
   (Array.isArray(turns) ? turns : [])
     .filter(turn => !turn?.compacted && !isRealtimeTranscript(turn) && trim(turn?.compactionProtection))
     .slice(-MAID_CONTEXT_WORKING_ITEM_LIMIT)
@@ -669,6 +675,7 @@ const normalizeTurn = (raw = {}, { now = Date.now } = {}) => {
       .slice(0, 16),
     context: isPlainObject(src.context) ? clone(src.context) : {},
     ...(cards.length ? { cards } : {}),
+    ...(src.hiddenFromMaid === true ? { hiddenFromMaid: true } : {}),
   };
 };
 
@@ -1425,6 +1432,7 @@ export class MaidConversationStore {
       maidContextVersion: MAID_CONTEXT_VERSION,
       threadId: this.state.threadId,
       threadTitle: this.state.threadTitle,
+      pendingMoment: findMaidPendingMoment(scoped.turns),
       historyText,
       memoryText,
       tokenCount,
@@ -1645,6 +1653,7 @@ export class MaidConversationStore {
       maidContextVersion: MAID_CONTEXT_VERSION,
       threadId: this.state.threadId,
       threadTitle: this.state.threadTitle,
+      pendingMoment: findMaidPendingMoment(scoped.turns),
       historyText,
       workingMemoryText: workingPlan.text || '',
       semanticMemoryText: semanticPlan.text || '',
@@ -2149,6 +2158,48 @@ export class MaidConversationStore {
       seen.add(key);
       return true;
     }).sort((a, b) => (Number(a.at) || 0) - (Number(b.at) || 0)).map(turn => clone(turn));
+  }
+
+  /**
+   * 按轮管理（ROADMAP 29-③）：设为「不给女仆看」或恢复。只改当前回合（归档里的旧回合本来就不进提示词）；
+   * 已整理进记忆的回合，记忆里的概括仍在。返回改动的回合数。
+   */
+  async setTurnsHidden(ids = [], hidden = true) {
+    this.ensureLoaded();
+    const targets = new Set((Array.isArray(ids) ? ids : [ids]).map(id => trim(id)).filter(Boolean));
+    let changed = 0;
+    this.state.turns = this.state.turns.map((turn) => {
+      if (!targets.has(turn.id) || (turn.hiddenFromMaid === true) === (hidden === true)) return turn;
+      changed += 1;
+      const next = { ...turn };
+      if (hidden === true) next.hiddenFromMaid = true;
+      else delete next.hiddenFromMaid;
+      return next;
+    });
+    if (changed && !await this.write()) return 0;
+    return changed;
+  }
+
+  /** 最近一轮（按时间最晚的当前回合）。 */
+  getLatestTurn() {
+    this.ensureLoaded();
+    return this.state.turns.reduce((latest, turn) => (!latest || (Number(turn.at) || 0) >= (Number(latest.at) || 0) ? turn : latest), null);
+  }
+
+  /**
+   * 删除最近一轮：只能删最近一轮、且还没整理进记忆（中间的轮次删掉会让记忆与抽取的来源对不上，改用「不给女仆看」）。
+   * 不回滚这一轮做过的事。返回被删的回合，删不了时返回 null。
+   */
+  async deleteLatestTurn(id = '') {
+    const latest = this.getLatestTurn();
+    if (!latest || latest.id !== trim(id) || latest.compacted) return null;
+    this.state.turns = this.state.turns.filter(turn => turn.id !== latest.id);
+    this.state.extractionBatches = this.state.extractionBatches.map(batch => ({
+      ...batch,
+      sourceTurnIds: (batch.sourceTurnIds || []).filter(turnId => turnId !== latest.id),
+    }));
+    if (!await this.write()) return null;
+    return clone(latest);
   }
 
   exportState() {

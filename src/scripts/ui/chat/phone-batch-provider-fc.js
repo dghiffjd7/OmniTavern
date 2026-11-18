@@ -103,7 +103,7 @@ export const sanitizePhoneBatchSemanticText = (value = '') => String(value ?? ''
   .replace(/<\s*tableEdit\b[^>]*>[\s\S]*?<\s*\/\s*tableEdit\s*>/gi, () => getLocalizedPromptText('fc.batch.sanitize_table'))
   .replace(/<\s*UpdateVariable\b[^>]*>[\s\S]*?<\s*\/\s*UpdateVariable\s*>/gi, () => getLocalizedPromptText('fc.batch.sanitize_variable'))
   .replace(/<\s*image_prompt\b[^>]*>[\s\S]*?<\s*\/\s*image_prompt\s*>/gi, 'image_prompt item')
-  .replace(/<\s*details\b[^>]*>\s*<\s*summary\b[^>]*>\s*摘要\s*<\s*\/\s*summary\s*>[\s\S]*?<\s*\/\s*details\s*>/gi, 'summary item')
+  .replace(/<\s*details\b[^>]*>\s*<\s*summary\b[^>]*>\s*(?:摘要|Summary)\s*<\s*\/\s*summary\s*>[\s\S]*?<\s*\/\s*details\s*>/gi, 'summary item')
   .replace(/<\s*\/?\s*content\s*>/gi, () => getLocalizedPromptText('fc.batch.sanitize_content'))
   .replace(/\bmoment_reply_start\s*\/\s*moment_reply_end\b/gi, 'moment_comment item')
   .replace(/\bmoment_start\s*(?:\.{3}|…{1,2}|\/|到|至)\s*moment_end\b/gi, 'moment_post item')

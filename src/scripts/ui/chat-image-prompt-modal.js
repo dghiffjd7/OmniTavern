@@ -1,12 +1,17 @@
 import { ImagePromptEditor } from './image-prompt/image-prompt-editor.js';
 import { IMAGE_PROMPT_TEXT_KEYS } from './image-prompt/image-prompt-utils.js';
 import { resolveImageGenerationParamSchema, getImageGenerationSizeError, syncImageGenerationOutputControls } from './image-generation-params-utils.js';
-import { createImageGenerationSizeControl, validateImageGenerationSizeControls } from './image-generation-size-control.js';
+import { validateImageGenerationSizeControls } from './image-generation-size-control.js';
 import { resolveImageReferenceCapability } from './media-generation-service.js';
 import { bindBackdropActivation } from './backdrop-activation-utils.js';
+import { normalizeAdvancedNumber, renderImageGenerationAdvancedFields } from './image-generation-advanced-fields.js';
+
+// 图钉（固定到本聊天）
+const PIN_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 4h6l-1 6 3 3v2H7v-2l3-3z"/></g></svg>';
 
 export const createChatImagePromptModal = ({
   imagePromptRuntime,
+  getImageTagConverter = () => null,
   pickFilesFromInput, getReferencePicker, readImageGenerationReferenceFiles, normalizeImageGenerationReferenceItems,
 }) => {
     let modal = null;
@@ -26,6 +31,14 @@ export const createChatImagePromptModal = ({
           </div>
           <div class="chat-image-gen-body">
             <div class="chat-image-prompt-editor"></div>
+            <div class="chat-image-gen-pins" hidden>
+              <div class="chat-image-gen-pins-head">
+                <span class="chat-image-gen-pins-title">本聊天参考图</span>
+                <label class="chat-image-gen-pins-use"><input type="checkbox" class="chat-image-gen-pins-toggle" checked><span>本次使用</span></label>
+              </div>
+              <div class="chat-image-gen-pins-list" aria-live="polite"></div>
+              <div class="chat-image-gen-pins-hint"></div>
+            </div>
             <div class="chat-image-gen-ref">
               <div class="chat-image-gen-ref-head">
                 <button type="button" class="chat-image-gen-ref-add">添加参考图</button>
@@ -77,7 +90,15 @@ export const createChatImagePromptModal = ({
       const refAddBtn = overlay.querySelector('.chat-image-gen-ref-add');
       const refHintEl = overlay.querySelector('.chat-image-gen-ref-hint');
       const refListEl = overlay.querySelector('.chat-image-gen-ref-list');
+      const pinsEl = overlay.querySelector('.chat-image-gen-pins');
+      const pinsListEl = overlay.querySelector('.chat-image-gen-pins-list');
+      const pinsHintEl = overlay.querySelector('.chat-image-gen-pins-hint');
+      const pinsToggleEl = overlay.querySelector('.chat-image-gen-pins-toggle');
       let resolveOpen = null;
+      // 本聊天参考图（固定在聊天上，这个聊天的生图都带上）：{ key, dataUrl, name }；pinHandlers 为 null 时不提供固定
+      let pinnedReferences = [];
+      let usePinnedReferences = true;
+      let pinHandlers = null;
       let promptEditor = null;
       let openVersion = 0;
       let previousFocus = null;
@@ -92,16 +113,10 @@ export const createChatImagePromptModal = ({
       let generationParamContextLoader = null;
       const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
       const isNegativePromptField = (field = {}) => IMAGE_PROMPT_TEXT_KEYS.includes(field?.key);
-      const normalizeParamFieldValue = (field, value) => {
-        if (field?.type === 'number') {
-          const raw = Math.trunc(Number(value));
-          if (!Number.isFinite(raw)) return Number(field?.defaultValue || 0);
-          const min = Number.isFinite(Number(field?.min)) ? Number(field.min) : Number.MIN_SAFE_INTEGER;
-          const max = Number.isFinite(Number(field?.max)) ? Number(field.max) : Number.MAX_SAFE_INTEGER;
-          return Math.min(max, Math.max(min, raw));
-        }
-        return String(value ?? field?.defaultValue ?? '');
-      };
+      // 数字照字段规则：整数字段取整，小数字段（例如 NAI 的 Guidance Rescale）保留小数
+      const normalizeParamFieldValue = (field, value) => (field?.type === 'number'
+        ? normalizeAdvancedNumber(field, value)
+        : String(value ?? field?.defaultValue ?? ''));
       const getParamFieldValue = (field, params = {}) => normalizeParamFieldValue(
         field,
         hasOwn(params, field?.key) ? params[field.key] : field?.defaultValue,
@@ -116,6 +131,12 @@ export const createChatImagePromptModal = ({
         return next;
       };
       const countGenerationParamOverrides = () => Object.keys(generationParamOverrides || {}).length;
+      const syncReferenceCapability = () => {
+        if (generationParamConfig?.provider) {
+          referenceCapability = resolveImageReferenceCapability(generationParamConfig, { ...generationParamBase, ...generationParamOverrides });
+        }
+        renderReferences();
+      };
       const updateAdvancedButton = () => {
         if (!advancedBtn) return;
         const count = countGenerationParamOverrides();
@@ -124,10 +145,21 @@ export const createChatImagePromptModal = ({
       };
       const updateAdvancedSummary = () => {
         const modelLabel = [generationParamConfig?.provider, generationParamConfig?.model].filter(Boolean).join(' / ') || '未选择图片模型';
-        if (advancedSummaryEl) {
-          const count = countGenerationParamOverrides();
-          advancedSummaryEl.textContent = `${generationParamSchema?.title || '图片生成参数'} · ${modelLabel}${count ? ` · 本次覆盖 ${count} 项` : ''}`;
-        }
+        if (!advancedSummaryEl) return;
+        const count = countGenerationParamOverrides();
+        advancedSummaryEl.innerHTML = '';
+        const copy = document.createElement('div');
+        copy.className = 'igp-adv-summary-copy';
+        const title = document.createElement('strong');
+        title.textContent = generationParamSchema?.title || '图片生成参数';
+        const model = document.createElement('span');
+        model.textContent = modelLabel;
+        model.dataset.i18nSkip = '';
+        copy.append(title, model);
+        const pill = document.createElement('span');
+        pill.className = `igp-adv-summary-pill${count ? ' is-active' : ''}`;
+        pill.textContent = count ? `本次覆盖 ${count} 项` : '沿用参数预设';
+        advancedSummaryEl.append(copy, pill);
       };
       const applyGenerationParamContext = (context = {}) => {
         generationParamConfig = context?.config && typeof context.config === 'object' ? context.config : {};
@@ -136,6 +168,7 @@ export const createChatImagePromptModal = ({
         generationParamOverrides = normalizeParamOverrides(generationParamOverrides, generationParamSchema);
         promptEditor?.setConfig(generationParamConfig, { ...generationParamBase, ...generationParamOverrides });
         updateAdvancedButton();
+        syncReferenceCapability();
       };
       const syncAdvancedOverridesFromFields = () => {
         if (!advancedFieldsEl) return;
@@ -153,58 +186,35 @@ export const createChatImagePromptModal = ({
         updateAdvancedButton();
         updateAdvancedSummary();
         promptEditor?.setConfig(generationParamConfig, { ...generationParamBase, ...generationParamOverrides });
+        syncReferenceCapability();
       };
+      let advancedUi = null;
       const renderAdvancedFields = () => {
         if (!advancedFieldsEl) return;
         updateAdvancedSummary();
-        advancedFieldsEl.innerHTML = '';
-        (generationParamSchema?.fields || []).forEach(field => {
-          if (isNegativePromptField(field)) return;
-          const label = document.createElement('label');
-          label.className = 'chat-image-gen-param-row';
-          const title = document.createElement('div');
-          title.className = 'chat-image-gen-param-label';
-          title.textContent = field.label || field.key;
-          label.appendChild(title);
-          if (field.type === 'image-size') {
-            title.classList.add('has-help'); title.dataset.help = field.help; title.dataset.helpMode = 'tap';
-            label.appendChild(createImageGenerationSizeControl({ field, value: getParamFieldValue(field, { ...generationParamBase, ...generationParamOverrides }), controlClass: 'chat-image-gen-param-field', onChange: syncAdvancedOverridesFromFields }));
-            advancedFieldsEl.appendChild(label);
-            return;
-          }
-          let control = null;
-          if (field.type === 'select') {
-            control = document.createElement('select');
-            (field.options || []).forEach(opt => {
-              const option = document.createElement('option');
-              option.value = String(opt.value ?? '');
-              option.textContent = String(opt.label || opt.value || '');
-              control.appendChild(option);
-            });
-          } else {
-            control = document.createElement('input');
-            control.type = field.type === 'number' ? 'number' : 'text';
-            if (field.type === 'number') {
-              if (field.min != null) control.min = String(field.min);
-              if (field.max != null) control.max = String(field.max);
-              if (field.step != null) control.step = String(field.step);
-            }
-          }
-          control.className = 'chat-image-gen-param-field';
-          control.dataset.paramKey = field.key;
-          control.value = String(getParamFieldValue(field, { ...generationParamBase, ...generationParamOverrides }));
-          control.addEventListener('input', syncAdvancedOverridesFromFields);
-          control.addEventListener('change', syncAdvancedOverridesFromFields);
-          label.appendChild(control);
-          if (field.help) {
-            title.classList.add('has-help'); title.dataset.help = field.help; title.dataset.helpMode = 'tap';
-          }
-          advancedFieldsEl.appendChild(label);
+        // 分组卡片＋按字段类型挑控件（image-generation-advanced-fields.js）；覆盖过的项目可单项恢复
+        advancedUi = renderImageGenerationAdvancedFields({
+          documentRef: document,
+          container: advancedFieldsEl,
+          fields: (generationParamSchema?.fields || []).filter(field => !isNegativePromptField(field)),
+          values: { ...generationParamBase, ...generationParamOverrides },
+          base: generationParamBase,
+          onChange: () => {
+            advancedUi?.refresh();
+            syncAdvancedOverridesFromFields();
+          },
         });
         syncImageGenerationOutputControls(advancedFieldsEl);
       };
+      const modalEl = overlay.querySelector('.chat-image-gen-modal');
       const openAdvancedPage = () => {
         renderAdvancedFields();
+        // 固定成生成页的高度，切换时对话框不跳动；参数多时在页内捲动
+        const height = modalEl?.offsetHeight || 0;
+        if (modalEl && height) {
+          modalEl.style.height = `${height}px`;
+          modalEl.classList.add('is-advanced');
+        }
         if (bodyEl) bodyEl.hidden = true;
         if (footerEl) footerEl.hidden = true;
         if (advancedPage) advancedPage.hidden = false;
@@ -213,6 +223,10 @@ export const createChatImagePromptModal = ({
         if (advancedPage) advancedPage.hidden = true;
         if (bodyEl) bodyEl.hidden = false;
         if (footerEl) footerEl.hidden = false;
+        if (modalEl) {
+          modalEl.style.height = '';
+          modalEl.classList.remove('is-advanced');
+        }
       };
       const refreshGenerationParamContext = async (event = null) => {
         if (event?.detail?.tab && event.detail.tab !== 'image') return;
@@ -224,12 +238,48 @@ export const createChatImagePromptModal = ({
         applyGenerationParamContext(nextContext);
         if (advancedPage && !advancedPage.hidden) renderAdvancedFields();
       };
+      const countUsedReferences = () => referenceImages.length + (usePinnedReferences ? pinnedReferences.length : 0);
+      const renderPins = (max, supported) => {
+        if (!pinsEl) return;
+        pinsEl.hidden = !pinHandlers || !pinnedReferences.length;
+        if (pinsEl.hidden) return;
+        pinsEl.classList.toggle('is-off', !usePinnedReferences);
+        if (pinsToggleEl) pinsToggleEl.checked = usePinnedReferences;
+        pinsListEl.innerHTML = '';
+        pinnedReferences.forEach((item) => {
+          const wrap = document.createElement('div');
+          wrap.className = 'chat-image-gen-ref-item is-pinned';
+          const img = document.createElement('img');
+          img.src = item.dataUrl;
+          img.alt = item.name || '参考图';
+          const unpin = document.createElement('button');
+          unpin.type = 'button';
+          unpin.className = 'chat-image-gen-ref-remove chat-image-gen-pin-remove';
+          unpin.textContent = '×';
+          unpin.title = '取消固定';
+          unpin.setAttribute('aria-label', '取消固定');
+          unpin.dataset.key = item.key;
+          wrap.appendChild(img);
+          wrap.appendChild(unpin);
+          pinsListEl.appendChild(wrap);
+        });
+        if (pinsHintEl) {
+          // 不支持时写具体原因（例如 NAI 要先打开「精准参考」），原因文字都已登记翻译
+          pinsHintEl.textContent = !supported
+            ? String(referenceCapability?.reason || '当前模型不支持参考图，这次不会带上')
+            : (usePinnedReferences && countUsedReferences() > max
+              ? `当前模型最多 ${max} 张，只会带上前 ${max} 张（本聊天参考图优先）`
+              : '这个聊天之后的生图（含自动配图）都会带上');
+        }
+      };
       const renderReferences = () => {
         const max = Math.max(0, Math.trunc(Number(referenceCapability?.max || 0)));
         const supported = Boolean(referenceCapability?.supported && max > 0);
+        renderPins(max, supported);
+        const used = countUsedReferences();
         if (refAddBtn) {
-          refAddBtn.disabled = !supported || referenceImages.length >= max;
-          refAddBtn.textContent = supported ? `添加参考图 ${referenceImages.length}/${max}` : '不支持参考图';
+          refAddBtn.disabled = !supported || used >= max;
+          refAddBtn.textContent = supported ? `添加参考图 ${used}/${max}` : '不支持参考图';
           refAddBtn.title = supported ? `当前模型最多 ${max} 张，可用于角色、构图或风格参考` : String(referenceCapability?.reason || '当前图片模型不支持参考图');
         }
         if (refHintEl) {
@@ -252,8 +302,44 @@ export const createChatImagePromptModal = ({
           remove.dataset.index = String(idx);
           wrap.appendChild(img);
           wrap.appendChild(remove);
+          // 固定到本聊天：这个聊天之后的生图都带上
+          if (pinHandlers) {
+            const pin = document.createElement('button');
+            pin.type = 'button';
+            pin.className = 'chat-image-gen-ref-pin';
+            pin.innerHTML = PIN_ICON;
+            pin.title = '固定到本聊天：之后的生图（含自动配图）都带上';
+            pin.setAttribute('aria-label', '固定到本聊天');
+            pin.dataset.index = String(idx);
+            wrap.appendChild(pin);
+          }
           refListEl.appendChild(wrap);
         });
+      };
+      const pinReference = async (idx) => {
+        const item = referenceImages[idx];
+        if (!item || !pinHandlers) return;
+        const result = await pinHandlers.pin(item).catch(error => ({ ok: false, reason: error?.message }));
+        if (!result?.ok) {
+          statusEl.textContent = result?.reason === 'limit' ? '本聊天参考图已满，先取消固定一张' : '固定失败，请再试一次';
+          return;
+        }
+        referenceImages.splice(referenceImages.indexOf(item), 1);
+        const key = String(result.item.key || result.item.path || '');
+        if (!pinnedReferences.some(pinned => pinned.key === key)) {
+          pinnedReferences = [...pinnedReferences, { key, dataUrl: item.dataUrl, name: item.name || '' }];
+        }
+        usePinnedReferences = true;
+        statusEl.textContent = '已固定到本聊天';
+        renderReferences();
+      };
+      const unpinReference = async (key) => {
+        if (!pinHandlers) return;
+        const ok = await Promise.resolve(pinHandlers.unpin(key)).catch(() => false);
+        if (!ok) { statusEl.textContent = '取消固定失败，请再试一次'; return; }
+        pinnedReferences = pinnedReferences.filter(item => item.key !== key);
+        statusEl.textContent = '';
+        renderReferences();
       };
       const handleAddReferences = async () => {
         const max = Math.max(0, Math.trunc(Number(referenceCapability?.max || 0)));
@@ -261,7 +347,7 @@ export const createChatImagePromptModal = ({
           statusEl.textContent = referenceCapability?.reason || '当前图片模型不支持参考图';
           return;
         }
-        const remaining = max - referenceImages.length;
+        const remaining = max - countUsedReferences();
         if (remaining <= 0) {
           statusEl.textContent = `参考图最多 ${max} 张`;
           return;
@@ -269,7 +355,7 @@ export const createChatImagePromptModal = ({
         const files = await pickFilesFromInput(getReferencePicker());
         if (!files.length) return;
         const refs = await readImageGenerationReferenceFiles(files, remaining);
-        referenceImages = normalizeImageGenerationReferenceItems([...referenceImages, ...refs], referenceCapability);
+        referenceImages = normalizeImageGenerationReferenceItems([...referenceImages, ...refs], { ...referenceCapability, max: referenceImages.length + remaining });
         statusEl.textContent = files.length > remaining ? `已按当前模型限制保留前 ${max} 张参考图` : '';
         renderReferences();
       };
@@ -278,7 +364,7 @@ export const createChatImagePromptModal = ({
         if (!overlay.classList.contains('is-active')) return;
         if (typeof referenceCapabilityLoader !== 'function') return;
         const version = openVersion;
-        const nextCapability = await referenceCapabilityLoader();
+        const nextCapability = await referenceCapabilityLoader(generationParamOverrides);
         if (version !== openVersion || !overlay.classList.contains('is-active')) return;
         referenceCapability = nextCapability || resolveImageReferenceCapability({});
         renderReferences();
@@ -292,6 +378,9 @@ export const createChatImagePromptModal = ({
         const resolve = resolveOpen;
         resolveOpen = null;
           referenceImages = [];
+          pinnedReferences = [];
+          usePinnedReferences = true;
+          pinHandlers = null;
           generationParamOverrides = {};
           generationParamContextLoader = null;
           updateAdvancedButton();
@@ -317,6 +406,7 @@ export const createChatImagePromptModal = ({
         close({
           prompt: value,
           referenceImages: referenceImages.map(item => ({ ...item })),
+          usePinnedReferences: Boolean(usePinnedReferences && pinnedReferences.length),
           negativePrompt: compiled.negativePrompt,
           generationParamOverrides: { ...generationParamOverrides, imagePromptDocument: promptDocument },
         });
@@ -330,6 +420,7 @@ export const createChatImagePromptModal = ({
         generationParamOverrides = {};
         renderAdvancedFields();
         updateAdvancedButton();
+        syncReferenceCapability();
       });
       secondaryBtn?.addEventListener('click', () => {
         const handler = secondaryHandler;
@@ -342,7 +433,22 @@ export const createChatImagePromptModal = ({
         onActivate: () => close(null),
       });
       refAddBtn?.addEventListener('click', () => handleAddReferences());
+      pinsListEl?.addEventListener('click', (event) => {
+        const btn = event?.target?.closest ? event.target.closest('button.chat-image-gen-pin-remove') : null;
+        if (btn) void unpinReference(String(btn.dataset.key || ''));
+      });
+      pinsToggleEl?.addEventListener('change', () => {
+        usePinnedReferences = Boolean(pinsToggleEl.checked);
+        statusEl.textContent = '';
+        renderReferences();
+      });
       refListEl?.addEventListener('click', (event) => {
+        const pinBtn = event?.target?.closest ? event.target.closest('button.chat-image-gen-ref-pin') : null;
+        if (pinBtn) {
+          const idx = Number(pinBtn.dataset.index);
+          if (Number.isFinite(idx)) void pinReference(idx);
+          return;
+        }
         const btn = event?.target?.closest ? event.target.closest('button.chat-image-gen-ref-remove') : null;
         if (!btn) return;
         const idx = Number(btn.dataset.index);
@@ -388,6 +494,8 @@ export const createChatImagePromptModal = ({
           onSecondary = null,
           referenceCapability: nextReferenceCapability = resolveImageReferenceCapability({}),
           referenceImages: initialReferenceImages = [],
+          // 本聊天参考图：{ items: [{ key, dataUrl, name }], pin(item) → { ok, item }, unpin(key) → boolean }；不提供则不显示
+          pinnedReferences: initialPinnedReferences = null,
           loadReferenceCapability = null,
           generationParamContext = {},
           generationParamOverrides: initialGenerationParamOverrides = {},
@@ -406,6 +514,11 @@ export const createChatImagePromptModal = ({
           applyGenerationParamContext(generationParamContext || {});
           referenceCapability = nextReferenceCapability || resolveImageReferenceCapability({});
           referenceImages = normalizeImageGenerationReferenceItems(initialReferenceImages, { supported: true, max: initialReferenceImages.length });
+          pinHandlers = initialPinnedReferences && typeof initialPinnedReferences.pin === 'function' && typeof initialPinnedReferences.unpin === 'function'
+            ? { pin: initialPinnedReferences.pin, unpin: initialPinnedReferences.unpin }
+            : null;
+          pinnedReferences = pinHandlers ? (initialPinnedReferences.items || []).filter(item => item?.key && item?.dataUrl).map(item => ({ ...item })) : [];
+          usePinnedReferences = true;
           const titleEl = overlay.querySelector('.chat-image-gen-title');
           const subtitleEl = overlay.querySelector('.chat-image-gen-subtitle');
           if (titleEl) titleEl.textContent = title;
@@ -421,7 +534,7 @@ export const createChatImagePromptModal = ({
           }
           statusEl.textContent = '';
           closeAdvancedPage();
-          renderReferences();
+          syncReferenceCapability();
           updateAdvancedButton();
           overlay.classList.add('is-active');
           submitBtn.disabled = true;
@@ -434,6 +547,7 @@ export const createChatImagePromptModal = ({
             if (version !== openVersion) return;
             promptEditor = new ImagePromptEditor({ container: overlay.querySelector('.chat-image-prompt-editor'), document: draft,
               config: generationParamConfig, options: { ...generationParamBase, ...generationParamOverrides },
+              getTagConverter: getImageTagConverter,
             });
             await promptEditor.ready;
             if (version !== openVersion) return;

@@ -887,7 +887,8 @@ export const buildMomentCommentTaskContext = ({
 
 export const extractMomentSummaryText = (text) => {
   const raw = String(text ?? '');
-  const re = /<details>\s*<summary>\s*摘要\s*<\/summary>\s*([\s\S]*?)<\/details>/gi;
+  // 中文提示词用「摘要」，英文提示词用「Summary」
+  const re = /<details>\s*<summary>\s*(?:摘要|Summary)\s*<\/summary>\s*([\s\S]*?)<\/details>/gi;
   let match;
   let last = null;
   while ((match = re.exec(raw))) last = match[1];
@@ -895,9 +896,7 @@ export const extractMomentSummaryText = (text) => {
   const plain = String(last || '').replace(/<[^>]+>/g, ' ');
   return plain
     .trim()
-    .replace(/\s+/g, ' ')
-    .replace(/[A-Za-z]+/g, '')
-    .trim();
+    .replace(/\s+/g, ' ');
 };
 
 export const sanitizeThinkingForMomentReply = (text) => {

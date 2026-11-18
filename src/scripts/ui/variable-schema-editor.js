@@ -229,6 +229,7 @@ export class VariableSchemaEditor {
     deleteSchema = () => false,
     setVariable = () => false,
     isGlobalScope = () => false,
+    isNestedPath = () => false,
     restoreInitialValue = null,
     onChange = () => {},
     onDelete = () => {},
@@ -242,6 +243,8 @@ export class VariableSchemaEditor {
     this.deleteSchema = deleteSchema;
     this.setVariable = setVariable;
     this.isGlobalScope = isGlobalScope;
+    // 树视图里的嵌套值（stat_data.角色.好感度）只能改值：schema 按顶层变量名存，给路径建 schema 会生出扁平变量
+    this.isNestedPath = isNestedPath;
     this.restoreInitialValue = restoreInitialValue;
     this.onChange = onChange;
     this.onDelete = onDelete;
@@ -752,7 +755,7 @@ export class VariableSchemaEditor {
     if (this.initialValue === undefined && this.existingSchema?.default !== undefined) {
       this.initialValue = cloneValue(this.existingSchema.default);
     }
-    const isGlobal = this.isGlobalScope();
+    const valueOnly = this.isGlobalScope() || this.isNestedPath(name);
 
     fields.key.value = name;
     fields.key.disabled = this.mode !== 'create';
@@ -770,9 +773,9 @@ export class VariableSchemaEditor {
     setText(fields.initialValue, formatInitialValue(this.initialValue));
     fields.restore.disabled = this.initialValue === undefined;
     fields.delete.hidden = this.mode === 'create';
-    fields.schemaConfig.hidden = isGlobal;
-    fields.draftNote.hidden = isGlobal;
-    fields.save.textContent = isGlobal ? '保存变量' : '保存配置';
+    fields.schemaConfig.hidden = valueOnly;
+    fields.draftNote.hidden = valueOnly;
+    fields.save.textContent = valueOnly ? '保存变量' : '保存配置';
 
     this.updateIdentity();
     this.updateImpact();
@@ -873,7 +876,7 @@ export class VariableSchemaEditor {
       notify('warning', parsedValue.error);
       return false;
     }
-    if (!this.isGlobalScope()) {
+    if (!this.isGlobalScope() && !this.isNestedPath(result.key)) {
       if (result.schema) {
         this.setSchema(result.key, mergeVariableSchemaDraft(this.existingSchema, result.schema));
       } else {

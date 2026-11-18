@@ -6972,9 +6972,14 @@ body[data-reduced-motion='on'] .persona-gallery-search {
   cursor: pointer;
 }
 
-.moment-load-more {
-  width: calc(100% - 24px);
+.moment-load-row {
+  display: flex;
+  gap: 8px;
   margin: 6px 12px 16px;
+}
+
+.moment-load-more {
+  flex: 1;
   padding: 10px 12px;
   border: 1px solid var(--app-border-default);
   border-radius: 999px;

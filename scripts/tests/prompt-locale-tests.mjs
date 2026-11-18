@@ -54,7 +54,8 @@ const defaults = getCanonicalBuiltinPromptDefaults();
 setPromptLocale('en');
 assert.match(getLocalizedPromptText('dialogue_rules', defaults.dialogue_rules), /Roleplay Core/);
 assert.match(getLocalizedPromptText('phone_format_chat_rules', defaults.phone_format_chat_rules), /QQ Chat Format Guide/);
-assert.match(getLocalizedPromptText('summary_rules', defaults.summary_rules), /summary must be written in English/);
+assert.match(getLocalizedPromptText('summary_rules', defaults.summary_rules), /Write the summary in English; keep names and other proper nouns in their original form/);
+assert.doesNotMatch(getLocalizedPromptText('summary_rules', defaults.summary_rules), /must not mix in other languages/);
 assert.doesNotMatch(getLocalizedPromptText('summary_rules', defaults.summary_rules), /\p{Script=Han}/u);
 assert.match(getLocalizedMaidPrompt(DEFAULT_MAID_PROMPT), /maid assistant inside this app/);
 assert.match(getLocalizedMaidOperationSafetyPrompt(), /non-destructive actions/);
@@ -247,3 +248,39 @@ assert.match(getLocalizedPromptText('maid.voice.conversation'), /没有本次任
 assert.match(getLocalizedMaidOperationSafetyPrompt({ voiceConversation: true }), /收到当前权限请求后/);
 
 console.log('prompt-locale-tests passed');
+
+{
+  // 摘要提示词放宽：用中文写，人名等专有名词保留原文（旧版要求「纯中文」，模型会硬译或删掉人名）
+  const { DEFAULT_SUMMARY_RULES, sanitizeSummaryRulesText } = await import('../../src/scripts/storage/preset-store.js');
+  const { readFile } = await import('node:fs/promises');
+  setPromptLocale('zh-CN');
+  assert.match(DEFAULT_SUMMARY_RULES, /摘要用中文书写，人名等专有名词保留原文/);
+  assert.doesNotMatch(DEFAULT_SUMMARY_RULES, /纯中文|不得夹杂其它语言/);
+  setPromptLocale('zh-TW');
+  assert.match(getLocalizedPromptText('summary_rules', DEFAULT_SUMMARY_RULES), /摘要用中文書寫，人名等專有名詞保留原文/);
+  assert.doesNotMatch(getLocalizedPromptText('summary_rules', DEFAULT_SUMMARY_RULES), /純中文/);
+  setPromptLocale('zh-CN');
+  const bridgeSource = await readFile(new URL('../../src/scripts/ui/bridge.js', import.meta.url), 'utf8');
+  assert.match(bridgeSource, /摘要用中文书写，人名等专有名词保留原文/, 'the fallback prompt matches the preset default');
+  assert.doesNotMatch(bridgeSource, /摘要\*\*纯中文输出\*\*/);
+
+  // 预设里存着的旧默认（用户没改过）升级成新默认；用户自己改过的不动
+  const legacy = [
+    '每次输出结束后，**紧跟着**以一句话概括本次互动的摘要，确保<details><summary>摘要</summary>',
+    '<内容>',
+    '</details>标签顺序正确，摘要**纯中文输出**，不得夹杂其它语言',
+    '[summary_format]',
+    '摘要格式示例：',
+    '',
+    '<details><summary>摘要</summary>',
+    '',
+    '用一句话概括本条回复的内容，禁止不必要的总结和升华',
+  ].join('\n');
+  assert.equal(sanitizeSummaryRulesText(legacy), DEFAULT_SUMMARY_RULES);
+  assert.equal(sanitizeSummaryRulesText(`  ${legacy}\n`), DEFAULT_SUMMARY_RULES);
+  assert.equal(sanitizeSummaryRulesText('我自己写的摘要规则，纯中文'), '我自己写的摘要规则，纯中文');
+  assert.equal(sanitizeSummaryRulesText(undefined), undefined);
+  const presetSource = await readFile(new URL('../../src/scripts/storage/preset-store.js', import.meta.url), 'utf8');
+  assert.equal(presetSource.match(/p\.summary_rules = sanitizeSummaryRulesText\(p\.summary_rules\);/g)?.length, 2, 'both preset load paths upgrade the old default');
+  console.log('ok - summary prompts allow original proper nouns and old defaults are upgraded');
+}

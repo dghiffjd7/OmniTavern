@@ -38,9 +38,11 @@ const canPresent = (result, context, isWriteTool) => {
   if (!Array.isArray(result.steps) || !result.steps.length) return false;
   for (const step of result.steps) {
     const output = outputOf(step), toolName = trim(step?.toolName);
+    // 「已读过」只指回本轮更早的真实读取，展示用的证据就是那些读取
+    const pointsToEarlierRead = toolName === 'worldbook.read' && output.alreadyRead === true;
     if (!toolName || step.status !== 'succeeded' || !object(output)
       || stopped(step.output) || stopped(output) || step.output?.partial === true || output.partial === true
-      || step.output?.localToolExecutionSkipped === true || output.localToolExecutionSkipped === true
+      || !pointsToEarlierRead && (step.output?.localToolExecutionSkipped === true || output.localToolExecutionSkipped === true)
       || output.worldbookSaved === true) return false;
     // Unknown tools fail closed. Callers must return the registry's actual
     // boolean capability, not infer reads from a missing write declaration.

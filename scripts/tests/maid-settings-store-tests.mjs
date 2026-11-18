@@ -296,8 +296,8 @@ const createStorage = () => {
     now: () => now,
   });
   await store.load();
-  assert.deepEqual(store.getBuiltinCapability('random'), { enabled: false, lastUsedAt: 0, revision: 0 });
-  assert.equal(store.getBuiltinCapability('weather'), null, 'only known capabilities exist');
+  assert.deepEqual(store.getBuiltinCapability('random'), { enabled: false, lastUsedAt: 0, revision: 0, options: {} });
+  assert.equal(store.getBuiltinCapability('music'), null, 'only known capabilities exist');
 
   const events = [];
   const unsubscribe = store.subscribeCapabilities((id, capability) => events.push([id, capability.enabled]));
@@ -318,10 +318,12 @@ const createStorage = () => {
   await store.setBuiltinCapabilityEnabled('random', false);
   assert.equal(events.length, 2, 'unsubscribed listeners are not called');
   assert.deepEqual(store.getCapabilityLog().map(item => [item.id, item.enabled, item.source]), [['random', true, 'maid_request'], ['random', false, 'settings']]);
+  await store.setBuiltinCapabilityOptions('map', { provider: 'amap' });
 
   const reloaded = new MaidSettingsStore({ storage, loadKv: async key => kv.get(key) ?? null, saveKv: async () => {}, now: () => 4000 });
   await reloaded.load();
-  assert.deepEqual(reloaded.getBuiltinCapability('random'), { enabled: false, lastUsedAt: 3000, revision: 2 }, 'load keeps the capability field');
+  assert.deepEqual(reloaded.getBuiltinCapability('random'), { enabled: false, lastUsedAt: 3000, revision: 2, options: {} }, 'load keeps the capability field');
+  assert.deepEqual(reloaded.getBuiltinCapability('map').options, { provider: 'amap' }, 'capability options persist');
   assert.equal(reloaded.getCapabilityLog().length, 2);
 
   const brokenStorage = { getItem: () => null, setItem: () => { throw new Error('quota'); }, removeItem() {} };

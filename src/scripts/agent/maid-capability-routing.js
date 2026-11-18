@@ -889,6 +889,10 @@ export const createMaidCapabilityRoutingRuntime = ({
     });
 
     if (revisionFeatureId) addRecord(projectedById.get(revisionFeatureId), 118, 'pending_action_revision', { pinned: true });
+    // 有一条没发出去的动态：下一句可能只是「发吧」，发布工具要留在候选里
+    if (retrievalContext?.maidConversationContext?.pendingMoment) {
+      addRecord(projectedById.get('moments.publish'), 118, 'pending_moment', { pinned: true });
+    }
     // 本轮附带了可识别的文件，或之前上传的文件尚未导入：附件查看／导入常驻候选
     const fileAttachments = [context?.maidAttachments, context?.maidRecentFileAttachments].flatMap(value => (Array.isArray(value) ? value : []));
     if (fileAttachments.some(item => item?.file)) {

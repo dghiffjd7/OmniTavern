@@ -104,3 +104,40 @@ test('business arguments and tools outside the offered plan retain strict valida
   assert.equal(tooLong.reason, 'invalid_tool_arguments');
   assert.equal(normalize({ action: 'clarify', message: 'Choose.', reason: 'r'.repeat(121) }, { name: 'unoffered_control' }).reason, 'unknown_tool');
 });
+
+test('clarify may carry choices: offered without length bounds, passed through and turned into one card on the decision', async () => {
+  const control = plan.toolMappings.find(tool => tool.control);
+  assert.equal(control.schema.properties.choices.type, 'array');
+  assert.equal(control.schema.properties.choices.items.properties.question.maxLength, undefined, 'no bounds that would void the whole clarify');
+  const choices = [{ question: 'Which book?', options: [{ label: 'Harbor' }, { label: 'Global', description: 'shared' }], recommended: 0 }];
+  const normalized = normalize({ action: 'clarify', message: 'Which one?', choices });
+  assert.equal(normalized.ok, true, normalized.reason);
+  assert.deepEqual(normalized.control.choices, choices);
+  // 校验宽松：多出的选项、长文字留给 APP 生成卡片时裁剪，不让整个反问作废
+  assert.equal(normalize({ action: 'clarify', message: 'Which one?', choices: [{ question: 'q'.repeat(400), options: ['a', 'b', 'c', 'd', 'e'].map(label => ({ label: label.repeat(80) })) }] }).ok, true);
+
+  const callArgs = { action: 'clarify', message: 'Which book should I change?', choices };
+  const client = { async chat(_messages, options) {
+    options.onProviderToolCallDelta({ candidates: [{ content: { parts: [{ functionCall: { name: MAID_PROVIDER_FC_CONTROL_TOOL_NAME, args: callArgs } }] }, finishReason: 'STOP' }] }, fixture.config);
+    return '';
+  } };
+  const react = createMaidModelBackedReActPlanner({ features: [feature],
+    resolveRuntimeConfig: async () => ({ config: fixture.config, client }),
+    getProviderFcExperimentStatus: () => ({ enabled: true }), logger: { warn() {}, debug() {} } });
+  const decision = await react('Change the setting.', { capabilitySnapshot: snapshot, sessionId: 'choice-test', uiMode: 'chat', maidReactSteps: [] });
+  assert.equal(decision.providerFcControl, 'clarify');
+  assert.equal(decision.message, callArgs.message, 'the text question stays as the message');
+  assert.equal(decision.choiceCard.type, 'choice');
+  assert.deepEqual(decision.choiceCard.data.questions[0].options.map(option => option.label), ['Harbor', 'Global']);
+
+  // final 附 choices 不出卡（只在停下反问时显示选项）
+  const finalClient = { async chat(_messages, options) {
+    options.onProviderToolCallDelta({ candidates: [{ content: { parts: [{ functionCall: { name: MAID_PROVIDER_FC_CONTROL_TOOL_NAME, args: { ...callArgs, action: 'final' } } }] }, finishReason: 'STOP' }] }, fixture.config);
+    return '';
+  } };
+  const finalReact = createMaidModelBackedReActPlanner({ features: [feature],
+    resolveRuntimeConfig: async () => ({ config: fixture.config, client: finalClient }),
+    getProviderFcExperimentStatus: () => ({ enabled: true }), logger: { warn() {}, debug() {} } });
+  const finalDecision = await finalReact('Change the setting.', { capabilitySnapshot: snapshot, sessionId: 'choice-final', uiMode: 'chat', maidReactSteps: [] });
+  assert.equal(finalDecision.choiceCard, undefined);
+});

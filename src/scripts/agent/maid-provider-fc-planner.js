@@ -1,3 +1,5 @@
+import { listAppFeatures } from './app-feature-catalog.js';
+import { isCatalogWriteTool } from './maid-result-cards.js';
 import { validateAgentToolArguments } from './agent-tool-registry.js';
 import { createProviderToolCallDeltaAccumulator } from './provider-tool-call-delta-adapter.js';
 import { buildProviderFcRequestPlan, resolveProviderFcTransport } from './provider-fc-transport.js';
@@ -157,15 +159,25 @@ const toProviderSafeName = (internalName = '', usedNames = new Map()) => {
   return candidate;
 };
 
-const buildControlSchema = () => ({
+// 计划（ROADMAP 29-⑨）：plan_first 先看（之后本次任务只给只读工具、写入由程序挡下），plan 交出计划卡并停下。
+// plan_first 只在一开始（planner 阶段）提供；规划中与执行中途只能交 plan。
+const buildControlSchema = ({ planning = false, writeTools = [], phase = 'planner' } = {}) => ({
   type: 'object',
   additionalProperties: false,
   required: ['action', 'message'],
   properties: {
     action: {
       type: 'string',
-      enum: ['final', 'clarify', 'unsupported', 'no_tool'],
-      description: 'Use final when observations are sufficient; otherwise clarify, unsupported, or no_tool.',
+      enum: planning
+        ? ['plan', 'final', 'clarify', 'unsupported', 'no_tool']
+        : trim(phase).toLowerCase() === 'planner'
+          ? ['final', 'clarify', 'plan_first', 'plan', 'unsupported', 'no_tool']
+          : ['final', 'clarify', 'plan', 'unsupported', 'no_tool'],
+      description: planning
+        ? 'You are planning: only read-only tools are available and the APP blocks writes. When you know enough, use plan to hand in the plan; use final or clarify if no plan is needed.'
+        : trim(phase).toLowerCase() === 'planner'
+          ? 'Use final when observations are sufficient; otherwise clarify, unsupported, or no_tool. For work with several steps that change content, or an unclear request you must look into first, do not start changing things: use plan_first to look first (the APP then gives you read-only tools until you hand in plan), or plan right away when nothing needs reading. The user starts, revises or drops the plan. Simple or read-only requests: just do them.'
+          : 'Use final when observations are sufficient; otherwise clarify, unsupported, or no_tool. Use plan to stop and hand the user a plan for the remaining changes.',
     },
     // 最终答复可能是较长的清单（例如列出几十个名称）。Gemini 的 schema 不支持 maxLength，模型看不到上限，
     // 上限过小会让合法的长答复在本地校验失败、再走一次文本路径重新生成
@@ -178,6 +190,42 @@ const buildControlSchema = () => ({
     reason: {
       type: 'string',
       maxLength: MAID_PROVIDER_FC_REASON_MAX_LENGTH,
+    },
+    // 选项提问卡（ROADMAP 29-①）：只写类型、不写长度与个数上限——校验不过会整个收尾作废；
+    // 题数、选项数与长度由 APP 生成卡片时裁剪（maid-result-cards.js），不合规的题目丢掉、只留文字提问
+    choices: {
+      type: 'array',
+      description: 'Only with clarify, when the user must pick between a few concrete alternatives: 1-3 questions, each with 2-4 short options (put a recommended one first and set recommended to 0). The APP shows them as buttons under your message; the user\'s pick comes back as their next message.',
+      items: {
+        type: 'object',
+        properties: {
+          question: { type: 'string' },
+          options: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                label: { type: 'string' },
+                description: { type: 'string' },
+              },
+            },
+          },
+          recommended: { type: 'integer' },
+          multiSelect: { type: 'boolean' },
+        },
+      },
+    },
+    // 计划卡：同样只写类型，由 APP 生成卡片时裁剪；tools 只留 APP 目录里的写入工具
+    plan: {
+      type: 'object',
+      description: `Only with plan: title, goal, concrete steps (last one: how you will check), changes (what will be created, modified, deleted or sent), and tools (the write tools you will use once the user starts; those are not asked one by one in that run${writeTools.length ? `; choose from: ${writeTools.join(', ')}` : ''}).`,
+      properties: {
+        title: { type: 'string' },
+        goal: { type: 'string' },
+        steps: { type: 'array', items: { type: 'string' } },
+        changes: { type: 'array', items: { type: 'string' } },
+        tools: { type: 'array', items: { type: 'string' } },
+      },
     },
   },
 });
@@ -213,8 +261,16 @@ export const buildMaidProviderFcToolPlan = ({
   phase = 'planner',
   thinkingEnabled = false,
   reasoningOptions = {},
+  // 规划中：只提供只读功能（写入由工具层挡下，这里不让模型看到）
+  planning = false,
 } = {}) => {
-  const candidateFeatures = Array.isArray(features) ? features : [];
+  const allFeatures = Array.isArray(features) ? features : [];
+  const candidateFeatures = allFeatures.filter(feature => !planning || feature?.writes !== true);
+  // 规划中看不到写入工具：把这次可用的写入工具名写进计划的说明，计划里才能列出开始后要用哪些
+  const planningWriteTools = planning
+    ? [...new Set(allFeatures.filter(feature => feature?.writes === true).flatMap(feature => list(feature?.tools)))]
+      .filter(name => isCatalogWriteTool(listAppFeatures(), name)).slice(0, 30)
+    : [];
   const usedNames = new Map([[MAID_PROVIDER_FC_CONTROL_TOOL_NAME, MAID_PROVIDER_FC_CONTROL_TOOL_NAME]]);
   const toolMappings = [];
   const missingSchemas = [];
@@ -280,15 +336,15 @@ export const buildMaidProviderFcToolPlan = ({
     };
   }
 
-  const controlSchema = buildControlSchema();
+  const controlSchema = buildControlSchema({ planning, writeTools: planningWriteTools, phase });
   toolMappings.push({
     providerName: MAID_PROVIDER_FC_CONTROL_TOOL_NAME,
     internalName: '',
     featureId: '',
     title: 'Finish or stop planning safely',
     description: trim(phase).toLowerCase() === 'react'
-      ? 'Return a final answer when observations are sufficient, or stop safely to clarify/decline.'
-      : 'Use only when no APP business tool should run: answer, clarify, or decline safely.',
+      ? 'Return a final answer when observations are sufficient, stop safely to clarify/decline, or hand in a plan.'
+      : 'Use only when no APP business tool should run now: answer, clarify, decline safely, or plan first.',
     schema: controlSchema,
     control: true,
   });
@@ -424,6 +480,13 @@ export const normalizeMaidProviderFcCompletedCalls = ({
         action: trim(validation.args.action, 'no_tool').toLowerCase(),
         message: truncate(validation.args.message, MAID_PROVIDER_FC_MESSAGE_MAX_LENGTH),
         reason: trim(validation.args.reason),
+        ...(Array.isArray(validation.args.choices) && validation.args.choices.length ? { choices: clone(validation.args.choices, []) } : {}),
+        // 计划里的工具名：模型看到的是服务商工具名，换回 APP 内部名（规划中列的本来就是内部名）
+        ...(isPlainObject(validation.args.plan) ? { plan: {
+          ...clone(validation.args.plan, {}),
+          tools: (Array.isArray(validation.args.plan.tools) ? validation.args.plan.tools : []).map(name => trim(name)).filter(Boolean)
+            .map(name => (toolPlan?.toolMappings || []).find(item => !item.control && item.providerName === name)?.internalName || name),
+        } } : {}),
       },
     };
   }
@@ -460,6 +523,7 @@ export const runMaidProviderFcAttempt = async ({
   generationSettings = null,
   onModelUsage = null,
   allowReadBatch = false,
+  planning = false,
   now = Date.now,
 } = {}) => {
   const eligibility = resolveMaidProviderFcEligibility({
@@ -486,6 +550,7 @@ export const runMaidProviderFcAttempt = async ({
     phase: eligibility.phase,
     thinkingEnabled: eligibility.thinkingEnabled || generationSettings?.reasoningMode === 'on',
     reasoningOptions: buildMaidReasoningBaseOptions(config, generationSettings),
+    planning,
   });
   if (!toolPlan.ok) {
     return {

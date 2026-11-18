@@ -20,6 +20,8 @@ const svgPath = Object.freeze({
   copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>',
   phrase: '<path d="M4 5h16v11H9l-5 4V5Z"/><path d="M8 9h8M8 12h5"/>',
   speak: '<path d="M4 9v6h4l5 4V5L8 9H4Z"/><path d="M16 9a3 3 0 0 1 0 6M18.5 6.5a7 7 0 0 1 0 11"/>',
+  translate: '<path d="M4 5h9M8.5 3v2M11 5c-1 4-3.5 7-7 9M6 9c1.5 2.5 3.5 4 6 5"/><path d="m13 21 4-9 4 9M14.5 18h5"/>',
+  steward: '<path d="M4 10.5 12 4l8 6.5V20H4v-9.5Z"/><path d="M9.5 20v-5h5v5"/>',
   image: '<rect x="3" y="4" width="18" height="16" rx="3"/><path d="m4 17 5-5 4 4 3-3 4 4"/><circle cx="16" cy="9" r="1.4"/>',
   memory: '<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"/>',
   variable: '<path d="M8 4c-2 0-3 1-3 3v2c0 1.5-1 2.5-2 3 1 .5 2 1.5 2 3v2c0 2 1 3 3 3M16 4c2 0 3 1 3 3v2c0 1.5 1 2.5 2 3-1 .5-2 1.5-2 3v2c0 2-1 3-3 3"/>',
@@ -52,6 +54,7 @@ export const TOOL_ACTION_GROUPS = Object.freeze([
   { id: 'text', title: '文字与输入' },
   { id: 'open', title: '打开功能' },
   { id: 'agent', title: 'AI Agent' },
+  { id: 'steward', title: '小管家' },
   { id: 'script', title: '脚本与插件' },
 ]);
 
@@ -67,6 +70,19 @@ export const TOOL_SCRIPT_CAPABILITIES = Object.freeze([
 export const SCRIPT_TOOL_ACTION = Object.freeze({
   source: 'script', id: 'inline', group: 'script', title: '自己写脚本', icon: 'code', target: 'any', defaultTarget: 'assistant', effect: 'script', directable: true,
   description: '写一段脚本处理这条消息、输入框，或调用模型。',
+});
+
+/** 小管家的自定义任务 → 工具可选的动作（结果按任务设定弹窗、写在气泡下方或填入输入框）。 */
+export const stewardToolAction = (task = {}) => ({
+  source: 'steward',
+  id: trim(task.id),
+  group: 'steward',
+  title: trim(task.name) || trim(task.id),
+  icon: 'steward',
+  target: 'any',
+  defaultTarget: 'assistant',
+  effect: 'read',
+  description: '让小管家执行这个自定义任务；用到消息时没有指定就用最后一条 AI 回复。',
 });
 
 /** 插件在 manifest 宣告的动作 → 工具可选的动作。 */
@@ -106,6 +122,7 @@ export const BUILTIN_TOOL_ACTIONS = Object.freeze([
     ],
   },
   { id: 'text.speak', group: 'text', title: '朗读这条', icon: 'speak', target: 'assistant', effect: 'read', description: '朗读这条 AI 回复；没有指定时为最后一条。' },
+  { id: 'text.translate', group: 'text', title: '翻译这条', icon: 'translate', target: 'any', defaultTarget: 'assistant', effect: 'read', description: '让小管家翻译这条消息，译文显示在气泡下方（要先在 Agent Center 开启小管家）；没有指定时为最后一条 AI 回复。' },
   {
     id: 'open.panel', group: 'open', title: '打开功能', icon: 'grid', target: 'none', effect: 'open', description: '打开指定的功能面板。',
     params: [{ key: 'panel', type: 'select', label: '要打开的功能', options: TOOL_PANELS.map(panel => [panel.id, panel.title]), default: 'image' }],

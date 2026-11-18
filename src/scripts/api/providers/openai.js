@@ -13,6 +13,7 @@ import { prepareTransportRequest } from '../transport.js';
 import { reportProviderUsage } from '../provider-usage.js';
 import { reportProviderWebSources } from '../web-search-runtime.js';
 import { attachSafeProviderErrorMetadata } from '../provider-error-metadata.js';
+import { emitImagePreview, streamImageSse } from './image-stream-transport.js';
 import { isStreamOptionsRejectionError, streamUsageCompat } from '../stream-usage-compat.js';
 import { emitDebugLog } from '../../utils/debug-log.js';
 import {
@@ -1052,6 +1053,61 @@ export class OpenAIProvider {
    * @param {string} prompt
    * @param {Object} options
    */
+  /**
+   * 发图片请求（generations／edits）。gpt-image 设了中间图张数（partial_images 1～3，每张另计 100 个图片输出 token）
+   * 且有人要看过程时，加 stream 收中间图；中转站不转发 SSE、直接回整包 JSON 时照常解析。其余照原本的 requestJson。
+   */
+  async requestImageData({ url, payload, signal, onPreview = null, partialImages = 0 } = {}) {
+    const count = Math.max(0, Math.min(3, Math.trunc(Number(partialImages) || 0)));
+    if (!count || typeof onPreview !== 'function' || !isOpenAIGptImageModel(this.model)) {
+      return this.requestJson({ url, method: 'POST', headers: this.getHeaders(), body: JSON.stringify(payload), signal });
+    }
+    const prepared = prepareTransportRequest({
+      config: this.transportConfig,
+      provider: this.provider,
+      url,
+      headers: { ...this.getHeaders(), Accept: 'text/event-stream' },
+    });
+    const format = String(payload?.output_format || 'png');
+    try {
+      const events = streamImageSse({
+        url: prepared.url,
+        headers: prepared.headers,
+        body: JSON.stringify({ ...payload, stream: true, partial_images: count }),
+        signal,
+        timeoutMs: Math.max(Number(this.timeout) || 0, 300000),
+        label: 'OpenAI',
+        invoker: getTauriInvoker(),
+      });
+      for await (const { event, data } of events) {
+        if (event === 'json' && Array.isArray(data?.data)) return data;
+        const type = String(data?.type || event || '');
+        if (type === 'error' || data?.error) {
+          throw new Error(`OpenAI API Error: ${String(data?.error?.message || data?.message || JSON.stringify(data)).slice(0, 300)}`);
+        }
+        // generations 是 image_generation.*，edits 是 image_edit.*
+        if (type.endsWith('.partial_image') && data?.b64_json) {
+          emitImagePreview(onPreview, {
+            dataUrl: `data:image/${data.output_format || format};base64,${data.b64_json}`,
+            step: Number(data.partial_image_index) + 1 || 0,
+            total: count,
+          });
+        } else if (type.endsWith('.completed') && data?.b64_json) {
+          return { data: [{ b64_json: data.b64_json }], output_format: data.output_format || format };
+        }
+      }
+    } catch (error) {
+      if (signal?.aborted || error?.name === 'AbortError') throw makeAbortError();
+      if (!error?.status) throw error;
+      const detail = this.extractErrorDetail(error.response);
+      const wrapped = new Error(`OpenAI API Error: ${error.status}${detail ? ` - ${detail}` : ''}`);
+      wrapped.status = error.status;
+      wrapped.response = error.response;
+      throw attachSafeProviderErrorMetadata(wrapped, error.response);
+    }
+    throw new Error('OpenAI 流式回应没有返回最终图片');
+  }
+
   async generateImage(prompt, options = {}) {
     const { signal } = options || {};
     let outputFormat = String(options.outputFormat || options.output_format || 'png').toLowerCase();
@@ -1089,12 +1145,12 @@ export class OpenAIProvider {
       if (options.moderation) payload.moderation = options.moderation;
       if (options.user) payload.user = options.user;
 
-      const data = await this.requestJson({
+      const data = await this.requestImageData({
         url: `${this.baseUrl}/images/edits`,
-        method: 'POST',
-        headers: this.getHeaders(),
-        body: JSON.stringify(payload),
+        payload,
         signal,
+        onPreview: options.onPreview,
+        partialImages: options.partial_images ?? options.partialImages,
       });
 
       const list = Array.isArray(data?.data) ? data.data : [];
@@ -1134,12 +1190,12 @@ export class OpenAIProvider {
       if (options.user) payload.user = options.user;
     }
 
-    const data = await this.requestJson({
+    const data = await this.requestImageData({
       url: `${this.baseUrl}/images/generations`,
-      method: 'POST',
-      headers: this.getHeaders(),
-      body: JSON.stringify(payload),
+      payload,
       signal,
+      onPreview: options.onPreview,
+      partialImages: options.partial_images ?? options.partialImages,
     });
 
     const list = Array.isArray(data?.data) ? data.data : [];

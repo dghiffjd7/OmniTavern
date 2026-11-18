@@ -10,6 +10,7 @@ const icons = {
   grip: '<path d="M9 5h.01M15 5h.01M9 12h.01M15 12h.01M9 19h.01M15 19h.01" stroke-width="3"/>',
   copy: '<rect x="8" y="8" width="12" height="13" rx="3"/><path d="M15 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h3"/>',
   trash: '<path d="M3 6h18M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M5 6l1 13a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-13M10 10v7M14 10v7"/>',
+  tags: '<path d="M3 12V4a1 1 0 0 1 1-1h8l9 9-9 9-9-9Z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
 };
 const imagePromptIcon = name => `<svg viewBox="0 0 24 24" aria-hidden="true">${icons[name] || ''}</svg>`;
 const labelOf = block => block.name || tr({ scene: '正向提示词', character: '角色', style: '固定正向', negative: '负向提示词' }[block.kind]);
@@ -17,9 +18,11 @@ const btn = (action, title, icon = '', extra = '') => `<button type="button" cla
 const help = (label, value) => `<span class="has-help" data-help="${escape(tr(value))}" data-help-mode="tap">${escape(tr(label))}</span>`;
 
 export class ImagePromptEditor {
-  constructor({ container, document: draft = {}, config = {}, options = {}, onChange = () => {} } = {}) {
+  // getTagConverter：返回「中文描述 → 英文标签」的函数（小管家可用时），否则 null，不显示按钮
+  constructor({ container, document: draft = {}, config = {}, options = {}, onChange = () => {}, getTagConverter = null } = {}) {
     this.container = container; this.document = normalizeImagePromptDocument(draft); this.config = config; this.options = options;
-    this.onChange = onChange;
+    this.onChange = onChange; this.getTagConverter = typeof getTagConverter === 'function' ? getTagConverter : () => null;
+    this.tagSuggestion = null; this.convertingTags = false;
     this.openBlocks = new Set(); this.openExtras = new Set(); this.previewState = 'closed'; this.disposed = false;
     this.root = document.createElement('section'); this.root.className = 'ip-editor'; this.root.dataset.preview = 'closed';
     container.replaceChildren(this.root);
@@ -67,7 +70,7 @@ export class ImagePromptEditor {
   promptMarkup(fields, negative = false) {
     const unused = negative && !this.compile().capability.negative;
     return `<section class="ip-prompt" data-kind="${negative ? 'negative' : 'scene'}">
-      <div class="ip-prompt-heading">${help(negative ? '负向提示词' : '正向提示词', negative ? (unused ? this.compile().capability.negativeReason : '选填需要排除的内容；固定内容可在分隔区修改，作为本次覆盖') : '可直接粘贴完整提示词；固定内容可在分隔区修改，作为本次覆盖')}${negative ? `<span class="ip-badge">${tr(unused ? '当前模型未使用' : '选填')}</span>` : ''}</div>
+      <div class="ip-prompt-heading">${help(negative ? '负向提示词' : '正向提示词', negative ? (unused ? this.compile().capability.negativeReason : '选填需要排除的内容；固定内容可在分隔区修改，作为本次覆盖') : '可直接粘贴完整提示词；固定内容可在分隔区修改，作为本次覆盖')}${negative ? `<span class="ip-badge">${tr(unused ? '当前模型未使用' : '选填')}</span>` : ''}${!negative && this.getTagConverter() ? `<button type="button" class="ip-steward-tags" data-action="steward-tags" ${this.convertingTags ? 'disabled' : ''}>${imagePromptIcon('tags')}<span>${escape(tr('转成英文标签'))}</span></button>` : ''}</div>
       <div class="ip-prompt-surface ${unused ? 'is-unused' : ''}">${fields.map(field => {
         const fixed = !field.role.endsWith('-main');
         const label = { 'positive-prefix': '固定正向', 'positive-suffix': '固定后缀', 'negative-fixed': '固定负向', 'positive-main': '正向提示词', 'negative-main': '负向提示词' }[field.role];
@@ -75,7 +78,45 @@ export class ImagePromptEditor {
           ${fixed ? `<div class="ip-fixed-label">${help(label, '来自生成参数或图片记录；此处修改随本次图片保存')}</div>` : ''}
           <textarea class="ip-text ${fixed ? 'ip-fixed-text' : ''}" data-text-part="${escape(field.key)}" data-text-role="${field.role}" data-i18n-skip aria-label="${escape(tr(label))}" rows="${fixed ? 2 : negative ? 3 : 6}" placeholder="${escape(tr(fixed ? '本次留空' : negative ? '选填需要排除的内容' : '粘贴完整提示词，或描述想生成的图片'))}">${escape(field.text)}</textarea>
         </div>`;
-      }).join('')}</div></section>`;
+      }).join('')}</div>${!negative && this.tagSuggestion ? this.tagSuggestionMarkup() : ''}</section>`;
+  }
+  // 小管家给的英文标签只是建议：按「替换」或「追加」才写进正向提示词
+  tagSuggestionMarkup() {
+    return `<div class="ip-steward-suggestion" role="status">
+      <span class="ip-steward-suggestion-label">${escape(tr('小管家建议的英文标签'))}</span>
+      <p class="ip-steward-suggestion-text" data-i18n-skip>${escape(this.tagSuggestion.text)}</p>
+      <div class="ip-steward-suggestion-actions">${btn('steward-tags-replace', '替换')}${btn('steward-tags-append', '追加')}${btn('steward-tags-dismiss', '取消')}</div>
+    </div>`;
+  }
+  mainPromptText() { return this.blocksEl.querySelector('[data-text-role="positive-main"]')?.value ?? ''; }
+  async convertToTags() {
+    const convert = this.getTagConverter();
+    const text = this.mainPromptText().trim();
+    if (!convert || this.convertingTags) return;
+    if (!text) { this.status('先写下想要的画面', true); return; }
+    this.convertingTags = true; this.render(); this.status('小管家正在转换…');
+    try {
+      const tags = await convert(text);
+      if (this.disposed) return;
+      this.tagSuggestion = { text: tags };
+      this.status('');
+    } catch (error) {
+      if (!this.disposed) this.status(error?.message || '转换失败', true);
+    } finally {
+      this.convertingTags = false;
+      if (!this.disposed) this.render();
+    }
+    // 建议框在提示词框下方，弹窗较高时可能在可见范围外
+    if (!this.disposed) this.root.querySelector('.ip-steward-suggestion')?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+  }
+  applyTagSuggestion(append = false) {
+    const field = this.textFields.find(f => f.role === 'positive-main');
+    if (!field || !this.tagSuggestion) return;
+    const current = this.mainPromptText().trim().replace(/[,，\s]+$/, '');
+    const next = append && current ? `${current}, ${this.tagSuggestion.text}` : this.tagSuggestion.text;
+    this.document = updateImagePromptFormText(this.document, field, next);
+    this.tagSuggestion = null;
+    this.changed(); this.render(); this.focusBlock('scene');
   }
   resizeFixedInputs() { this.blocksEl.querySelectorAll('.ip-fixed-text').forEach(el => { el.style.height = 'auto'; el.style.height = `${Math.min(180, Math.max(44, el.scrollHeight))}px`; }); }
   blockMarkup(block) {
@@ -179,6 +220,9 @@ export class ImagePromptEditor {
     if (action === 'drag') return;
     if (action === 'source') { this.setPreview('close'); this.focusBlock(button.dataset.source); return; }
     if (action === 'copy-preview') { void this.copyText(button.closest('.ip-preview-section').querySelector('pre').textContent); return; }
+    if (action === 'steward-tags') { void this.convertToTags(); return; }
+    if (action === 'steward-tags-replace' || action === 'steward-tags-append') { this.applyTagSuggestion(action === 'steward-tags-append'); return; }
+    if (action === 'steward-tags-dismiss') { this.tagSuggestion = null; this.render(); return; }
     if (action === 'add-character') { const b = createImagePromptBlock('character', { name: `${tr('角色')} ${this.document.blocks.filter(b => b.kind === 'character').length + 1}` }); this.document.blocks.push(b); this.openBlocks.add(b.id); this.changed(); this.render(); this.focusBlock(b.id); return; }
     if (action === 'undo') { if (this.undoDocument) this.document = this.undoDocument; this.undoDocument = null; }
     else if (block?.kind !== 'character') return;

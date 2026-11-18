@@ -12,15 +12,24 @@ import {
 const tests = [];
 const test = (name, fn) => tests.push({ name, fn });
 
-test('extractSummaryBlock removes the last summary details block and keeps Chinese-only summary text', () => {
+test('extractSummaryBlock removes the last summary details block and keeps English words in the summary', () => {
   const result = extractSummaryBlock(
     '正文A\n<details><summary>摘要</summary>Alpha 这是 summary 123</details>\n正文B',
   );
 
   assert.deepEqual(result, {
     text: '正文A\n\n正文B',
-    summary: '这是  123',
+    summary: 'Alpha 这是 summary 123',
   });
+});
+
+test('extractSummaryBlock keeps names and reads the English Summary label', () => {
+  assert.equal(
+    extractSummaryBlock('好的。<details><summary>摘要</summary>Alice 在 Starbucks 用 iPhone 给 Bob 发了消息。</details>').summary,
+    'Alice 在 Starbucks 用 iPhone 给 Bob 发了消息。',
+  );
+  const english = extractSummaryBlock('Sure.\n<details><summary>Summary</summary>\nAlice told Bob she will visit Tokyo.\n</details>');
+  assert.deepEqual(english, { text: 'Sure.', summary: 'Alice told Bob she will visit Tokyo.' });
 });
 
 test('buildMemoryConfirmText renders readable action lines with truncation notice', () => {

@@ -1,7 +1,12 @@
+import { isNovelAIPreciseReferenceModel } from '../api/providers/novelai-image-model-catalog.js';
+import { getWaveSpeedReferenceInput } from '../api/providers/wavespeed-model-catalog.js';
+
 const DEFAULT_IMAGE_MIME = 'image/png';
 const DEFAULT_GEMINI_REFERENCE_IMAGE_MAX = 3;
 const DEFAULT_OPENAI_GPT_IMAGE_REFERENCE_IMAGE_MAX = 16;
 const DEFAULT_CUSTOM_OPENAI_REFERENCE_IMAGE_MAX = 16;
+// 还没拉过 WaveSpeed 模型列表、不知道当前模型能带几张时先按这个算；生成前渠道会按参数表再检查
+const DEFAULT_WAVESPEED_REFERENCE_IMAGE_MAX = 4;
 
 const createId = (prefix = 'media') => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -51,7 +56,8 @@ const readExplicitReferenceImageMax = (config = {}) => {
   return null;
 };
 
-export const resolveImageReferenceCapability = (config = {}) => {
+/** params：当前生图参数（NovelAI 要看「精准参考」有没有打开）。 */
+export const resolveImageReferenceCapability = (config = {}, params = null) => {
   const explicitMax = readExplicitReferenceImageMax(config || {});
   if (explicitMax === 0) {
     return {
@@ -120,8 +126,31 @@ export const resolveImageReferenceCapability = (config = {}) => {
     return unsupported('当前 Vertex AI 图片生成链路暂未接入参考图');
   }
 
+  if (provider === 'wavespeed') {
+    const input = getWaveSpeedReferenceInput({ baseUrl: config?.baseUrl, model: config?.model });
+    if (input.known && !input.field) {
+      return unsupported('当前 WaveSpeed 模型不能用参考图，请在设置里改选编辑模型（名称里通常带 edit）');
+    }
+    const modelMax = input.known ? input.max : DEFAULT_WAVESPEED_REFERENCE_IMAGE_MAX;
+    const max = explicitMax !== null ? Math.min(explicitMax, modelMax) : modelMax;
+    return {
+      supported: max > 0,
+      max,
+      reason: input.known
+        ? `当前 WaveSpeed 模型最多用 ${max} 张参考图`
+        : 'WaveSpeed 能带几张参考图以所选模型为准，生成前会再检查',
+      source: explicitMax !== null ? 'config' : 'builtin',
+    };
+  }
+
+  if (provider === 'novelai') {
+    if (!isNovelAIPreciseReferenceModel(model)) return unsupported('NovelAI 精准参考只支持 V4.5 模型');
+    const mode = String(params?.preciseReference || 'off');
+    if (mode === 'off') return unsupported('在 NAI 参数里打开「精准参考」后才会用参考图（每张图另扣 5 Anlas）');
+    return { supported: true, max: 1, reason: 'NovelAI 精准参考只用第一张参考图（每张图另扣 5 Anlas）', source: 'builtin' };
+  }
+
   if ([
-    'novelai',
     'stability',
     'togetherai',
     'pollinations',
@@ -213,6 +242,7 @@ export const createMediaGenerationService = ({
     sessionId,
     signal,
     retainDataUrl = false,
+    fileLabel = 'generated_image',
   }) => {
     throwIfAborted(signal);
     let dataUrl = normalized.dataUrl || '';
@@ -232,7 +262,7 @@ export const createMediaGenerationService = ({
     let bytes = 0;
     if (dataUrl && typeof saveDataUrl === 'function') {
       const ext = getImageExtensionFromMime(getImageMimeFromDataUrl(dataUrl) || mime);
-      const fileName = `generated_image_${now()}_${Number(normalized.index || 0) + 1}.${ext}`;
+      const fileName = `${fileLabel}_${now()}_${Number(normalized.index || 0) + 1}.${ext}`;
       const saved = await saveDataUrl(dataUrl, fileName, { sessionId, prompt, config });
       if (typeof saved === 'string') {
         path = saved;
@@ -349,6 +379,8 @@ export const createMediaGenerationService = ({
     signal,
     agentTask = true,
     retainDataUrl = false,
+    // 生成途中的中间画面（支持流式的渠道才会调用）：{ dataUrl, step, total }
+    onPreview = null,
   } = {}) => {
     throwIfAborted(signal);
     let text = String(prompt || '').trim();
@@ -363,12 +395,45 @@ export const createMediaGenerationService = ({
     throwIfAborted(signal);
     const referenceInputs = [...(options.referenceImages || options.reference_images || [])];
 
+    // 记住最后一张中间图：生成失败（不是取消）时存成图片挂在错误上（error.partialImage），调用方显示在失败处
+    let lastPreview = null;
+    const watchPreview = typeof onPreview === 'function'
+      ? (preview) => {
+        if (preview?.dataUrl) lastPreview = preview;
+        onPreview(preview);
+      }
+      : null;
+    const keepPartialImage = async (error) => {
+      if (!lastPreview || !error || typeof error !== 'object' || signal?.aborted || error.name === 'AbortError') return;
+      try {
+        const saved = await persistImage({
+          normalized: { dataUrl: lastPreview.dataUrl, index: 0 },
+          prompt: text,
+          config,
+          sessionId,
+          fileLabel: 'generated_partial',
+        });
+        if (saved.path) {
+          error.partialImage = { path: saved.path, mime: saved.mime, step: Number(lastPreview.step) || 0, total: Number(lastPreview.total) || 0 };
+        }
+      } catch (saveError) {
+        logger?.warn?.('partial image persistence failed', saveError);
+      }
+    };
+
     const execute = async () => {
       const client = createClient(config);
-      const images = await client.generateImage(text, {
-        ...options,
-        signal,
-      });
+      let images;
+      try {
+        images = await client.generateImage(text, {
+          ...options,
+          signal,
+          ...(watchPreview ? { onPreview: watchPreview } : {}),
+        });
+      } catch (error) {
+        await keepPartialImage(error);
+        throw error;
+      }
       throwIfAborted(signal);
 
       const normalized = (Array.isArray(images) ? images : [])

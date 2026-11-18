@@ -33,7 +33,7 @@ const source = fs.readFileSync(
   assert.match(source, /applyMaidGuideExpression/);
   assert.match(source, /resolveMaidGuideExpressionState/);
   assert.match(source, /maid-spotlight-done-avatar/);
-  assert.match(source, /applyMaidGuideExpression\(avatar, 'complete', \{ variant: 'full' \}\)/);
+  assert.match(source, /applyMaidGuideExpression\(avatar, 'complete'\)/);
   assert.match(source, /\.maid-spotlight-card-avatar-wrap\s*\{[\s\S]*?width:\s*50px;[\s\S]*?height:\s*50px;[\s\S]*?flex:\s*0 0 50px;/);
   assert.match(source, /\.maid-spotlight-card-avatar\s*\{[\s\S]*?width:\s*50px;[\s\S]*?height:\s*50px;/);
   assert.match(source, /\.maid-spotlight-done-avatar\s*\{[\s\S]*?width:\s*72px;[\s\S]*?height:\s*72px;/);

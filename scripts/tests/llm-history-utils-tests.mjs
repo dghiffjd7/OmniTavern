@@ -10,6 +10,7 @@ import {
   limitHistoryByTokenBudget,
   mapHistoryMessagesToTurns,
   resolveCoverageProtectedHistoryIndexes,
+  restoreCoverageHoleHistory,
   limitCreativeAssistantHistory,
   stripTransientHistoryFields,
 } from '../../src/scripts/ui/chat/llm-history-utils.js';
@@ -126,6 +127,80 @@ test('coverage holes protect exact history turns even when they exceed the recen
   assert.deepEqual(limited.stats.keptOriginalIndexes, [0, 1]);
   assert.equal(limited.stats.protectedMessageCount, 2);
   assert.equal(limited.stats.overflowed, true);
+});
+
+const buildTurnHistory = (turns, chars = 1000) => {
+  const history = [];
+  for (let turn = 1; turn <= turns; turn += 1) {
+    history.push({ role: 'user', content: `[第${turn}轮用户]${'字'.repeat(chars)}` });
+    history.push({ role: 'assistant', content: `[第${turn}轮AI]${'字'.repeat(chars)}` });
+  }
+  return history;
+};
+
+const holeIndexesBeforeRecentWindow = (history, recent) => {
+  const oldestKept = Math.min(...recent.stats.keptOriginalIndexes);
+  return history.map((_, index) => index).filter(index => index < oldestKept);
+};
+
+test('coverage hole restore keeps the recent window when uncovered history exceeds the budget', () => {
+  const history = buildTurnHistory(50);
+  const recent = limitHistoryByTokenBudget(history, { inputBudgetTokens: 35000 });
+  const holes = holeIndexesBeforeRecentWindow(history, recent);
+  assert.ok(holes.length > recent.stats.keptOriginalIndexes.length, 'holes alone exceed the budget');
+  const restored = restoreCoverageHoleHistory(history, recent, {
+    holeMessageIndexes: holes,
+    inputBudgetTokens: 35000,
+  });
+  for (const index of recent.stats.keptOriginalIndexes) {
+    assert.ok(restored.stats.keptOriginalIndexes.includes(index), `recent message ${index} must stay`);
+  }
+  assert.equal(restored.stats.keptOriginalIndexes.at(-1), history.length - 1);
+  assert.ok(restored.stats.usedTokens <= 35000);
+  assert.equal(restored.stats.overflowed, false);
+  assert.equal(restored.stats.originalMessageCount, history.length);
+  assert.equal(
+    restored.stats.droppedMessageCount,
+    history.length - restored.stats.keptOriginalIndexes.length,
+  );
+});
+
+const buildUniformHistory = count => Array.from({ length: count }, (_, index) => ({
+  role: index % 2 === 0 ? 'user' : 'assistant',
+  content: '字'.repeat(100),
+}));
+
+test('coverage hole restore fills only leftover budget, newest holes first and contiguous', () => {
+  const history = buildUniformHistory(20);
+  const perMessage = limitHistoryByTokenBudget([history[0]], {}).stats.usedTokens;
+  const recent = limitHistoryByTokenBudget(history, { inputBudgetTokens: perMessage * 6 });
+  assert.deepEqual(recent.stats.keptOriginalIndexes, [14, 15, 16, 17, 18, 19]);
+  const budget = perMessage * 8 + Math.floor(perMessage / 2);
+  const restored = restoreCoverageHoleHistory(history, recent, {
+    holeMessageIndexes: [4, 5, 6, 7, 8, 9, 10, 11],
+    inputBudgetTokens: budget,
+  });
+  assert.deepEqual(restored.stats.keptOriginalIndexes, [10, 11, 14, 15, 16, 17, 18, 19]);
+  assert.equal(restored.stats.restoredHoleMessageCount, 2);
+  assert.ok(restored.stats.usedTokens <= budget);
+  assert.deepEqual(restored.messages[0], history[10]);
+});
+
+test('coverage hole restore returns the recent window untouched when there is no hole or no room', () => {
+  const history = buildUniformHistory(20);
+  const recent = limitHistoryByTokenBudget(history, { inputBudgetTokens: 2000 });
+  const noHoles = restoreCoverageHoleHistory(history, recent, {
+    holeMessageIndexes: [],
+    inputBudgetTokens: 2000,
+  });
+  assert.deepEqual(noHoles.messages, recent.messages);
+  assert.equal(noHoles.stats.restoredHoleMessageCount, 0);
+  const noRoom = restoreCoverageHoleHistory(history, recent, {
+    holeMessageIndexes: [0, 1],
+    inputBudgetTokens: recent.stats.usedTokens,
+  });
+  assert.deepEqual(noRoom.stats.keptOriginalIndexes, recent.stats.keptOriginalIndexes);
+  assert.equal(noRoom.stats.restoredHoleMessageCount, 0);
 });
 
 test('token budget trimming stays fast on thousand-floor Chinese histories', () => {

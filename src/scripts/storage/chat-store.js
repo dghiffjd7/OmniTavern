@@ -2571,6 +2571,16 @@ export class ChatStore {
     return n;
   }
 
+  /** 当前对话的消息总数。V2 下没打开过的会话还没载入消息，按索引里记的总数算；只读，不建会话。 */
+  getMessageTotal(id = this.currentId) {
+    const sid = String(id || '').trim();
+    const session = sid ? this.state.sessions[sid] : null;
+    if (!session) return 0;
+    const loaded = Array.isArray(session.messages) ? session.messages.length : 0;
+    if (!this._useV2) return loaded;
+    return Math.max(this._v2.getThreadTotal(sid, session.currentArchiveId), loaded);
+  }
+
   hasMessages(id = this.currentId) {
     const sid = String(id || '').trim();
     if (!sid) return false;
@@ -2871,6 +2881,23 @@ export class ChatStore {
     const sid = String(id || '').trim();
     if (!sid) return '';
     return this.state.sessions[sid]?.draft || '';
+  }
+
+  // 「每 N 回填一次表」的会话计数：随会话落盘，重启和每次发送新建的填表 runtime 都接得上
+  getMemoryFillCounter(id = this.currentId) {
+    const sid = String(id || '').trim();
+    if (!sid) return 0;
+    const value = Math.trunc(Number(this.state.sessions[sid]?.memoryFillCounter));
+    return Number.isFinite(value) && value > 0 ? value : 0;
+  }
+
+  setMemoryFillCounter(count, id = this.currentId) {
+    const sid = String(id || '').trim();
+    if (!sid || !this.state.sessions[sid]) return false;
+    const value = Math.trunc(Number(count));
+    this.state.sessions[sid].memoryFillCounter = Number.isFinite(value) && value > 0 ? value : 0;
+    this._persist();
+    return true;
   }
 
   clear(id = this.currentId) {
@@ -3498,7 +3525,8 @@ export class ChatStore {
       });
     }
     this._persist();
-    this._emitArchiveEvent({ type: 'created', sessionId: sid, archiveId, automaticName: false });
+    // imported：内容来自导入，不是当前聊天（小管家写概述时据此跳过）
+    this._emitArchiveEvent({ type: 'created', sessionId: sid, archiveId, automaticName: false, imported: true });
     return archiveId;
   }
 
@@ -3580,6 +3608,25 @@ export class ChatStore {
     archive.updatedAt = Date.now();
     this._persist();
     this._emitArchiveEvent({ type: 'renamed', sessionId: sid, archiveId: aid });
+    return true;
+  }
+
+  // 小管家的存档概述（{ text, at, messageCount }，null 时移除）；不改 updatedAt，不影响正在进行的存档命名
+  setArchiveOverview(archiveId, overview = null, id = this.currentId) {
+    const sid = String(id || '').trim();
+    const aid = String(archiveId || '').trim();
+    const archive = sid && aid ? this.state.sessions[sid]?.archives?.find(a => String(a?.id || '').trim() === aid) : null;
+    if (!archive) return false;
+    if (overview && String(overview.text || '').trim()) {
+      archive.stewardOverview = {
+        text: String(overview.text).trim(),
+        at: Number(overview.at) || Date.now(),
+        messageCount: Number(overview.messageCount) || 0,
+      };
+    } else {
+      delete archive.stewardOverview;
+    }
+    this._persist();
     return true;
   }
 

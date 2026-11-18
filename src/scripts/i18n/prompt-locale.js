@@ -471,7 +471,7 @@ dialogue_examples:
   'fc.batch.table_rows': '{id}={name}（现有 rowIndex：{indexes}；rowId 见该表 schema）',
   'fc.batch.table_rules': '记忆确有新增或变化时才提交 table_edit；无变化时省略，禁止提交空动作。init/insert action 只能带 action、tableId、data，禁止带 rowId/rowIndex；update 必须带 data 与且仅一个 rowId/rowIndex；delete 不带 data，并且只带一个 rowId/rowIndex。',
   'fc.batch.variable_rules': '变量确有变化时才提交 variable_update；只使用已知变量路径。',
-  'fc.batch.summary_rule': '最后提交一句简短、纯中文、无额外升华的 summary。',
+  'fc.batch.summary_rule': '最后提交一句简短、无额外升华的中文 summary，人名等专有名词保留原文。',
   'fc.batch.sanitize_table': '提交 table_edit item；无修改时不要提交该 item。',
   'fc.batch.sanitize_variable': '提交 variable_update item。',
   'fc.batch.sanitize_content': '结构化结果',

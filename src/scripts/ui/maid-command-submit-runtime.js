@@ -1,7 +1,15 @@
 // One command submission, shared by the input bar and the continuous voice task queue.
 import { t } from '../i18n/index.js';
 import { captureMaidTextApprovalScope, sameMaidTextApprovalScope } from './maid-text-approval-reply.js';
-import { collectMaidResultCards } from '../agent/maid-result-cards.js';
+import { collectMaidResultCardsFromResult } from '../agent/maid-result-cards.js';
+export const isPreApprovedByPlan = (approvedPlan, request = {}) => {
+  const tools = Array.isArray(approvedPlan?.tools) ? approvedPlan.tools : [];
+  const toolName = String(request?.toolName || '').trim();
+  if (!toolName || !tools.includes(toolName) || request?.escalation) return false;
+  const operation = `${request?.operationType || ''} ${request?.kind || ''}`.toLowerCase();
+  return !/delete|remove|destroy/.test(operation);
+};
+
 export const createMaidCommandSubmit = ({
   getVoiceRuntime, getOnboardingRuntime, matchMaidIntent, hasConfiguredMaidProfile, resolveMaidRuntimeConfig,
   logger, checkMaidVisionInput, maidSettingsStore, buildAppFeatureSearchContextText, getAppContext,
@@ -87,9 +95,13 @@ export const createMaidCommandSubmit = ({
         signal: controls?.signal || null,
         maxReactSteps: maidSettingsStore.getMaxReactSteps?.(),
         resolveMaidSelectionRegion: regionId => resolveSelectionRegion(regionId, maidTurnContext),
-        requestToolConfirmation: (request, options = {}) => requestMaidToolConfirmation(request, {
-          ...options, submissionId: controls.submissionId, ...approvalScope,
-        }),
+        // 计划卡上点「开始做」（ROADMAP 29-⑨）：计划里写明的写入工具本轮不再逐个确认；
+        // 删除、只读请求里的写入升级确认等仍照常弹（只免普通写入的确认）
+        requestToolConfirmation: (request, options = {}) => (isPreApprovedByPlan(controls?.approvedPlan, request)
+          ? Promise.resolve('allow')
+          : requestMaidToolConfirmation(request, {
+            ...options, submissionId: controls.submissionId, ...approvalScope,
+          })),
         onStatus: (status = {}) => {
           const message = String(status?.message || '').trim();
           if (!message) return;
@@ -115,8 +127,8 @@ export const createMaidCommandSubmit = ({
           source: 'no_model_result',
         });
       }
-      // 结果卡片：只取成功步骤的工具返回；文字回复区与语音托盘都从这里读
-      const cards = collectMaidResultCards(result?.steps);
+      // 结果卡片：成功步骤的工具返回，加上收尾反问附的选项卡；文字回复区与语音托盘都从这里读
+      const cards = collectMaidResultCardsFromResult(result);
       if (cards.length && result && typeof result === 'object') result.cards = cards;
       if (controls.source === 'maid_realtime') return result;
       // 导入附件后提供「打开」按钮（按成功的导入步骤生成）
@@ -129,7 +141,9 @@ export const createMaidCommandSubmit = ({
       } else if (
         result?.message &&
         result?.responseType !== 'chat' &&
-        !['awaiting_confirmation', 'cancelled'].includes(String(result?.status || '').trim())
+        !['awaiting_confirmation', 'cancelled'].includes(String(result?.status || '').trim()) &&
+        // 停下来问你（选项卡）或交出计划等你点「开始做」：还没做完，不提示完成
+        !['clarify', 'plan'].includes(String(result?.finalDecision?.providerFcControl || ''))
       ) {
         // 完整回复已在女仆气泡中展示；通知只提示任务结束，不重复全文
         toast?.success?.(t('女仆已完成任务 ✓'));

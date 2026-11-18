@@ -3,6 +3,7 @@ import {
   resolveCreativeRichRenderSource,
 } from './creative-content-display-utils.js';
 import { appendGeneratedImageReferences } from './generated-image-reference-view.js';
+import { IMAGE_PREVIEW_JOB_TOKEN, createImagePreviewPlaceholder } from './image-generation-preview.js';
 
 const appendChild = (parent, child) => {
   parent?.appendChild?.(child);
@@ -309,8 +310,12 @@ export const renderMessageBubbleContentCore = ({
       // An image attempt owns the displayed status; retained RP raw data belongs
       // to an older reply and must not hide the current prompt or retry action.
       if (generatedImage && generated.status === 'running') {
-        bubble.textContent = String(message?.content ?? '');
+        // 生成中：文字下方放预览占位，流式渠道的中间画面到了就显示在这里（image-generation-preview.js）
+        const status = String(message?.content ?? '');
         bubble.style.whiteSpace = 'pre-wrap';
+        const placeholder = createImagePreviewPlaceholder(documentLike, IMAGE_PREVIEW_JOB_TOKEN, status || translateText('图片生成中'));
+        if (placeholder) appendChild(bubble, placeholder);
+        else bubble.textContent = status;
         break;
       }
       if (generatedImage && ['failed', 'cancelled', 'interrupted'].includes(generated.status)) {
@@ -343,6 +348,24 @@ export const renderMessageBubbleContentCore = ({
           appendChild(card, body);
         }
         appendChild(bubble, card);
+        // 失败时留下的最后一张中间图（放在卡片外，错误详情收起时也看得到）
+        const partial = generated.status === 'failed' && String(generated.partialImage?.path || '').trim() ? generated.partialImage : null;
+        if (partial) {
+          const figure = documentLike.createElement('div');
+          figure.className = 'generated-media-partial';
+          const img = documentLike.createElement('img');
+          const src = resolveLocalFileLikeUrl(partial.path) || resolveMediaUrl?.('image', partial.path) || partial.path;
+          img.src = src;
+          img.alt = translateText('未完成的中间图');
+          img.className = 'previewable generated-media-partial-image';
+          img.addEventListener?.('click', () => openLightbox?.(src));
+          const caption = documentLike.createElement('div');
+          caption.className = 'generated-media-partial-caption';
+          caption.textContent = translateText('未完成的中间图') + (Number(partial.total) > 0 ? ` · ${Math.min(Number(partial.step) || 0, Number(partial.total))}/${Number(partial.total)}` : '');
+          appendChild(figure, img);
+          appendChild(figure, caption);
+          appendChild(bubble, figure);
+        }
         break;
       }
       if (message?.meta?.renderRich) {
