@@ -4554,7 +4554,7 @@ pub async fn http_request(
             req = req.body(body);
         }
 
-        let resp = req.send().await.map_err(|e| e.to_string())?;
+        let resp = req.send().await.map_err(|e| describe_reqwest_error(&e))?;
         let status = resp.status();
         let mut out_headers: HashMap<String, String> = HashMap::new();
         for (k, v) in resp.headers().iter() {
@@ -4563,10 +4563,10 @@ pub async fn http_request(
             }
         }
         let body = if response_base64.unwrap_or(false) {
-            let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+            let bytes = resp.bytes().await.map_err(|e| describe_reqwest_error(&e))?;
             BASE64_ENGINE.encode(bytes)
         } else {
-            resp.text().await.map_err(|e| e.to_string())?
+            resp.text().await.map_err(|e| describe_reqwest_error(&e))?
         };
 
         Ok(HttpResponse {
@@ -4786,7 +4786,9 @@ pub async fn openai_realtime_create_call(
     await_abortable_realtime_task(task, request_key, abort_state.inner.clone()).await
 }
 
-fn describe_http_stream_error(e: &reqwest::Error) -> String {
+/// reqwest 的报错本身只有「error sending request for url」这一层；接上底层原因（代理、证书、连线），
+/// 用户截图或诊断日志才看得出问题在哪。
+fn describe_reqwest_error(e: &reqwest::Error) -> String {
     use std::error::Error as _;
     let mut msg = e.to_string();
     let mut source = e.source();
@@ -4870,11 +4872,11 @@ pub async fn http_stream_request_start(
                             d.as_millis()
                         )
                     })?
-                    .map_err(|e| describe_http_stream_error(&e))?,
+                    .map_err(|e| describe_reqwest_error(&e))?,
                 None => req
                     .send()
                     .await
-                    .map_err(|e| describe_http_stream_error(&e))?,
+                    .map_err(|e| describe_reqwest_error(&e))?,
             };
             let status = resp.status();
             let mut out_headers: HashMap<String, String> = HashMap::new();
@@ -4902,7 +4904,7 @@ pub async fn http_stream_request_start(
                     })?,
                     None => resp.chunk().await,
                 };
-                let Some(chunk) = next.map_err(|e| describe_http_stream_error(&e))? else {
+                let Some(chunk) = next.map_err(|e| describe_reqwest_error(&e))? else {
                     break;
                 };
                 if encode_binary_chunks {
@@ -5163,6 +5165,29 @@ pub async fn delete_template(
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[tokio::test]
+    async fn socks5_proxy_is_supported_and_errors_keep_their_cause() {
+        // 用户把代理设成 socks5:// 的环境变量时，请求要真的经过 SOCKS 代理，不能报 unsupported scheme。
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .and_then(|listener| listener.local_addr())
+            .map(|addr| addr.port())
+            .expect("reserve a local port");
+        let proxy = reqwest::Proxy::all(format!("socks5://127.0.0.1:{port}")).expect("socks5 proxy url");
+        let client = reqwest::Client::builder()
+            .proxy(proxy)
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+            .expect("build client");
+        let error = client
+            .get("https://proxy-check.invalid/v1/chat/completions")
+            .send()
+            .await
+            .expect_err("nothing listens on the proxy port");
+        let message = describe_reqwest_error(&error);
+        assert!(!message.contains("unsupported scheme"), "{message}");
+        assert!(message.len() > error.to_string().len(), "cause missing: {message}");
+    }
 
     #[test]
     fn opencode_user_agent_uses_app_version_only_for_marked_requests() {
