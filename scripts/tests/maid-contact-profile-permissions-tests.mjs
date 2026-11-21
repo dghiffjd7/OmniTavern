@@ -77,7 +77,6 @@ const runProfileTask = async ({ decision = 'allow', denied = false, concurrentEd
   };
   const submit = createMaidCommandSubmit({
     getVoiceRuntime: () => null, getOnboardingRuntime: () => null,
-    matchMaidIntent: () => null, hasConfiguredMaidProfile: () => true,
     resolveMaidRuntimeConfig: async () => ({ configured: true }), logger,
     checkMaidVisionInput: async () => ({ ok: true }),
     maidSettingsStore: { setLastExchange() {}, getLastExchange: () => ({}) },

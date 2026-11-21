@@ -189,6 +189,38 @@ for (const provider of ['anthropic', 'openai']) {
 }
 
 {
+  // Dream 1.65 的「Gemini ToolCall 编排器 v16.5」拦下后用写死的酒馆路径重发，编号丢了，仍认作这次生成
+  const host = harness(base => async (_url, init) => {
+    const body = JSON.parse(init.body);
+    body.messages.unshift({ role: 'system', content: 'rewritten' });
+    return base('/api/backends/chat-completions/generate', { method: 'POST', headers: init.headers, body: JSON.stringify(body) });
+  });
+  const session = await host.prepare(payload({ stream: false, spreset: null }));
+  assert.equal(session.body.messages[0].content, 'rewritten');
+  const client = createPresetGenerationClient({ session, config, client: { chat: async () => '原文' } });
+  assert.equal(await client.chat(input, {}), '原文');
+}
+
+{
+  // 生成之外单独打酒馆生成接口：不认作主生成，留给酒馆接口路由回应
+  const lone = createPresetRequestWorker({ send() {}, getFetch: () => null, getBaseFetch: () => null, getContext: () => context });
+  assert.equal(lone.interceptFetch('/api/backends/chat-completions/generate', { method: 'POST', body: '{}' }), null);
+  assert.equal(lone.interceptFetch('https://example.com/api/backends/chat-completions/generate'), null, 'other hosts are left to the network gate');
+  assert.equal(lone.interceptFetch('/api/backends/text-completions/generate'), null);
+
+  // 两次生成同时在等脚本提交：不猜是哪一次
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const host = harness(base => async (_url, init) => { await gate; return base('/api/backends/chat-completions/generate', init); });
+  const first = host.prepare(payload({ stream: false, spreset: null }));
+  const second = host.prepare(payload({ stream: false, spreset: null }));
+  await new Promise(resolve => setTimeout(resolve, 20));
+  release();
+  await assert.rejects(first, /多个生成/);
+  await assert.rejects(second, /多个生成/);
+}
+
+{
   const host = harness();
   const session = await host.prepare(payload({ preview: true }));
   assert.equal(session.body.tools.length, 1);

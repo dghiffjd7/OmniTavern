@@ -1,3 +1,5 @@
+import { wrapMaidExternalContent } from './maid-external-content.js';
+
 const trim = (value, fallback = '') => {
   const text = String(value ?? '').trim();
   return text || fallback;
@@ -276,8 +278,8 @@ export const buildMaidSourceGroundingPromptBlock = ({
   const sourceLines = state.sources.slice(0, 8).map((source, index) => [
     `${index + 1}. ${source.targetRelevant === true ? 'relevant' : (source.targetRelevant === false ? 'unrelated' : 'unchecked')}`,
     `target=${source.target || source.targetAliases.join(' / ') || '(unspecified)'}`,
-    source.title,
-    source.url,
+    // 网页标题与网址是外部内容（11/20 统一包法）
+    wrapMaidExternalContent('web', JSON.stringify({ title: source.title || '', url: source.url || '' }), { inline: true }),
   ].filter(Boolean).join(' | '));
   return [
     `<maid_source_grounding mode="${state.policy.strictNoInvent ? 'strict_no_invent' : 'layered'}">`,

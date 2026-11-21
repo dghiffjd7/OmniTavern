@@ -1,5 +1,6 @@
 (async () => {
   const mod = await import(`/scripts/plugins/script-runtime.js?isolation-smoke=${Date.now()}`);
+  const { PresetRequestTransport } = await import('/scripts/plugins/preset-request-transport.js');
   const source = mod.buildScriptRuntimeWorkerSourceForTests();
   const createWorker = () => {
     const url = URL.createObjectURL(new Blob([source], { type: 'application/javascript' }));
@@ -82,6 +83,11 @@
   runtime.uiLayoutPendingIds = new Set();
   runtime.uiNativeStatePending = new Map();
   runtime.uiPerformanceSamples = [];
+  // 与 ScriptRuntime 构造函数一致：handleWorkerMessage 每条消息都先交给它
+  runtime.presetRequestTransport = new PresetRequestTransport({
+    post: value => runtime.worker?.postMessage(value),
+    onTimeout: () => runtime.restartWorker('preset request timeout'),
+  });
   let restarted = false;
   runtime.restartWorker = () => {
     restarted = true;

@@ -10,6 +10,7 @@ import { findKeptSimilarWorldbooks, formatKeptSimilarWorldbooks } from './worldb
 import { t } from '../../i18n/index.js';
 import { captureWorldbookResourceOwnership, resolveWorldbookCurrentPersona } from '../worldbook-resource-ownership.js';
 import { createProfileUpdateTool } from './profile-update-tool.js';
+import { confirmRequest } from './preset-regex-script-tools.js';
 import { describeWorldbookEntryContent, getWorldbookEntrySearchText, resolveWorldbookEntryContentPatch } from './worldbook-entry-content.js';
 import {
   buildWorldbookEntryGenerationPrompt,
@@ -133,6 +134,60 @@ const resolveProfileSwitchTarget = (args = {}, keys = []) => {
     if (value) return value;
   }
   return '';
+};
+
+// 新建用户／角色卡前先确认；同名项已存在且不需要切换时什么都不会变，不弹确认
+const buildProfileCreateConfirmation = (store, args = {}, {
+  kind, operationType, title, switchTitle, createMessage, createAndSwitchMessage, switchExistingMessage,
+}) => {
+  const name = trim(args.name);
+  if (!name || typeof store?.create !== 'function') return { destructive: false };
+  const existing = args.allowDuplicate === true ? null : findStoreItem(store, name);
+  const switchActive = args.setActive === true
+    && !(existing && trim(existing.id) === trim(getActiveStoreItem(store)?.id));
+  if (existing && !switchActive) return { destructive: false };
+  return confirmRequest({
+    kind,
+    operationType: existing ? 'switch_active' : operationType,
+    title: existing ? switchTitle : title,
+    message: existing
+      ? switchExistingMessage(trim(existing.name, name))
+      : (switchActive ? createAndSwitchMessage(name) : createMessage(name)),
+    confirmText: existing ? t('切换') : t('新建'),
+    danger: false,
+    denyReason: `${kind.replace('.', '_')}_cancelled`,
+    denyResult: { created: false },
+  });
+};
+
+// 切换当前用户／角色卡前先确认；目标找不到（execute 会报错）或已是当前项时什么都不会变，不弹确认
+const buildProfileSwitchConfirmation = (store, args = {}, { kind, targetKeys, title, message }) => {
+  const profile = findStoreItem(store, resolveProfileSwitchTarget(args, targetKeys));
+  if (!profile?.id || trim(profile.id) === trim(getActiveStoreItem(store)?.id)) return { destructive: false };
+  return confirmRequest({
+    kind,
+    operationType: 'switch_active',
+    title,
+    message: message(trim(profile.name, profile.id)),
+    confirmText: t('切换'),
+    danger: false,
+    denyReason: `${kind.replace('.', '_')}_cancelled`,
+    denyResult: { switched: false },
+  });
+};
+
+const previewConfirmText = (value = '', max = 60) => {
+  const text = trim(value).replace(/\s+/g, ' ');
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+};
+
+const matchModelProfiles = (profiles = [], query = '') => {
+  const lowered = query.toLowerCase();
+  let matches = profiles.filter(p => p.id === query);
+  if (!matches.length) matches = profiles.filter(p => p.name === query);
+  if (!matches.length) matches = profiles.filter(p => p.name.toLowerCase() === lowered);
+  if (!matches.length) matches = profiles.filter(p => p.name.toLowerCase().includes(lowered) || p.model.toLowerCase().includes(lowered));
+  return matches;
 };
 
 const buildSwitchProfileResult = async ({
@@ -715,6 +770,22 @@ const hasWorldbookEntryOverwriteFields = (updates = []) => (
       .some(key => hasOwn(update, key))
   ))
 );
+
+// execute 只在有效更新项命中已有条目、或 createMissing 补建条目时写入；其余情况什么都不会变
+const listWritingWorldbookUpdates = (entries = [], validUpdates = [], createMissing = false) => (
+  validUpdates.filter(update => createMissing || findWorldbookEntryIndex(entries, update) >= 0)
+);
+
+// 不改正文／标题／关键词的更新（启用、顺序等设置，或补建条目）也要确认，但不算高风险
+const describeWorldbookEntriesUpdate = (worldbookId = '', count = 0) => ({
+  title: t('修改世界书条目'),
+  message: t('将更新世界书「{worldbook}」中的 {count} 项（如启用状态、顺序等设置或补建条目），不会删除未指定条目。', {
+    worldbook: worldbookId, count,
+  }),
+  confirmText: t('修改'),
+  cancelText: t('取消'),
+  danger: false,
+});
 
 const summarizeWorldbook = (worldId = '', data = null, meta = {}) => {
   const entries = getWorldEntries(data);
@@ -1444,6 +1515,16 @@ export const createAppContentAgentTools = ({
     };
   };
 
+  // 发消息／生图确认要显示聊天室名称；与 execute 相同：缺会话、或有联系人目录却查不到时 execute 会直接失败，不弹确认
+  const resolveChatConfirmationTarget = (rawSessionId = '') => {
+    const contact = findStoreItem(contactsStore, rawSessionId);
+    const sessionId = trim(contact?.id || rawSessionId);
+    return {
+      missing: !sessionId || (!contact && typeof contactsStore?.getContact === 'function'),
+      name: trim(contact?.name || sessionId),
+    };
+  };
+
   const worldbookWriteBoundary = createWorldbookWriteBoundary({
     getCurrentPersona: () => getCurrentCardPersona(),
     getCurrentSessionId: () => trim(chatStore?.getCurrent?.()),
@@ -1491,7 +1572,7 @@ export const createAppContentAgentTools = ({
   {
     name: 'persona.create',
     title: 'Create character card',
-    description: 'Create an APP character card/persona profile.',
+    description: 'Create an APP character card/persona profile. Chats and group chats are created under the active character card; to build them under this new card, pass setActive:true or call persona.switch first.',
     source: 'maid-app-content',
     permissions: [],
     riskLevel: 'medium',
@@ -1506,8 +1587,17 @@ export const createAppContentAgentTools = ({
     },
     safety: {
       operationType: 'create',
-      destructive: 'never',
+      destructive: 'conditional',
       description: 'Creates a new character card or reuses an existing one; it does not overwrite existing profile content.',
+      preflight: async (args = {}) => buildProfileCreateConfirmation(personaStore, args, {
+        kind: 'persona.create',
+        operationType: 'create_character_card',
+        title: t('新建角色卡'),
+        switchTitle: t('切换角色卡'),
+        createMessage: name => t('将新建角色卡「{name}」。', { name }),
+        createAndSwitchMessage: name => t('将新建角色卡「{name}」，创建后会切换为当前角色卡。', { name }),
+        switchExistingMessage: name => t('角色卡「{name}」已存在，不会重复新建；将把它切换为当前角色卡。', { name }),
+      }),
     },
     schema: {
       type: 'object',
@@ -1830,8 +1920,17 @@ export const createAppContentAgentTools = ({
     },
     safety: {
       operationType: 'create',
-      destructive: 'never',
+      destructive: 'conditional',
       description: 'Creates a new user profile or reuses an existing one; it does not overwrite existing profile content.',
+      preflight: async (args = {}) => buildProfileCreateConfirmation(userStore, args, {
+        kind: 'user.create',
+        operationType: 'create_user_profile',
+        title: t('新建用户'),
+        switchTitle: t('切换用户'),
+        createMessage: name => t('将新建用户「{name}」。', { name }),
+        createAndSwitchMessage: name => t('将新建用户「{name}」，创建后会切换为当前用户。', { name }),
+        switchExistingMessage: name => t('用户「{name}」已存在，不会重复新建；将把它切换为当前用户。', { name }),
+      }),
     },
     schema: {
       type: 'object',
@@ -1894,8 +1993,14 @@ export const createAppContentAgentTools = ({
     },
     safety: {
       operationType: 'switch_active',
-      destructive: 'never',
+      destructive: 'conditional',
       description: 'Switches active user profile without deleting or overwriting profile data.',
+      preflight: async (args = {}) => buildProfileSwitchConfirmation(userStore, args, {
+        kind: 'user.switch',
+        targetKeys: ['target', 'userId', 'id', 'name'],
+        title: t('切换用户'),
+        message: name => t('将把当前用户切换为「{name}」。', { name }),
+      }),
     },
     schema: {
       type: 'object',
@@ -1936,8 +2041,14 @@ export const createAppContentAgentTools = ({
     },
     safety: {
       operationType: 'switch_active',
-      destructive: 'never',
+      destructive: 'conditional',
       description: 'Switches active character card without deleting or overwriting profile data.',
+      preflight: async (args = {}) => buildProfileSwitchConfirmation(personaStore, args, {
+        kind: 'persona.switch',
+        targetKeys: ['target', 'personaId', 'id', 'name'],
+        title: t('切换角色卡'),
+        message: name => t('将把当前角色卡切换为「{name}」。', { name }),
+      }),
     },
     schema: {
       type: 'object',
@@ -1976,6 +2087,27 @@ export const createAppContentAgentTools = ({
       undo: 'manual',
       modelContext: 'allowlist',
       confirmation: 'always',
+    },
+    safety: {
+      operationType: 'generate_worldbook_entries',
+      destructive: 'conditional',
+      // 生成会调用模型（可能计费）并写入世界书，先确认；目标属于其他角色卡或共享范围时，写入边界会把它并成同一张确认
+      preflight: async (args = {}) => {
+        const worldbook = trim(args.name);
+        const values = { worldbook, count: args.entries.length };
+        const snapshot = await readWorldbookSnapshot(worldbook);
+        return confirmRequest({
+          kind: 'worldbook.generate_entries',
+          operationType: 'generate_worldbook_entries',
+          title: t('生成世界书条目'),
+          message: snapshot.exists
+            ? t('将调用模型生成 {count} 个条目，追加到世界书「{worldbook}」，可能产生费用；不会改动已有条目。', values)
+            : t('将调用模型生成 {count} 个条目，并新建世界书「{worldbook}」保存，可能产生费用。', values),
+          confirmText: t('生成'),
+          danger: false,
+          denyReason: 'worldbook_generate_cancelled',
+        });
+      },
     },
     schema: {
       type: 'object',
@@ -2216,7 +2348,42 @@ export const createAppContentAgentTools = ({
           exists: target.snapshot?.exists === true,
         }));
         if (target.mode !== 'replace' || !target.existingEntries.length) {
-          return { destructive: false, operationType: target.mode };
+          // 新建或追加同样会写入，先确认；与 execute 相同的条件判断是否顺带改动角色卡绑定
+          const creating = target.mode === 'create_new' || target.snapshot?.exists !== true;
+          const binding = target.personaBinding;
+          const bindsPersona = (args.bindToPersona === true || Boolean(target.personaQuery) || (!target.explicitName && binding.personaId))
+            && binding.personaId && (target.mode === 'create_new' || binding.worldbookId !== target.name);
+          const values = {
+            worldbook: target.name,
+            count: args.entries.length,
+            binding: !bindsPersona ? ''
+              : binding.worldbookId
+              ? t('，并把角色卡「{persona}」绑定的世界书由「{previous}」改为这本', {
+                persona: trim(target.persona?.name || binding.personaId), previous: binding.worldbookId,
+              })
+              : t('，并绑定到角色卡「{persona}」', { persona: trim(target.persona?.name || binding.personaId) }),
+          };
+          return {
+            destructive: true,
+            kind: 'worldbook.create',
+            operationType: creating ? 'create_worldbook' : 'append_worldbook_entries',
+            title: creating ? t('新建世界书') : t('追加世界书条目'),
+            message: creating
+              ? t('将新建世界书「{worldbook}」并写入 {count} 个条目{binding}。', values)
+              : t('将向世界书「{worldbook}」追加 {count} 个条目{binding}；不会改动已有条目。', values),
+            confirmText: creating ? t('新建') : t('追加'),
+            cancelText: t('取消'),
+            danger: false,
+            allowAlways: false,
+            details: {
+              worldbookId: target.name,
+              nextEntryCount: args.entries.length,
+            },
+            onDeny: {
+              action: 'skip',
+              reason: 'worldbook_create_cancelled',
+            },
+          };
         }
         return {
           destructive: true,
@@ -2501,8 +2668,27 @@ export const createAppContentAgentTools = ({
           entries: clone(target.existingEntries),
         }));
         const validUpdates = target.updates.filter(update => !checkWorldbookUpdateItem(target.existingEntries, update, target.createMissing));
-        if (!target.worldbookId || !target.existingEntries.length || !hasWorldbookEntryOverwriteFields(validUpdates)) {
+        const writingUpdates = listWritingWorldbookUpdates(target.existingEntries, validUpdates, target.createMissing);
+        if (!target.worldbookId || !target.existing || !writingUpdates.length) {
           return { destructive: false, operationType: 'update_worldbook_entries' };
+        }
+        if (!target.existingEntries.length || !hasWorldbookEntryOverwriteFields(validUpdates)) {
+          return {
+            destructive: true,
+            kind: 'worldbook.update_entries',
+            operationType: 'update_worldbook_entries',
+            ...describeWorldbookEntriesUpdate(target.worldbookId, writingUpdates.length),
+            allowAlways: false,
+            details: {
+              worldbookId: target.worldbookId,
+              currentEntryCount: target.existingEntries.length,
+              updateCount: target.updates.length,
+            },
+            onDeny: {
+              action: 'skip',
+              reason: 'worldbook_update_cancelled',
+            },
+          };
         }
         return {
           destructive: true,
@@ -2567,16 +2753,24 @@ export const createAppContentAgentTools = ({
         };
       }
       const validUpdates = args.updates.filter((_, index) => !invalidUpdates.some(item => item.index === index));
-      const requiresConfirmation = target.existingEntries.length > 0 && hasWorldbookEntryOverwriteFields(validUpdates);
+      const writingUpdates = listWritingWorldbookUpdates(target.existingEntries, validUpdates, args.createMissing === true);
+      const requiresConfirmation = writingUpdates.length > 0;
+      const overwritesEntries = target.existingEntries.length > 0 && hasWorldbookEntryOverwriteFields(validUpdates);
       if (requiresConfirmation && !isWorldbookUpdateAllowed(context)) {
         const confirmed = typeof confirmDestructiveWrite === 'function'
-          ? await confirmDestructiveWrite({
+          ? await confirmDestructiveWrite(overwritesEntries ? {
             kind: 'worldbook.update_entries',
             title: '修改世界书条目',
             message: `世界书「${target.worldbookId}」已有 ${target.existingEntries.length} 个条目。此操作会修改匹配条目的正文、标题或关键词，但不会删除未指定条目。`,
             confirmText: '修改',
             cancelText: '取消',
             danger: true,
+            worldbookId: target.worldbookId,
+            currentEntryCount: target.existingEntries.length,
+            updateCount: args.updates.length,
+          } : {
+            kind: 'worldbook.update_entries',
+            ...describeWorldbookEntriesUpdate(target.worldbookId, writingUpdates.length),
             worldbookId: target.worldbookId,
             currentEntryCount: target.existingEntries.length,
             updateCount: args.updates.length,
@@ -3209,8 +3403,27 @@ export const createAppContentAgentTools = ({
     },
     safety: {
       operationType: 'bind_worldbook_to_session',
-      destructive: 'never',
+      destructive: 'conditional',
       description: 'Adds a worldbook binding to a chat session. Default mode preserves any existing session worldbook bindings.',
+      preflight: async (args = {}) => {
+        const target = await resolveSessionBindingTarget(trim(args.sessionId || args.sessionName || args.target || args.chatName || chatStore?.getCurrent?.()));
+        // 找不到聊天室时 execute 会直接报错，不弹确认
+        if (!target.found) return { destructive: false };
+        const replace = trim(args.mode, 'append') === 'replace';
+        const values = { worldbook: trim(args.worldbookId || args.id || args.name), session: trim(target.sessionName || target.sessionId) };
+        return confirmRequest({
+          kind: 'worldbook.bind_session',
+          operationType: replace ? 'replace_session_worldbooks' : 'bind_worldbook_to_session',
+          title: t('绑定世界书到聊天室'),
+          message: replace
+            ? t('将用世界书「{worldbook}」替换聊天室「{session}」现有的全部世界书绑定；被替换的世界书本身不会删除。', values)
+            : t('将把世界书「{worldbook}」追加绑定到聊天室「{session}」，原有绑定保留。', values),
+          confirmText: t('绑定'),
+          danger: replace,
+          denyReason: 'worldbook_binding_cancelled',
+          denyResult: { bound: false },
+        });
+      },
     },
     schema: {
       type: 'object',
@@ -3328,8 +3541,27 @@ export const createAppContentAgentTools = ({
     },
     safety: {
       operationType: 'bind_worldbook_to_rp_session',
-      destructive: 'never',
+      destructive: 'conditional',
       description: 'Adds a worldbook binding to exactly one rp:<personaId> session. It never changes the persona worldbook binding used by private chats.',
+      preflight: async (args = {}) => {
+        const { persona, personaId } = capturePersonaBindingTarget(args);
+        // 找不到角色卡时 execute 会直接报错，不弹确认
+        if (!personaId) return { destructive: false };
+        const replace = trim(args.mode, 'append') === 'replace';
+        const values = { worldbook: trim(args.worldbookId || args.id || args.name), persona: trim(persona?.name || personaId) };
+        return confirmRequest({
+          kind: 'worldbook.bind_rp_session',
+          operationType: replace ? 'replace_rp_session_worldbooks' : 'bind_worldbook_to_rp_session',
+          title: t('绑定世界书到创作会话'),
+          message: replace
+            ? t('将用世界书「{worldbook}」替换角色卡「{persona}」创作会话现有的全部世界书绑定；被替换的世界书本身不会删除，私聊与角色卡绑定不受影响。', values)
+            : t('将把世界书「{worldbook}」追加绑定到角色卡「{persona}」的创作会话，原有绑定保留，私聊与角色卡绑定不受影响。', values),
+          confirmText: t('绑定'),
+          danger: replace,
+          denyReason: 'worldbook_binding_cancelled',
+          denyResult: { bound: false },
+        });
+      },
     },
     schema: {
       type: 'object',
@@ -3879,7 +4111,7 @@ export const createAppContentAgentTools = ({
   {
     name: 'chat.send_message',
     title: 'Send chat message',
-    description: 'Append a chat message to a private or group chat session and optionally open it.',
+    description: 'Append a chat message to a private or group chat session and optionally open it. A user message that triggers a reply always opens its chat, because the reply runs in the current chat; other messages open the chat unless open is false.',
     source: 'maid-app-content',
     permissions: [],
     riskLevel: 'medium',
@@ -3894,8 +4126,32 @@ export const createAppContentAgentTools = ({
     },
     safety: {
       operationType: 'append_message',
-      destructive: 'never',
+      destructive: 'conditional',
       description: 'Appends a new chat message; it does not edit or delete existing messages.',
+      preflight: async (args = {}) => {
+        const content = trim(args.content || args.message || args.text);
+        const target = resolveChatConfirmationTarget(trim(args.sessionId || args.sessionName || args.target || args.chatName || chatStore?.getCurrent?.()));
+        if (!content || target.missing) return { destructive: false };
+        const role = ['assistant', 'system'].includes(trim(args.role)) ? trim(args.role) : 'user';
+        const triggerReply = role === 'user' && args.triggerReply !== false && typeof sendChatMessage === 'function';
+        const values = { session: target.name, preview: previewConfirmText(content) };
+        return confirmRequest({
+          kind: 'chat.send_message',
+          operationType: triggerReply ? 'send_message_with_reply' : `append_${role}_message`,
+          title: t('发送聊天消息'),
+          message: role === 'assistant'
+            ? t('将以角色身份在「{session}」写入一条消息，不会触发回复：「{preview}」', values)
+            : role === 'system'
+            ? t('将在「{session}」写入一条系统消息，不会触发回复：「{preview}」', values)
+            : triggerReply
+            ? t('将以用户身份在「{session}」发送消息，并触发角色回复（会调用模型）：「{preview}」', values)
+            : t('将以用户身份在「{session}」发送消息，不会触发角色回复：「{preview}」', values),
+          confirmText: t('发送'),
+          danger: false,
+          denyReason: 'send_message_cancelled',
+          denyResult: { sent: false },
+        });
+      },
     },
     schema: {
       type: 'object',
@@ -3911,7 +4167,7 @@ export const createAppContentAgentTools = ({
         role: { type: 'string', enum: ['user', 'assistant', 'system'] },
         name: { type: 'string', maxLength: 120 },
         avatar: { type: 'string', maxLength: 500000 },
-        open: { type: 'boolean' },
+        open: { type: 'boolean', description: 'Open the target chat. Defaults to true; a reply-triggering user message always opens it.' },
         triggerReply: { type: 'boolean' },
         waitForReply: { type: 'boolean' },
       },
@@ -3930,18 +4186,20 @@ export const createAppContentAgentTools = ({
       }
       const role = ['assistant', 'system'].includes(trim(args.role)) ? trim(args.role) : 'user';
       const shouldTriggerReply = role === 'user' && args.triggerReply !== false && typeof sendChatMessage === 'function';
+      // 正常回复链要求目标成为当前会话并进入聊天室，会触发回复的发送一律打开；其余照 open 参数
+      const open = shouldTriggerReply || args.open !== false;
       if (shouldTriggerReply) {
         const waitForReply = args.waitForReply !== false;
         chatStore?.switchSession?.(sessionId);
         setActiveSession?.(sessionId);
-        if (args.open !== false && typeof enterChatRoom === 'function') {
+        if (typeof enterChatRoom === 'function') {
           const title = renderSessionNameHtml?.(sessionId, contact) || contact?.name || sessionId;
           await enterChatRoom(sessionId, title, 'chat', { suppressInitialAutoScroll: true });
         }
         const sendResult = await sendChatMessage(content, {
           sessionId,
           source: 'maid',
-          open: args.open !== false,
+          open,
           waitForReply,
           ...(context?.signal ? { signal: context.signal } : {}),
         });
@@ -4011,7 +4269,7 @@ export const createAppContentAgentTools = ({
       };
       if (role === 'system') message.type = 'meta';
       chatStore.appendMessage(message, sessionId);
-      if (args.open !== false) {
+      if (open) {
         chatStore.switchSession?.(sessionId);
         setActiveSession?.(sessionId);
         if (typeof enterChatRoom === 'function') {
@@ -4054,8 +4312,25 @@ export const createAppContentAgentTools = ({
     },
     safety: {
       operationType: 'append_message',
-      destructive: 'never',
+      destructive: 'conditional',
       description: 'Generates a new image and appends it as a chat message; it does not edit or delete existing content.',
+      preflight: async (args = {}) => {
+        const prompt = trim(args.prompt);
+        const target = resolveChatConfirmationTarget(trim(args.sessionId || args.sessionName || args.target || chatStore?.getCurrent?.()));
+        if (typeof generateChatImage !== 'function' || !prompt || target.missing) return { destructive: false };
+        return confirmRequest({
+          kind: 'chat.generate_image',
+          operationType: 'generate_image',
+          title: t('生成图片'),
+          message: t('将生成一张图片，以用户身份发到「{session}」，生图可能产生费用。提示词：「{preview}」', {
+            session: target.name, preview: previewConfirmText(prompt),
+          }),
+          confirmText: t('生成'),
+          danger: false,
+          denyReason: 'generate_image_cancelled',
+          denyResult: { generated: false },
+        });
+      },
     },
     // 生图时长跟随生图模型配置的请求超时。
     timeoutMs: 0,
@@ -4191,8 +4466,30 @@ export const createAppContentAgentTools = ({
     },
     safety: {
       operationType: 'switch_profile',
-      destructive: 'never',
+      destructive: 'conditional',
       description: 'Changes which saved model profile is active; profiles themselves are not modified.',
+      preflight: async (args = {}) => {
+        const scope = trim(args.scope);
+        const query = trim(args.profileId || args.profileName);
+        if (typeof listModelProfiles !== 'function' || typeof switchModelProfile !== 'function' || !query) return { destructive: false };
+        const data = await listModelProfiles({ scope });
+        const matches = matchModelProfiles(data?.profiles || [], query);
+        // 找不到、有歧义（execute 会报错）或已是当前配置时什么都不会变，不弹确认
+        if (matches.length !== 1 || matches[0].id === data.activeId) return { destructive: false };
+        const values = { name: matches[0].name, model: matches[0].model };
+        return confirmRequest({
+          kind: 'config.switch_profile',
+          operationType: 'switch_profile',
+          title: t('切换模型配置'),
+          message: scope === 'image'
+            ? t('将把生图使用的模型配置切换为「{name}」（{model}）。', values)
+            : t('将把聊天使用的模型配置切换为「{name}」（{model}）。', values),
+          confirmText: t('切换'),
+          danger: false,
+          denyReason: 'profile_switch_cancelled',
+          denyResult: { switched: false, scope },
+        });
+      },
     },
     schema: {
       type: 'object',
@@ -4214,11 +4511,7 @@ export const createAppContentAgentTools = ({
       const data = await listModelProfiles({ scope });
       if (!data) return { ok: false, switched: false, reason: 'unsupported_scope', scope };
       const profiles = data.profiles || [];
-      const lowered = query.toLowerCase();
-      let matches = profiles.filter(p => p.id === query);
-      if (!matches.length) matches = profiles.filter(p => p.name === query);
-      if (!matches.length) matches = profiles.filter(p => p.name.toLowerCase() === lowered);
-      if (!matches.length) matches = profiles.filter(p => p.name.toLowerCase().includes(lowered) || p.model.toLowerCase().includes(lowered));
+      const matches = matchModelProfiles(profiles, query);
       if (!matches.length) {
         return { ok: false, switched: false, reason: 'profile_not_found', scope, query, available: profiles.map(p => p.name) };
       }

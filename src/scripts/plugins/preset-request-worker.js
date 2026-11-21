@@ -332,9 +332,22 @@ export function createPresetRequestWorker({ send, getFetch, getBaseFetch, getCon
       emit(job, 'error', { error: String(error.message || error) });
     } else emit(job, 'done');
   };
+  // 只认相对路径（脚本以为自己在酒馆页面上）；完整网址交给网络权限处理
+  const isTavernGenerateUrl = url => {
+    if (/^[a-z][a-z\d+.-]*:|^\/\//i.test(url.trim())) return false;
+    try { return new URL(url, 'http://chatapp.invalid').pathname === '/api/backends/chat-completions/generate'; } catch { return false; }
+  };
   const interceptFetch = (input, init = {}) => {
     const url = String(input?.url || input || '');
-    const token = /[?&]chatapp_request=([^&]+)/.exec(url)?.[1];
+    let token = /[?&]chatapp_request=([^&]+)/.exec(url)?.[1];
+    // 有些预设脚本拦下请求后用写死的酒馆路径重发，编号就丢了：只有一次生成正在等脚本提交时才认作那一次；
+    // 没有生成在等时是脚本单独打的请求，交给酒馆接口路由回应
+    if (!token && isTavernGenerateUrl(url)) {
+      const waiting = [...jobs.values()].filter(job => job.submitting && !job.prepared);
+      if (!waiting.length) return null;
+      if (waiting.length > 1) return Promise.reject(new Error('同时有多个生成在等预设提交，无法判断这个请求属于哪一个'));
+      token = waiting[0].id;
+    }
     if (!token || !jobs.has(token)) return null;
     const job = jobs.get(token);
     return (async () => {
@@ -379,10 +392,14 @@ export function createPresetRequestWorker({ send, getFetch, getBaseFetch, getCon
       if (hasSettings) body = await prepareSPreset(body, msg.preset || {}, msg.spreset);
       const settingsReady = await dispatch('chat_completion_settings_ready', { args: [body] });
       body = settingsReady?.args?.[0] || body;
-      const response = await middleware('/api/backends/chat-completions/generate?chatapp_request=' + job.id, {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body), signal: job.abort.signal,
-      });
+      job.submitting = true;
+      let response;
+      try {
+        response = await middleware('/api/backends/chat-completions/generate?chatapp_request=' + job.id, {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body), signal: job.abort.signal,
+        });
+      } finally { job.submitting = false; }
       if (!job.prepared) throw new Error('预设拦截器未提交生成请求');
       if (job.preview) { finish(job); try { await response.body?.cancel(); } catch {} return; }
       await consumeResponse(job, response);

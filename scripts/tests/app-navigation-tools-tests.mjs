@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 
 import { createAppNavigationAgentTools } from '../../src/scripts/agent/tools/app-navigation-tools.js';
+import { createAgentToolRegistry } from '../../src/scripts/agent/agent-tool-registry.js';
+import { createAgentPermissionEvaluator } from '../../src/scripts/agent/agent-permissions.js';
 
 const getTool = (tools, name) => tools.find(tool => tool.name === name);
 
@@ -202,4 +204,59 @@ const getTool = (tools, name) => tools.find(tool => tool.name === name);
   assert.match(confirmation.message, /删除记录/);
   assert.equal(clicks[0].label, '删除记录');
   console.log('ok - ref clicks use the inspected label instead of a caller supplied harmless label');
+}
+
+{
+  // 用户决定（2026-11-20）：程序分不清哪个按钮会改内容，每次点击都先确认；危险按钮单独一类 kind，operationType 固定
+  const clicks = [];
+  let scopesStarted = 0;
+  let scopesEnded = 0;
+  const labels = { 'settings:r1:btn-1': '活动', 'settings:r1:btn-2': '删除记录' };
+  const tools = createAppNavigationAgentTools({
+    describeUiElement: ({ ref }) => (labels[ref] ? { ok: true, ref, label: labels[ref], panel: 'settings' } : { ok: false, reason: 'ref_not_found' }),
+    beginUiElementConfirmation: () => {
+      scopesStarted += 1;
+      return () => { scopesEnded += 1; };
+    },
+    clickUiElement: async args => {
+      clicks.push(args);
+      return { ok: true, clicked: args.label };
+    },
+  });
+  const clickTool = getTool(tools, 'ui.click_element');
+  const pick = result => [result.destructive, result.kind, result.operationType, result.danger];
+  assert.deepEqual(pick(await clickTool.safety.preflight({ ref: 'settings:r1:btn-1' }, {})), [true, 'ui.click_element', 'click_element', false]);
+  assert.deepEqual(pick(await clickTool.safety.preflight({ label: '展开' }, { operationIntentPolicy: { mode: 'read_only' } })), [true, 'ui.click_element', 'click_element', false],
+    'even navigation clicks are confirmed');
+  const danger = await clickTool.safety.preflight({ ref: 'settings:r1:btn-2', label: '活动' }, {});
+  assert.deepEqual(pick(danger), [true, 'ui.click_danger', 'click_element', true], 'the inspected label decides the danger class');
+  assert.match(danger.message, /删除记录/);
+  assert.equal((await clickTool.safety.preflight({ ref: 'settings:r1:btn-2' }, { operationIntentPolicy: { mode: 'read_only' } })).destructive, false,
+    'read-only intent refuses dangerous clicks in execute without asking first');
+  assert.equal((await clickTool.safety.preflight({ ref: 'settings:r9:gone' }, {})).destructive, false, 'a stale ref clicks nothing');
+  assert.equal((await clickTool.safety.preflight({}, {})).destructive, false, 'no target clicks nothing');
+  assert.equal((await getTool(createAppNavigationAgentTools(), 'ui.click_element').safety.preflight({ label: '活动' }, {})).destructive, false);
+  assert.deepEqual([scopesStarted, scopesEnded], [3, 3], 'each confirming preflight opens one scope; the next click call closes a leftover one');
+
+  const registry = createAgentToolRegistry({
+    permissionEvaluator: createAgentPermissionEvaluator({ defaultDecision: 'allow' }),
+    logger: { warn() {} },
+  });
+  registry.registerMany(tools);
+  const requests = [];
+  const allowed = await registry.executeTool('ui.click_element', { ref: 'settings:r1:btn-2' }, {
+    requestToolConfirmation: (request) => { requests.push(request); return true; },
+  });
+  assert.equal(allowed.result.ok, true);
+  assert.deepEqual(requests.map(request => request.kind), ['ui.click_danger'], 'a dangerous click asks once, not again inside execute');
+  assert.equal(scopesEnded, scopesStarted, 'the confirmation scope closes before clicking');
+  const denied = await registry.executeTool('ui.click_element', { ref: 'settings:r1:btn-1' }, {
+    requestToolConfirmation: (request) => { requests.push(request); return false; },
+  });
+  assert.equal(denied.status, 'skipped');
+  assert.deepEqual([denied.result.reason, denied.result.cancelled], ['user_declined', true]);
+  assert.equal(clicks.length, 1, 'a declined click never clicks');
+  await clickTool.safety.preflight({}, {});
+  assert.equal(scopesEnded, scopesStarted, 'a declined confirmation scope is closed by the next click call');
+  console.log('ok - every UI click is confirmed once by preflight, dangerous labels get their own kind');
 }

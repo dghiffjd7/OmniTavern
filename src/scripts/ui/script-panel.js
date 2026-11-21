@@ -5,6 +5,14 @@ import { getCharacterCardDisplayName } from '../utils/character-card-display.js'
 import { bindCustomSelectButton, closeCustomSelectMenu, createCustomSelectWrapper } from './custom-select.js';
 import { restartScriptWorker } from './script-runtime-utils.js';
 import { analyzeScriptCompatibility } from '../import/script-capability-preflight.js';
+import { analyzeTavernFeatures, buildTavernFeatureImportLine } from '../import/tavern-feature-report.js';
+import { getCompatGapReportStore } from '../storage/compat-gap-report-store.js';
+import { t } from '../i18n/index.js';
+import {
+  getScriptRuntimeGapReports,
+  renderScriptCompatDetailHtml,
+  renderScriptCompatToggleHtml,
+} from './script-compat-report-view.js';
 
 const SCRIPT_PANEL_STYLE_ID = 'script-panel-polish-style';
 
@@ -196,6 +204,153 @@ const ensureScriptPanelStyles = () => {
       background: color-mix(in srgb, var(--app-surface-card) 75%, transparent);
       font-size: 13px !important;
       font-weight: 600;
+    }
+    #script-panel .script-panel-compat-toggle {
+      display: inline-flex;
+      max-width: 100%;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 5px;
+      margin-top: 7px;
+      padding: 3px 8px 3px 9px;
+      border: 1px solid var(--app-border-default);
+      border-radius: 999px;
+      background: var(--app-surface-subtle);
+      color: var(--app-text-secondary);
+      font-size: 11px;
+      font-weight: 600;
+      line-height: 1.5;
+      cursor: pointer;
+      transition: border-color 160ms ease, background 160ms ease;
+    }
+    #script-panel .script-panel-compat-toggle:hover {
+      border-color: var(--app-border-strong, var(--app-border-default));
+    }
+    #script-panel .script-panel-compat-toggle:focus-visible {
+      outline: 2px solid rgba(var(--app-accent-rgb), 0.45);
+      outline-offset: 2px;
+    }
+    #script-panel .script-compat-chevron {
+      width: 12px;
+      height: 12px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2.4;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      transition: transform 180ms ease;
+    }
+    #script-panel .script-panel-compat-toggle[aria-expanded='true'] .script-compat-chevron {
+      transform: rotate(180deg);
+    }
+    #script-panel :is(.script-compat-count, .script-compat-badge) {
+      display: inline-flex;
+      align-items: center;
+      padding: 0 6px;
+      border-radius: 999px;
+      font-size: 10.5px;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+    #script-panel :is(.script-compat-count, .script-compat-badge).is-supported {
+      background: rgba(var(--app-success-rgb), 0.12);
+      color: var(--app-success-text);
+    }
+    #script-panel :is(.script-compat-count, .script-compat-badge).is-partial {
+      background: rgba(var(--app-warning-rgb), 0.14);
+      color: var(--app-warning-text);
+    }
+    #script-panel :is(.script-compat-count, .script-compat-badge).is-unsupported,
+    #script-panel .script-compat-count.is-gap {
+      background: rgba(var(--app-danger-rgb), 0.12);
+      color: var(--app-danger-text-strong, var(--app-danger-text));
+    }
+    #script-panel.script-panel-shell .script-panel-card.is-compat-open {
+      align-items: flex-start !important;
+    }
+    #script-panel .script-panel-compat-detail {
+      display: grid;
+      gap: 12px;
+      margin-top: 10px;
+      padding: 10px 12px;
+      border: 1px solid var(--app-border-subtle);
+      border-radius: 12px;
+      background: var(--app-surface-subtle);
+    }
+    #script-panel .script-panel-compat-detail[hidden] {
+      display: none;
+    }
+    #script-panel .script-compat-section-title {
+      color: var(--app-text-primary);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    #script-panel :is(.script-compat-hint, .script-compat-empty) {
+      margin-top: 3px;
+      color: var(--app-text-muted);
+      font-size: 11px;
+      line-height: 1.5;
+    }
+    #script-panel .script-compat-list {
+      display: grid;
+      gap: 8px;
+      margin: 8px 0 0;
+      padding: 0;
+      list-style: none;
+    }
+    #script-panel .script-compat-row {
+      min-width: 0;
+      padding: 8px 10px;
+      border: 1px solid var(--app-border-subtle);
+      border-radius: 10px;
+      background: var(--app-surface-card);
+    }
+    #script-panel .script-compat-row-head {
+      display: flex;
+      min-width: 0;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+    }
+    #script-panel .script-compat-label {
+      min-width: 0;
+      overflow-wrap: anywhere;
+      color: var(--app-text-primary);
+      font-size: 12px;
+      font-weight: 600;
+    }
+    #script-panel .script-compat-label.is-code {
+      font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      font-size: 11.5px;
+    }
+    #script-panel .script-compat-category {
+      color: var(--app-text-muted);
+      font-size: 10.5px;
+    }
+    #script-panel .script-compat-impact {
+      margin-top: 4px;
+      color: var(--app-text-secondary);
+      font-size: 11.5px;
+      line-height: 1.55;
+    }
+    #script-panel .script-compat-matches {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 4px;
+      margin-top: 5px;
+      color: var(--app-text-muted);
+      font-size: 10.5px;
+    }
+    #script-panel .script-compat-matches code {
+      max-width: 100%;
+      overflow-wrap: anywhere;
+      padding: 1px 5px;
+      border-radius: 6px;
+      background: var(--app-surface-subtle);
+      color: var(--app-text-secondary);
+      font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      font-size: 10.5px;
     }
     .script-panel-icon {
       width: 15px;
@@ -480,7 +635,7 @@ const openScriptEditor = ({ script, title = '编辑脚本' } = {}) => new Promis
 });
 
 export class ScriptPanel {
-  constructor({ store, personaStore, presetStore, appBridge = null } = {}) {
+  constructor({ store, personaStore, presetStore, appBridge = null, compatGapStore = null } = {}) {
     this.store = store || null;
     this.personaStore = personaStore || null;
     this.presetStore = presetStore || null;
@@ -496,6 +651,9 @@ export class ScriptPanel {
     this.scriptList = null;
     this.statusEl = null;
     this.importInput = null;
+    // 兼容报告：执行时缺口记录与已展开明细的脚本
+    this.compatGapStore = compatGapStore || null;
+    this.compatExpanded = new Set();
   }
 
   async show() {
@@ -702,6 +860,55 @@ export class ScriptPanel {
     const scopeId = this.getScopeId();
     const scripts = this.store.getScripts(this.tab, scopeId);
     this.renderList(scripts, scopeId);
+    // 执行时缺口要等记录读好；读到后补进各脚本卡片（期间换了分页或范围就不补）
+    const tab = this.tab;
+    const gapReports = await this.loadCompatGapReports();
+    if (tab !== this.tab || scopeId !== this.getScopeId()) return;
+    const current = this.store.getScripts(this.tab, scopeId);
+    if ((current || []).some(script => getScriptRuntimeGapReports(gapReports, script?.id).length)) {
+      this.renderList(current, scopeId, gapReports);
+    }
+  }
+
+  async loadCompatGapReports() {
+    try {
+      const store = this.compatGapStore || getCompatGapReportStore();
+      const reports = await store.getReports();
+      return Array.isArray(reports) ? reports : [];
+    } catch {
+      return [];
+    }
+  }
+
+  // 卡片上的兼容摘要（按代码推测＋执行时实际打到）；没有用到酒馆功能也没有缺口时不显示
+  appendCompatReport(card, container, script, gapReports = []) {
+    const report = script.schemaOnly === true ? null : analyzeTavernFeatures(script);
+    const gaps = getScriptRuntimeGapReports(gapReports, script.id);
+    const toggleHtml = renderScriptCompatToggleHtml({ report, gaps });
+    if (!toggleHtml) return;
+    const expanded = this.compatExpanded.has(script.id);
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'script-panel-compat-toggle';
+    toggle.innerHTML = toggleHtml;
+    toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    toggle.title = t('查看这个脚本用到的酒馆功能与支持情况');
+    const detail = document.createElement('div');
+    detail.className = 'script-panel-compat-detail';
+    detail.hidden = !expanded;
+    if (expanded) detail.innerHTML = renderScriptCompatDetailHtml({ report, gaps });
+    card.classList.toggle('is-compat-open', expanded);
+    toggle.addEventListener('click', () => {
+      const open = detail.hidden;
+      if (open && !detail.innerHTML) detail.innerHTML = renderScriptCompatDetailHtml({ report, gaps });
+      detail.hidden = !open;
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      card.classList.toggle('is-compat-open', open);
+      if (open) this.compatExpanded.add(script.id);
+      else this.compatExpanded.delete(script.id);
+    });
+    container.appendChild(toggle);
+    container.appendChild(detail);
   }
 
   showStatus(message, type = 'info') {
@@ -784,11 +991,12 @@ export class ScriptPanel {
       this.showStatus(`已导入 ${count} 个脚本`, 'success');
     }
     if (runnableIds.length) {
+      const tavernLine = buildTavernFeatureImportLine(result?.tavernFeatures);
       const ok = await appConfirm({
         title: '导入脚本',
-        message: blockedCount > 0
+        message: (blockedCount > 0
           ? `其中 ${runnableIds.length} 个脚本可运行，是否立即启用？`
-          : `已导入 ${count} 个脚本，是否立即启用？`,
+          : `已导入 ${count} 个脚本，是否立即启用？`) + (tavernLine ? `\n${tavernLine}` : ''),
       });
       if (ok) {
         for (const id of runnableIds) {
@@ -802,7 +1010,7 @@ export class ScriptPanel {
     this.refresh();
   }
 
-  renderList(scripts, scopeId) {
+  renderList(scripts, scopeId, gapReports = []) {
     if (!this.scriptList) return;
     const shouldAnimateCards = this.scriptList.dataset.motionInitialized !== 'true';
     this.scriptList.innerHTML = '';
@@ -841,6 +1049,7 @@ export class ScriptPanel {
       meta.style.cssText = 'font-size:12px;color:var(--app-text-muted);margin-top:4px;';
       left.appendChild(title);
       left.appendChild(meta);
+      if (!blocked) this.appendCompatReport(card, left, script, gapReports);
       const icon = document.createElement('span');
       icon.className = 'script-panel-card-icon';
       icon.innerHTML = SCRIPT_ICONS.code;

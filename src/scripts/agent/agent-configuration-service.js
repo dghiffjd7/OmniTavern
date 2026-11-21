@@ -6,6 +6,25 @@ import { buildInputAgentRequest } from './input-agent-runtime.js';
 import { createAgentToolTargets } from './agent-tool-targets.js';
 import { resolveFormatRepairProfile, saveFormatRepairProfileDraft } from './format-repair-profiles.js';
 
+/** 保存前的检查，编辑器与女仆工具共用。通过时返回空字符串，否则返回给用户看的原因。
+ *  bodyRule：处理范围选「正文」时用的正文规则。 */
+export const validateAgentConfiguration = (config, { place = 'chat', repairDraft = false, bodyRule = null } = {}) => {
+  if (!repairDraft && config.enabled && (config.modelMode === 'none' || (config.modelMode === 'profile' && !config.modelProfileId))) return '请先选择模型';
+  const independentModel = agentIndependentModelRequirement(config);
+  if (independentModel) return independentModel;
+  // 套用预设时任务由预设代替，任务要求可以留空，但要先选预设
+  const usesPreset = config.promptSource === 'preset';
+  if (config.enabled && usesPreset && ['input_agent', 'text_edit'].includes(config.kind) && !config.presetId) return '请先选择预设';
+  if (config.enabled && !usesPreset && config.kind === 'input_agent' && !config.prompt.trim()) return '请填写任务要求';
+  if (!repairDraft && config.enabled && config.id === 'reply_check' && place === 'writing' && !config.formatGuide.trim()) return '请先填写格式要求';
+  if (config.enabled && !usesPreset && config.kind === 'text_edit' && !config.prompt.trim()) return '请填写任务要求';
+  if (config.enabled && config.kind === 'text_edit') {
+    const rule = config.target.mode === 'body' ? bodyRule : config.target;
+    if (!rule || rule.mode === 'body' || (rule.mode === 'tags' && (!rule.start || !rule.end)) || (rule.mode === 'regex' && !rule.pattern)) return '请先设置完整的处理范围';
+  }
+  return '';
+};
+
 export const createAgentConfigurationService = ({ store, getContext, getMessages, getRaw, getEvidence = () => [], getProfiles,
   getInput = () => ({ before: '', after: '' }), getInputRuntime = () => null, buildInputPreview = null, captureModel = null,
   buildFormatPreview, previewRequest = null, runtime, runFormat, formatRuntime = null, getFormatTarget, resolveReference = null, listReferenceSources = async () => [], listAvailableTools = async () => [], resolveTarget = resolveAgentTextTargetAsync, getCurrentModelLabel = () => '', onChanged = () => {} } = {}) => {
@@ -87,20 +106,9 @@ export const createAgentConfigurationService = ({ store, getContext, getMessages
       let config = normalizeAgentConfiguration(options.config, options.id);
       const repairDraft = options.id === 'reply_check' && options.repairProfileId;
       if (repairDraft && !String(options.config?.repairProfileName || '').trim()) return { ok: false, message: '请填写方案名称' };
-      if (!repairDraft && config.enabled && (config.modelMode === 'none' || (config.modelMode === 'profile' && !config.modelProfileId))) return { ok: false, message: '请先选择模型' };
-      const independentModel = agentIndependentModelRequirement(config);
-      if (independentModel) return { ok: false, message: independentModel };
-      // 套用预设时任务由预设代替，任务要求可以留空，但要先选预设
-      const usesPreset = config.promptSource === 'preset';
-      if (config.enabled && usesPreset && ['input_agent', 'text_edit'].includes(config.kind) && !config.presetId) return { ok: false, message: '请先选择预设' };
-      if (config.enabled && !usesPreset && config.kind === 'input_agent' && !config.prompt.trim()) return { ok: false, message: '请填写任务要求' };
-      if (!repairDraft && config.enabled && config.id === 'reply_check' && context(options).place === 'writing' && !config.formatGuide.trim()) return { ok: false, message: '请先填写格式要求' };
-      if (config.enabled && !usesPreset && config.kind === 'text_edit' && !config.prompt.trim()) return { ok: false, message: '请填写任务要求' };
-      if (config.enabled && config.kind === 'text_edit') {
-        const rule = config.target.mode === 'body' ? options.bodyRule || store.read(BODY_SELECTOR_ID, context(options), options.scope).config?.target : config.target;
-        if (!rule || rule.mode === 'body' || (rule.mode === 'tags' && (!rule.start || !rule.end)) || (rule.mode === 'regex' && !rule.pattern))
-          return { ok: false, message: '请先设置完整的处理范围' };
-      }
+      const invalid = validateAgentConfiguration(config, { place: context(options).place, repairDraft,
+        bodyRule: options.bodyRule || store.read(BODY_SELECTOR_ID, context(options), options.scope).config?.target });
+      if (invalid) return { ok: false, message: invalid };
       if (repairDraft) config = saveFormatRepairProfileDraft(config, { id: options.repairProfileId, name: options.config.repairProfileName });
       if (config.id === 'reply_check' && config.repairCheckType === 'tableEdit' && config.repairProfiles.automaticId) {
         return { ok: false, message: '表格指令方案请从工具箱选择后执行，自动检查请选择回复格式方案' };

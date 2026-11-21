@@ -14,7 +14,12 @@ const createStore = (data = new Map()) => new MaidConversationStore({
   compactionTurnThreshold: 1000,
   compactionHistoryTokenThreshold: 100000,
 });
-const projectedBasis = text => [...text.matchAll(/resultBasis: (\{[^\n]+\})/g)].map(match => JSON.parse(match[1]));
+// 给模型看的历史里，来源都标 externalContent:true（11/20 外部内容统一包法）；存档资料本身不带，比对时先去掉这个标记
+const projectedBasis = text => [...text.matchAll(/resultBasis: (\{[^\n]+\})/g)].map(match => JSON.parse(match[1]))
+  .map((basis) => {
+    assert.ok(basis.sources.every(source => source.externalContent === true), 'history marks every source as external content');
+    return { ...basis, sources: basis.sources.map(({ externalContent: _external, ...source }) => source) };
+  });
 const executedBasis = buildMaidResultBasis({
   status: 'succeeded', responseType: 'tool', runId: 'run-web',
   steps: [{ toolName: 'web_read', status: 'succeeded', id: 'step-web',

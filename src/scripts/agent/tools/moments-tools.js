@@ -3,6 +3,7 @@
    可选的发布后评论生成），经依赖注入接入；本模块不直接触碰 store。 */
 
 import { t } from '../../i18n/index.js';
+import { confirmRequest } from './preset-regex-script-tools.js';
 
 const trim = (value, fallback = '') => {
   const text = String(value ?? '').trim();
@@ -45,6 +46,8 @@ const askAboutImageFailure = async ({ context = {}, failure = {}, failedIndex = 
       riskLevel: 'medium',
       danger: false,
       allowAlways: false,
+      // 这是让用户选「先不发／发已生成的」，不是权限，不提供一律允许
+      allowRemember: false,
       title: t('动态配图没有全部生成'),
       message: parts.join(''),
       confirmText,
@@ -83,6 +86,33 @@ export const createMomentsAgentTools = ({
       undo: 'none',
       modelContext: 'allowlist',
       confirmation: 'allow_once',
+    },
+    safety: {
+      operationType: 'create_moment',
+      destructive: 'conditional',
+      // 以用户身份发布前先让用户确认（附正文预览）；没有发布通道、正文为空或图片超限时不会发布，不弹确认
+      preflight: async (args = {}) => {
+        const content = trim(args.content);
+        const imageCount = uniqueTexts(args.attachmentIds, MOMENT_IMAGE_LIMIT).length;
+        const promptCount = uniqueTexts(args.imagePrompts, MOMENT_IMAGE_PROMPT_LIMIT).length;
+        if (typeof publishMoment !== 'function' || !content || imageCount + promptCount > MOMENT_IMAGE_LIMIT) {
+          return { destructive: false, operationType: 'create_moment' };
+        }
+        const notes = [t('将以你的身份发布这条动态。')];
+        if (imageCount) notes.push(t('附 {count} 张已有图片。', { count: imageCount }));
+        if (promptCount) notes.push(t('另会用当前生图模型现场生成 {count} 张配图，可能产生费用。', { count: promptCount }));
+        if (args.generateComments !== false) notes.push(t('发布后角色们会自动评论（会调用模型）。'));
+        return confirmRequest({
+          kind: 'moments.publish',
+          operationType: 'create_moment',
+          title: t('发布动态'),
+          message: notes.join(''),
+          confirmText: t('发布'),
+          danger: false,
+          items: [{ id: 'content', label: content.length > 200 ? `${content.slice(0, 199)}…` : content }],
+          denyReason: 'moment_publish_cancelled',
+        });
+      },
     },
     schema: {
       type: 'object',

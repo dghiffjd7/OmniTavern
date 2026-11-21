@@ -59,6 +59,12 @@ const context = { roleCardId: 'p-test', sessionId: 'rp:p-test' };
 }
 
 {
+  // 用户决定（2026-11-20）：存进文件库前确认；只列真的会新取出的文件，都已取出过或都找不到时不弹
+  const extractPreflight = await tools['attachment.extract'].safety.preflight({ attachmentId: 'zip', entries: ['世界书/星港.json', 'inner.zip', 'nope.txt'] });
+  assert.deepEqual([extractPreflight.destructive, extractPreflight.kind, extractPreflight.operationType, extractPreflight.danger], [true, 'attachment.extract', 'create_extracted_files', false]);
+  assert.deepEqual(extractPreflight.details.items.map(item => item.label), ['世界书/星港.json', 'inner.zip']);
+  assert.equal((await tools['attachment.extract'].safety.preflight({ attachmentId: 'zip', entries: ['nope.txt'] })).destructive, false);
+  assert.equal((await tools['attachment.extract'].safety.preflight({ attachmentId: 'missing', entries: ['a'] })).destructive, false);
   const extracted = await tools['attachment.extract'].execute({ attachmentId: 'zip', entries: ['世界书/星港.json', 'inner.zip', 'nope.txt'] });
   assert.deepEqual(extracted.files.map(file => [file.name, file.format, file.origin, file.entry]), [
     ['星港.json', 'worldbook', 'archive', '世界书/星港.json'],
@@ -67,6 +73,7 @@ const context = { roleCardId: 'p-test', sessionId: 'rp:p-test' };
   assert.deepEqual(extracted.failed.map(item => item.reason), ['entry_not_found']);
   const again = await tools['attachment.extract'].execute({ attachmentId: 'zip', entries: ['世界书/星港.json'] });
   assert.equal(again.files[0].attachmentId, extracted.files[0].attachmentId, 'the same entry is taken out only once');
+  assert.equal((await tools['attachment.extract'].safety.preflight({ attachmentId: 'zip', entries: ['世界书/星港.json'] })).destructive, false, 'an entry already taken out is reused without a confirmation');
   assert.equal(library.get(extracted.files[0].attachmentId).submittedContext.roleCardId, 'p-test', 'a file taken out of an archive keeps the context the archive was sent in');
   const nested = await tools['attachment.read'].execute({ attachmentId: extracted.files[1].attachmentId, entry: '深处.txt' });
   assert.equal(nested.text, '内层文件', 'a zip inside the zip is readable once taken out');
@@ -74,8 +81,14 @@ const context = { roleCardId: 'p-test', sessionId: 'rp:p-test' };
 }
 
 {
+  const createPreflight = await tools['attachment.create'].safety.preflight({ name: '摘要.md', content: '# 摘要\n' });
+  assert.deepEqual([createPreflight.destructive, createPreflight.kind, createPreflight.operationType], [true, 'attachment.create', 'create_file']);
+  assert.equal((await tools['attachment.create'].safety.preflight({ name: 'run.exe', content: 'x' })).destructive, false, 'an unsupported name writes nothing');
+  assert.equal((await tools['attachment.create'].safety.preflight({ appendTo: 'zip', content: 'x' })).destructive, false, 'only maid files can be appended to');
   const created = await tools['attachment.create'].execute({ name: '摘要.md', content: '# 摘要\n' }, context);
   assert.deepEqual([created.ok, created.origin, created.format], [true, 'maid', 'text']);
+  const appendPreflight = await tools['attachment.create'].safety.preflight({ appendTo: created.attachmentId, content: '第二部分' });
+  assert.deepEqual([appendPreflight.destructive, appendPreflight.kind, appendPreflight.operationType], [true, 'attachment.create', 'create_file'], 'appending keeps the same stable kind');
   const appended = await tools['attachment.create'].execute({ appendTo: created.attachmentId, content: '第二部分' }, context);
   assert.equal(appended.attachmentId, created.attachmentId);
   assert.equal((await tools['attachment.read'].execute({ attachmentId: created.attachmentId })).text, '# 摘要\n第二部分');
@@ -83,6 +96,10 @@ const context = { roleCardId: 'p-test', sessionId: 'rp:p-test' };
   assert.equal((await tools['attachment.create'].execute({ name: 'run.exe', content: 'x' })).reason, 'unsupported_file_name');
   assert.ok(library.listRecent().some(item => item.id === created.attachmentId), 'a created file is offered in the next turn');
 
+  const packPreflight = await tools['attachment.pack'].safety.preflight({ name: '整理后', files: [{ attachmentId: created.attachmentId }, { attachmentId: 'zip', entryPrefix: 'docs' }] });
+  assert.deepEqual([packPreflight.destructive, packPreflight.kind, packPreflight.operationType], [true, 'attachment.pack', 'create_zip']);
+  assert.match(packPreflight.message, /整理后\.zip/);
+  assert.deepEqual(packPreflight.details.items.map(item => item.label), ['摘要.md', 'docs']);
   const packed = await tools['attachment.pack'].execute({
     name: '整理后',
     files: [

@@ -52,4 +52,22 @@ const getTool = (tools, name) => tools.find(tool => tool.name === name);
   console.log('ok - moments.publish 失败/空正文/缺通道路径');
 }
 
+{
+  // 用户决定（2026-11-20）：以用户身份发动态前一律确认，附正文预览；现场生图要提示费用
+  const tools = createMomentsAgentTools({
+    publishMoment: async () => ({ ok: true, momentId: 'm_1' }),
+    generateMomentImage: async () => ({ ok: true, asset: { id: 'a' } }),
+  });
+  const publish = getTool(tools, 'moments.publish');
+  const plain = await publish.safety.preflight({ content: '  今天天气真好  ' });
+  assert.deepEqual([plain.destructive, plain.kind, plain.operationType, plain.danger], [true, 'moments.publish', 'create_moment', false]);
+  assert.equal(plain.details.items[0].label, '今天天气真好', 'the card previews the text');
+  const withImages = await publish.safety.preflight({ content: '配图', imagePrompts: ['猫', '狗'], generateComments: false });
+  assert.deepEqual([withImages.kind, withImages.operationType], [plain.kind, plain.operationType], 'kind/operationType stay stable');
+  assert.match(withImages.message, /2 张配图.*费用/);
+  assert.equal((await publish.safety.preflight({ content: '   ' })).destructive, false, 'empty text publishes nothing');
+  assert.equal((await getTool(createMomentsAgentTools(), 'moments.publish').safety.preflight({ content: 'x' })).destructive, false);
+  console.log('ok - moments.publish 发布前一律确认（附正文预览）');
+}
+
 console.log('moments-tools tests passed');

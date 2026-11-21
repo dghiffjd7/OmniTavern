@@ -61,7 +61,8 @@ export const toTavernWorldEntry = (entry = {}, index = 0) => {
   };
 };
 
-const buildIncomingWorld = ({ mode, worldName, entries, content }) => {
+// 写入前转换成 APP 格式（纯函数：同样的输入得到同样的结果，酒馆接口据此记下写入后的条目指纹）
+export const buildIncomingWorld = ({ mode, worldName, entries, content }) => {
   if (mode === 'import') {
     let json;
     try {
@@ -73,6 +74,14 @@ const buildIncomingWorld = ({ mode, worldName, entries, content }) => {
   }
   if (!Array.isArray(entries)) throw new Error('世界书条目必须是数组');
   return convertSTWorld({ entries: entries.map(toTavernWorldEntry) }, worldName);
+};
+
+// 用户拒绝写入时的错误代码：酒馆接口模拟据此回「用户拒绝」而不是一般错误
+export const SCRIPT_WRITE_DENIED = 'script_write_denied';
+const deniedError = (message) => {
+  const error = new Error(message);
+  error.code = SCRIPT_WRITE_DENIED;
+  return error;
 };
 
 export const createScriptWorldbookWriter = ({ bridge, confirm }) => {
@@ -125,7 +134,7 @@ export const createScriptWorldbookWriter = ({ bridge, confirm }) => {
             title: '脚本要新建世界书',
             message: `「${script}」要新建世界书「${worldName}」，共 ${count} 条。`,
           });
-      if (!ok) throw new Error('用户拒绝了脚本写入世界书');
+      if (!ok) throw deniedError('用户拒绝了脚本写入世界书');
       const plan = buildWorldbookImportPlan({ worldId: worldName, incomingWorld: world, snapshot });
       await bridge.saveWorldInfo(plan.targetId, plan.incomingWorld, plan.saveOptions);
       return { created: !snapshot?.exists, ...listing() };
@@ -147,11 +156,12 @@ export const createScriptWorldbookWriter = ({ bridge, confirm }) => {
         title: '脚本要设为全局世界书',
         message: `「${String(scriptName || scriptId || '脚本')}」要把世界书「${additions.join('、')}」设为全局，所有会话都会用到它。`,
       });
-      if (!ok) throw new Error('用户拒绝了脚本修改全局世界书');
+      if (!ok) throw deniedError('用户拒绝了脚本修改全局世界书');
       bridge.setGlobalWorldIds([...bridge.getGlobalWorldIds(), ...additions]);
       return listing();
     });
   };
 
-  return { write, bindGlobal, listing };
+  // ask 也给脚本的其他写入确认用（酒馆接口的存预设）：同一队列，免得两个确认框互相挤掉
+  return { write, bindGlobal, listing, ask };
 };

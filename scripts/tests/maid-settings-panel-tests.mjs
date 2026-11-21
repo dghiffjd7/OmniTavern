@@ -378,7 +378,7 @@ const flushMicrotasks = () => new Promise(resolve => setTimeout(resolve, 0));
   assert.ok(revokeBtn, '规则应有撤销按钮');
   revokeBtn.dispatchEvent('click', {});
   assert.deepEqual(revoked, ['worldbook.delete_entries|worldbook.delete|write']);
-  assert.ok(findByText(elements.ruleListEl, '没有已保存的“始终允许”规则。危险操作每次都会重新确认。'), '撤销后应显示空状态');
+  assert.ok(findByText(elements.ruleListEl, '没有已保存的允许规则。会改动内容的操作每次都会确认；在确认时选「这个角色卡一律允许」会记在这里。'), '撤销后应显示空状态');
   console.log('ok - maid settings panel shows recent runs and revocable allow rules');
 }
 

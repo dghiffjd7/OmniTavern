@@ -1,3 +1,4 @@
+import { MAID_EXTERNAL_CONTENT_RULE, wrapMaidExternalContent } from '../agent/maid-external-content.js';
 import { MAID_SUB_AGENT_SKILLS, MAID_SUB_AGENT_DEFAULT_OUTPUT_TOKENS } from '../storage/maid-settings-store.js';
 
 // Owns model delegation, its confirmation and fallback; app.js only supplies dependencies.
@@ -100,7 +101,9 @@ export const createMaidSubAgentRuntime = ({
           max_tokens: maxTokens,
           ...(signal ? { signal } : {}),
         },
-        messages: [{ role: 'user', content: prompt }],
+        // 联网时搜索结果包成外部内容并附上说明（11/20 统一包法）
+        messages: [{ role: 'user', content: webSearch === true ? `${prompt}\n\n${MAID_EXTERNAL_CONTENT_RULE}` : prompt }],
+        wrapToolResult: text => wrapMaidExternalContent('web.search', text),
         onStatus: status => {
           const message = String(status?.message || '').trim();
           if (message) context?.onStatus?.({ message, tone: ['unavailable', 'fallback'].includes(status?.state) ? 'warning' : 'thinking' });

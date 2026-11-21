@@ -3,6 +3,8 @@ import {
   searchAppFeatures,
 } from '../app-feature-catalog.js';
 import { createMaidSkillContext, readMaidTaskSkill, searchMaidTaskSkills } from '../maid-skill-context.js';
+import { t } from '../../i18n/index.js';
+import { confirmRequest } from './preset-regex-script-tools.js';
 
 const trim = (value, fallback = '') => {
   const text = String(value ?? '').trim();
@@ -115,6 +117,16 @@ const createVisiblePanelInspectTool = ({
 });
 
 const UI_CLICK_DANGER_PATTERN = /删除|覆盖|清空|移除|解绑|重置|清除|发送|撤销|注销|卸载/;
+
+// 用户决定（2026-11-20）：程序分不清哪个按钮会改内容，每次点击都由 preflight 先确认。
+// 确认期间开着 UI 确认作用域（确认框里的选择不让 inspect 过的目标失效）；执行时收尾，
+// 用户拒绝时注册表不会再调用工具，留到下一次点击的 preflight 收尾。
+let endPendingClickConfirmation = null;
+const settlePendingClickConfirmation = () => {
+  const end = endPendingClickConfirmation;
+  endPendingClickConfirmation = null;
+  if (typeof end === 'function') end();
+};
 
 export const createAppNavigationAgentTools = ({
   actions = {},
@@ -309,7 +321,7 @@ export const createAppNavigationAgentTools = ({
   {
     name: 'ui.click_element',
     title: 'Click UI element',
-    description: 'Click a visible UI element by ref (from app.ui.inspect) or unique label. Returns the updated UI summary after the click. Dangerous buttons (delete/replace/send etc.) require user confirmation.',
+    description: 'Click a visible UI element by ref (from app.ui.inspect) or unique label. Returns the updated UI summary after the click. Every click requires user confirmation; dangerous buttons (delete/replace/send etc.) are flagged in the confirmation.',
     source: 'maid-app-navigation',
     permissions: [],
     riskLevel: 'medium',
@@ -335,7 +347,47 @@ export const createAppNavigationAgentTools = ({
         panel: { type: 'string', maxLength: 80 },
       },
     },
+    safety: {
+      operationType: 'click_element',
+      destructive: 'conditional',
+      // 与 execute 同样先核验真实文案；点不了（无点击能力、ref 失效、没有目标）时不弹确认，由 execute 报错
+      preflight: async (args = {}, context = {}) => {
+        settlePendingClickConfirmation();
+        if (typeof clickUiElement !== 'function') return { destructive: false, operationType: 'click_element' };
+        const targetRef = trim(args.ref);
+        let targetText = trim(args.label);
+        let targetPanel = trim(args.panel);
+        if (targetRef) {
+          if (typeof describeUiElement !== 'function') return { destructive: false, operationType: 'click_element' };
+          const described = await describeUiElement({ ref: targetRef });
+          if (described?.ok === false || !trim(described?.label)) return { destructive: false, operationType: 'click_element' };
+          targetText = trim(described.label);
+          targetPanel = trim(described?.panel) || targetPanel;
+        }
+        if (!targetText) return { destructive: false, operationType: 'click_element' };
+        const danger = UI_CLICK_DANGER_PATTERN.test(targetText);
+        // 只读意图下的危险按钮由 execute 直接拒绝，不先让用户确认
+        if (danger && context?.operationIntentPolicy?.mode === 'read_only') return { destructive: false, operationType: 'click_element' };
+        if (typeof beginUiElementConfirmation === 'function') {
+          endPendingClickConfirmation = beginUiElementConfirmation({ ref: targetRef, label: targetText, panel: targetPanel });
+        }
+        return confirmRequest({
+          // 危险按钮单独一类，「一律允许」普通点击不会顺带放行删除／发送类按钮
+          kind: danger ? 'ui.click_danger' : 'ui.click_element',
+          operationType: 'click_element',
+          title: t('确认界面操作'),
+          message: danger
+            ? t('女仆想点击「{label}」，这可能执行删除、覆盖或发送类操作。', { label: targetText })
+            : t('女仆想点击「{label}」。', { label: targetText }),
+          confirmText: t('允许点击'),
+          danger,
+          denyReason: 'user_declined',
+          denyResult: { cancelled: true, message: t('用户未允许点击「{label}」。', { label: targetText }) },
+        });
+      },
+    },
     execute: async (args = {}, context = {}) => {
+      settlePendingClickConfirmation();
       if (typeof clickUiElement !== 'function') {
         return { ok: false, reason: 'ui_click_unavailable' };
       }
@@ -365,9 +417,11 @@ export const createAppNavigationAgentTools = ({
             message: '用户本轮只要求查询或查看，不能点击可能写入、发送或删除数据的按钮。',
           };
         }
-        const confirm = context?.requestToolConfirmation;
-        let allowed = false;
-        const endConfirmation = typeof beginUiElementConfirmation === 'function'
+        // 注册表 preflight 已为这次点击确认过就不再弹第二张；没走注册表确认（直接调用 execute）时仍在这里确认
+        const confirmedByRegistry = context?.toolSafety?.decision === 'allow' && context?.toolSafety?.request?.kind === 'ui.click_danger';
+        const confirm = confirmedByRegistry ? null : context?.requestToolConfirmation;
+        let allowed = confirmedByRegistry;
+        const endConfirmation = !confirmedByRegistry && typeof beginUiElementConfirmation === 'function'
           ? beginUiElementConfirmation({ ref: targetRef, label: targetText, panel: targetPanel })
           : null;
         if (typeof confirm === 'function') {

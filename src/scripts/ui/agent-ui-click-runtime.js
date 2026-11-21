@@ -51,7 +51,8 @@ const isAppConfirmationInteraction = (event) => {
   return nodes.some(node => Boolean(
     node &&
     typeof node.closest === 'function' &&
-    node.closest('.app-confirm-overlay, .app-confirm-modal')
+    // 运行卡内的确认（.mrc-approval：输入胶囊、执行流、语音托盘）与弹窗一样是这次工具调用自己的确认
+    node.closest('.app-confirm-overlay, .app-confirm-modal, .mrc-approval')
   ));
 };
 

@@ -6,7 +6,7 @@ import { buildScriptPermissionLines } from '../../ui/script-authorization-utils.
    先解析并冻结目标（preflight 快照）→ 一次结构化确认 → 执行前复验 → 写入后读回核对，
    批量操作逐项报告 succeeded / skipped / protected / failed。
    用户决定（2026-09-23）：切换预设默认只对当前会话生效；可新建/修改正则规则内容；
-   启用脚本每次都要确认、不提供“始终允许”，兼容性拦截的脚本不能启用。 */
+   启用脚本要确认，兼容性拦截的脚本不能启用（11/20 起启用的确认卡跟一般写入一样给记住选项）。 */
 
 const trim = value => String(value ?? '').trim();
 const nameKey = value => trim(value).toLowerCase().replace(/\s+/g, '');
@@ -98,7 +98,7 @@ export const compileRegexSource = (source = '') => {
   }
 };
 
-const batchResult = (toolName, results, { requestedCount, retryArgs = null, extra = {} } = {}) => {
+export const batchResult = (toolName, results, { requestedCount, retryArgs = null, extra = {} } = {}) => {
   const succeededCount = results.filter(item => item.status === 'succeeded').length;
   const failed = results.filter(item => item.status === 'failed');
   const cancelledCount = results.filter(item => item.status === 'cancelled').length;
@@ -117,11 +117,11 @@ const batchResult = (toolName, results, { requestedCount, retryArgs = null, extr
   };
 };
 
-const summarizeBatch = label => result => (result?.reason && !Array.isArray(result?.results)
+export const summarizeBatch = label => result => (result?.reason && !Array.isArray(result?.results)
   ? `${label} failed: ${trim(result.reason)}`
   : `${label} ${result?.cancelled ? 'cancelled' : result?.ok ? 'completed' : 'incomplete'}; ${Number(result?.succeededCount || 0)} succeeded; ${Number(result?.skippedCount || 0)} skipped; ${Number(result?.failedCount || 0)} failed${result?.cancelled ? `; ${result.cancelledCount} cancelled` : ''}`);
 
-const confirmRequest = ({
+export const confirmRequest = ({
   kind, operationType, title, message, confirmText, danger = true, allowAlways = false, items = [], denyReason, denyResult = {},
 }) => ({
   destructive: true,
@@ -1173,7 +1173,7 @@ export const createPresetRegexScriptAgentTools = ({
   const scriptToggleTool = {
     name: 'script.toggle_many',
     title: 'Enable or disable scripts',
-    description: 'Enable or disable TavernHelper-style scripts (global, character-card or preset scope) in one batch. Enabling lets the script run code with the app\'s script permissions, so it always asks the user and never offers "always allow"; scripts blocked by the compatibility check cannot be enabled. Scripts only actually run when the global script switch is on (reported as scriptsRunGlobally).',
+    description: 'Enable or disable TavernHelper-style scripts (global, character-card or preset scope) in one batch. Enabling lets the script run code with the app\'s script permissions and needs the user\'s confirmation; scripts blocked by the compatibility check cannot be enabled. Scripts only actually run when the global script switch is on (reported as scriptsRunGlobally).',
     source: 'maid-app-content', permissions: [], riskLevel: 'high',
     capabilities: { read: true, write: true, network: false, cost: 'none', undo: 'manual_toggle', modelContext: 'none', confirmation: 'required' },
     schema: {

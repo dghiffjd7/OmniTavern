@@ -150,7 +150,7 @@ const cloneJson = value => JSON.parse(JSON.stringify(value));
   assert.match(messages[0].content, /只要求查询、查看、检查或确认/);
   assert.match(messages[0].content, /多个结构化资源的只读比较不需要 todo/);
   assert.match(messages[0].content, /继续上一件未完成/);
-  assert.match(messages[0].content, /可继续: 是/);
+  assert.match(messages[0].content, /maid\.task\.resume/, '接着做之前的任务指向续跑工具');
   assert.match(messages[0].content, /worldbook\.update_entries/);
   assert.match(messages[0].content, /1-3 个条目/);
   assert.match(messages[0].content, /完整、具体、可直接执行的 JSON/);
@@ -172,8 +172,8 @@ const cloneJson = value => JSON.parse(JSON.stringify(value));
   assert.doesNotMatch(catalog.detailText, /aliases:/, '详情不带检索别名');
   assert.match(catalog.staticText, /^- regex\.open: /m);
   assert.match(catalog.staticText, /^- regex\.list: /m, '索引包含全部功能，不随候选变化');
-  // 索引列出女仆看得到的全部功能（awareness_only 除外），含只有说明、没有工具的 APP 知识（如防截断传输）
-  assert.equal((catalog.staticText.split('<maid_skills>')[0].match(/^- /gm) || []).length, all.filter(feature => feature.maidModelContext !== 'awareness_only').length, 'every model-visible feature is indexed separately from skill descriptions');
+  // 索引列出全部功能，含只有说明、没有工具的 APP 知识（如防截断传输）
+  assert.equal((catalog.staticText.split('<maid_skills>')[0].match(/^- /gm) || []).length, all.length, 'every model-visible feature is indexed separately from skill descriptions');
   assert.match(catalog.staticText, /app\.search_skills/);
   assert.doesNotMatch(catalog.staticText, /avatar\.create_and_set/, 'the editable skill directory is dynamic context');
   assert.match(catalog.staticText, /app\.read_feature_doc/);
@@ -496,8 +496,9 @@ const cloneJson = value => JSON.parse(JSON.stringify(value));
     featureId: 'maid.onboarding',
     response: '我来带主人完成配置。',
   });
-  assert.equal(guidePlan.ok, false);
-  assert.equal(guidePlan.reason, 'feature_not_found');
+  assert.equal(guidePlan.ok, true, '新手引导是模型可选的功能');
+  assert.equal(guidePlan.toolName, 'guide.start_flow');
+  assert.equal(guidePlan.featureId, 'maid.onboarding');
 
   const noResponse = normalizeMaidModelPlan({
     ok: true,
@@ -979,14 +980,14 @@ const cloneJson = value => JSON.parse(JSON.stringify(value));
     steps: [],
   });
   for (const system of [messages[0].content, reactMessages[0].content]) {
-    assert.match(system, /APP 存在由本地界面直接处理的内建新手任务/);
-    assert.doesNotMatch(system, /maid\.onboarding|女仆新手引导|guide\.start_flow|setup-api|add-friend|first-chat|meet-maid/);
+    assert.doesNotMatch(system, /APP 存在由本地界面直接处理的内建新手任务/);
+    assert.match(system, /maid\.onboarding: 内建新手引导/, '新手引导和其他功能一样进功能索引');
     assert.match(system, /默认在后台执行/);
     assert.match(system, /只展示最终的主要结果/);
     assert.match(system, /triggerReply:true/);
     assert.match(system, /必须进入目标聊天室/);
   }
-  console.log('ok - model planner separates local onboarding from background-first presentation policy');
+  console.log('ok - model planner lists onboarding as a catalog feature and keeps the background-first presentation policy');
 }
 
 {

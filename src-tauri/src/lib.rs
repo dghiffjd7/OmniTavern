@@ -7,6 +7,7 @@ mod commands;
 mod external_links;
 mod memory_db;
 mod microphone_permission;
+mod network_proxy;
 mod realtime_transport;
 mod reply_notifications;
 mod screenshot;
@@ -46,6 +47,7 @@ pub fn run() {
             external_links::open_external_url,
             app_update::app_version,
             app_update::app_update_install,
+            network_proxy::set_network_proxy,
             commands::exit_app,
             commands::restart_app,
             commands::save_config,

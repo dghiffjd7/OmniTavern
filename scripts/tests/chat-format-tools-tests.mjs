@@ -157,13 +157,23 @@ const getTool = (tools, name) => tools.find(tool => tool.name === name);
   assert.equal(missing.ok, true);
   assert.equal(missing.hasProfile, false);
 
-  const saved = await saveTool.execute({
+  // 用户决定（2026-11-20）：保存格式画像前确认；与已存画像完全相同（含来源指纹）时不弹
+  const saveArgs = {
     sessionName: '蒂法',
     guide: '回复必须以 <status>...</status> 状态块结尾',
     sources: [{ type: 'worldbook', ref: '蒂法' }],
-  });
+  };
+  const firstPreflight = await saveTool.safety.preflight(saveArgs, {});
+  assert.deepEqual([firstPreflight.destructive, firstPreflight.kind, firstPreflight.operationType, firstPreflight.danger],
+    [true, 'chat.save_format_profile', 'save_format_profile', false]);
+  assert.match(firstPreflight.details.items[0].label, /status/);
+  const saved = await saveTool.execute({ ...saveArgs });
   assert.equal(saved.ok, true);
   assert.equal(saved.sessionId, '蒂法');
+  assert.equal((await saveTool.safety.preflight({ ...saveArgs }, {})).destructive, false, 'saving the same profile again changes nothing');
+  const changedPreflight = await saveTool.safety.preflight({ ...saveArgs, guide: '回复必须以 <status>...</status> 状态块开头' }, {});
+  assert.deepEqual([changedPreflight.destructive, changedPreflight.kind, changedPreflight.operationType], [true, firstPreflight.kind, firstPreflight.operationType]);
+  assert.equal((await saveTool.safety.preflight({ sessionName: '不存在', guide: '规范内容规范' }, {})).destructive, false, 'a failing save asks nothing');
 
   const found = await readTool.execute({ sessionName: '蒂法' });
   assert.equal(found.hasProfile, true);
@@ -173,6 +183,7 @@ const getTool = (tools, name) => tools.find(tool => tool.name === name);
   const stale = await readTool.execute({ sessionName: '蒂法' });
   assert.equal(stale.hasProfile, false, '来源变化后旧自动画像不再作为有效画像返回');
   assert.equal(stale.staleProfile?.sourceChanged, true);
+  assert.equal((await saveTool.safety.preflight({ ...saveArgs }, {})).destructive, true, 'refreshing a stale profile is a real change');
 
   const cleanupOnlyTools = createChatFormatRepairTools({
     formatProfileStore: createMaidFormatProfileStore({ storage: (() => { const m = new Map(); return { getItem: k => m.get(k) ?? null, setItem: (k, v) => m.set(k, String(v)) }; })() }),
@@ -194,6 +205,10 @@ const getTool = (tools, name) => tools.find(tool => tool.name === name);
   });
   assert.equal(rejected.ok, false);
   assert.equal(rejected.reason, 'regex_format_evidence_untrusted');
+  assert.equal((await getTool(cleanupOnlyTools, 'chat.save_format_profile').safety.preflight({
+    guide: '必须输出 <think>...</think>',
+    sources: [{ type: 'regex', ref: '隐藏思考' }],
+  }, {})).destructive, false, 'an untrusted regex-only profile is refused without asking');
 
   let manualPresetRule = 'A';
   const manualStore = createMaidFormatProfileStore({

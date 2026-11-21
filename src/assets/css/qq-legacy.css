@@ -8548,6 +8548,27 @@ body[data-maid-spotlight='on'] .app-confirm-modal {
   text-underline-offset: 3px;
 }
 
+/* 两个以上「记住」选项（这个角色卡／这个任务一律允许）：文字按钮自成一行靠左，取消／允许一次在下一行靠右 */
+.app-confirm-modal.is-permission .app-confirm-actions:has(.app-confirm-btn[data-variant='link'] + .app-confirm-btn[data-variant='link']) .app-confirm-btn[data-variant='link'] {
+  order: 0;
+  margin-right: 0;
+}
+
+.app-confirm-modal.is-permission .app-confirm-actions:has(.app-confirm-btn[data-variant='link'] + .app-confirm-btn[data-variant='link']) .app-confirm-btn[data-variant='link']:not(:has(+ .app-confirm-btn[data-variant='link'])) {
+  margin-right: auto;
+}
+
+.app-confirm-modal.is-permission .app-confirm-actions:has(.app-confirm-btn[data-variant='link'] + .app-confirm-btn[data-variant='link'])::after {
+  content: '';
+  order: 1;
+  flex-basis: 100%;
+  height: 0;
+}
+
+.app-confirm-modal.is-permission .app-confirm-actions:has(.app-confirm-btn[data-variant='link'] + .app-confirm-btn[data-variant='link']) .app-confirm-btn:not([data-variant='link']) {
+  order: 2;
+}
+
 .app-confirm-modal.is-permission .app-confirm-btn[data-variant='ghost'] {
   border-color: transparent;
   background: transparent;

@@ -7,14 +7,25 @@ import { serializeForInlineScript } from '../utils/inline-script.js';
 import { buildMacroEngineRuntimeSource } from '../utils/macro-engine.js';
 import { createSillyTavernMacroApi } from '../utils/macro-compat-api.js';
 import { createPresetRequestWorker } from './preset-request-worker.js';
+import { createTavernApiWorker } from './tavern-api-worker.js';
+import {
+  createTavernApiRouter, buildTavernApiGapReport, stripTavernConnectionSecrets, mergeTavernPresetSave,
+} from './tavern-api-router.js';
+import { createTavernGenerateHandler } from './tavern-api-generate.js';
+import { resolveEffectiveReasoningSetting } from '../api/model-capabilities.js';
+import { getScriptModelConsentStore } from '../storage/script-model-consent-store.js';
+import { LLMClient } from '../api/client.js';
+import { captureRequestContext } from '../api/request-context.js';
+import { getCompatGapReportStore } from '../storage/compat-gap-report-store.js';
 import { toScriptPreset, fromScriptPreset, mergeScriptPresetChanges, patchScriptPresetRegexes, createPresetScriptApi } from './preset-script-api.js';
 import { runScriptGeneration } from './script-generation.js';
-import { createScriptWorldbookWriter } from './script-worldbook-write.js';
+import { createScriptWorldbookWriter, buildIncomingWorld, SCRIPT_WRITE_DENIED } from './script-worldbook-write.js';
+import { createScriptWorldFiles, getScriptWorldFileStore } from '../storage/script-world-file-store.js';
 import { createScriptStoragePersistence, SCRIPT_LOCAL_STORAGE_LIMIT } from './script-storage-persistence.js';
 import { fillDeclaredScriptButtons } from '../storage/script-store.js';
 import { extractScriptTree } from '../import/script-tree-utils.js';
 import { patchScriptUiChildren } from './script-ui-dom.js';
-import { buildTavernConnectionSettings, TAVERN_CONNECTION_SETTING_KEYS } from './tavern-connection-settings.js';
+import { buildTavernConnectionSettings, mergeScriptPresetSettings } from './tavern-connection-settings.js';
 import { resolveRequestConfigProfileId } from '../ui/chat/request-config-profile-utils.js';
 import {
   PresetRequestTransport, isCreativePresetRequest, makePresetRequestBody,
@@ -24,7 +35,7 @@ import {
 import {
   analyzeScriptCompatibility,
   buildScriptRuntimeErrorDiagnostic,
-  hasTopLevelAwait,
+  isModuleLikeScript,
   resolveScriptCompatibility,
 } from '../import/script-capability-preflight.js';
 
@@ -90,6 +101,7 @@ let currentSettings = { allowReadMessages: true, allowModifyVariables: true, all
 ${buildMacroEngineRuntimeSource()}
 ${createSillyTavernMacroApi.toString()}
 ${createPresetRequestWorker.toString()}
+${createTavernApiWorker.toString()}
 ${toScriptPreset.toString()}
 ${createPresetScriptApi.toString()}
 const DISPATCH_RESULT_LIMIT = ${SCRIPT_PAYLOAD_LIMIT};
@@ -365,6 +377,8 @@ const warnNetworkDenied = (kind, url = '') => {
 const guardedFetch = (...args) => {
   const internal = presetRequestWorker.interceptFetch(...args);
   if (internal) return internal;
+  const tavernApi = tavernApiWorker.interceptFetch(...args);
+  if (tavernApi) return tavernApi;
   const input = args[0];
   const url = String(input?.url || input || '').trim();
   if (currentSettings.allowNetwork !== true) {
@@ -382,6 +396,15 @@ const presetRequestWorker = createPresetRequestWorker({
   waitUntilReady: () => pendingScriptSync,
   dispatch: (event, payload) => dispatchEvent(event, payload, true),
   substitute: text => getMacroCompatApi().substituteParams(text),
+});
+// 脚本直接打酒馆后端的相对路径 /api/...：交主程式的酒馆接口路由
+const tavernApiWorker = createTavernApiWorker({
+  callRpc: (method, params) => callRpc(method, params),
+  getOrigin: () => getOrigin(),
+  getSessionId: () => currentContext.sessionId,
+  getScriptName: id => String(scripts.get(id)?.record?.name || ''),
+  getChatMetadata: () => clone(getCompatChatMetadata()),
+  bodyLimit: DISPATCH_RESULT_LIMIT,
 });
 let compatFetchInstalled = false;
 
@@ -4848,7 +4871,8 @@ const compileScript = (record) => {
       'getTavernRegexes',
       'replaceTavernRegexes',
       '__scriptGlobals',
-      'with (__scriptGlobals) { return (function () {\\n' + code + '\\n}).call(this); }',
+      // sourceURL 让酒馆接口请求能从调用堆栈认出是哪个脚本发的
+      'with (__scriptGlobals) { return (function () {\\n' + code + '\\n}).call(this); }\\n//# sourceURL=' + tavernApiWorker.scriptSourceUrl(record.id),
     );
     const __import = (url) => runImport(url, getOrigin());
     self.__chatappScriptOn = on;
@@ -4980,6 +5004,7 @@ const dispatchEvent = async (eventName, payload, allowMutate = true) => {
 self.onmessage = async (e) => {
   const msg = e?.data || {};
   if (presetRequestWorker.handle(msg)) return;
+  if (tavernApiWorker.handle(msg)) return;
   if (msg.type === 'rpc_result' || msg.type === 'rpc_error') {
     const pendingItem = pending.get(msg.id);
     if (!pendingItem) return;
@@ -5232,18 +5257,8 @@ const toScriptGenerationMessage = (entry) => {
   };
 };
 
-const isEsmLikeScript = (content, compatibility = null) => {
-  const text = String(content || '');
-  if (!text) return false;
-  // 只认语句起点的模块语法：脚本内嵌 HTML/字符串里的 `id="btn-import"`、`bam-btn-export`
-  // 一类字面量不能把普通 worker 脚本改判进 iframe（iframe API 面更窄，误判会静默丢功能）。
-  if (/(^|[;{}()\n])\s*import\s*(?:['"]|\{|\*|[\w$]+\s+from\s)/.test(text)) return true;
-  if (/(^|[;{}()\n])\s*export\s*(?:default\s|const\s|let\s|var\s|function[\s(*]|class\s|async\s|\{|\*)/.test(text)) return true;
-  if (typeof compatibility?.signals?.topLevelAwait === 'boolean') {
-    return compatibility.signals.topLevelAwait;
-  }
-  return hasTopLevelAwait(text);
-};
+// 判定共用 script-capability-preflight（导入兼容报告也按它判断运行环境）
+const isEsmLikeScript = isModuleLikeScript;
 
 export const isEsmLikeScriptForTests = isEsmLikeScript;
 
@@ -5306,6 +5321,35 @@ class ScriptIframeRuntime {
   <base href=${baseJson} />
 </head>
 <body>
+<script>
+  // base 指向 CDN：脚本打酒馆的相对路径（/api/...）解析后会变成 CDN 网址，请求内容（可能含聊天记录）会被送出去。
+  // 模块环境没有酒馆接口，这类请求一律在本机挡下，回 501 说明。
+  (function () {
+    var baseOrigin = '';
+    try { baseOrigin = new URL(document.baseURI).origin; } catch (e) {}
+    var message = 'APP 的模块脚本环境不支持酒馆后端接口（/api/...），这次请求没有送出。';
+    var isTavernUrl = function (raw) {
+      try { var url = new URL(String(raw || ''), document.baseURI); return url.origin === baseOrigin && url.pathname.toLowerCase().indexOf('/api/') === 0; } catch (e) { return false; }
+    };
+    var urlOf = function (input) { return typeof input === 'string' ? input : (input && typeof input.url === 'string' ? input.url : String(input || '')); };
+    var nativeFetch = window.fetch;
+    if (typeof nativeFetch === 'function') {
+      window.fetch = function (input) {
+        if (isTavernUrl(urlOf(input))) return Promise.resolve(new Response(JSON.stringify({ error: { message: message } }), { status: 501, headers: { 'content-type': 'application/json' } }));
+        return nativeFetch.apply(this, arguments);
+      };
+    }
+    var nativeOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function (method, url) {
+      if (isTavernUrl(url)) throw new TypeError(message);
+      return nativeOpen.apply(this, arguments);
+    };
+    if (navigator && typeof navigator.sendBeacon === 'function') {
+      var nativeBeacon = navigator.sendBeacon.bind(navigator);
+      navigator.sendBeacon = function (url, data) { return isTavernUrl(url) ? false : nativeBeacon(url, data); };
+    }
+  })();
+</script>
 ${allowNetwork ? `
 <script src="${lodashUrl}"></script>
 <script src="${jqueryUrl}"></script>
@@ -6856,13 +6900,15 @@ export class ScriptRuntime {
     await this.syncScripts();
   }
 
-  setContext({ bridge, chatStore, contactsStore, getEffectivePersona, getActiveUserProfile, presets } = {}) {
+  setContext({ bridge, chatStore, contactsStore, getEffectivePersona, getActiveUserProfile, presets, modelCallRunTracker } = {}) {
     this.bridge = bridge || this.bridge;
     this.chatStore = chatStore || this.chatStore;
     this.contactsStore = contactsStore || this.contactsStore;
     this.getEffectivePersona = typeof getEffectivePersona === 'function' ? getEffectivePersona : this.getEffectivePersona;
     this.getActiveUserProfile = typeof getActiveUserProfile === 'function' ? getActiveUserProfile : this.getActiveUserProfile;
     this.presets = presets || this.presets;
+    // 脚本单独调用模型的执行流记录（运行记录与创意写作泳道），由 app.js 注入
+    this.modelCallRunTracker = modelCallRunTracker || this.modelCallRunTracker;
   }
 
   startWorker() {
@@ -6894,6 +6940,7 @@ export class ScriptRuntime {
     this.presetRequestTransport.reset(new Error(msg));
     for (const generation of this.scriptGenerations.values()) generation.controller.abort();
     this.scriptGenerations.clear();
+    this.tavernGenerateHandler?.cancelAll();
     try {
       this.worker?.terminate?.();
     } catch {}
@@ -7068,8 +7115,10 @@ export class ScriptRuntime {
     const connectionConfig = (requestProfile.profileId && this.bridge?.getConfigProfileById?.(requestProfile.profileId))
       || this.bridge?.getConfig?.()
       || null;
+    // 导入的酒馆预设可能带着反代地址与密码：Key、连线地址、代理类栏位不交给脚本（同 /api/settings/get 的规则）。
+    // 主生成用的是连线档与预设 store 本身，不读这份
     const chatCompletionSettings = {
-      ...(clonePlain(activeOpenAiPreset) || {}),
+      ...stripTavernConnectionSecrets(clonePlain(activeOpenAiPreset) || {}),
       ...buildTavernConnectionSettings(connectionConfig),
     };
     const presetView = preset => ({
@@ -7143,6 +7192,190 @@ export class ScriptRuntime {
       sharedVariables,
       variableRuntimeEnabled,
     };
+  }
+
+  // 脚本能读到的世界书名单（world.list 与酒馆 /api/worldinfo/list 共用）
+  listScriptWorldbookNames() {
+    return Array.from(new Set([
+      ...(Array.isArray(this.bridge?.worldStore?.list?.()) ? this.bridge.worldStore.list() : []),
+      ...(Array.isArray(this.context.worldbookNames) ? this.context.worldbookNames : []),
+      ...(Array.isArray(this.context.worldIds) ? this.context.worldIds : []),
+      ...(this.context.worldId ? [this.context.worldId] : []),
+    ].map(item => String(item || '').trim()).filter(Boolean)));
+  }
+
+  // 酒馆后端接口模拟：Worker 拦下的 fetch('/api/...') 经 tavern.request 交到这里
+  getTavernApiRouter() {
+    const contextFor = (sessionId) => (sessionId && sessionId === String(this.context.sessionId || '')
+      ? this.context
+      : this.buildContext(sessionId));
+    this.tavernApiRouter ||= createTavernApiRouter({
+      // 当前会话实际会用的连线档（含预设绑定）；Key 与地址都留在连线档里
+      listModels: async ({ sessionId }) => {
+        const resolved = await this.bridge?.resolveRequestRuntimeConfig?.({
+          sessionId, uiMode: sessionId.startsWith('rp:') ? 'rp' : 'chat',
+        });
+        if (!resolved?.client) throw new Error('当前会话没有可用的 API 连线');
+        return resolved.client.listModels();
+      },
+      listWorldbooks: () => this.listScriptWorldbookNames(),
+      readWorldbook: async (name) => {
+        if (typeof this.bridge?.getWorldInfoSnapshot === 'function') {
+          const snapshot = await this.bridge.getWorldInfoSnapshot(name);
+          return snapshot?.exists ? clonePlain(snapshot.data) : null;
+        }
+        return clonePlain(this.bridge?.worldStore?.load?.(name)) || null;
+      },
+      getChat: ({ sessionId }) => {
+        const context = contextFor(sessionId);
+        const messages = this.chatStore?.getMessages?.(sessionId);
+        return {
+          messages: Array.isArray(messages) ? messages : [],
+          userName: context.userName,
+          characterName: context.characterName,
+        };
+      },
+      getPresetSettings: ({ sessionId }) => {
+        const context = contextFor(sessionId);
+        const presetId = String(context.openaiPresetId || '').trim();
+        const saved = presetId ? this.presets?.state?.presets?.openai?.[presetId] || null : null;
+        return { inUse: context.chatCompletionSettings || {}, name: String(saved?.name || ''), saved };
+      },
+      generate: (request, access) => this.getTavernGenerateHandler().handle(request, access),
+      // /api/worldinfo/edit：与酒馆助手 createOrReplaceWorldbook 同一条整本写入（确认、覆盖检查、保存）；
+      // savedEntries 是写入时实际存下的 APP 条目（同一个转换函数算出），用来记指纹
+      writeWorldbook: async ({ name, entries, scriptId, scriptName }) => {
+        try {
+          await this.getScriptWorldbookWriter().write({ mode: 'replace', name, entries, scriptId, scriptName });
+        } catch (error) {
+          if (error?.code === SCRIPT_WRITE_DENIED) return { denied: true };
+          throw error;
+        }
+        return { denied: false, savedEntries: buildIncomingWorld({ mode: 'replace', worldName: name, entries }).entries };
+      },
+      worldFiles: createScriptWorldFiles({
+        store: this.scriptWorldFileStore || getScriptWorldFileStore(),
+        // 建立时间认是不是同一本书（删掉重建、改名都算换了一本）；索引还没载入完时先等
+        getCreatedAt: async (name) => {
+          const worldStore = this.bridge?.worldStore;
+          await worldStore?.ready;
+          const meta = worldStore?.getMetadata?.(name);
+          if (meta) return Number(meta.createdAt) || 0;
+          // 索引整个是空的（读取失败或还没有任何世界书）时回 undefined：不确定，不清理记录
+          return Object.keys(worldStore?.metadata || {}).length ? null : undefined;
+        },
+      }),
+      findPreset: (name) => {
+        const matches = Object.entries(this.presets?.state?.presets?.openai || {})
+          .filter(([, preset]) => String(preset?.name || '').trim() === name);
+        if (matches.length > 1) return { duplicate: true };
+        if (!matches.length) return null;
+        const [id, preset] = matches[0];
+        return { id, name: String(preset.name), preset };
+      },
+      // /api/presets/save：与脚本存预设设置同一个写入队列与 upsert，按键合并到写入当时的预设
+      savePreset: ({ id, settings, sessionId }) => {
+        const previous = this.presetSettingsWriteQueues.get(id) || Promise.resolve();
+        const task = previous.catch(() => {}).then(async () => {
+          const stored = this.presets?.state?.presets?.openai?.[id];
+          if (!stored || typeof this.presets?.upsert !== 'function') throw new Error('预设已不存在');
+          await this.presets.upsert('openai', {
+            id, name: stored.name, data: mergeTavernPresetSave(stored, settings), makeActive: false,
+          });
+          if (sessionId && this.context.sessionId === sessionId) this.context = { ...this.context, ...this.buildContext(sessionId) };
+          try { window.dispatchEvent(new CustomEvent('preset-changed')); } catch {}
+        });
+        this.presetSettingsWriteQueues.set(id, task);
+        return task.finally(() => {
+          if (this.presetSettingsWriteQueues.get(id) === task) this.presetSettingsWriteQueues.delete(id);
+        });
+      },
+      confirmWrite: (key, options) => this.getScriptWorldbookWriter().ask(key, options),
+      recordGap: request => this.recordTavernApiGap(request),
+    });
+    return this.tavernApiRouter;
+  }
+
+  // 脚本单独调用 /api/backends/chat-completions/generate：用当前会话实际会用的连线档（含预设绑定）发出，
+  // Key 与地址只留在主程式；每个脚本第一次调用先请用户同意费用
+  // 脚本单独调用模型时的思考设定，与主生成同一套规则（bridge.getGenerationOptions）：会话／模式的推理覆盖优先，
+  // 否则用这个会话实际用的预设；对话预设关着时主生成不送思考参数，这里回 null 同样不送。
+  resolveSessionReasoning(sessionId = '') {
+    const presets = this.presets || this.bridge?.presets;
+    if (!presets || presets.getSelectionState?.()?.enabled?.openai === false) return null;
+    const uiMode = String(sessionId || '').startsWith('rp:') ? 'rp' : 'chat';
+    const preset = presets.getResolvedActive?.('openai', { sessionId, uiMode })?.preset || null;
+    if (!preset) return null;
+    return resolveEffectiveReasoningSetting({
+      sessionReasoning: presets.getSessionReasoning?.('openai', sessionId) || null,
+      modeReasoning: presets.getModeReasoning?.('openai', uiMode) || null,
+      preset,
+    });
+  }
+
+  getTavernGenerateHandler() {
+    this.tavernGenerateHandler ||= createTavernGenerateHandler({
+      resolveConnection: async ({ sessionId }) => {
+        const resolved = await this.bridge?.resolveRequestRuntimeConfig?.({
+          sessionId, uiMode: sessionId.startsWith('rp:') ? 'rp' : 'chat',
+        });
+        if (!resolved?.client || !resolved?.config) return null;
+        const config = resolved.config;
+        const profileId = String(resolved.profileId || '').trim();
+        return {
+          config,
+          client: resolved.client,
+          createClient: model => new LLMClient({ ...config, model }),
+          normalizeMessages: messages => this.bridge?.normalizeOutgoingProviderMessages?.(messages, config) || messages,
+          requestContext: captureRequestContext({ sessionId }),
+          cacheKey: [profileId, config.provider, config.baseUrl].map(value => String(value || '')).join('\u0000'),
+          profileName: String(this.bridge?.getConfigProfileById?.(profileId)?.name || '').trim(),
+          reasoning: this.resolveSessionReasoning(sessionId),
+        };
+      },
+      findScript: ({ scriptId, sessionId }) => {
+        const { scope, scopeId } = this.findScriptScope(scriptId);
+        const record = (this.store?.getScripts?.(scope, scopeId) || [])
+          .find(item => String(item?.id || '').trim() === scriptId);
+        if (!record) return null;
+        let sourceName = '';
+        if (scope === 'character') {
+          const persona = this.getEffectivePersona?.(sessionId);
+          sourceName = String(persona?.id || '') === scopeId ? String(persona?.name || '') : '';
+        } else if (scope === 'preset') {
+          sourceName = String(this.presets?.getPreset?.('openai', scopeId)?.name
+            || this.presets?.state?.presets?.openai?.[scopeId]?.name || '');
+        }
+        return { id: scriptId, name: record.name, content: record.content, scope, scopeId, sourceName };
+      },
+      consentStore: getScriptModelConsentStore(),
+      // appChoice 分得出「按了拒绝」（deny）与「关掉或被别的确认窗取代」（null）；appConfirm 两者都回 false
+      confirm: options => import('../ui/app-confirm.js').then(({ appChoice }) => appChoice(options)),
+      runTracker: {
+        start: info => this.modelCallRunTracker?.start?.(info) || null,
+        finish: (handle, result) => this.modelCallRunTracker?.finish?.(handle, result),
+        record: (info, result) => this.modelCallRunTracker?.record?.(info, result),
+      },
+      postStream: message => this.worker?.postMessage(message),
+      log: ({ type, message }) => emitDebugLog({ message, type, source: 'script' }),
+    });
+    return this.tavernGenerateHandler;
+  }
+
+  recordTavernApiGap({ path, scriptId, scriptName } = {}) {
+    const report = buildTavernApiGapReport({
+      path, scriptId, scriptName, revision: this.scriptDiagnosticRevisions?.get(String(scriptId || '').trim()),
+    });
+    void getCompatGapReportStore().record(report);
+    this.tavernApiGapLogged ||= new Set();
+    const key = `${report.scopeFingerprint}|${report.api}`;
+    if (this.tavernApiGapLogged.has(key)) return;
+    this.tavernApiGapLogged.add(key);
+    emitDebugLog({
+      message: t('脚本「{script}」调用了 APP 尚未支持的酒馆接口 {path}', { script: report.scriptName || '-', path: report.api }),
+      type: 'warn',
+      source: 'script',
+    });
   }
 
   findScriptScope(scriptId) {
@@ -8046,6 +8279,12 @@ export class ScriptRuntime {
       try { return await runScriptGeneration(this, config, sessionId, controller.signal, settings); }
       finally { this.scriptGenerations.delete(id); }
     }
+    if (method === 'tavern.request') {
+      return this.getTavernApiRouter().handle(params, { allowNetwork, allowReadMessages, allowModifyVariables, sessionId });
+    }
+    if (method === 'tavern.cancel') {
+      return this.tavernGenerateHandler?.cancel(params.requestId) || false;
+    }
     if (method === 'generation.generateRaw') {
       if (!allowNetwork) denyScriptPermission('访问网络');
       const config = params.config && typeof params.config === 'object' && !Array.isArray(params.config)
@@ -8249,15 +8488,7 @@ export class ScriptRuntime {
     }
     if (method === 'world.write') return this.getScriptWorldbookWriter().write(params);
     if (method === 'world.bindGlobal') return this.getScriptWorldbookWriter().bindGlobal(params);
-    if (method === 'world.list') {
-      const names = Array.from(new Set([
-        ...(Array.isArray(this.bridge?.worldStore?.list?.()) ? this.bridge.worldStore.list() : []),
-        ...(Array.isArray(this.context.worldbookNames) ? this.context.worldbookNames : []),
-        ...(Array.isArray(this.context.worldIds) ? this.context.worldIds : []),
-        ...(this.context.worldId ? [this.context.worldId] : []),
-      ].map(item => String(item || '').trim()).filter(Boolean)));
-      return names;
-    }
+    if (method === 'world.list') return this.listScriptWorldbookNames();
     if (method === 'world.getBook') {
       const worldId = String(params.world || this.context.worldId || '').trim();
       if (!worldId) return [];
@@ -8404,10 +8635,6 @@ export class ScriptRuntime {
         return false;
       }
       const snapshot = clonePlain(incoming);
-      const blockedKeys = new Set([
-        '__proto__', 'prototype', 'constructor', 'id', 'name',
-        'key', 'apikey', 'authorization', 'accesstoken', 'secrettoken',
-      ]);
       if (!this.presetSettingsWriteQueues) this.presetSettingsWriteQueues = new Map();
       const previous = this.presetSettingsWriteQueues.get(activePresetId) || Promise.resolve();
       const task = previous.catch(() => {}).then(async () => {
@@ -8420,15 +8647,7 @@ export class ScriptRuntime {
         if (latestPresetId !== activePresetId) return false;
         const currentPreset = clonePlain(latestResolved?.preset || this.presets?.getActive?.('openai') || null);
         if (!currentPreset || typeof currentPreset !== 'object' || Array.isArray(currentPreset)) return false;
-        const nextPreset = clonePlain(currentPreset) || {};
-        Object.entries(snapshot).forEach(([key, value]) => {
-          const normalizedKey = String(key || '').replace(/[_\-\s]/g, '').toLowerCase();
-          if (blockedKeys.has(key) || blockedKeys.has(normalizedKey)) return;
-          if (TAVERN_CONNECTION_SETTING_KEYS.has(key)) return;
-          if (key === 'function_calling' && !Object.hasOwn(currentPreset, key)) return;
-          if ((key === 'prompts' || key === 'prompt_order' || key === 'prompts_unused') && !Array.isArray(value)) return;
-          nextPreset[key] = clonePlain(value);
-        });
+        const nextPreset = mergeScriptPresetSettings(currentPreset, snapshot);
         nextPreset.name = String(currentPreset.name || activePresetId);
         await this.presets.upsert('openai', {
           id: activePresetId,

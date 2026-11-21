@@ -200,7 +200,7 @@ export class PresetRequestTransport {
 
 // Convert provider tool deltas to an OpenAI-compatible virtual response for
 // legacy interceptors. Providers retain ownership of HTTP, usage and reasoning.
-function makeToolPackets(config, emit) {
+export function makeToolPackets(config, emit) {
   const calls = [];
   const byId = new Map(), byIndex = new Map();
   return {

@@ -1,3 +1,5 @@
+import { normalizeNetworkProxyMode } from '../utils/network-proxy.js';
+
 const SETTINGS_KEY = 'app_settings_v1';
 const LEGACY_LIGHT_CHAT_DEFAULTS = Object.freeze({
   bubbleColor: '#c9c9c9',
@@ -37,6 +39,9 @@ const inferChatColorMode = (input = {}, fallback = 'theme') => {
 const defaults = {
   locale: 'system',
   languageSetupCompleted: false,
+  // 网络代理：system 跟随系统代理／direct 不用代理／custom 用 networkProxyUrl
+  networkProxyMode: 'system',
+  networkProxyUrl: '',
   showDebugToggle: false,
   debugExecutionLogs: false,
   typingDotsEnabled: true,
@@ -393,6 +398,8 @@ const migrateSettings = (settings = {}) => {
   next.creativeDialogueHighlightEnabled = next.creativeDialogueHighlightEnabled !== false;
   next.creativeScrubberEnabled = next.creativeScrubberEnabled !== false;
   next.creativeHopscotchEnabled = next.creativeHopscotchEnabled === true;
+  next.networkProxyMode = normalizeNetworkProxyMode(next.networkProxyMode);
+  next.networkProxyUrl = String(next.networkProxyUrl || '').trim().slice(0, 500);
   return next;
 };
 

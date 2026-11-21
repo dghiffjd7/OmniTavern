@@ -40,12 +40,18 @@ export const buildAgentToolSafetyAllowKey = (request = {}) => {
   ].filter(Boolean).join('|');
 };
 
+// 「这个角色卡一律允许」的规则只在该角色卡生效；没有 roleCardId 的是旧的全局规则，照旧对所有地方生效
+const roleCardRuleKey = (baseKey, roleCardId) => `${baseKey}#card:${roleCardId}`;
+
 const normalizeRule = (rule = {}, now = Date.now) => {
   const source = isPlainObject(rule) ? rule : {};
-  const key = trim(source.key) || buildAgentToolSafetyAllowKey(source);
+  const roleCardId = trim(source.roleCardId);
+  const baseKey = buildAgentToolSafetyAllowKey(source);
+  const key = trim(source.key) || (baseKey && roleCardId ? roleCardRuleKey(baseKey, roleCardId) : baseKey);
   if (!key) return null;
   return {
     key,
+    ...(roleCardId ? { roleCardId, roleCardName: trim(source.roleCardName) } : {}),
     toolName: trim(source.toolName),
     kind: trim(source.kind),
     operationType: trim(source.operationType),
@@ -137,16 +143,19 @@ export const createAgentToolSafetyAllowStore = ({
 
   const list = () => load().map(rule => ({ ...rule }));
 
-  const isAllowed = (request = {}) => {
+  const isAllowed = (request = {}, { roleCardId = '' } = {}) => {
     const allowKey = buildAgentToolSafetyAllowKey(request);
     if (!allowKey) return false;
-    return load().some(rule => rule.key === allowKey);
+    const cardKey = trim(roleCardId) ? roleCardRuleKey(allowKey, trim(roleCardId)) : '';
+    return load().some(rule => (rule.key === allowKey && !rule.roleCardId) || (cardKey && rule.key === cardKey));
   };
 
-  const allowAlways = (request = {}) => {
+  const upsertRule = (request = {}, { roleCardId = '', roleCardName = '' } = {}) => {
     const source = isPlainObject(request) ? request : {};
-    const allowKey = buildAgentToolSafetyAllowKey(source);
-    if (!allowKey) return null;
+    const baseKey = buildAgentToolSafetyAllowKey(source);
+    if (!baseKey) return null;
+    const cardId = trim(roleCardId);
+    const allowKey = cardId ? roleCardRuleKey(baseKey, cardId) : baseKey;
     const existingRules = load();
     const existing = existingRules.find(rule => rule.key === allowKey);
     const timestamp = toTimestamp(null, now);
@@ -159,6 +168,7 @@ export const createAgentToolSafetyAllowStore = ({
       title: trim(source.title || existing?.title),
       source: trim(source.source || existing?.source),
       riskLevel: trim(source.riskLevel || existing?.riskLevel),
+      ...(cardId ? { roleCardId: cardId, roleCardName: trim(roleCardName || existing?.roleCardName) } : {}),
       createdAt: existing?.createdAt || timestamp,
       updatedAt: timestamp,
     }, now);
@@ -168,6 +178,11 @@ export const createAgentToolSafetyAllowStore = ({
     save(nextRules);
     return nextRule ? { ...nextRule } : null;
   };
+
+  const allowAlways = request => upsertRule(request);
+  const allowForRoleCard = (request, { roleCardId = '', roleCardName = '' } = {}) => (
+    trim(roleCardId) ? upsertRule(request, { roleCardId, roleCardName }) : null
+  );
 
   const revoke = (ruleKey = '') => {
     const target = trim(ruleKey);
@@ -200,6 +215,7 @@ export const createAgentToolSafetyAllowStore = ({
     hydrate,
     isAllowed,
     allowAlways,
+    allowForRoleCard,
     list,
     revoke,
     clear,

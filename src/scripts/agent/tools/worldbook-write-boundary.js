@@ -114,9 +114,11 @@ export const createWorldbookWriteBoundary = ({
           const id = `worldbook-write:${++sequence}`;
           pending.set(args, { id, state, args: stable(args), required, toolName: tool.name });
           if (!required) return original;
+          // 普通写入（新建、追加、生成等）也会单独确认：跨卡／共享目标用自己的 operationType，
+          // 对普通写入选的「一律允许」不会顺带放行写到别处；kind 不变，execute 仍按 kind 核对
           return {
             ...original, destructive: true, kind: original.kind || 'worldbook.write_target',
-            operationType: original.operationType || tool.name,
+            operationType: `${original.operationType || tool.name}_cross_scope`,
             title: translateUiText(original.title || '确认世界书写入目标'),
             message: t('当前角色卡：{persona}。{targets}。{operation}请确认允许本次操作。', {
               persona: state.current?.name || t('未选择'), targets: describe(state),

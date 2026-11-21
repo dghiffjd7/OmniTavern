@@ -10,6 +10,8 @@ import {
   searchText,
 } from '../../import/attachment-content.js';
 import { buildZip, findZipEntry, listZipEntries, normalizeZipEntryPath, readZipEntry } from '../../utils/zip-archive.js';
+import { t } from '../../i18n/index.js';
+import { confirmRequest } from './preset-regex-script-tools.js';
 
 const trim = value => String(value ?? '').trim();
 const failure = (reason, extra = {}) => ({ ok: false, reason, ...extra });
@@ -221,6 +223,30 @@ export const createAttachmentFileAgentTools = ({
         entries: { type: 'array', minItems: 1, maxItems: 20, items: { type: 'string', minLength: 1, maxLength: 500 } },
       },
     },
+    safety: {
+      operationType: 'create_extracted_files', destructive: 'conditional',
+      // 只列真的会新存进文件库的文件；找不到、已经取出过（会直接复用）的不算，都不会新增时不弹确认
+      preflight: async (args = {}) => {
+        const lib = library();
+        const parent = lib ? await loadEntry(lib, args.attachmentId) : null;
+        if (!parent) return { destructive: false };
+        let listing;
+        try { listing = listZipEntries(parent.bytes); } catch { return { destructive: false }; }
+        const extracted = new Set((lib.list?.() || []).filter(item => item.parentId === parent.id).map(item => item.entryPath));
+        const planned = [...new Set((args.entries || []).map(path => findZipEntry(listing, path))
+          .filter(entry => entry && !entry.isDirectory && !extracted.has(entry.path))
+          .map(entry => entry.path))];
+        if (!planned.length) return { destructive: false };
+        return confirmRequest({
+          kind: 'attachment.extract', operationType: 'create_extracted_files', danger: false,
+          title: t('从压缩包取出文件'),
+          message: t('将从「{name}」取出 {count} 个文件，存进女仆文件库。', { name: parent.name, count: planned.length }),
+          confirmText: t('取出'),
+          items: planned.map(path => ({ id: path, label: path })),
+          denyReason: 'attachment_extract_cancelled',
+        });
+      },
+    },
     execute: async (args = {}) => {
       const lib = library();
       if (!lib) return failure('attachment_files_unavailable');
@@ -250,6 +276,32 @@ export const createAttachmentFileAgentTools = ({
         name: { type: 'string', minLength: 1, maxLength: 120 },
         content: { type: 'string', maxLength: 200000 },
         appendTo: { type: 'string', maxLength: 120 },
+      },
+    },
+    safety: {
+      operationType: 'create_file', destructive: 'conditional',
+      // 新建或续写都要确认（续写只能接女仆自己产出的文件）；目标不可写、文件名不支持时不会写入，不弹确认
+      preflight: async (args = {}) => {
+        const lib = library();
+        if (!lib) return { destructive: false };
+        let name = '';
+        if (trim(args.appendTo)) {
+          const current = await loadEntry(lib, args.appendTo);
+          if (!current || current.origin !== 'maid') return { destructive: false };
+          name = current.name;
+        } else {
+          name = baseName(normalizeZipEntryPath(args.name).path);
+          if (!name || !CREATABLE_EXTENSIONS.has(extensionOf(name))) return { destructive: false };
+        }
+        return confirmRequest({
+          kind: 'attachment.create', operationType: 'create_file', danger: false,
+          title: t('写入文件'),
+          message: trim(args.appendTo)
+            ? t('将向女仆文件库里的「{name}」续写内容。', { name })
+            : t('将在女仆文件库新建文件「{name}」。', { name }),
+          confirmText: t('写入'),
+          denyReason: 'attachment_create_cancelled',
+        });
       },
     },
     execute: async (args = {}, context = {}) => {
@@ -301,6 +353,28 @@ export const createAttachmentFileAgentTools = ({
             },
           },
         },
+      },
+    },
+    safety: {
+      operationType: 'create_zip', destructive: 'conditional',
+      // 打包出的新 zip 会存进文件库，先确认
+      preflight: async (args = {}) => {
+        const lib = library();
+        if (!lib) return { destructive: false };
+        const rawName = baseName(normalizeZipEntryPath(args.name).path);
+        const name = /\.zip$/i.test(rawName) ? rawName : `${rawName || 'files'}.zip`;
+        const files = Array.isArray(args.files) ? args.files : [];
+        return confirmRequest({
+          kind: 'attachment.pack', operationType: 'create_zip', danger: false,
+          title: t('打包文件'),
+          message: t('将把 {count} 项打包成「{name}」，存进女仆文件库。', { count: files.length, name }),
+          confirmText: t('打包'),
+          items: files.map((item, index) => ({
+            id: `file_${index}`,
+            label: trim(item?.entry || item?.entryPrefix) || trim(lib.get?.(trim(item?.attachmentId))?.name) || trim(item?.attachmentId),
+          })),
+          denyReason: 'attachment_pack_cancelled',
+        });
       },
     },
     execute: async (args = {}, context = {}) => {

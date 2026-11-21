@@ -158,11 +158,20 @@ const runtime = createAgentUiClickRuntime({
     target: confirmationButton,
     composedPath: () => [confirmationButton],
   });
+  // 运行卡内的确认（输入胶囊／执行流／语音托盘）同样是这次调用自己的确认（11/20 起每次点击都确认）
+  const inlineApprovalButton = {
+    closest: selector => selector.split(',').map(item => item.trim()).includes('.mrc-approval') ? {} : null,
+  };
+  listeners.get('pointerdown')?.({
+    type: 'pointerdown',
+    target: inlineApprovalButton,
+    composedPath: () => [inlineApprovalButton],
+  });
   endConfirmation();
   const clicked = await runtime.clickElement({ ref });
   assert.equal(clicked.ok, true);
   assert.equal(button.clickCount, 1);
-  console.log('ok - an app confirmation choice does not invalidate the inspected target');
+  console.log('ok - an app or inline run-card confirmation choice does not invalidate the inspected target');
 }
 
 {

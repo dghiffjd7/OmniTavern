@@ -143,6 +143,18 @@ export const STORAGE_MIGRATION_CONTRACTS = Object.freeze([
     tests: ['kv-too-large-guard-tests', 'transfer-package-contract-tests'],
   }),
   freezeContract({
+    id: 'scripts',
+    owner: 'ScriptStore',
+    currentKey: 'script_store_v2_index',
+    scopeStrategy: 'shared-index-and-items-with-legacy-read',
+    legacyReadKeys: ['script_store_v1'],
+    writeTargets: ['script_store_v2_index', 'script_store_v2_item_<scope>_<hash>_<id>'],
+    payloadVersion: 2,
+    risk: 'medium',
+    importExportSurfaces: ['character-card', 'preset-file'],
+    tests: ['script-store-shard-tests', 'script-store-scope-tests'],
+  }),
+  freezeContract({
     id: 'plugins',
     owner: 'PluginStore',
     currentKey: 'plugin_store_v1',

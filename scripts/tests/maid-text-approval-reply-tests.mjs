@@ -218,7 +218,7 @@ test('real command-submit wrapper binds trustworthy task scope and records only 
   const approvals = [], turns = [], tasks = [];
   const raw = '好，但是名字改成新的探险团';
   const command = createMaidCommandSubmit({ getAppContext: () => ({ ...baseScope, agentId: 'maid-assistant' }),
-    getVoiceRuntime: () => null, matchMaidIntent: () => null,
+    getVoiceRuntime: () => null,
     resolveMaidRuntimeConfig: async () => ({ configured: true }),
     logger: { debug() {} }, checkMaidVisionInput: async () => ({ ok: true }),
     maidSettingsStore: { setLastExchange() {}, getLastExchange: () => ({ requestPrompt: 'captured', source: 'model' }) },
@@ -248,7 +248,7 @@ test('real conversation store records original task then raw revision before the
   const confirmation = createMaidToolConfirmationRuntime({ canShowInline: () => true, getCurrentScope: () => baseScope });
   let runtime, count = 0, historyAtRevision;
   const command = createMaidCommandSubmit({ getAppContext: () => ({ ...baseScope, agentId: 'maid-assistant' }),
-    getVoiceRuntime: () => null, matchMaidIntent: () => null, resolveMaidRuntimeConfig: async () => ({ configured: true }),
+    getVoiceRuntime: () => null, resolveMaidRuntimeConfig: async () => ({ configured: true }),
     logger: { debug() {} }, checkMaidVisionInput: async () => ({ ok: true }),
     maidSettingsStore: { setLastExchange() {}, getLastExchange: () => ({ requestPrompt: 'captured', source: 'model' }) },
     buildAppFeatureSearchContextText: () => '', recordMaidTurnFromResult: record,

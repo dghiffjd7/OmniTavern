@@ -3105,6 +3105,7 @@ pub async fn save_kv(
     data: Value,
     compact: Option<bool>,
 ) -> Result<(), String> {
+    validate_kv_write_name(&name)?;
     let data_dir = get_data_dir(&app)?;
     fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
     let file = data_dir.join(format!("{name}.json"));
@@ -3167,6 +3168,22 @@ pub async fn load_kv(app: AppHandle, name: String) -> Result<Value, String> {
     }
 
     Ok(data)
+}
+
+/// save_kv 的名称检查：name 直接拼成数据目录里的 `<name>.json`。Windows 上冒号会落进 NTFS 附加资料流
+/// （原子写入的暂存档改名失败，os error 87），路径分隔符与 `..` 会写到别的目录，结尾的点或空格会被系统去掉。
+/// 这类名称直接拒绝，不静默改名（改了名就读不回来）；load_kv 不检查，仍能读旧的带冒号存档。
+fn validate_kv_write_name(name: &str) -> Result<(), String> {
+    let invalid = name.contains("..")
+        || name.ends_with('.')
+        || name.ends_with(' ')
+        || name.chars().any(|ch| {
+            ch.is_control() || matches!(ch, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')
+        });
+    if invalid {
+        return Err(format!("invalid_kv_name:{name:?}"));
+    }
+    Ok(())
 }
 
 // load_kv 的读取上限；compact_oversized_turn_checkpoint 只在超过它时动手。
@@ -4538,7 +4555,8 @@ pub async fn http_request(
         }
 
         complete_opencode_user_agent(&mut header_map);
-        let mut builder = reqwest::Client::builder();
+        let mut builder =
+            crate::network_proxy::apply_network_proxy(reqwest::Client::builder(), Some(&url));
         if let Some(ms) = timeout_ms {
             builder = builder.timeout(std::time::Duration::from_millis(ms));
         }
@@ -4693,12 +4711,13 @@ async fn execute_openai_realtime_call(
     session_json: String,
     timeout: std::time::Duration,
 ) -> Result<String, String> {
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .connect_timeout(timeout)
-        .timeout(timeout)
-        .build()
-        .map_err(|_| "OpenAI Realtime native client initialization failed".to_string())?;
+    let client =
+        crate::network_proxy::apply_network_proxy(reqwest::Client::builder(), Some(&url))
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(timeout)
+            .timeout(timeout)
+            .build()
+            .map_err(|_| "OpenAI Realtime native client initialization failed".to_string())?;
     let form = build_openai_realtime_call_form(sdp, session_json)?;
     let response = client
         .post(url)
@@ -4852,7 +4871,8 @@ pub async fn http_stream_request_start(
             // 长流在中途杀死并伪装成 "error decoding response body"。改为
             // 连接超时 + 响应头超时 + 块间空闲超时，仅在链路真正无数据时失败。
             let idle_timeout = timeout_ms.map(std::time::Duration::from_millis);
-            let mut builder = reqwest::Client::builder();
+            let mut builder =
+                crate::network_proxy::apply_network_proxy(reqwest::Client::builder(), Some(&url));
             if let Some(d) = idle_timeout {
                 builder = builder.connect_timeout(d);
             }
@@ -6051,6 +6071,27 @@ mod tests {
         let error = serialize_kv_json(&data, true, (compact.len() - 1) as u64).unwrap_err();
         assert!(error.starts_with("kv_too_large:"), "{error}");
         assert!(serialize_kv_json(&data, true, compact.len() as u64).is_ok());
+    }
+
+    #[test]
+    fn save_kv_rejects_names_windows_cannot_store_as_plain_files() {
+        // 回归：女仆长期记忆的 `maid_semantic_memory_store_v1:maid_default` 在 NTFS 上落进附加资料流，原子写入改名失败。
+        for name in [
+            "maid_semantic_memory_store_v1:maid_default",
+            "a<b", "a>b", "a\"b", "a/b", "a\\b", "a|b", "a?b", "a*b",
+            "a\nb", "a\u{0}b", "../app_settings_v1", "a..b", "trailing.", "trailing ",
+        ] {
+            let error = validate_kv_write_name(name).unwrap_err();
+            assert!(error.starts_with("invalid_kv_name:"), "{name:?}: {error}");
+        }
+        for name in [
+            "app_settings_v1",
+            "maid_semantic_memory_store_v1__maid_default",
+            "turn_checkpoint_v1__rp_persona_1_abc__persona_1",
+            "preset.v2-shard_1",
+        ] {
+            assert!(validate_kv_write_name(name).is_ok(), "{name:?}");
+        }
     }
 
     #[test]

@@ -38,6 +38,33 @@ export const TAVERN_CONNECTION_SETTING_KEYS = Object.freeze(new Set([
   ...Object.values(TAVERN_MODEL_FIELD_BY_SOURCE),
 ]));
 
+// 脚本存预设设置时不写编号、名称与 Key 类字段
+const SCRIPT_PRESET_BLOCKED_KEYS = Object.freeze(new Set([
+  '__proto__', 'prototype', 'constructor', 'id', 'name',
+  'key', 'apikey', 'authorization', 'accesstoken', 'secrettoken',
+]));
+const clonePlain = (value) => {
+  if (value == null) return value;
+  try { return structuredClone(value); } catch { return JSON.parse(JSON.stringify(value)); }
+};
+
+// 脚本写回预设设置：按键合并到现有预设（脚本没给的键保留原值），跳过上面这些字段与连接字段；
+// keepKey(key) 为真的键也保留预设原值（例如交给脚本前被滤掉的连线资料）
+export const mergeScriptPresetSettings = (current, incoming, { keepKey = () => false } = {}) => {
+  const base = current && typeof current === 'object' && !Array.isArray(current) ? current : {};
+  const next = clonePlain(base) || {};
+  Object.entries(incoming && typeof incoming === 'object' && !Array.isArray(incoming) ? incoming : {}).forEach(([key, value]) => {
+    const normalizedKey = String(key || '').replace(/[_\-\s]/g, '').toLowerCase();
+    if (SCRIPT_PRESET_BLOCKED_KEYS.has(key) || SCRIPT_PRESET_BLOCKED_KEYS.has(normalizedKey)) return;
+    if (TAVERN_CONNECTION_SETTING_KEYS.has(key)) return;
+    if (key === 'function_calling' && !Object.hasOwn(base, key)) return;
+    if ((key === 'prompts' || key === 'prompt_order' || key === 'prompts_unused') && !Array.isArray(value)) return;
+    if (keepKey(key)) return;
+    next[key] = clonePlain(value);
+  });
+  return next;
+};
+
 export const buildTavernConnectionSettings = (config = null) => {
   const provider = String(config?.provider || '').trim().toLowerCase();
   const source = TAVERN_SOURCE_BY_PROVIDER[provider];

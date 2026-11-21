@@ -47,6 +47,28 @@ export const createWorldbookPersonaBindingTool = ({
     details: { personaId: snapshot.personaId, worldbookId: snapshot.worldbookId, previousWorldbookId: snapshot.previous.worldbookId },
   });
   const isReplacement = snapshot => !!snapshot.previous.worldbookId && snapshot.previous.worldbookId !== snapshot.worldbookId;
+  const isUnchanged = snapshot => sameBinding(snapshot.previous, { worldbookId: snapshot.worldbookId, enabled: snapshot.enabled });
+  // 首次绑定、启用／停用同一本书也要确认（不算高风险）；更换成另一本沿用上面的更换确认
+  const bindingRequest = (snapshot) => {
+    if (isReplacement(snapshot)) return replacementRequest(snapshot);
+    const first = !snapshot.previous.worldbookId;
+    const values = { persona: snapshot.personaName, worldbook: snapshot.worldbookId };
+    return {
+      destructive: true, kind: 'worldbook.bind_persona',
+      operationType: first ? 'bind_role_worldbook' : (snapshot.enabled ? 'enable_role_worldbook' : 'disable_role_worldbook'),
+      title: first ? t('绑定角色世界书') : (snapshot.enabled ? t('启用角色世界书') : t('停用角色世界书')),
+      message: first
+        ? (snapshot.enabled
+          ? t('将把世界书「{worldbook}」绑定到角色卡「{persona}」，不会改动世界书条目。', values)
+          : t('将把世界书「{worldbook}」绑定到角色卡「{persona}」并保持停用，不会改动世界书条目。', values))
+        : (snapshot.enabled
+          ? t('将启用角色卡「{persona}」绑定的世界书「{worldbook}」。', values)
+          : t('将停用角色卡「{persona}」绑定的世界书「{worldbook}」，绑定关系保留。', values)),
+      confirmText: first ? t('绑定') : (snapshot.enabled ? t('启用') : t('停用')),
+      cancelText: t('取消'), danger: false, allowAlways: false,
+      details: { personaId: snapshot.personaId, worldbookId: snapshot.worldbookId, previousWorldbookId: snapshot.previous.worldbookId },
+    };
+  };
   return {
     name: 'worldbook.bind_persona', title: 'Bind worldbook to character card',
     description: 'Bind an already saved worldbook to one explicitly identified character card, without rewriting entries or switching the active card. Use personaId, or an unambiguous personaName. Each card has one role-world binding; replacing a different book requires confirmation. For creative-writing-only lore use worldbook.bind_rp_session instead.',
@@ -66,7 +88,7 @@ export const createWorldbookPersonaBindingTool = ({
       preflight: async args => {
         const snapshot = await capture(args);
         targets.set(args, snapshot);
-        return !snapshot.error && isReplacement(snapshot) ? replacementRequest(snapshot) : { destructive: false };
+        return snapshot.error || isUnchanged(snapshot) ? { destructive: false } : bindingRequest(snapshot);
       },
     },
     execute: async (args = {}, context = {}) => {
@@ -75,8 +97,8 @@ export const createWorldbookPersonaBindingTool = ({
       const { personaId, personaName, worldbookId, enabled, previous } = snapshot;
       const target = { personaId, personaName, worldbookId, enabled, previousWorldbookId: previous.worldbookId };
       if (typeof assignWorldToPersona !== 'function') return failure('persona_binding_unavailable', target);
-      if (isReplacement(snapshot) && !(context.toolSafety?.decision === 'allow' && context.toolSafety?.request?.kind === 'worldbook.bind_persona')) {
-        if (await confirmDestructiveWrite?.(replacementRequest(snapshot)) !== true) return failure('persona_binding_cancelled', target);
+      if (!isUnchanged(snapshot) && !(context.toolSafety?.decision === 'allow' && context.toolSafety?.request?.kind === 'worldbook.bind_persona')) {
+        if (await confirmDestructiveWrite?.(bindingRequest(snapshot)) !== true) return failure('persona_binding_cancelled', target);
       }
       const latestWorld = await readWorldbookSnapshot(worldbookId);
       if (!latestWorld?.exists) return failure('worldbook_deleted_during_operation', target);

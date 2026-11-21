@@ -1,3 +1,6 @@
+import { t } from '../../i18n/index.js';
+import { confirmRequest } from './preset-regex-script-tools.js';
+
 const trim = (value, fallback = '') => {
   const text = String(value ?? '').trim();
   return text || fallback;
@@ -44,6 +47,49 @@ export const createChatFormatRepairTools = ({
       return {};
     }
   };
+  // 保存格式画像前的核对（preflight 与 execute 共用）：不能保存时返回原因，能保存时返回要写入的内容
+  const planFormatProfileSave = async (args = {}, context = {}) => {
+    if (!formatProfileStore || typeof formatProfileStore.set !== 'function') {
+      return { ok: false, reason: 'format_profile_store_unavailable' };
+    }
+    const sid = resolveSid(args);
+    if (!sid) return { ok: false, reason: 'session_not_found', message: '没有找到目标会话。' };
+    const sources = Array.isArray(args.sources) ? args.sources : [];
+    const sourceState = await resolveSourceState(sid, sources);
+    const sourceTypes = new Set(sources.map(item => trim(item?.type).toLowerCase()).filter(Boolean));
+    const hasRegexSource = sourceTypes.has('regex');
+    const hasCorroboratingSource = ['preset', 'worldbook', 'world', 'persona', 'character', 'character_card', 'character-card']
+      .some(type => sourceTypes.has(type));
+    const guide = trim(args.guide);
+    const manualOverride = args.manualOverride === true;
+    if (manualOverride && !isExplicitManualFormatOverride(guide, context)) {
+      return {
+        ok: false,
+        reason: 'manual_format_override_not_explicit',
+        message: '只有用户在本轮原话中明确给出完整格式规范并要求手动保存时，才能建立手动覆盖画像。请勿把模型推断标成手动；需要时请用户提供完整规范。',
+      };
+    }
+    const evidence = (Array.isArray(sourceState?.evidence) ? sourceState.evidence : [])
+      .filter(item => (Array.isArray(item?.markers) ? item.markers : []).some((marker) => {
+        const [opening = '', closing = ''] = String(marker || '').split('...');
+        return opening && closing && guide.includes(opening) && guide.includes(closing);
+      }));
+    if (!manualOverride && hasRegexSource && !hasCorroboratingSource && evidence.length === 0) {
+      return {
+        ok: false,
+        reason: 'regex_format_evidence_untrusted',
+        message: '当前启用正则只有清理/显示用途或缺少高置信结构证据，不能据此保存必需输出格式。请继续核对预设、世界书或角色卡；仍无法确认时请用户补充格式规范。',
+      };
+    }
+    const confidence = manualOverride
+      ? 'high'
+      : (hasCorroboratingSource
+      ? 'medium'
+      : (evidence.some(item => item?.confidence === 'high') ? 'high' : 'low'));
+    return { ok: true, sid, sources, sourceState, guide, manualOverride, evidence, confidence };
+  };
+  const formatSourcesKey = list => (Array.isArray(list) ? list : [])
+    .map(item => `${trim(item?.type).toLowerCase()}:${trim(item?.ref)}`).join('|');
   return [
   {
     name: 'chat.save_format_profile',
@@ -87,44 +133,41 @@ export const createChatFormatRepairTools = ({
         },
       },
     },
+    safety: {
+      operationType: 'save_format_profile',
+      destructive: 'conditional',
+      // 保存前确认；核对不过（execute 会拒绝）或与已存画像完全相同（规范、来源、来源指纹都没变）时不弹确认
+      preflight: async (args = {}, context = {}) => {
+        const plan = await planFormatProfileSave(args, context);
+        if (!plan.ok) return { destructive: false, operationType: 'save_format_profile' };
+        const existing = typeof formatProfileStore.peek === 'function'
+          ? formatProfileStore.peek(plan.sid)
+          : formatProfileStore.get?.(plan.sid);
+        const unchanged = Boolean(existing) &&
+          trim(existing.guide) === plan.guide &&
+          (existing.manualOverride === true) === plan.manualOverride &&
+          formatSourcesKey(existing.sources) === formatSourcesKey(plan.sources) &&
+          trim(existing.sourceFingerprint) === trim(plan.sourceState?.fingerprint || plan.sourceState?.sourceFingerprint);
+        if (unchanged) return { destructive: false, operationType: 'save_format_profile' };
+        const session = trim(args.sessionName || args.target) || plan.sid;
+        return confirmRequest({
+          kind: 'chat.save_format_profile',
+          operationType: 'save_format_profile',
+          title: t('保存格式画像'),
+          message: existing
+            ? t('将更新会话「{session}」的格式画像，之后修复该会话格式时会自动使用。', { session })
+            : t('将为会话「{session}」保存格式画像，之后修复该会话格式时会自动使用。', { session }),
+          confirmText: t('保存'),
+          danger: false,
+          items: [{ id: 'guide', label: plan.guide.length > 160 ? `${plan.guide.slice(0, 159)}…` : plan.guide, meta: t('格式规范') }],
+          denyReason: 'format_profile_save_cancelled',
+        });
+      },
+    },
     execute: async (args = {}, context = {}) => {
-      if (!formatProfileStore || typeof formatProfileStore.set !== 'function') {
-        return { ok: false, reason: 'format_profile_store_unavailable' };
-      }
-      const sid = resolveSid(args);
-      if (!sid) return { ok: false, reason: 'session_not_found', message: '没有找到目标会话。' };
-      const sources = Array.isArray(args.sources) ? args.sources : [];
-      const sourceState = await resolveSourceState(sid, sources);
-      const sourceTypes = new Set(sources.map(item => trim(item?.type).toLowerCase()).filter(Boolean));
-      const hasRegexSource = sourceTypes.has('regex');
-      const hasCorroboratingSource = ['preset', 'worldbook', 'world', 'persona', 'character', 'character_card', 'character-card']
-        .some(type => sourceTypes.has(type));
-      const guide = trim(args.guide);
-      const manualOverride = args.manualOverride === true;
-      if (manualOverride && !isExplicitManualFormatOverride(guide, context)) {
-        return {
-          ok: false,
-          reason: 'manual_format_override_not_explicit',
-          message: '只有用户在本轮原话中明确给出完整格式规范并要求手动保存时，才能建立手动覆盖画像。请勿把模型推断标成手动；需要时请用户提供完整规范。',
-        };
-      }
-      const evidence = (Array.isArray(sourceState?.evidence) ? sourceState.evidence : [])
-        .filter(item => (Array.isArray(item?.markers) ? item.markers : []).some((marker) => {
-          const [opening = '', closing = ''] = String(marker || '').split('...');
-          return opening && closing && guide.includes(opening) && guide.includes(closing);
-        }));
-      if (!manualOverride && hasRegexSource && !hasCorroboratingSource && evidence.length === 0) {
-        return {
-          ok: false,
-          reason: 'regex_format_evidence_untrusted',
-          message: '当前启用正则只有清理/显示用途或缺少高置信结构证据，不能据此保存必需输出格式。请继续核对预设、世界书或角色卡；仍无法确认时请用户补充格式规范。',
-        };
-      }
-      const confidence = manualOverride
-        ? 'high'
-        : (hasCorroboratingSource
-        ? 'medium'
-        : (evidence.some(item => item?.confidence === 'high') ? 'high' : 'low'));
+      const plan = await planFormatProfileSave(args, context);
+      if (!plan.ok) return plan;
+      const { sid, sources, sourceState, guide, manualOverride, evidence, confidence } = plan;
       const saved = formatProfileStore.set(sid, {
         guide,
         sources,

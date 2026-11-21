@@ -32,6 +32,7 @@ import { pickSavePath as pickNativeSavePath } from '../utils/save-dialog.js';
 import { safeInvoke } from '../utils/tauri.js';
 import { appConfirm, appChoice, appPromptText } from './app-confirm.js';
 import { buildScriptAuthorizationMessage } from './script-authorization-utils.js';
+import { buildTavernFeatureSummary } from '../import/tavern-feature-report.js';
 import { createDragGhost } from './drag-ghost-utils.js';
 import {
     buildReasoningEffortComboboxOptions,
@@ -8220,10 +8221,12 @@ export class PresetPanel {
                     });
                     if (result?.count && decisions) {
                         // 女仆导入：脚本保持关闭且未授权，启用另行确认
+                        const tavernFeatures = buildTavernFeatureSummary(result.tavernFeatures);
                         outcome.scripts = {
                             status: 'succeeded', count: result.count,
                             runnableCount: Number(result.compatibility?.runnableCount ?? (result.runnableIds || []).length) || 0,
                             blockedCount: Number(result.compatibility?.blockedCount || 0) || 0, enabled: false,
+                            ...(tavernFeatures ? { tavernFeatures } : {}),
                         };
                     } else if (result?.count) {
                         outcome.scripts = { status: 'succeeded', count: result.count };
@@ -8237,6 +8240,7 @@ export class PresetPanel {
                             leadText: `已导入 ${result.count} 条绑定脚本。`,
                             settings,
                             compatibility,
+                            tavernFeatures: result.tavernFeatures,
                         });
                         if (runnableIds.length) {
                             const choice = await appChoice({

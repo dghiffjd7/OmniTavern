@@ -12,7 +12,7 @@ import {
   mergeDeepSeekPrefillResponse,
   resolveDeepSeekPhonePrefillPlan,
 } from '../api/deepseek-phone-prefill-utils.js';
-import { buildReasoningRequestOptions, getReasoningSamplerPolicy } from '../api/model-capabilities.js';
+import { buildReasoningRequestOptions, getReasoningSamplerPolicy, resolveEffectiveReasoningSetting } from '../api/model-capabilities.js';
 import { isReasoningStreamEvent } from '../api/native-reasoning.js';
 import {
   buildWebSearchRequestPlan,
@@ -9427,14 +9427,13 @@ const stringifyMessageContent = (content) => {
           : null;
       const modeForReasoning = normalizeBridgePresetUiMode(presetContext?.uiMode, { sessionId });
       const modeReasoning = this.presets.getModeReasoning?.('openai', modeForReasoning) || null;
-      const overrideReasoning = explicitPreset ? null : (sessionReasoning || modeReasoning);
-      const effectiveRequestReasoning = reasoningOff
-          ? false
-          : overrideReasoning
-          ? overrideReasoning.request_reasoning === true
-          : p.request_reasoning === true;
-      const effectiveReasoningEffort = overrideReasoning?.reasoning_effort
-          || p.reasoning_effort;
+      const effectiveReasoning = resolveEffectiveReasoningSetting({
+          sessionReasoning: explicitPreset ? null : sessionReasoning,
+          modeReasoning: explicitPreset ? null : modeReasoning,
+          preset: p,
+      });
+      const effectiveRequestReasoning = reasoningOff ? false : effectiveReasoning.requestReasoning;
+      const effectiveReasoningEffort = effectiveReasoning.reasoningEffort;
 
       const base = {
         temperature: num(p.temperature),

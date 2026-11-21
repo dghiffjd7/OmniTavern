@@ -2,11 +2,8 @@ import {
   listAppFeatures,
   searchAppFeatures,
 } from './app-feature-catalog.js';
-import {
-  searchMaidCapabilityConcepts,
-  stripNegatedMaidCapabilityActions,
-  hasPositiveMaidDeleteIntent,
-} from './maid-capability-concept-retriever.js';
+import { searchMaidCapabilityConcepts } from './maid-capability-concept-retriever.js';
+import { isMaidRunActive, isMaidRunResumable, runBelongsToMaidContext } from './maid-run-followup.js';
 import { readMaidSkill } from './maid-skill-catalog.js';
 import { getMaidLoadedSkillFeatures } from './maid-skill-context.js';
 
@@ -22,6 +19,7 @@ export const MAID_CAPABILITY_ROUTING_MODES = Object.freeze({
 const ROUTING_MODE_SET = new Set(Object.values(MAID_CAPABILITY_ROUTING_MODES));
 const CONTROL_CAPABILITY_ID = 'app.capabilities.search';
 const MULTI_STEP_TODO_CAPABILITY_ID = 'maid.todo';
+const MAID_TASK_FEATURE_IDS = Object.freeze(['maid.task.status', 'maid.task.resume', 'maid.task.cancel']);
 const DEFAULT_CANDIDATE_LIMIT = 8;
 const SKILL_REFERENCE_SCORE = 40;
 const DEFAULT_STICKY_LIMIT = 4;
@@ -412,17 +410,6 @@ export const createMaidCapabilityRetriever = ({
   },
 });
 
-const hasExplicitHighRiskIntent = (input = '', feature = {}) => {
-  if (trim(feature?.riskLevel, 'low') !== 'high') return true;
-  const text = String(input || '').normalize('NFKC');
-  if (
-    /(?:只读|只查询|只查|只看|仅查询|仅查看|仅看|仅核对)/iu.test(text) &&
-    !/(?:删除预览|预览.{0,12}删除|preview)/iu.test(text)
-  ) return false;
-  const positiveText = stripNegatedMaidCapabilityActions(text);
-  return hasPositiveMaidDeleteIntent(text) || /(?:清空|清除|去重|覆盖|替换|clear|dedupe|overwrite|replace)/iu.test(positiveText);
-};
-
 const detectLanguage = (input = '') => (/\p{Script=Han}/u.test(String(input || '')) ? 'zh' : 'other');
 
 const inferPlatform = (context = {}) => {
@@ -673,8 +660,22 @@ export const createMaidCapabilityRoutingRuntime = ({
   logger = console,
   // 内置能力开关（女仆设置 → 技能 → 内置能力）：id → 是否开启；每次决策时读最新值
   isBuiltinCapabilityEnabled = null,
+  // 女仆任务记录（agent run store 的 maid_assistant runs）：有可以接着做或进行中的任务时，任务工具进候选
+  listMaidRuns = null,
 } = {}) => {
   const allFeatures = (Array.isArray(features) ? features : []).map(item => clone(item, {}));
+  // 本轮自己的任务（tracker 建的 run、同一次提交）与本轮正在接着做的那条不算
+  const hasOpenMaidTask = (context = {}) => {
+    if (typeof listMaidRuns !== 'function' || !trim(context?.roleCardId)) return false;
+    let runs = [];
+    try { runs = listMaidRuns() || []; } catch { return false; }
+    const own = new Set([context.maidRunId, context.runId, context.runContinuation?.sourceRunId].map(value => trim(value)).filter(Boolean));
+    const submissionId = trim(context.submissionId);
+    return (Array.isArray(runs) ? runs : []).some(run => run && !own.has(trim(run.id))
+      && !(submissionId && trim(run.metadata?.submissionId) === submissionId)
+      && runBelongsToMaidContext(run, context)
+      && (isMaidRunResumable(run) || isMaidRunActive(run)));
+  };
   const activeRetriever = retriever?.retrieve
     ? retriever
     : createMaidCapabilityRetriever({ version: retrieverVersion });
@@ -784,14 +785,6 @@ export const createMaidCapabilityRoutingRuntime = ({
       projection.excludedTools.forEach((item) => {
         excluded.push({ id: trim(rawFeature.id), tools: [item.toolName], reason: item.reason });
       });
-      if (trim(rawFeature.id) !== revisionFeatureId && !hasExplicitHighRiskIntent(primaryIntent, projection.feature)) {
-        excluded.push({
-          id: trim(rawFeature.id),
-          tools: list(projection.feature.tools),
-          reason: 'risk_intent_not_explicit',
-        });
-        continue;
-      }
       projectedById.set(trim(rawFeature.id), projection.feature);
     }
 
@@ -929,8 +922,21 @@ export const createMaidCapabilityRoutingRuntime = ({
 
     const ranked = Array.from(records.values())
       .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.score - a.score || trim(a.feature.id).localeCompare(trim(b.feature.id)));
-    const selected = ranked
-      .slice(0, currentConfig.candidateLimit)
+    const limited = ranked.slice(0, currentConfig.candidateLimit);
+    // 当前角色卡有可以接着做或仍在进行的女仆任务时，任务工具一律进候选：看任务状态，不看用户原话。
+    // 补在名额之外、排在本句检索结果之后，不挤掉其他候选，也不算作本句的检索命中
+    if (hasOpenMaidTask(context)) {
+      for (const featureId of MAID_TASK_FEATURE_IDS) {
+        const feature = projectedById.get(featureId);
+        const existing = limited.find(item => trim(item.feature?.id) === featureId);
+        if (existing) existing.reasons.add('open_maid_task');
+        else if (feature) {
+          const record = records.get(featureId);
+          limited.push({ feature, score: record?.score || 0, reasons: new Set([...(record?.reasons || []), 'open_maid_task']), pinned: true });
+        }
+      }
+    }
+    const selected = limited
       .sort((a, b) => (
         Number(trim(a.feature?.id) === CONTROL_CAPABILITY_ID) -
         Number(trim(b.feature?.id) === CONTROL_CAPABILITY_ID)

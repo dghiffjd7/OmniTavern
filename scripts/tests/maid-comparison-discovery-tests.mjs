@@ -46,7 +46,7 @@ test('registered worldbook comparison documentation explains real content compar
   const fixture = createFixture();
   const result = await fixture.call('app.read_feature_doc', { featureId: 'worldbook.compare' });
   assert.equal(result.ok, true);
-  assert.deepEqual(result.feature.tools, ['worldbook.list', 'worldbook.read']);
+  assert.deepEqual(result.feature.tools, ['worldbook.list', 'worldbook.compare_entries', 'worldbook.read']);
   for (const fact of ['includeContent:true', '相同', '源独有', '目标独有', '冲突', 'APP', '确认']) {
     assert.ok(result.feature.doc.includes(fact), `workflow must explain ${fact}`);
   }

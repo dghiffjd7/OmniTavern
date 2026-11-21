@@ -10,7 +10,7 @@ import {
   buildAgentRunListView,
 } from '../agent/agent-run-view-model.js';
 import { makeScopedKey, normalizeScopeId } from './store-scope.js';
-import { safeInvoke } from '../utils/tauri.js';
+import { hasTauriInvoke, safeInvoke } from '../utils/tauri.js';
 
 export const AGENT_RUN_STORE_BASE_KEY = 'agent_run_store_v1';
 export const AGENT_RUN_STORE_VERSION = 1;
@@ -187,7 +187,9 @@ export class AgentRunStore {
     });
     const payload = this.exportState({ includeNonExportable: true });
     const key = this.storeKey;
-    writeLocalJson(key, payload);
+    const savedLocally = writeLocalJson(key, payload);
+    // 不在 Tauri 里（浏览器开发、隔离测试）时 localStorage 就是唯一的存储，load() 也从这里读回
+    if (!hasTauriInvoke()) return savedLocally;
     try {
       await safeInvoke('save_kv', { name: key, data: payload });
       return true;

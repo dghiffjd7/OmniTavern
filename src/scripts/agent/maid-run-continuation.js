@@ -1,5 +1,6 @@
 import { normalizeMaidVisualSpecLedger } from './maid-visual-spec.js';
 import { normalizeCarriedMaidWorldbookObservations } from './maid-worldbook-observations.js';
+import { escapeMaidPromptAngles, isMaidExternalContentTool } from './maid-external-content.js';
 
 const trim = (value, fallback = '') => {
   const text = String(value ?? '').trim();
@@ -373,9 +374,15 @@ export const buildMaidRunContinuationPromptBlock = (snapshot = {}) => {
   if (!normalized) return '';
   // 已读的世界书正文并入 <maid_worldbook_observations>，这里不重复
   const { worldbookObservations, ...ledger } = normalized;
+  // 外部来源（网页、MCP、附件）的步骤标上 externalContent，整段 < > 转义（11/20 统一包法）
+  const ledgerForPrompt = {
+    ...ledger,
+    successfulSteps: (Array.isArray(ledger.successfulSteps) ? ledger.successfulSteps : [])
+      .map(step => (isMaidExternalContentTool(step?.toolName) ? { ...step, externalContent: true } : step)),
+  };
   return [
     `<maid_run_continuation version="${MAID_RUN_CONTINUATION_VERSION}">`,
-    JSON.stringify(ledger),
+    escapeMaidPromptAngles(JSON.stringify(ledgerForPrompt)),
     '</maid_run_continuation>',
   ].join('\n');
 };

@@ -144,3 +144,34 @@ const createMemoryStorage = (initial = {}) => {
   assert.deepEqual(kvMap.get('agent_tool_safety_allow_rules_v1')?.rules, [], 'clear 应同步清空 kv');
   console.log('ok - allow store 配额满时经 kv 持久化、恢复与清空');
 }
+
+{
+  // 「这个角色卡一律允许」：规则只在该角色卡生效；旧的全局规则照旧对所有角色卡生效（11/20 用户定）
+  const storage = createMemoryStorage();
+  const store = createAgentToolSafetyAllowStore({ storage, now: () => 10000 });
+  const request = { toolName: 'persona.create', kind: 'persona.create', operationType: 'create_persona', title: '新建角色卡' };
+  assert.equal(store.isAllowed(request, { roleCardId: 'card-a' }), false);
+  const rule = store.allowForRoleCard(request, { roleCardId: 'card-a', roleCardName: '小雪' });
+  assert.equal(rule.roleCardId, 'card-a');
+  assert.equal(rule.roleCardName, '小雪');
+  assert.notEqual(rule.key, buildAgentToolSafetyAllowKey(request), '角色卡规则的键要带上角色卡，才能各卡分开撤销');
+  assert.equal(store.isAllowed(request, { roleCardId: 'card-a' }), true);
+  assert.equal(store.isAllowed(request, { roleCardId: 'card-b' }), false, '别的角色卡不放行');
+  assert.equal(store.isAllowed(request), false, '没有角色卡范围时，角色卡规则不放行（MCP 等全局查询）');
+  assert.equal(store.isAllowed({ ...request, operationType: 'other' }, { roleCardId: 'card-a' }), false);
+  assert.equal(store.allowForRoleCard(request, { roleCardId: '' }), null, '没有角色卡就不建规则');
+
+  store.allowForRoleCard(request, { roleCardId: 'card-b', roleCardName: '莉莉丝' });
+  assert.equal(store.list().length, 2);
+  const reloaded = createAgentToolSafetyAllowStore({ storage });
+  assert.equal(reloaded.isAllowed(request, { roleCardId: 'card-b' }), true, '角色卡规则会存档');
+  assert.equal(reloaded.revoke(rule.key), true);
+  assert.equal(reloaded.isAllowed(request, { roleCardId: 'card-a' }), false, '撤销只影响那张卡');
+  assert.equal(reloaded.isAllowed(request, { roleCardId: 'card-b' }), true);
+
+  const legacy = { toolName: 'worldbook.create', kind: 'worldbook.replace', operationType: 'replace_existing' };
+  reloaded.allowAlways(legacy);
+  assert.equal(reloaded.isAllowed(legacy, { roleCardId: 'card-z' }), true, '旧全局规则对任何角色卡都生效');
+  assert.equal(reloaded.isAllowed(legacy), true);
+  console.log('ok - allow store 角色卡范围规则各卡独立，旧全局规则照旧生效');
+}

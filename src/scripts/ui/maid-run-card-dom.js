@@ -175,6 +175,8 @@ export const MAID_RUN_CARD_STYLE = `
 .mrc-approval-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; padding-top: 2px; }
 .mrc-btn.is-link { margin-right: auto; padding: 0 4px; border-color: transparent; background: transparent; color: var(--app-text-muted, #94a3b8); font-weight: 500; text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 3px; }
 .mrc-btn.is-link:hover { background: transparent; color: var(--app-text-secondary, #475569); text-decoration-color: currentColor; }
+.mrc-approval-remember { display: flex; flex-wrap: wrap; align-items: center; gap: 0 6px; margin-right: auto; }
+.mrc-approval-remember .mrc-btn.is-link { margin-right: 0; }
 .mrc-approval[data-tone='danger'] .mrc-btn.is-primary { border-color: var(--mrc-danger); background: var(--mrc-danger); color: var(--app-text-inverse, #fff); }
 .mrc-btn { min-height: 32px; padding: 0 13px; border-radius: 999px; border: 1px solid var(--app-border-strong, rgba(15, 23, 42, 0.16)); background: var(--app-surface-card, #fff); font-size: 12px; font-weight: 600; cursor: pointer; }
 .mrc-btn:hover { background: var(--app-surface-hover, #f1f5f9); }
@@ -266,6 +268,19 @@ const approvalItemsHtml = (items, shown, open) => {
   }).join('')}</ul>${more}`;
 };
 
+// 记住的选项（语音只能允许一次）：MCP 是全局「始终允许」，其他写入是「这个任务／这个角色卡」
+const rememberActions = (approval = {}, voice = false) => (voice ? [] : [
+  approval.allowAlways ? ['allow_always', t('始终允许'), ''] : null,
+  approval.allowRoleCard ? ['allow_role_card', t('这个角色卡一律允许'), approval.roleCardName || ''] : null,
+  approval.allowTask ? ['allow_task', t('这个任务一律允许'), t('重开 APP 或清空女仆对话前都不再询问')] : null,
+].filter(Boolean));
+const rememberHtml = (approval, voice) => {
+  const actions = rememberActions(approval, voice);
+  return actions.length
+    ? `<span class="mrc-approval-remember">${actions.map(([id, label, hint]) => `<button type="button" class="mrc-btn is-link" data-mrc-action="${id}"${hint ? ` title="${escapeHtml(hint)}"` : ''}>${escapeHtml(label)}</button>`).join('')}</span>`
+    : '';
+};
+
 const approvalHtml = (approval, { voice = false, itemsOpen = false } = {}) => {
   const items = Array.isArray(approval.items) ? approval.items : [];
   const shown = itemsOpen ? items : items.slice(0, APPROVAL_ITEMS_PREVIEW);
@@ -279,7 +294,7 @@ const approvalHtml = (approval, { voice = false, itemsOpen = false } = {}) => {
     + (shown.length ? approvalItemsHtml(items, shown, itemsOpen) : '')
     + (voice ? `<span class="mrc-approval-hint">${escapeHtml(t('也可以直接说“允许”'))}</span>` : '')
     + '<div class="mrc-approval-actions">'
-    + (approval.allowAlways && !voice ? `<button type="button" class="mrc-btn is-link" data-mrc-action="allow_always">${escapeHtml(t('始终允许'))}</button>` : '')
+    + rememberHtml(approval, voice)
     + `<button type="button" class="mrc-btn is-ghost" data-mrc-action="deny">${escapeHtml(approval.cancelLabel || t('取消'))}</button>`
     + `<button type="button" class="mrc-btn is-primary" data-mrc-action="allow_once">${escapeHtml(approval.confirmLabel || t('允许一次'))}</button>`
     + '</div>';
@@ -523,10 +538,11 @@ export const createMaidRunCardView = ({
       onLayoutChange?.({ reason: 'approval-items' });
       return true;
     }
-    if (['deny', 'allow_once', 'allow_always'].includes(action)) {
+    if (['deny', 'allow_once', 'allow_always', 'allow_task', 'allow_role_card'].includes(action)) {
       const approvalId = extras.approval?.id;
       if (!approvalId) return false;
-      if (action === 'allow_always' && (extras.voice || !extras.approval.allowAlways)) return false;
+      if (!['deny', 'allow_once'].includes(action)
+        && !rememberActions(extras.approval, extras.voice).some(([id]) => id === action)) return false;
       void onDecision?.({ id: approvalId, action, runId: model.runId });
       return true;
     }

@@ -1,6 +1,4 @@
 import { t } from '../i18n/index.js';
-import { hasPositiveMaidDeleteIntent } from './maid-capability-concept-retriever.js';
-import { classifyMaidPendingActionReply } from './maid-pending-action.js';
 
 const trim = value => String(value ?? '').trim();
 const list = value => Array.isArray(value) ? value : [];
@@ -30,14 +28,12 @@ const hasForeignIdentity = (step, context) => {
 // session read results do not attest their store scope: record the request scope,
 // reject explicit mismatches, and never claim that each read's scope was verified.
 // Observed IDs are evidence of reads, not a deletion selection or permission.
-export const buildMaidSessionDeletionNotice = ({ input = '', context = {}, steps = [], decision = {} } = {}) => {
+// 只看结构：模型以完成或澄清收尾、只用了读取工具、有比较同名联系人（session.compare）的读取、比较了 2～100 个会话。
+export const buildMaidSessionDeletionNotice = ({ context = {}, steps = [], decision = {} } = {}) => {
   const requestRoleCardId = trim(context.roleCardId);
   const requestRunId = trim(context.submissionId || context.runId || context.capabilityRequestId);
   const observations = list(steps);
   if (!requestRoleCardId || !requestRunId || context.signal?.aborted || context.runContinuation
-    || context.operationIntentPolicy?.mode !== 'write_allowed'
-    || !hasPositiveMaidDeleteIntent(input)
-    || String(input).split(/[，,。；;！？!?\n]/u).some(clause => classifyMaidPendingActionReply(clause) === 'cancel')
     || decision.ok !== true || !['final', 'clarify'].includes(trim(decision.action))
     || ['cancelled', 'failed', 'interrupted'].includes(trim(decision.status))
     || /cancel|abort|permission|denied|forbidden/iu.test(trim(decision.reason))

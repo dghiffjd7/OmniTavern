@@ -1,7 +1,13 @@
 import { appConfirm } from './app-confirm.js';
 import { validateManifest } from '../storage/plugin-store.js';
-import { safeInvoke } from '../utils/tauri.js';
-import { RISKY_PERMISSIONS, RISKY_PERMISSION_SET } from '../plugins/plugin-permissions.js';
+import { RISKY_PERMISSIONS, RISKY_PERMISSION_SET, getRiskyPermissions } from '../plugins/plugin-permissions.js';
+import {
+  SILLY_TAVERN_EXTENSION_MESSAGE,
+  downloadPluginPackage,
+  isSillyTavernExtensionManifest,
+  readPluginZip,
+  resolveInstallUrl,
+} from '../plugins/plugin-package.js';
 
 const STYLE_ID = 'plugin-panel-polish-style';
 
@@ -269,42 +275,11 @@ const readFileText = (file) => new Promise((resolve, reject) => {
 
 const normalizePath = (value) => String(value || '').replace(/\\/g, '/').replace(/^\/+/, '');
 
-const base64ToByteArray = (base64 = '') => {
-  const raw = atob(String(base64 || ''));
-  const bytes = new Uint8Array(raw.length);
-  for (let i = 0; i < raw.length; i += 1) bytes[i] = raw.charCodeAt(i);
-  return Array.from(bytes);
-};
-
-const isInvokeUnavailableError = (err) => /tauri invoke not available|command not found|unknown command/i.test(String(err?.message || err || ''));
-
-const SILLY_TAVERN_EXTENSION_MESSAGE = '检测到 SillyTavern/酒馆扩展格式（display_name/js/css）。当前插件系统不能直接运行酒馆扩展；需要先做兼容适配或转换为 OmniTavern 插件清单。';
-
-const isSillyTavernExtensionManifest = (manifest) => {
-  const raw = manifest && typeof manifest === 'object' ? manifest : {};
-  const hasSillyTavernEntry =
-    typeof raw.display_name === 'string' ||
-    typeof raw.js === 'string' ||
-    typeof raw.css === 'string';
-  const hasChatAppEntry =
-    typeof raw.id === 'string' ||
-    typeof raw.name === 'string' ||
-    typeof raw.apiVersion === 'string' ||
-    typeof raw.main === 'string' ||
-    Array.isArray(raw.permissions);
-  return hasSillyTavernEntry && !hasChatAppEntry;
-};
-
 const pickManifestPath = (paths) => {
   const candidates = paths.filter(p => p.toLowerCase().endsWith('/manifest.json') || p.toLowerCase() === 'manifest.json');
   if (!candidates.length) return '';
   candidates.sort((a, b) => a.length - b.length);
   return candidates[0];
-};
-
-const getRiskyPermissions = (manifest) => {
-  const perms = Array.isArray(manifest?.permissions) ? manifest.permissions : [];
-  return perms.filter(p => RISKY_PERMISSIONS.has(p));
 };
 
 export class PluginPanel {
@@ -338,6 +313,12 @@ export class PluginPanel {
     this.closeMenus();
     if (this.element) this.element.style.display = 'none';
     if (this.overlayElement) this.overlayElement.style.display = 'none';
+  }
+
+  // 女仆改动插件或插件界面后：面板开着时刷新清单与 UI 管理
+  async refreshIfOpen() {
+    if (this.element?.style.display === 'flex') await this.renderList();
+    if (this.uiManagePanel?.style.display === 'flex') this.renderUiManager();
   }
 
   createUI() {
@@ -789,34 +770,17 @@ export class PluginPanel {
       window.toastr?.warning?.('仅支持 http/https 链接');
       return;
     }
-    const normalizedUrl = await this.resolveInstallUrl(url);
+    const normalizedUrl = await resolveInstallUrl(url);
     if (normalizedUrl && normalizedUrl !== url) {
       window.toastr?.info?.('已自动转换为直链');
     }
     try {
       this.setStatus('正在下载插件…');
-      const download = await this.downloadPluginUrl(normalizedUrl);
-      if (!download.ok) {
-        if (this.shouldRetryGithubMain(normalizedUrl, download.status)) {
-          const fallback = this.replaceGithubBranch(normalizedUrl, 'master');
-          this.setStatus('尝试主分支…');
-          const retry = await this.downloadPluginUrl(fallback);
-          if (!retry.ok) throw new Error(`下载失败 (${retry.status})`);
-          const name = retry.name || fallback.split('/').pop() || 'plugin.zip';
-          this.setStatus('正在解析 ZIP…');
-          const installed = await this.installFromZipBytes(retry.bytes, { name, url: fallback });
-          if (installed) {
-            this.setStatus('安装完成', 2000);
-          } else {
-            this.setStatus('已取消', 1500);
-          }
-          return;
-        }
-        throw new Error(`下载失败 (${download.status})`);
-      }
-      const name = download.name || normalizedUrl.split('/').pop() || 'plugin.zip';
+      const download = await downloadPluginPackage(normalizedUrl, {
+        onRetry: () => this.setStatus('尝试主分支…'),
+      });
       this.setStatus('正在解析 ZIP…');
-      const installed = await this.installFromZipBytes(download.bytes, { name, url: normalizedUrl });
+      const installed = await this.installFromZipBytes(download.bytes, { name: download.name, url: download.url });
       if (installed) {
         this.setStatus('安装完成', 2000);
       } else {
@@ -828,93 +792,8 @@ export class PluginPanel {
     }
   }
 
-  async downloadPluginUrl(url) {
-    const requestUrl = String(url || '').trim();
-    if (!/^https?:\/\//i.test(requestUrl)) throw new Error('仅支持 http/https 链接');
-    let nativeError = null;
-    try {
-      const response = await safeInvoke('http_request', {
-        url: requestUrl,
-        method: 'GET',
-        headers: {
-          Accept: 'application/zip, application/octet-stream, */*',
-        },
-        body: null,
-        timeoutMs: 120000,
-        requestId: null,
-        responseBase64: true,
-      });
-      const status = Number(response?.status || 0) || 0;
-      const ok = Boolean(response?.ok) || (status >= 200 && status < 300);
-      const body = String(response?.body || '');
-      return {
-        ok,
-        status,
-        bytes: ok ? base64ToByteArray(body) : [],
-        name: this.resolveDownloadedFileName(requestUrl, response?.headers),
-        url: requestUrl,
-        source: 'native',
-      };
-    } catch (err) {
-      nativeError = err;
-      if (!isInvokeUnavailableError(err)) {
-        console.warn('native plugin download failed, trying browser fetch:', err);
-      }
-    }
-
-    try {
-      const res = await fetch(requestUrl, { credentials: 'omit' });
-      const buffer = res.ok ? await res.arrayBuffer() : new ArrayBuffer(0);
-      return {
-        ok: res.ok,
-        status: Number(res.status || 0) || 0,
-        bytes: res.ok ? Array.from(new Uint8Array(buffer)) : [],
-        name: this.resolveDownloadedFileName(requestUrl, Object.fromEntries(res.headers.entries())),
-        url: requestUrl,
-        source: 'fetch',
-      };
-    } catch (err) {
-      if (nativeError && !isInvokeUnavailableError(nativeError)) {
-        throw new Error(`下载失败：native ${nativeError?.message || nativeError}; fetch ${err?.message || err}`);
-      }
-      throw err;
-    }
-  }
-
-  resolveDownloadedFileName(url, headers = {}) {
-    try {
-      const map = headers && typeof headers === 'object' ? headers : {};
-      const disposition = String(map['content-disposition'] || map['Content-Disposition'] || '').trim();
-      const encoded = disposition.match(/filename\*\s*=\s*UTF-8''([^;]+)/i)?.[1];
-      if (encoded) return decodeURIComponent(encoded).replace(/[\\/]+/g, '_');
-      const quoted = disposition.match(/filename\s*=\s*"([^"]+)"/i)?.[1];
-      if (quoted) return quoted.replace(/[\\/]+/g, '_');
-      const plain = disposition.match(/filename\s*=\s*([^;]+)/i)?.[1];
-      if (plain) return plain.trim().replace(/[\\/]+/g, '_');
-    } catch {}
-    try {
-      const parsed = new URL(url);
-      const last = parsed.pathname.split('/').filter(Boolean).pop();
-      if (last) return last;
-    } catch {}
-    return 'plugin.zip';
-  }
-
   async installFromZipBytes(bytes, { name, url } = {}) {
-    const result = await safeInvoke('read_plugin_zip', { bytes });
-    const manifestText = String(result?.manifestText || '');
-    const mainText = String(result?.mainText || '');
-    if (!manifestText || !mainText) {
-      throw new Error('ZIP 解析失败');
-    }
-    const manifest = JSON.parse(manifestText);
-    if (isSillyTavernExtensionManifest(manifest)) {
-      throw new Error(SILLY_TAVERN_EXTENSION_MESSAGE);
-    }
-    const { manifest: normalized, ok, errors } = validateManifest(manifest);
-    if (!ok) {
-      throw new Error(`manifest 校验失败：${errors.join('；')}`);
-    }
+    const { manifest: normalized, code: mainText } = await readPluginZip(bytes);
     const confirmed = await this.confirmInstall(normalized, {
       type: 'zip',
       name: name || '',
@@ -941,120 +820,6 @@ export class PluginPanel {
         if (this.statusEl) this.statusEl.textContent = '';
         this.statusTimer = null;
       }, timeoutMs);
-    }
-  }
-
-  normalizeInstallUrl(rawUrl) {
-    try {
-      const parsed = new URL(rawUrl);
-      if (parsed.hostname === 'github.com') {
-        const parts = parsed.pathname.split('/').filter(Boolean);
-        if (parts.length >= 4 && parts[2] === 'blob') {
-          const user = parts[0];
-          const repo = parts[1];
-          const rest = parts.slice(3).join('/');
-          if (user && repo && rest) {
-            return `https://raw.githubusercontent.com/${user}/${repo}/${rest}`;
-          }
-        }
-      }
-    } catch {
-      return rawUrl;
-    }
-    return rawUrl;
-  }
-
-  parseGithubRepoUrl(rawUrl) {
-    try {
-      const parsed = new URL(rawUrl);
-      if (parsed.hostname !== 'github.com') return null;
-      const parts = parsed.pathname.split('/').filter(Boolean);
-      if (parts.length < 2) return null;
-      const owner = parts[0];
-      const repo = String(parts[1] || '').replace(/\.git$/i, '');
-      if (!owner || !repo) return null;
-      const kind = parts[2] || '';
-      if (kind === 'tree' && parts[3]) {
-        return { owner, repo, branch: parts.slice(3).join('/') };
-      }
-      if (kind === 'releases' && parts[3] === 'tag' && parts[4]) {
-        return { owner, repo, tag: parts.slice(4).join('/') };
-      }
-      if (kind === 'releases' && parts[3] === 'latest') {
-        return { owner, repo, latest: true };
-      }
-      if (kind === 'archive') {
-        return { owner, repo, archive: true, url: rawUrl };
-      }
-      return { owner, repo };
-    } catch {
-      return null;
-    }
-  }
-
-  buildGithubZipUrl(owner, repo, refType, ref) {
-    const safeOwner = encodeURIComponent(owner);
-    const safeRepo = encodeURIComponent(repo);
-    const safeRef = encodeURIComponent(ref);
-    if (refType === 'tags') {
-      return `https://codeload.github.com/${safeOwner}/${safeRepo}/zip/refs/tags/${safeRef}`;
-    }
-    return `https://codeload.github.com/${safeOwner}/${safeRepo}/zip/refs/heads/${safeRef}`;
-  }
-
-  async resolveInstallUrl(rawUrl) {
-    const normalized = this.normalizeInstallUrl(rawUrl);
-    const github = this.parseGithubRepoUrl(normalized);
-    if (!github) return normalized;
-    if (github.archive && github.url) return github.url;
-    if (github.tag) {
-      return this.buildGithubZipUrl(github.owner, github.repo, 'tags', github.tag);
-    }
-    if (github.branch) {
-      return this.buildGithubZipUrl(github.owner, github.repo, 'heads', github.branch);
-    }
-    if (github.latest) {
-      try {
-        const api = `https://api.github.com/repos/${github.owner}/${github.repo}/releases/latest`;
-        const res = await fetch(api);
-        if (res.ok) {
-          const data = await res.json();
-          const tag = String(data?.tag_name || '').trim();
-          if (tag) return this.buildGithubZipUrl(github.owner, github.repo, 'tags', tag);
-        }
-      } catch {}
-    }
-    try {
-      const api = `https://api.github.com/repos/${github.owner}/${github.repo}`;
-      const res = await fetch(api);
-      if (res.ok) {
-        const data = await res.json();
-        const branch = String(data?.default_branch || '').trim();
-        if (branch) return this.buildGithubZipUrl(github.owner, github.repo, 'heads', branch);
-      }
-    } catch {}
-    return this.buildGithubZipUrl(github.owner, github.repo, 'heads', 'main');
-  }
-
-  shouldRetryGithubMain(url, status) {
-    if (status !== 404 && status !== 403) return false;
-    try {
-      const parsed = new URL(url);
-      if (!parsed.hostname.endsWith('github.com')) return false;
-      if (!parsed.pathname.includes('/zip/refs/heads/main')) return false;
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  replaceGithubBranch(url, branch) {
-    try {
-      const parsed = new URL(url);
-      parsed.pathname = parsed.pathname.replace(/\/zip\/refs\/heads\/[^/]+/i, `/zip/refs/heads/${branch}`);
-      return parsed.toString();
-    } catch {
-      return url;
     }
   }
 

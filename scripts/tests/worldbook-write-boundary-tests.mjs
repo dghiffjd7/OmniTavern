@@ -135,11 +135,22 @@ for (const [name, args] of [
   assert.equal(f.worlds.get('邻家篇世界书').entries[0].content, '经本次明确批准的新正文。');
 }
 
-// Own exclusive books keep the ordinary append flow; shared ownership and
-// global books remain protected even when the current card also owns them.
+// Own exclusive books get one ordinary write confirmation (not the target
+// boundary card); shared ownership and global books remain protected even when
+// the current card also owns them.
+const ordinaryWrite = (asks, kind, operationType) => request => {
+  asks.push(request);
+  assert.equal(request.kind, kind);
+  assert.equal(request.operationType, operationType);
+  assert.equal(request.danger, false);
+  assert.equal(request.details?.worldbookWriteBoundaryId, undefined, 'own books do not get the cross-card boundary card');
+  return { decision: 'allow' };
+};
 {
   const f = createFixture();
-  const result = await call(f, 'worldbook.create', { entries: [entry()] }, () => assert.fail('own append should not ask'));
+  const asks = [];
+  const result = await call(f, 'worldbook.create', { entries: [entry()] }, ordinaryWrite(asks, 'worldbook.create', 'append_worldbook_entries'));
+  assert.equal(asks.length, 1);
   assert.equal(result.result.ok, true);
   assert.equal(f.worlds.get('当前卡书').entries.length, 3);
 }
@@ -151,7 +162,12 @@ for (const configure of [
   const f = createFixture(); configure(f);
   let asks = 0;
   const result = await call(f, 'worldbook.create', { entries: [entry()] }, request => {
-    asks += 1; assert.equal(request.allowAlways, false); return { decision: 'deny' };
+    asks += 1; assert.equal(request.allowAlways, false);
+    // One merged card, remembered separately from ordinary own-book appends.
+    assert.equal(request.kind, 'worldbook.create');
+    assert.equal(request.operationType, 'append_worldbook_entries_cross_scope');
+    assert.ok(request.details.worldbookWriteBoundaryId);
+    return { decision: 'deny' };
   });
   assert.equal(asks, 1);
   assert.equal(result.status, 'skipped');
@@ -201,10 +217,28 @@ for (const [change, reason] of [
   [f => f.generations.set('当前卡书', 2), 'worldbook_changed_since_confirmation'],
 ]) {
   const f = createFixture(); f.onGenerate(() => change(f));
+  const asks = [];
   const result = await call(f, 'worldbook.generate_entries', {
     name: '当前卡书', entries: [{ title: '人物', outline: '人物的完整背景设定' }],
-  }, () => assert.fail('own book does not require target approval'));
+  }, ordinaryWrite(asks, 'worldbook.generate_entries', 'generate_worldbook_entries'));
+  assert.equal(asks.length, 1, 'paid generation into the own book asks once');
+  assert.match(asks[0].message, /生成 1 个条目，追加到世界书「当前卡书」，可能产生费用/);
   assert.equal(result.result.reason, reason);
+  assert.deepEqual(f.saves, []);
+}
+
+// Generating into a new book is a paid write too: one ordinary card, and a
+// denial spends no model call and saves nothing.
+{
+  const f = createFixture();
+  const asks = [];
+  const result = await call(f, 'worldbook.generate_entries', {
+    name: '新书', entries: [{ title: '人物', outline: '人物的完整背景设定' }],
+  }, request => { ordinaryWrite([], 'worldbook.generate_entries', 'generate_worldbook_entries')(request); asks.push(request); return { decision: 'deny' }; });
+  assert.equal(asks.length, 1);
+  assert.match(asks[0].message, /新建世界书「新书」保存，可能产生费用/);
+  assert.equal(result.status, 'skipped');
+  assert.equal(f.generated(), 0);
   assert.deepEqual(f.saves, []);
 }
 
@@ -217,7 +251,7 @@ for (const change of [f => f.setActive('other'), f => f.globals.push('当前卡�
   }));
   const result = await call(f, 'worldbook.generate_entries', {
     name: '当前卡书', entries: [{ title: '人物', outline: '人物的完整背景设定' }],
-  });
+  }, () => ({ decision: 'allow' }));
   assert.equal(result.result.reason, 'worldbook_target_changed');
   assert.deepEqual(f.saves, []);
 }
@@ -240,7 +274,10 @@ for (const change of [f => f.setActive('other'), f => f.globals.push('当前卡�
   const f = createFixture();
   f.personas[0].source.worldbookId = '';
   f.personas[0].source.worldbookEnabled = false;
-  const result = await call(f, 'worldbook.create', { entries: [entry()] }, () => assert.fail('new own book should not ask'));
+  const asks = [];
+  const result = await call(f, 'worldbook.create', { entries: [entry()] }, ordinaryWrite(asks, 'worldbook.create', 'create_worldbook'));
+  assert.equal(asks.length, 1);
+  assert.match(asks[0].message, /新建世界书「测试 世界书」.*绑定到角色卡「测试」/);
   assert.equal(result.result.ok, true);
   assert.equal(result.result.boundPersonaId, 'current');
   assert.equal(f.personas[0].source.worldbookId, result.result.worldbookId);
@@ -254,7 +291,10 @@ for (const change of [f => f.setActive('other'), f => f.globals.push('当前卡�
 for (const mode of ['append', 'create_new']) {
   const f = createFixture();
   f.personas[0].source.worldbookEnabled = false;
-  const result = await call(f, 'worldbook.create', { mode, entries: [entry()] }, () => assert.fail('own book should not ask'));
+  const asks = [];
+  const result = await call(f, 'worldbook.create', { mode, entries: [entry()] }, ordinaryWrite(asks, 'worldbook.create', mode === 'append' ? 'append_worldbook_entries' : 'create_worldbook'));
+  assert.equal(asks.length, 1, mode);
+  if (mode === 'create_new') assert.match(asks[0].message, /由「当前卡书」改为这本/);
   assert.equal(result.result.ok, true);
   assert.equal(f.personas[0].source.worldbookId, result.result.worldbookId);
   assert.equal(f.personas[0].source.worldbookEnabled, false, mode);

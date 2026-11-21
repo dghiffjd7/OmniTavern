@@ -122,6 +122,7 @@ export const buildAdHocWebSearchRuntime = ({
   onSearchOutcome = null,
   // 原生联网失败后的回退：按非原生服务商规划，改用 APP 搜索工具（实际请求仍发给原模型）
   forceToolFallback = false,
+  wrapToolResult = null,
 } = {}) => {
   const baseOptions = requestOptions && typeof requestOptions === 'object' ? { ...requestOptions } : {};
   if (baseOptions.requestContext || sessionId) {
@@ -190,6 +191,7 @@ export const buildAdHocWebSearchRuntime = ({
     model: config?.model,
     sessionId,
     onSearchOutcome,
+    wrapToolResult,
   });
   return { client: generationClient, requestOptions: mergedOptions, plan };
 };
@@ -223,12 +225,14 @@ export const runAdHocWebSearchChat = async ({
   toolRuntime = undefined,
   onStatus = null,
   onSources = null,
+  // 可选：搜索工具结果交给模型前的包装（女仆子代理用来标成外部内容）
+  wrapToolResult = null,
 } = {}) => {
   const notify = (status) => { try { onStatus?.(status); } catch {} };
   const build = (extra = {}) => {
     const attempt = { sources: [], sourceMeta: {}, outcome: null };
     const generation = buildAdHocWebSearchRuntime({
-      client, config, enabled, sessionId, toolRuntime, onStatus, ...extra,
+      client, config, enabled, sessionId, toolRuntime, onStatus, wrapToolResult, ...extra,
       // 每次尝试独立收集来源。chat 成功后才提交，避免失败响应污染降级回答。
       requestOptions: {
         ...requestOptions,

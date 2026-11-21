@@ -1,6 +1,4 @@
-import { resolveMaidWorldbookComparison } from './maid-worldbook-comparison.js';
 import { buildMaidSessionDeletionNotice } from './maid-session-deletion-notice.js';
-import { buildMaidWorldbookTargetClarification } from './maid-worldbook-target-clarification.js';
 
 const trim = value => String(value ?? '').trim();
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
@@ -57,28 +55,14 @@ const canPresent = (result, context, isWriteTool) => {
 // Shared by FC and JSON final results. The model's decision remains diagnostic
 // evidence; APP text is visibly attributed in message as well as in metadata,
 // so existing message-only persistence cannot turn it into a model quotation.
-export const applyMaidResultPresentation = (result, { input = '', context = {}, isWriteTool } = {}) => {
+export const applyMaidResultPresentation = (result, { context = {}, isWriteTool } = {}) => {
   if (!canPresent(result, context, isWriteTool)) return result;
   const modelMessage = typeof result.message === 'string' ? result.message : '';
   const attribution = {
     version: 1, source: 'app', modelMessage, modelSource: trim(result.source),
     requestRoleCardId: trim(context.roleCardId), requestRunId: requestId(context),
   };
-  const clarification = buildMaidWorldbookTargetClarification({ input, context, steps: result.steps, decision: result.finalDecision });
-  if (clarification?.source === 'app' && trim(clarification.message)) {
-    return { ...result, message: clarification.message, appPresentation: { ...clarification, ...attribution } };
-  }
-  const comparison = resolveMaidWorldbookComparison({ input, context, steps: result.steps, maxMessageChars: 2200 });
-  // Two background reads do not change the user's goal into lorebook merging.
-  if (comparison?.autoPresentEligible === true && comparison.ok === true
-    && ['ready', 'needs_selection', 'incomplete'].includes(comparison.status)
-    && trim(comparison.message)) {
-    return { ...result, message: comparison.message, appPresentation: {
-      ...attribution, kind: 'worldbook_entries', status: comparison.status, reason: comparison.reason,
-      report: comparison.report, ...(comparison.comparison ? { comparison: comparison.comparison } : {}),
-    } };
-  }
-  const notice = buildMaidSessionDeletionNotice({ input, context, steps: result.steps, decision: result.finalDecision });
+  const notice = buildMaidSessionDeletionNotice({ context, steps: result.steps, decision: result.finalDecision });
   if (notice?.source !== 'app' || !trim(notice.message)) return result;
   return { ...result, message: `${notice.message}${modelMessage ? `\n\n${modelMessage}` : ''}`, appPresentation: {
     ...notice, ...attribution, status: 'notice',

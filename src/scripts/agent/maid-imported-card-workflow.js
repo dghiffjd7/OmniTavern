@@ -2,6 +2,8 @@ import { classifyMaidPendingActionReply, isPendingRunInContext } from './maid-pe
 
 export const MAID_IMPORTED_CARD_WORKFLOW_KIND = 'imported_card_session_setup';
 export const MAID_IMPORTED_CARD_WORKFLOW_VERSION = 1;
+// 模型可调用的「从角色卡世界书挑人物建房」工具：读卡、分类、冻结清单；确认后由女仆执行层建立
+export const MAID_IMPORTED_CARD_PLAN_TOOL = 'session.plan_character_rooms';
 
 const CLASSIFICATION_KINDS = new Set(['character', 'setting', 'format', 'rule', 'other']);
 const PENDING_TTL_MS = 24 * 60 * 60 * 1000;
@@ -33,81 +35,6 @@ const uniqueStrings = (value, limit = 100) => Array.from(new Set(
     .map(item => trim(item))
     .filter(Boolean),
 )).slice(0, limit);
-
-const extractQuotedPersonaName = (text = '') => {
-  const patterns = [
-    /(?:切到|切换到|当前(?:是|在)?|现在(?:是|在)?|就在|使用)\s*[「『“"'‘]([^」』”"'’]{1,80})[」』”"'’]\s*(?:这张)?(?:角色卡|人物卡|卡)/iu,
-    /[「『“"'‘]([^」』”"'’]{1,80})[」』”"'’]\s*(?:这张)?(?:角色卡|人物卡)/iu,
-    /(?:角色卡|人物卡)\s*[「『“"'‘]([^」』”"'’]{1,80})[」』”"'’]/iu,
-  ];
-  for (const pattern of patterns) {
-    const matched = String(text || '').match(pattern);
-    if (trim(matched?.[1])) return trim(matched[1]);
-  }
-  return '';
-};
-
-const extractQuotedGroupName = (text = '') => {
-  const patterns = [
-    /(?:建立|创建|新建|建|开)(?:一个|一個|个|個)?\s*(?:真)?群聊\s*[「『“"'‘]([^」』”"'’]{1,80})[」』”"'’]/iu,
-    /(?:建立|创建|新建|建|开)(?:一个|一個|个|個)?\s*[「『“"'‘]([^」』”"'’]{1,80})[」』”"'’]\s*(?:真)?群聊/iu,
-    /(?:群聊|群组)(?:名|名称|叫|叫做|设为|设成)?\s*[「『“"'‘]([^」』”"'’]{1,80})[」』”"'’]/iu,
-  ];
-  for (const pattern of patterns) {
-    const matched = String(text || '').match(pattern);
-    if (trim(matched?.[1])) return trim(matched[1]);
-  }
-  return '';
-};
-
-export const classifyMaidImportedCardWorkflowIntent = (input = '') => {
-  const text = String(input ?? '').normalize('NFKC');
-  const hasImportedCardSource = Boolean(
-    /(?:导入|匯入|自带|自帶|关联|關聯|绑定|綁定|当前|當前|这张|這張).{0,28}(?:角色卡|人物卡|世界书|世界書)|(?:角色卡|人物卡).{0,32}(?:自带|自帶|关联|關聯|世界书|世界書)|\b(?:imported?\s+)?character\s*card\b/isu.test(text),
-  );
-  const hasSelectionTask = Boolean(
-    /(?:挑(?:出|选|選)?|筛选|篩選|识别|識別|找出|整理|候选|候選|主要人物|主要角色|核心人物|核心角色|成员|成員)|\b(?:select|identify|classify|candidate|main\s+characters?)\b/iu.test(text),
-  );
-  const hasChatPurpose = Boolean(
-    /(?:长期聊天|長期聊天|私聊|单聊|單聊|聊天室|会话|會話|房间|房間|群聊|群组|群組|联系人|聯絡人)|\b(?:private\s+chat|chat\s*room|session|group\s*chat|contact)\b/iu.test(text),
-  );
-  const matched = hasImportedCardSource && hasSelectionTask && hasChatPurpose;
-  if (!matched) {
-    return {
-      matched: false,
-      createRequested: false,
-      groupRequested: false,
-      targetPersonaName: '',
-      requestedGroupName: '',
-      requestedStrategy: '',
-      revealRequested: false,
-    };
-  }
-
-  const rawCreateRequested = Boolean(
-    /(?:创建|建立|新建|新增|生成|建|开).{0,52}(?:私聊|单聊|單聊|聊天室|会话|會話|房间|房間|群聊|群组|群組|联系人|聯絡人)|(?:给|為|为).{0,36}(?:人物|角色|成员|成員).{0,24}(?:建立|创建|新建|开).{0,24}(?:私聊|聊天室|群聊)|\b(?:create|build|add)\b.{0,48}\b(?:private\s+chat|chat\s*room|session|group\s*chat|contact)\b/isu.test(text),
-  );
-  const explicitPreviewOnly = Boolean(
-    /(?:这一步|這一步|本轮|本輪|现在|現在)?\s*(?:先)?\s*(?:只看|只读|只讀|只整理|只给|只給).{0,20}(?:候选|候選|清单|清單)|(?:先别|先不要|不要|別|别)\s*(?:真的)?\s*(?:创建|建立|新建|修改|写入|寫入)/isu.test(text),
-  );
-  const stagedConfirmation = Boolean(
-    /(?:先[^。！？.!?；;]{0,80}(?:(?:给|給|让|讓)我)?(?:确认|確認)|等我确认|等我確認|确认后|確認後|我确认再|我確認再|确认.*再|確認.*再)/isu.test(text),
-  );
-  const createRequested = rawCreateRequested && (!explicitPreviewOnly || stagedConfirmation);
-  const groupRequested = createRequested && /(?:群聊|群组|群組|group\s*chat)/iu.test(text);
-  const requestedStrategy = /(?:隔离|隔離|独立|獨立|专属|專屬).{0,16}(?:世界书|世界書)/iu.test(text)
-    ? 'isolated_session_worldbooks'
-    : 'inherit_persona_worldbook';
-  return {
-    matched: true,
-    createRequested,
-    groupRequested,
-    targetPersonaName: extractQuotedPersonaName(text),
-    requestedGroupName: extractQuotedGroupName(text),
-    requestedStrategy,
-    revealRequested: /(?:完成后|完成後|最后|最後|然后|然後).{0,24}(?:打开|打開|进入|進入|给我看|給我看)|(?:打开|打開|进入|進入).{0,18}(?:群聊|结果|結果)/isu.test(text),
-  };
-};
 
 // 建房清单是低风险写入，确认比删除宽松：短答复（含“好 / 可以 / ok / 嗯”，与语音侧同一套词）即可确认。
 // 仅完整短答复走快捷入口；自然语言原话交给现有 planner，不用否定/条件关键词表抢先决定整单执行。

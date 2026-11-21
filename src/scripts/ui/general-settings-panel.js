@@ -4,6 +4,7 @@ import { localizeDomSubtree, t } from '../i18n/index.js';
 import { ConfigManager } from '../storage/config.js';
 import { pickSavePath } from '../utils/save-dialog.js';
 import { safeInvoke } from '../utils/tauri.js';
+import { normalizeNetworkProxyMode, resolveNetworkProxy, syncNetworkProxy } from '../utils/network-proxy.js';
 import { bindReplyNotificationSettings } from './reply-notification-service.js';
 import { appConfirm } from './app-confirm.js';
 import {
@@ -158,6 +159,11 @@ export class GeneralSettingsPanel {
     this.modalElement = null;
     this.languageSelect = null;
     this.languageButton = null;
+    this.networkProxySelect = null;
+    this.networkProxyButton = null;
+    this.networkProxyUrlBlock = null;
+    this.networkProxyUrlInput = null;
+    this.networkProxyStatus = null;
     this.languageStatus = null;
     this.themePresetSelect = null;
     this.themePresetButton = null;
@@ -356,6 +362,7 @@ export class GeneralSettingsPanel {
     }
     this.refreshThemeSelectButton(this.languageButton, this.languageSelect, t('选择语言'));
     if (this.languageStatus) this.languageStatus.textContent = t('更改语言后需要重启应用。');
+    this.refreshNetworkProxyControls(settings);
     if (this.debugToggle) {
       this.debugToggle.checked = Boolean(settings.showDebugToggle);
     }
@@ -643,6 +650,39 @@ export class GeneralSettingsPanel {
     if (!buttonEl || !selectEl) return;
     const labelEl = buttonEl.querySelector('.general-settings-custom-select-label');
     if (labelEl) labelEl.textContent = this.getThemeButtonLabel(selectEl, fallback);
+  }
+
+  refreshNetworkProxyControls(settings = appSettings.get()) {
+    if (!this.networkProxySelect) return;
+    const mode = normalizeNetworkProxyMode(settings.networkProxyMode);
+    this.networkProxySelect.value = mode;
+    this.refreshThemeSelectButton(this.networkProxyButton, this.networkProxySelect, t('网络代理'));
+    if (this.networkProxyUrlBlock) this.networkProxyUrlBlock.hidden = mode !== 'custom';
+    if (this.networkProxyUrlInput && document.activeElement !== this.networkProxyUrlInput) {
+      this.networkProxyUrlInput.value = String(settings.networkProxyUrl || '');
+    }
+    if (!this.networkProxyStatus) return;
+    if (mode === 'direct') {
+      this.networkProxyStatus.textContent = t('所有请求都直接连线。');
+    } else if (mode === 'system') {
+      this.networkProxyStatus.textContent = t('电脑上使用 Windows 的代理设置，与浏览器相同；没有设置就直接连线。');
+    } else {
+      this.networkProxyStatus.textContent = resolveNetworkProxy(settings).mode === 'custom'
+        ? t('支持 http://、https://、socks5:// 开头的地址；只填 127.0.0.1:7890 时按 http 处理。')
+        : t('地址未填或格式不对，暂时跟随系统代理。');
+    }
+  }
+
+  async applyNetworkProxySetting(patch) {
+    const settings = appSettings.update(patch);
+    this.refreshNetworkProxyControls(settings);
+    try {
+      await syncNetworkProxy(safeInvoke, settings);
+    } catch (error) {
+      if (this.networkProxyStatus) {
+        this.networkProxyStatus.textContent = `${t('代理设置没有生效：')}${error?.message || error}`;
+      }
+    }
   }
 
   populateThemeSelect(selectEl, options = [], currentValue = '') {
@@ -1655,6 +1695,7 @@ export class GeneralSettingsPanel {
         width: 100%;
       }
       #general-settings-panel .general-settings-number-input,
+      #general-settings-panel .general-settings-text-input,
       #general-settings-panel .general-settings-select {
         width: 100%;
         padding: 8px 10px;
@@ -1868,6 +1909,34 @@ export class GeneralSettingsPanel {
                   <span class="world-app-select-btn-chevron">▾</span>
                 </button>
                 <div id="general-language-status" class="general-settings-inline-hint">更改语言后需要重启应用。</div>
+              `,
+            })}
+          </div>
+        </div>
+
+        <div class="general-settings-card">
+          <div class="general-settings-card-head">
+            <div>
+              <div class="general-settings-card-title has-help" data-help="连线 AI 服务时用不用代理。">网络</div>
+            </div>
+          </div>
+          <div class="general-settings-setting-list">
+            ${this.renderInputRow({
+              title: '网络代理',
+              description: '对话、生图、朗读、拉取模型和自动更新使用的代理。本机和局域网地址（如 Ollama、ComfyUI）始终直接连线；实时语音通话不经过这项设置。',
+              icon: 'link',
+              control: `
+                <select id="general-network-proxy-select" class="general-settings-select" style="display:none;"></select>
+                <div class="general-settings-inline-actions">
+                  <button type="button" id="general-network-proxy-btn" class="world-app-select-btn" style="margin-top:0;">
+                    <span class="general-settings-custom-select-label">网络代理</span>
+                    <span class="world-app-select-btn-chevron">▾</span>
+                  </button>
+                </div>
+                <div id="general-network-proxy-url-block" class="general-settings-field-block" hidden>
+                  <input type="text" id="general-network-proxy-url" class="general-settings-text-input" placeholder="http://127.0.0.1:7890" spellcheck="false" autocomplete="off">
+                </div>
+                <div id="general-network-proxy-status" class="general-settings-inline-hint"></div>
               `,
             })}
           </div>
@@ -2582,6 +2651,11 @@ export class GeneralSettingsPanel {
     this.modalElement = this.element.querySelector('.general-settings-modal');
     this.languageSelect = this.element.querySelector('#general-language-select');
     this.languageButton = this.element.querySelector('#general-language-btn');
+    this.networkProxySelect = this.element.querySelector('#general-network-proxy-select');
+    this.networkProxyButton = this.element.querySelector('#general-network-proxy-btn');
+    this.networkProxyUrlBlock = this.element.querySelector('#general-network-proxy-url-block');
+    this.networkProxyUrlInput = this.element.querySelector('#general-network-proxy-url');
+    this.networkProxyStatus = this.element.querySelector('#general-network-proxy-status');
     this.languageStatus = this.element.querySelector('#general-language-status');
 
     this.themePresetSelect = this.element.querySelector('#general-theme-preset-select');
@@ -2710,6 +2784,11 @@ export class GeneralSettingsPanel {
     this.populateThemeSelect(this.themeAvatarStyleSelect, THEME_AVATAR_STYLE_OPTIONS, appSettings.get().uiThemeAvatarStyle);
     this.populateThemeSelect(this.themeChatDisplaySelect, THEME_CHAT_DISPLAY_OPTIONS, appSettings.get().uiThemeChatDisplay);
     this.populateThemeSelect(this.themeToastPositionSelect, THEME_TOAST_POSITION_OPTIONS, appSettings.get().uiThemeToastrPosition);
+    this.populateThemeSelect(this.networkProxySelect, [
+      { value: 'system', label: t('跟随系统代理') },
+      { value: 'direct', label: t('不用代理') },
+      { value: 'custom', label: t('自定义地址') },
+    ], appSettings.get().networkProxyMode);
 
     this.initSelectableCards();
     this.updateShortcutButtons();
@@ -2964,6 +3043,15 @@ export class GeneralSettingsPanel {
     this.debugLogToggle?.addEventListener('change', (e) => {
       const enabled = Boolean(e?.target?.checked);
       appSettings.update({ debugExecutionLogs: enabled });
+    });
+    this.networkProxyButton?.addEventListener('click', () => {
+      this.openThemeSelectMenu(this.networkProxyButton, this.networkProxySelect, t('网络代理'));
+    });
+    this.networkProxySelect?.addEventListener('change', (e) => {
+      this.applyNetworkProxySetting({ networkProxyMode: normalizeNetworkProxyMode(e?.target?.value) });
+    });
+    this.networkProxyUrlInput?.addEventListener('change', (e) => {
+      this.applyNetworkProxySetting({ networkProxyUrl: String(e?.target?.value || '').trim() });
     });
     this.languageButton?.addEventListener('click', () => {
       this.openThemeSelectMenu(this.languageButton, this.languageSelect, t('选择语言'));

@@ -4,6 +4,8 @@ export const COMPAT_GAP_REPORT_STORE_KEY = 'compat_gap_reports_v1';
 export const COMPAT_GAP_REPORT_LIMIT = 100;
 const COMPAT_GAP_REPORT_VERSION = 1;
 const COMPAT_API_RE = /^(?:\$\(\)|\$|_\(\)|_)\.[A-Za-z_$][A-Za-z0-9_$]{0,79}$/;
+// 脚本打到 APP 还没有的酒馆后端接口（/api/...）
+const TAVERN_API_PATH_RE = /^\/api\/[A-Za-z0-9_\-./]{1,120}$/;
 
 const clone = (value) => {
   try {
@@ -21,8 +23,8 @@ const toTimestamp = (value, fallback = 0) => {
 const trimToken = (value, maxLength = 96) => String(value || '').trim().slice(0, maxLength);
 
 export const sanitizeCompatGapApi = (value) => {
-  const api = trimToken(value, 96);
-  return COMPAT_API_RE.test(api) ? api : '';
+  const api = trimToken(value, 128);
+  return COMPAT_API_RE.test(api) || TAVERN_API_PATH_RE.test(api) ? api : '';
 };
 
 export const fingerprintCompatGapValue = (value) => {
@@ -60,6 +62,7 @@ const normalizeReport = (value = {}) => {
     errorCategory: trimToken(input.errorCategory, 48),
     errorFingerprint: trimToken(input.errorFingerprint, 80),
     appVersion: trimToken(input.appVersion, 48),
+    scriptName: trimToken(input.scriptName, 80),
     firstSeenAt,
     lastSeenAt,
     candidateCount: Math.max(0, Math.trunc(Number(input.candidateCount) || 0)),
@@ -114,6 +117,7 @@ export const upsertCompatGapReport = (
     errorCategory: confirmed ? incoming.errorCategory : (previous?.errorCategory || incoming.errorCategory),
     errorFingerprint: confirmed ? incoming.errorFingerprint : (previous?.errorFingerprint || incoming.errorFingerprint),
     appVersion: incoming.appVersion || previous?.appVersion || '',
+    scriptName: incoming.scriptName || previous?.scriptName || '',
     firstSeenAt: previous ? Math.min(previous.firstSeenAt, timestamp) : timestamp,
     lastSeenAt: timestamp,
     candidateCount: (previous?.candidateCount || 0) + (confirmed ? 0 : 1),
@@ -147,7 +151,8 @@ export const formatCompatGapReports = (reports = []) => {
     .sort((left, right) => right.lastSeenAt - left.lastSeenAt);
   if (!list.length) return '暂无兼容缺口记录';
   return list.map((report, index) => [
-    `${index + 1}. [${report.status === 'confirmed' ? 'CONFIRMED' : 'CANDIDATE'}] api=${report.api}`,
+    `${index + 1}. [${report.status === 'confirmed' ? 'CONFIRMED' : 'CANDIDATE'}] api=${report.api}${
+      report.scriptName || report.phase === 'tavern_api' ? ` script=${report.scriptName || '-'}` : ''}`,
     `   scope=${report.scopeFingerprint} revision=${report.revisionFingerprint}`,
     `   phase=${report.phase || '-'} category=${report.errorCategory || '-'} error=${report.errorFingerprint || '-'}`,
     `   candidate=${report.candidateCount} confirmed=${report.confirmedCount} app=${report.appVersion || '-'}`,

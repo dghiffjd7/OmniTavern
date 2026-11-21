@@ -22,8 +22,10 @@ const sessionReads = [
 
 // Exercise real normalization, registry execution and terminal persistence with
 // fixed model responses. Network/model retries cannot hide the two regressions.
+// 11/21 起世界书比较报告是模型自己调用的工具（worldbook.compare_entries），读完世界书后的最终回复照模型原文；
+// 同名联系人比较后的删除提醒（只看结构）仍由 APP 加在模型原文前。
 for (const transport of ['provider_fc', 'prompted_json']) for (const scenario of ['worldbook', 'session']) {
-  test(`${transport}: ${scenario} APP presentation is published while the model draft stays unchanged`, async () => {
+  test(`${transport}: ${scenario} final reply ${scenario === 'session' ? 'gets the APP deletion notice' : 'stays the model draft'} without extra calls`, async () => {
     const reads = scenario === 'worldbook' ? worldReads : sessionReads;
     const draft = scenario === 'worldbook' ? worldDraft : sessionDraft;
     const input = scenario === 'worldbook' ? '把奇幻大陆的副本合并回去' : '把重复的小雪删掉只留一个';
@@ -73,24 +75,20 @@ for (const transport of ['provider_fc', 'prompted_json']) for (const scenario of
     assert.equal(requests.length, reads.length + 1, 'presentation adds no model call');
     assert.equal(result.finalDecision.message, draft, 'raw model output remains available for diagnosis/scoring');
     assert.equal(result.finalDecision.source, transport === 'provider_fc' ? 'maid_provider_fc' : 'model_react');
-    assert.ok(result.appPresentation, 'terminal output must apply the APP presentation');
-    assert.equal(result.appPresentation.modelMessage, draft);
-    assert.match(result.message, /APP/);
+    const run = store.listRuns({ kind: 'maid_assistant' })[0];
     if (scenario === 'worldbook') {
-      assert.ok(!result.message.includes(worldDraft), 'known cross-book paraphrase must not remain in the visible facts');
-      const sourceBodies = [...new Map(worldReads.flatMap(step => step.output.entries
-        .filter(entry => typeof entry.content === 'string' && /旅行者公会|北境霜城/u.test(entry.title))
-        .map(entry => [`${step.output.id}:${entry.id}`, entry]))).values()];
-      assert.equal(sourceBodies.length, 4);
-      for (const entry of sourceBodies) assert.ok(result.message.includes(entry.content), `Missing original: ${entry.content}\nVisible result: ${result.message}`);
+      assert.equal(result.appPresentation, undefined);
+      assert.equal(result.message, worldDraft);
     } else {
+      assert.ok(result.appPresentation, 'terminal output must apply the APP deletion notice');
+      assert.equal(result.appPresentation.modelMessage, draft);
+      assert.match(result.message, /APP/);
       assert.ok(result.message.endsWith(sessionDraft));
       assert.match(result.message, /丢失其聊天记录/);
       assert.match(result.message, /真实确认/);
+      assert.ok(run.summary.startsWith('APP'), 'tracker must persist the APP notice instead of the original draft');
     }
     assert.equal(result.pendingWorkflow, undefined);
     assert.equal(result.pendingAction, undefined);
-    const run = store.listRuns({ kind: 'maid_assistant' })[0];
-    assert.ok(run.summary.startsWith('APP'), 'tracker must persist the APP presentation instead of the original draft');
   });
 }

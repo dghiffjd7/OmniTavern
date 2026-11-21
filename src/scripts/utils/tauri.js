@@ -26,14 +26,21 @@ export const resolveInvokeTimeoutMs = (cmd, args) => {
     return 20000;
 };
 
-export const safeInvoke = async (cmd, args) => {
+// 尝试多种路径获取 invoke 函数
+const resolveInvoker = () => {
     const g = typeof globalThis !== 'undefined' ? globalThis : window;
-    // 尝试多种路径获取 invoke 函数
-    const invoker = g?.__TAURI__?.core?.invoke || 
-                    g?.__TAURI__?.invoke || 
-                    g?.__TAURI_INVOKE__ || 
-                    g?.__TAURI_INTERNALS__?.invoke;
-    
+    return g?.__TAURI__?.core?.invoke ||
+        g?.__TAURI__?.invoke ||
+        g?.__TAURI_INVOKE__ ||
+        g?.__TAURI_INTERNALS__?.invoke;
+};
+
+// 不在 Tauri 里（浏览器开发、node 测试）时调用方改用 localStorage 等
+export const hasTauriInvoke = () => typeof resolveInvoker() === 'function';
+
+export const safeInvoke = async (cmd, args) => {
+    const invoker = resolveInvoker();
+
     if (typeof invoker !== 'function') {
         // 如果找不到 invoke，抛出错误，调用者应捕获并回退到 localStorage 等
         recordInvokeResult({ cmd, status: 'error', message: 'Tauri invoke not available' });

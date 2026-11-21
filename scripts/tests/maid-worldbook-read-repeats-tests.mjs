@@ -7,6 +7,7 @@ import { buildMaidModelReActMessages } from '../../src/scripts/agent/maid-model-
 import { buildMaidRunContinuationPromptBlock } from '../../src/scripts/agent/maid-run-continuation.js';
 import { buildMaidWorldbookObservationLedger, normalizeCarriedMaidWorldbookObservations } from '../../src/scripts/agent/maid-worldbook-observations.js';
 import { inspectMaidWorldbookRead, MAID_WORLDBOOK_READ_REPEAT_LIMIT } from '../../src/scripts/agent/maid-worldbook-read-repeats.js';
+import { buildMaidRunResumeSubmission } from '../../src/scripts/ui/maid-run-resume-utils.js';
 
 // 读取结果的形状与 worldbook.read 一致（11/14 那几轮读「苏晓彤」的缩小版）
 const entry = (id, content, extra = {}) => ({ id, title: `title:${id}`, keys: [id], disabled: false, contentLength: content.length,
@@ -79,7 +80,7 @@ test('the read ledger carried into a continuation keeps what is still valid', ()
   assert.doesNotMatch(buildMaidRunContinuationPromptBlock(continuation), /worldbookObservations|林林林/);
 });
 
-test('in a run: duplicate reads skip the tool, and saying 继续喵 resumes with the read ledger', async () => {
+test('in a run: duplicate reads skip the tool, and the structured resume carries the read ledger', async () => {
   const book = [entry('lin', '林'.repeat(40)), entry('su', '苏'.repeat(40))];
   const calls = [];
   const registry = {
@@ -128,7 +129,9 @@ test('in a run: duplicate reads skip the tool, and saying 继续喵 resumes with
   const carried = source.metadata.continuationSnapshot.worldbookObservations;
   assert.deepEqual(carried.books[0].entries.map(item => [item.id, item.content, item.earlierRun]), book.map(item => [item.id, item.content, true]));
 
-  await agent.runPrompt('继续喵', scope);
-  assert.equal(received?.runContinuation?.sourceRunId, source.id, '「继续喵」接上了中断的任务');
+  // 「继续」按钮与续跑工具 maid.task.resume 走同一条：buildMaidRunResumeSubmission → runContinuation
+  const submission = buildMaidRunResumeSubmission(source);
+  await agent.runPrompt(submission.text, { ...scope, ...submission.controls.context });
+  assert.equal(received?.runContinuation?.sourceRunId, source.id, '续跑接上了中断的任务');
   assert.deepEqual(received.runContinuation.worldbookObservations, carried);
 });

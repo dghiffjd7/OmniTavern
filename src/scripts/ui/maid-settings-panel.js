@@ -2315,9 +2315,9 @@ export const createMaidSettingsPanel = ({
       icon.className = 'maid-settings-empty-state-icon';
       icon.innerHTML = ICONS.shield;
       const title = documentRef.createElement?.('strong');
-      title.textContent = '尚无始终允许规则';
+      title.textContent = t('尚无允许规则');
       const copy = documentRef.createElement?.('p');
-      copy.textContent = '没有已保存的“始终允许”规则。危险操作每次都会重新确认。';
+      copy.textContent = t('没有已保存的允许规则。会改动内容的操作每次都会确认；在确认时选「这个角色卡一律允许」会记在这里。');
       empty.append(icon, title, copy);
       ruleListEl.appendChild(empty);
       return;
@@ -2336,6 +2336,10 @@ export const createMaidSettingsPanel = ({
       const meta = documentRef.createElement?.('div');
       meta.className = 'maid-settings-item-meta';
       meta.textContent = [
+        // 角色卡规则只在那张卡生效；没有角色卡的是旧的全局规则（与 MCP 的始终允许）
+        trim(rule?.roleCardId)
+          ? t('仅限角色卡「{name}」', { name: trim(rule?.roleCardName) || trim(rule?.roleCardId) })
+          : t('所有角色卡'),
         trim(rule?.toolName),
         trim(rule?.operationType),
         trim(rule?.riskLevel),
@@ -3614,7 +3618,7 @@ export const createMaidSettingsPanel = ({
     const safetyCaption = documentRef.createElement?.('div');
     safetyCaption.className = 'maid-settings-section-caption';
     const safetyLabel = documentRef.createElement?.('span');
-    safetyLabel.textContent = '始终允许规则';
+    safetyLabel.textContent = t('允许规则');
     const safetyCode = documentRef.createElement?.('small');
     safetyCode.textContent = 'ALLOWLIST';
     safetyCaption.append(safetyLabel, safetyCode);

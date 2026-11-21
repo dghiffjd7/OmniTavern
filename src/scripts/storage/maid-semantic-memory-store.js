@@ -1,4 +1,5 @@
 import { safeInvoke } from '../utils/tauri.js';
+import { makeScopedKey } from './store-scope.js';
 
 export const MAID_SEMANTIC_MEMORY_STORE_VERSION = 1;
 export const MAID_SEMANTIC_MEMORY_STORE_KEY = 'maid_semantic_memory_store_v1';
@@ -105,15 +106,6 @@ const readLocalJson = (storage, key = '') => {
   }
 };
 
-const writeLocalJson = (storage, key = '', value = {}) => {
-  try {
-    storage?.setItem?.(key, JSON.stringify(value));
-    return true;
-  } catch {
-    return false;
-  }
-};
-
 const loadKvDefault = async key => safeInvoke('load_kv', { name: key });
 const saveKvDefault = async (key, value) => safeInvoke('save_kv', { name: key, data: value });
 
@@ -124,6 +116,9 @@ const selectAuthoritativeState = (localRaw = null, kvRaw = null) => {
   if (!kv) return local;
   return Number(kv.updatedAt || 0) >= Number(local.updatedAt || 0) ? kv : local;
 };
+
+// load_kv 在档案不存在时回 {}；存过的状态一定带 memories 阵列
+const hasKvState = raw => isPlainObject(raw) && raw._tooLarge !== true && Array.isArray(raw.memories);
 
 const stableHash = (value = '') => {
   let hash = 2166136261;
@@ -400,8 +395,15 @@ const scoreMemoryForRetrieval = (memory = {}, query = '') => {
   return { score, reasons: Array.from(reasons) };
 };
 
+// localStorage 键（照旧）；它也是旧版 KV 存档名，升级后只读不写
 export const getMaidSemanticMemoryStorageKey = (scopeId = 'maid_default') => (
   `${MAID_SEMANTIC_MEMORY_STORE_KEY}:${encodeURIComponent(trim(scopeId, 'maid_default'))}`
+);
+
+// KV 存档名会直接成为数据目录里的档名：Windows 上冒号会被当成 NTFS 附加资料流，原子写入的暂存档无法改名
+// （os error 87），所以磁盘键改用 makeScopedKey（只留 [a-zA-Z0-9_-]），与其他按范围分档的 store 相同。
+export const getMaidSemanticMemoryDiskKey = (scopeId = 'maid_default') => (
+  makeScopedKey(MAID_SEMANTIC_MEMORY_STORE_KEY, trim(scopeId, 'maid_default'))
 );
 
 export class MaidSemanticMemoryStore {
@@ -412,6 +414,7 @@ export class MaidSemanticMemoryStore {
     saveKv = saveKvDefault,
     now = Date.now,
     onChanged = null,
+    logger = console,
   } = {}) {
     this.scopeId = trim(scopeId, 'maid_default');
     this.storage = storage;
@@ -419,6 +422,7 @@ export class MaidSemanticMemoryStore {
     this.saveKv = typeof saveKv === 'function' ? saveKv : null;
     this.now = typeof now === 'function' ? now : Date.now;
     this.onChanged = typeof onChanged === 'function' ? onChanged : null;
+    this.logger = logger || console;
     this.loaded = false;
     this.state = normalizeStoreState({}, { scopeId: this.scopeId, now: this.now });
     this.writeChain = Promise.resolve();
@@ -429,13 +433,27 @@ export class MaidSemanticMemoryStore {
     return getMaidSemanticMemoryStorageKey(this.scopeId);
   }
 
-  async load() {
-    const key = this.storageKey;
-    const localRaw = readLocalJson(this.storage, key);
-    let kvRaw = null;
+  get diskKey() {
+    return getMaidSemanticMemoryDiskKey(this.scopeId);
+  }
+
+  async readKv(name = '') {
     try {
-      kvRaw = await this.loadKv?.(key);
-    } catch {}
+      return await this.loadKv?.(name);
+    } catch {
+      return null;
+    }
+  }
+
+  async load() {
+    const localRaw = readLocalJson(this.storage, this.storageKey);
+    let kvRaw = await this.readKv(this.diskKey);
+    // 新磁盘键还没写过时才读旧存档名（带冒号，只读）；与 localStorage 之间仍照 updatedAt 取较新的一份，
+    // 旧副本不会盖掉较新的 localStorage。之后第一次写入就写进新磁盘键。
+    if (!hasKvState(kvRaw)) {
+      const legacyRaw = await this.readKv(this.storageKey);
+      if (hasKvState(legacyRaw)) kvRaw = legacyRaw;
+    }
     this.state = normalizeStoreState(selectAuthoritativeState(localRaw, kvRaw), {
       scopeId: this.scopeId,
       now: this.now,
@@ -465,10 +483,24 @@ export class MaidSemanticMemoryStore {
     const payload = this.exportState();
     let kvSaved = false;
     try {
-      await this.saveKv?.(this.storageKey, payload);
+      await this.saveKv?.(this.diskKey, payload);
       kvSaved = Boolean(this.saveKv);
-    } catch {}
-    const localSaved = writeLocalJson(this.storage, this.storageKey, payload);
+    } catch (error) {
+      this.logger?.warn?.('maid semantic memory KV save failed', {
+        name: this.diskKey,
+        error: String(error?.message || error),
+      });
+    }
+    let localSaved = true;
+    try {
+      this.storage?.setItem?.(this.storageKey, JSON.stringify(payload));
+    } catch (error) {
+      localSaved = false;
+      this.logger?.warn?.('maid semantic memory localStorage save failed', {
+        key: this.storageKey,
+        error: String(error?.message || error),
+      });
+    }
     return kvSaved || localSaved;
   }
 

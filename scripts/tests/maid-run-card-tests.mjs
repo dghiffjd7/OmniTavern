@@ -200,7 +200,11 @@ const run = (overrides = {}) => ({
   let visible = true;
   const allowRules = [];
   const runtime = createMaidToolConfirmationRuntime({
-    allowStore: { isAllowed: () => false, allowAlways: request => { allowRules.push(request.toolName); return { id: 'rule' }; } },
+    allowStore: {
+      isAllowed: () => false,
+      allowAlways: request => { allowRules.push(request.toolName); return { id: 'rule' }; },
+      allowForRoleCard: (request, scope) => { allowRules.push(`${request.toolName}@${scope.roleCardId}`); return { id: 'rule' }; },
+    },
     choose: async (options) => { opened.push(options); return 'allow_once'; },
     canShowInline: () => visible,
     onChange: () => changes.push(runtime.getPendingCount()),
@@ -209,8 +213,12 @@ const run = (overrides = {}) => ({
   const modal = await runtime.request({ toolName: 'x', title: 'T' }, { runId: '' });
   assert.deepEqual(modal, { decision: 'allow' });
   assert.equal(opened.length, 1, '没有 runId 时沿用弹窗');
-  // 权限确认弹窗横排：始终允许（文字按钮）在左，取消、允许一次在右；回车仍默认允许一次
-  assert.deepEqual(opened[0].actions.map(action => action.id), ['allow_always', 'deny', 'allow_once']);
+  // 权限确认弹窗横排：记住的选项（文字按钮）在左，取消、允许一次在右；回车仍默认允许一次。
+  // 一般写入不再提供全局始终允许；没有角色卡身份时只能记住到「这个任务」（11/20）
+  assert.deepEqual(opened[0].actions.map(action => action.id), ['allow_task', 'deny', 'allow_once']);
+  await runtime.request({ toolName: 'x', title: 'T' }, { runId: '', submissionId: 'sub_1', roleCardId: 'card_1' });
+  assert.deepEqual(opened[1].actions.map(action => action.id), ['allow_role_card', 'allow_task', 'deny', 'allow_once']);
+  opened.splice(1);
   assert.equal(opened[0].defaultActionId, 'allow_once');
   assert.equal(opened[0].tone, 'caution');
   assert.equal(opened[0].danger, false, '非删除类操作不再用红色主按钮');
@@ -222,17 +230,19 @@ const run = (overrides = {}) => ({
     assert.equal(dangerOpened[0].tone, 'danger');
     assert.equal(dangerOpened[0].danger, true);
     assert.equal(dangerOpened[0].badge, '删除');
-    assert.deepEqual(dangerOpened[0].actions.map(action => action.id), ['deny', 'allow_once'], '不允许“始终允许”时不显示');
+    assert.deepEqual(dangerOpened[0].actions.map(action => action.id), ['allow_task', 'deny', 'allow_once'], '删除只能记住到这个任务，不按角色卡');
   }
 
-  const inline = runtime.request({ toolName: 'worldbook.bind', title: '绑定？', details: { items: [{ label: 'A' }] } }, { runId: 'run_1' });
+  const inline = runtime.request({ toolName: 'worldbook.bind', title: '绑定？', details: { items: [{ label: 'A' }] } }, { runId: 'run_1', submissionId: 'sub_1', roleCardId: 'card_1' });
   const pending = runtime.getInline('run_1');
   assert.equal(pending.title, '绑定？');
   assert.equal(pending.items[0].label, 'A');
   assert.equal(runtime.getInline('run_other'), null);
-  runtime.resolve(pending.id, 'allow_always');
-  assert.deepEqual(await inline, { decision: 'allow', remembered: true, rule: { id: 'rule' } });
-  assert.deepEqual(allowRules, ['worldbook.bind']);
+  assert.equal(pending.allowAlways, false);
+  assert.equal(pending.allowRoleCard, true);
+  runtime.resolve(pending.id, 'allow_role_card');
+  assert.deepEqual(await inline, { decision: 'allow', remembered: 'role_card' });
+  assert.deepEqual(allowRules, ['worldbook.bind@card_1']);
 
   const escalated = runtime.request({ toolName: 'w', escalation: 'read_only_write' }, { runId: 'run_1' });
   const escalatedEntry = runtime.getInline('run_1');
@@ -348,4 +358,26 @@ const run = (overrides = {}) => ({
   });
   assert.equal(labels(), 6, '新的确认重新收起');
   console.log('ok - long inline approval lists expand and collapse');
+}
+
+{
+  // 记住的选项（11/20）：这个任务／这个角色卡一律允许；语音时不显示；没提供的选项按了没反应
+  const decisions = [];
+  const card = createMaidRunCardView({ documentRef: new FakeDocument(), onDecision: payload => decisions.push(payload) });
+  card.update(projectMaidRunToTraceView(run({ status: 'waiting_permission' })), {
+    approval: { id: 'c5', title: '新建角色卡', message: '', allowTask: true, allowRoleCard: true, roleCardName: '小雪', confirmLabel: '允许一次', cancelLabel: '取消' },
+  });
+  const approvalEl = card.el.children[1].children[1];
+  assert.match(approvalEl.innerHTML, /mrc-approval-remember/);
+  assert.match(approvalEl.innerHTML, /data-mrc-action="allow_task" title="重开 APP 或清空女仆对话前都不再询问">这个任务一律允许/);
+  assert.match(approvalEl.innerHTML, /data-mrc-action="allow_role_card" title="小雪">这个角色卡一律允许/);
+  assert.doesNotMatch(approvalEl.innerHTML, /始终允许/);
+  assert.equal(card.handleAction('allow_always'), false, '没提供的全局始终允许按了没反应');
+  assert.equal(card.handleAction('allow_task'), true);
+  assert.equal(card.handleAction('allow_role_card'), true);
+  assert.deepEqual(decisions.map(item => item.action), ['allow_task', 'allow_role_card']);
+  card.setExtras({ voice: true });
+  assert.doesNotMatch(approvalEl.innerHTML, /一律允许/, '语音确认只能允许一次');
+  assert.equal(card.handleAction('allow_task'), false);
+  console.log('ok - inline approval offers this task / this role card and hides them for voice');
 }

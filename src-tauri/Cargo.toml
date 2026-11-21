@@ -23,7 +23,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 base64 = "0.22"
 chrono = "0.4"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "multipart", "socks"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "multipart", "socks", "system-proxy"] }
 tokio = { version = "1", features = ["rt", "net", "time", "sync", "macros"] }
 tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }

@@ -54,7 +54,7 @@ const checks = [
     assert.equal(snapshot.candidateRefs.find(item => item.id === 'worldbook.delete_many')
       .reasonCodes.includes('looked_up_feature'), true);
   }],
-  ['negation and read-only requests stay filtered even after a successful doc read', () => {
+  ['negation and read-only wording no longer filters candidates by keywords', () => {
     for (const input of [
       '不要把世界书「雾港旧档」删了',
       '我不想把世界书「雾港旧档」删了',
@@ -69,10 +69,9 @@ const checks = [
       '仅查看世界书「雾港旧档」是否已经删了',
       '只读核对世界书「雾港旧档」，不要删除',
     ]) {
+      // 11/20 起程序不再按否定／只读字眼剔除删除候选：要不要删交给模型，真的删除照样逐次确认
       const snapshot = prepare(createRuntime(), input, { readDoc: true });
-      assert.equal(snapshot.candidateIds.has('worldbook.delete_many'), false, input);
-      assert.equal(snapshot.excluded.some(item => item.id === 'worldbook.delete_many'
-        && item.reason === 'risk_intent_not_explicit'), true, input);
+      assert.equal(snapshot.excluded.some(item => item.reason === 'risk_intent_not_explicit'), false, input);
     }
   }],
   ['negation ends at punctuation before an independent positive request', () => {

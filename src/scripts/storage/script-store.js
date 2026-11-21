@@ -1,13 +1,21 @@
-import { safeInvoke } from '../utils/tauri.js';
+import { hasTauriInvoke, safeInvoke } from '../utils/tauri.js';
 import { logger } from '../utils/logger.js';
+import { t } from '../i18n/index.js';
 import { shouldRestoreLegacyExecutableScript } from '../import/mvu-script-classification.js';
 import {
   analyzeScriptCompatibility,
   resolveScriptCompatibility,
 } from '../import/script-capability-preflight.js';
+import { analyzeImportedScripts } from '../import/tavern-feature-report.js';
 
-const STORE_KEY = 'script_store_v1';
+// 旧版把所有脚本存成一个 KV 档，脚本一多就超过 load_kv/save_kv 的 30MB 上限、存不进去。
+// 现在全局、每张角色卡、每个预设各存一个分片，索引记下分片档名；旧档只在没有索引时读一次并迁移，不删除。
+const LEGACY_STORE_KEY = 'script_store_v1';
+const INDEX_KEY = 'script_store_v2_index';
+const ITEM_PREFIX = 'script_store_v2_item';
 const STORE_VERSION = 2;
+const SHARD_LOAD_CONCURRENCY = 8;
+const SAVE_FAILURE_NOTICE_MS = 30000;
 
 const genId = (prefix) => `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 
@@ -49,14 +57,73 @@ const loadKv = async (name) => {
   return null;
 };
 
-const saveKv = async (name, data) => {
-  try {
-    await safeInvoke('save_kv', { name, data });
-    return true;
-  } catch (err) {
-    logger.debug('script store save_kv skipped (maybe not tauri)', err);
-    return false;
+const hashKey = (value) => {
+  let h = 2166136261;
+  const raw = String(value || '');
+  for (let i = 0; i < raw.length; i++) {
+    h ^= raw.charCodeAt(i);
+    h = Math.imul(h, 16777619);
   }
+  return (h >>> 0).toString(36);
+};
+
+const sanitizeKeySegment = (value, max = 40) => {
+  let out = '';
+  for (const ch of String(value || '').trim()) {
+    out += /^[a-zA-Z0-9_-]$/.test(ch) ? ch : '_';
+    if (out.length >= max) break;
+  }
+  return out.replace(/_+/g, '_').replace(/^_+|_+$/g, '') || 'item';
+};
+
+const makeItemKey = (scope, id) => `${ITEM_PREFIX}_${scope}_${hashKey(`${scope}:${id}`)}_${sanitizeKeySegment(id)}`;
+
+// 只记签名（长度＋两种杂凑），不在内存里再存一份整包 JSON
+const signatureOf = (text) => {
+  let a = 2166136261;
+  let b = 5381;
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    a = Math.imul(a ^ code, 16777619);
+    b = (Math.imul(b, 33) + code) | 0;
+  }
+  return `${text.length}:${(a >>> 0).toString(36)}:${(b >>> 0).toString(36)}`;
+};
+
+const listBuckets = (state) => [
+  { scope: 'global', id: 'global', bucket: state.global },
+  ...Object.entries(state.character || {}).map(([id, bucket]) => ({ scope: 'character', id, bucket })),
+  ...Object.entries(state.preset || {}).map(([id, bucket]) => ({ scope: 'preset', id, bucket })),
+];
+
+const makeItemPayload = (scope, id, bucket) => ({
+  version: 1,
+  scope,
+  id,
+  data: { scripts: bucket?.scripts || [], variables: bucket?.variables || {} },
+});
+
+const readIndexItems = (raw) => {
+  if (!raw || typeof raw !== 'object' || raw._tooLarge || !Array.isArray(raw.items)) return null;
+  return raw.items
+    .map(item => ({ scope: String(item?.scope || ''), id: String(item?.id || ''), key: String(item?.key || '') }))
+    .filter(item => ['global', 'character', 'preset'].includes(item.scope) && item.id && item.key);
+};
+
+const readItemPayload = (payload, { scope, id }) => {
+  if (!payload || typeof payload !== 'object' || payload._tooLarge) return null;
+  if (payload.scope !== scope || payload.id !== id) return null;
+  return payload.data && typeof payload.data === 'object' ? payload.data : null;
+};
+
+// 同一句提示 30 秒内只跳一次（脚本每次改动都会存档，失败时不要连跳）
+const lastSaveFailureNotices = new Map();
+const reportSaveFailure = (message, details) => {
+  logger.warn('[script-store] save failed', details);
+  const now = Date.now();
+  if (now - (lastSaveFailureNotices.get(message) || 0) < SAVE_FAILURE_NOTICE_MS) return;
+  lastSaveFailureNotices.set(message, now);
+  try { globalThis.window?.toastr?.error?.(message); } catch {}
 };
 
 // 酒馆助手在脚本配置里声明的按钮：运行时据此绘制，导出预设时原样带回
@@ -171,17 +238,66 @@ const emitChanged = (detail) => {
 export class ScriptStore {
   constructor() {
     this.state = makeDefaultState();
+    this.itemSignatures = new Map();
+    this.indexedKeys = new Set();
+    this.unloadedItems = new Map();
+    this.persistChain = Promise.resolve();
+    this.persistBlocked = '';
     this.ready = this.load();
   }
 
+  // 有索引就读分片；读不到的分片留在索引里（不当作已删除），之后存档也不清掉它的档
+  // 回传 null：还没迁移（索引档不存在）；{ error }：索引读不出来，不能退回旧档（旧档是迁移前的资料）
+  async loadSharded() {
+    const raw = await loadKv(INDEX_KEY);
+    if (raw === null && hasTauriInvoke()) return { error: 'index_unreadable' };
+    if (!raw || !Object.keys(raw).length) return null;
+    const items = readIndexItems(raw);
+    if (!items) return { error: raw._tooLarge ? 'index_too_large' : 'index_invalid' };
+    const loaded = new Array(items.length);
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < items.length) {
+        const at = cursor++;
+        loaded[at] = await loadKv(items[at].key);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(SHARD_LOAD_CONCURRENCY, items.length) }, worker));
+    const data = { version: STORE_VERSION, character: {}, preset: {} };
+    items.forEach((item, at) => {
+      const bucket = readItemPayload(loaded[at], item);
+      if (!bucket) {
+        this.unloadedItems.set(item.key, item);
+        logger.warn('[script-store] shard missing or unreadable; kept in index', { ...item, tooLarge: Boolean(loaded[at]?._tooLarge) });
+        return;
+      }
+      if (item.scope === 'global') data.global = bucket;
+      else data[item.scope][item.id] = bucket;
+    });
+    this.indexedKeys = new Set(items.map(item => item.key));
+    return { data };
+  }
+
+  // 存档读不出来时不迁移、不存档，免得用空资料或旧资料盖掉
+  blockPersist(reason) {
+    this.persistBlocked = reason;
+    this.state = makeDefaultState();
+    reportSaveFailure(t('脚本存档读不出来；为免覆盖，这次脚本的改动不会存档'), { reason });
+  }
+
   async load() {
-    const kv = await loadKv(STORE_KEY);
-    let data = kv && typeof kv === 'object' && !kv._tooLarge ? kv : null;
-    if (!data) data = readLocalJson(STORE_KEY);
-    if (!data || typeof data !== 'object') {
-      this.state = makeDefaultState();
-      return;
+    const sharded = await this.loadSharded();
+    if (sharded?.error) return this.blockPersist(sharded.error);
+    let data = sharded?.data || null;
+    const fromShards = Boolean(data);
+    if (!data) {
+      const kv = await loadKv(LEGACY_STORE_KEY);
+      // load_kv 档案不存在回 {}，读取出错回 null
+      if (kv?._tooLarge) return this.blockPersist('legacy_too_large');
+      if (kv === null && hasTauriInvoke()) return this.blockPersist('legacy_unreadable');
+      data = kv && typeof kv === 'object' && Object.keys(kv).length ? kv : readLocalJson(LEGACY_STORE_KEY);
     }
+    if (!data || typeof data !== 'object') data = {};
     const next = makeDefaultState();
     if (data.global && typeof data.global === 'object') {
       next.global.scripts = Array.isArray(data.global.scripts) ? data.global.scripts.map(s => normalizeScript(s)) : [];
@@ -216,21 +332,80 @@ export class ScriptStore {
     }
     next.version = STORE_VERSION;
     this.state = next;
-    if (storedVersion < STORE_VERSION) {
-      const payload = clone(this.state);
-      const saved = await saveKv(STORE_KEY, payload);
-      if (!saved) writeLocalJson(STORE_KEY, payload);
-      if (restoredLegacyScripts > 0) {
-        logger.info(`[script-store] restored ${restoredLegacyScripts} executable card scripts from legacy schemaOnly flags`);
-      }
+    if (restoredLegacyScripts > 0) {
+      logger.info(`[script-store] restored ${restoredLegacyScripts} executable card scripts from legacy schemaOnly flags`);
     }
+    if (fromShards) {
+      // 读入时会整理脚本栏位；以整理后的内容为已存基准，没改动就不重写分片
+      listBuckets(this.state).forEach(({ scope, id, bucket }) => {
+        const key = makeItemKey(scope, id);
+        if (this.indexedKeys.has(key)) this.itemSignatures.set(key, signatureOf(JSON.stringify(makeItemPayload(scope, id, bucket))));
+      });
+      return;
+    }
+    await this.persist({ notifyScriptsChanged: false, migration: true });
   }
 
-  async persist({ notifyScriptsChanged = true } = {}) {
-    const payload = clone(this.state);
-    const saved = await saveKv(STORE_KEY, payload);
-    if (!saved) writeLocalJson(STORE_KEY, payload);
-    if (notifyScriptsChanged) emitChanged({});
+  persist(options = {}) {
+    const run = this.persistChain.then(() => this.persistNow(options));
+    this.persistChain = run.catch(() => {});
+    return run;
+  }
+
+  async persistNow({ notifyScriptsChanged = true, migration = false } = {}) {
+    try {
+      if (this.persistBlocked) {
+        reportSaveFailure(t('脚本存档读不出来；为免覆盖，这次脚本的改动不会存档'), { reason: this.persistBlocked });
+        return false;
+      }
+      if (!hasTauriInvoke()) return writeLocalJson(LEGACY_STORE_KEY, clone(this.state));
+      const failures = [];
+      const indexItems = [];
+      for (const { scope, id, bucket } of listBuckets(this.state)) {
+        const key = makeItemKey(scope, id);
+        indexItems.push({ scope, id, key });
+        const payload = makeItemPayload(scope, id, bucket);
+        const signature = signatureOf(JSON.stringify(payload));
+        if (this.itemSignatures.get(key) === signature) continue;
+        try {
+          await safeInvoke('save_kv', { name: key, data: payload, compact: true });
+          this.itemSignatures.set(key, signature);
+        } catch (err) {
+          failures.push({ scope, id, error: String(err?.message || err) });
+        }
+      }
+      // 迁移时有分片没写成就不写索引，下次开机仍从旧档读
+      if (migration && failures.length) {
+        reportSaveFailure(t('脚本存档迁移没有完成，下次打开 APP 会再试：{reason}', { reason: failures[0].error }), failures);
+        return false;
+      }
+      const keys = new Set(indexItems.map(item => item.key));
+      this.unloadedItems.forEach((item, key) => { if (!keys.has(key)) { indexItems.push(item); keys.add(key); } });
+      try {
+        await safeInvoke('save_kv', { name: INDEX_KEY, data: { version: 1, storeVersion: STORE_VERSION, items: indexItems, savedAt: Date.now() } });
+      } catch (err) {
+        failures.push({ scope: 'index', id: INDEX_KEY, error: String(err?.message || err) });
+        reportSaveFailure(t('脚本没能存档，重开 APP 后这次的改动会不见：{reason}', { reason: failures[0].error }), failures);
+        return false;
+      }
+      for (const key of this.indexedKeys) {
+        if (keys.has(key)) continue;
+        try {
+          await safeInvoke('save_kv', { name: key, data: null });
+          this.itemSignatures.delete(key);
+        } catch (err) {
+          logger.debug('[script-store] stale shard cleanup failed', { key, err });
+        }
+      }
+      this.indexedKeys = keys;
+      if (failures.length) {
+        reportSaveFailure(t('脚本没能存档，重开 APP 后这次的改动会不见：{reason}', { reason: failures[0].error }), failures);
+        return false;
+      }
+      return true;
+    } finally {
+      if (notifyScriptsChanged) emitChanged({});
+    }
   }
 
   getScripts(scope = 'global', scopeId = '') {
@@ -378,6 +553,7 @@ export class ScriptStore {
         runnableIds: [],
         blockedIds: [],
         compatibility: { runnableCount: 0, blockedCount: 0, blocked: [] },
+        tavernFeatures: analyzeImportedScripts([]),
       };
     }
     const existingIds = new Set(bucket.scripts.map(s => s.id));
@@ -407,6 +583,8 @@ export class ScriptStore {
           message: script.compatibility.message,
         })),
       },
+      // 导入兼容报告：可运行脚本用到的酒馆功能与支持情况（导入完成提示用）
+      tavernFeatures: analyzeImportedScripts(runnable),
     };
   }
 }

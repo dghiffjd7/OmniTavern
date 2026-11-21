@@ -37,3 +37,7 @@ export const isAllowedPermission = (perm) => ALLOWED_PERMISSIONS.has(perm);
 export const isPowerRequired = (perm) => POWER_REQUIRED_PERMISSIONS.has(perm);
 export const isRiskyPermission = (perm) => RISKY_PERMISSIONS.has(perm);
 export const getRiskyDescription = (perm) => RISKY_PERMISSIONS.get(perm) || perm;
+export const getRiskyPermissions = (manifest) => {
+  const perms = Array.isArray(manifest?.permissions) ? manifest.permissions : [];
+  return perms.filter(p => RISKY_PERMISSIONS.has(p));
+};

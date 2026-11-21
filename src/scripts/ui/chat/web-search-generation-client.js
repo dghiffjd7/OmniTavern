@@ -94,14 +94,15 @@ const compactSearchResultForModel = (output = {}) => {
   };
 };
 
-const buildToolContinuationMessages = (toolCalls = [], toolResults = [], assistantCapture = {}) => {
+// wrapToolResult：调用方可选的包装（女仆子代理把搜索结果包成外部内容）；不传就原样
+const buildToolContinuationMessages = (toolCalls = [], toolResults = [], assistantCapture = {}, wrapToolResult = text => text) => {
   const nativeOutput = assistantCapture.responsesOutput || toolCalls.find(call => call?.providerContinuation?.api === 'openai_responses')
     ?.providerContinuation?.assistantOutput;
   if (Array.isArray(nativeOutput) && nativeOutput.length) {
     return [...nativeOutput, ...toolResults.map(item => ({
       type: 'function_call_output',
       call_id: trim(item.call.toolCallId || item.call.id),
-      output: JSON.stringify(compactSearchResultForModel(item.output)),
+      output: wrapToolResult(JSON.stringify(compactSearchResultForModel(item.output))),
     }))];
   }
   const assistantMessage = {
@@ -124,7 +125,7 @@ const buildToolContinuationMessages = (toolCalls = [], toolResults = [], assista
   ...toolResults.map(item => ({
     role: 'tool',
     tool_call_id: trim(item.call.toolCallId || item.call.id),
-    content: JSON.stringify(compactSearchResultForModel(item.output)),
+    content: wrapToolResult(JSON.stringify(compactSearchResultForModel(item.output))),
   })),
   ];
 };
@@ -296,7 +297,9 @@ export const createWebSearchGenerationClient = ({
   sessionId = '',
   maxToolCalls = 2,
   onSearchOutcome = null,
+  wrapToolResult = null,
 } = {}) => {
+  const wrapResult = typeof wrapToolResult === 'function' ? wrapToolResult : text => text;
   if (client && plan?.native === true && plan?.route === 'kimi_native') {
     return createKimiNativeWebSearchClient({
       client,
@@ -384,6 +387,7 @@ export const createWebSearchGenerationClient = ({
         toolResults.map(item => item.call),
         toolResults,
         assistantCapture,
+        wrapResult,
       );
       notifyWebSearchStatus(options, webSearch ? 'continuing' : 'failed', webSearch
         ? 'App 搜索工具已完成检索，正在整理回答…'
@@ -466,6 +470,7 @@ export const createWebSearchGenerationClient = ({
         toolResults.map(item => item.call),
         toolResults,
         assistantCapture,
+        wrapResult,
       );
       notifyWebSearchStatus(options, webSearch ? 'continuing' : 'failed', webSearch
         ? 'App 搜索工具已完成检索，正在整理回答…'

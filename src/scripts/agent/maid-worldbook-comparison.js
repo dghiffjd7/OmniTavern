@@ -3,20 +3,6 @@ import { buildMaidWorldbookObservationLedger } from './maid-worldbook-observatio
 
 const trim = value => String(value ?? '').trim();
 const clone = value => JSON.parse(JSON.stringify(value));
-const forbidden = /取消|算了|停止|不(?:比较|对比|合并|并回)|(?:不要|别|不想|不打算|没让你|禁止).{0,24}(?:比较|对比|合并|并回|compare|merge)|\b(?:do not|don't|never|cancel|stop)\b/iu;
-const request = /(?:^|[，,。；;！？!?\n])\s*(?:(?:请|麻烦|帮我|替我|给我)\s*)*(?:(?:把|将)[^，,。；;！？!?\n]{1,120}(?:比较|对比|合并|并回)|(?:比较|对比|合并|并回)\s*\S|(?:(?:please|can you|could you|would you)\s+)?(?:compare|merge)\s+\S)/iu;
-const nonImperative = /(?:^|[，,。；;！？!?\n])\s*(?:(?:比较|对比|合并|并回)\s*(?:是什么|是什么意思|有什么意思|的意思)|(?:合并|并回)后的|(?:比较|对比)好看)/u;
-const isRequest = input => request.test(trim(input)) && !forbidden.test(trim(input)) && !nonImperative.test(trim(input));
-const mergeRequest = /(?:^|[，,。；;！？!?\n])\s*(?:(?:请|麻烦|帮我|替我|给我)\s*)*(?:(?:把|将)[^，,。；;！？!?\n]{1,120}(?:合并|并回)|(?:合并|并回)\s*\S|(?:(?:please|can you|could you|would you)\s+)?merge\s+\S)/iu;
-const worldbookReference = /世界[书書]|\b(?:world\s*books?|lore\s*books?)\b/iu;
-const mentionsObservedReference = (input, reference) => {
-  const value = trim(reference);
-  if (!value) return false;
-  const escaped = value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
-  const prefix = /^[A-Za-z0-9_-]/u.test(value) ? '(?:^|[^A-Za-z0-9_-])' : '';
-  const suffix = /[A-Za-z0-9_-]$/u.test(value) ? '(?=$|[^A-Za-z0-9_-])' : '';
-  return new RegExp(`${prefix}${escaped}${suffix}`, 'u').test(input);
-};
 const fullEntry = entry => typeof entry?.content === 'string'
   && entry.contentTruncated === false && entry.presentationTruncated === false
   && entry.contentLength === entry.content.length;
@@ -30,18 +16,11 @@ const bookRef = book => ({
   sourceSteps: [...new Set(book.entries.map(entry => entry.observedStep))],
 });
 
-export const buildMaidWorldbookComparisonContext = ({ input = '', steps = [], context = {} } = {}) => {
-  if (!isRequest(input)) return { eligible: false, autoPresentEligible: false, reason: 'not_comparison_request', books: [], needsSelection: false };
+// 只看实际读取：两本以上世界书的已读内容才能比较
+export const buildMaidWorldbookComparisonContext = ({ steps = [], context = {} } = {}) => {
   const ledger = getLedger(steps, context), books = (ledger?.books || []).map(bookRef);
-  const text = trim(input);
-  const hasWorldbookTarget = worldbookReference.test(text)
-    || books.some(book => mentionsObservedReference(text, book.name) || mentionsObservedReference(text, book.id));
   return {
     eligible: books.length >= 2,
-    // A report may support an explicit comparison API call, but automatic
-    // publication is narrower: incidental background reads cannot change a
-    // character comparison into a worldbook merge proposal.
-    autoPresentEligible: books.length >= 2 && mergeRequest.test(text) && hasWorldbookTarget,
     reason: books.length < 2 ? 'comparison_reads_missing' : '', books,
     omittedBooks: ledger?.omittedBooks || 0,
     needsSelection: books.length > 2 || Boolean(ledger?.omittedBooks),
@@ -147,10 +126,9 @@ const formatReport = (report, maxMessageChars) => {
   return message;
 };
 
-export const resolveMaidWorldbookComparison = ({ input = '', steps = [], context = {}, comparison = null, maxMessageChars = 2200 } = {}) => {
-  const available = buildMaidWorldbookComparisonContext({ input, steps, context });
-  if (!available.eligible) return { ok: false, autoPresentEligible: false, status: 'not_applicable', reason: available.reason, message: '', report: null };
-  const { autoPresentEligible } = available;
+export const resolveMaidWorldbookComparison = ({ steps = [], context = {}, comparison = null, maxMessageChars = 2200 } = {}) => {
+  const available = buildMaidWorldbookComparisonContext({ steps, context });
+  if (!available.eligible) return { ok: false, status: 'not_applicable', reason: available.reason, message: '', report: null };
   const ledger = getLedger(steps, context), books = ledger.books;
   let left, right, targetBookId = '';
   if (comparison !== null && comparison !== undefined) {
@@ -168,7 +146,7 @@ export const resolveMaidWorldbookComparison = ({ input = '', steps = [], context
     const message = t('APP 已保留实际读取的世界书资料，请明确要比较的两本世界书；尚未选择合并目标，也未执行修改。');
     const budget = messageBudget(maxMessageChars);
     return {
-    ok: true, autoPresentEligible, status: 'needs_selection', reason: 'comparison_books_not_selected',
+    ok: true, status: 'needs_selection', reason: 'comparison_books_not_selected',
     message: message.length <= budget ? message : '',
     report: { kind: 'worldbook_entries', source: 'app_observed_content', readOnly: true,
       books: available.books, omittedBooks: available.omittedBooks, completeComparison: false,
@@ -178,7 +156,7 @@ export const resolveMaidWorldbookComparison = ({ input = '', steps = [], context
   const report = buildReport(left, right, targetBookId);
   const message = formatReport(report, maxMessageChars);
   const complete = report.completeComparison && report.presentation.complete;
-  return { ok: true, autoPresentEligible, status: complete ? 'ready' : 'incomplete', reason: complete ? '' : 'comparison_evidence_incomplete', message, report,
+  return { ok: true, status: complete ? 'ready' : 'incomplete', reason: complete ? '' : 'comparison_evidence_incomplete', message, report,
     comparison: { kind: 'worldbook_entries', leftBookId: left.id, rightBookId: right.id, ...(targetBookId ? { targetBookId } : {}) },
   };
 };

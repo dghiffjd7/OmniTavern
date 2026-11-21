@@ -46,17 +46,19 @@ import { DEFAULT_MAID_PROMPT } from '../../src/scripts/agent/maid-prompt-default
 }
 
 {
+  // 11/21 起新手引导是功能目录里的工具，闲聊回复与其他功能一样按检索带上它的说明
   const messages = buildMaidChatResponderMessages({
-    input: '新手任务有哪些',
+    input: '新手引导有哪些',
   });
   const prompt = messages.map(message => (
     typeof message.content === 'string'
       ? message.content
       : JSON.stringify(message.content)
   )).join('\n');
-  assert.match(prompt, /APP 存在由本地界面直接处理的内建新手任务/);
-  assert.doesNotMatch(prompt, /maid\.onboarding|女仆新手引导|guide\.start_flow|setup-api|add-friend|first-chat|meet-maid/);
-  console.log('ok - maid chat responder does not receive built-in onboarding flow details');
+  assert.doesNotMatch(prompt, /APP 存在由本地界面直接处理的内建新手任务/);
+  assert.match(prompt, /maid\.onboarding/);
+  assert.match(prompt, /guide\.start_flow/);
+  console.log('ok - maid chat responder sees the onboarding guide like any other catalog feature');
 }
 
 {

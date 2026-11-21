@@ -531,7 +531,7 @@ export const createGroupChatAgentTools = ({
     {
       name: 'group.create',
       title: 'Create group chat',
-      description: 'Create a real group chat from explicit existing private-contact members with one APP approval. Use preview:true only when the user asks to see the proposed details first; this does not create or approve the group. The active user participates implicitly and must not be included in members.',
+      description: 'Create a real group chat from explicit existing private-contact members with one APP approval. Use preview:true only when the user asks to see the proposed details first; this does not create or approve the group. The active user participates implicitly and must not be included in members. The group is created under the active character card; to create it under a new card, first create it with persona.create setActive:true or switch to it with persona.switch.',
       source: 'maid-group-chat',
       permissions: [],
       riskLevel: 'medium',

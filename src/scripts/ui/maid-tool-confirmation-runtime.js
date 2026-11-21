@@ -1,7 +1,11 @@
 /* 女仆工具确认：原 app.js 的 requestMaidToolConfirmation 整块迁入，并新增卡内确认。
    - 能在运行卡里显示时（输入胶囊、执行流面板或语音托盘正在展示该 run），确认块直接出现在卡内；
    - 否则沿用原 appChoice 弹窗；卡内确认期间若所有承载面都关闭，自动改用弹窗，避免任务无人确认而挂起；
-   - 语音只能给出“允许一次”，“始终允许”只在按钮上提供；
+   - 语音只能给出“允许一次”，记住的选项只在按钮上提供；
+   - 记住的选项（11/20）：一般写入是「这个任务一律允许」（只在记忆体：重开 APP 或清空女仆对话前都有效、跨角色卡，
+     对应 Noa 的会话；女仆只有一条连续的对话）与「这个角色卡一律允许」
+     （存成带 roleCardId 的规则）；MCP（allowScope: 'global'）维持全局「始终允许」；旧的全局规则照旧生效；
+     删除／归档／取消女仆任务不提供角色卡范围；只读升级、开启内置能力不提供任何记住选项；
    - purpose 区分用途：persistent_enable（内置能力持久开启）的“允许”就是开启本身，语音与回报措辞随之不同。 */
 
 import { t } from '../i18n/index.js';
@@ -12,7 +16,7 @@ const trim = (value, fallback = '') => {
   return text || fallback;
 };
 
-export const MAID_CONFIRMATION_ACTIONS = Object.freeze(['deny', 'allow_once', 'allow_always']);
+export const MAID_CONFIRMATION_ACTIONS = Object.freeze(['deny', 'allow_once', 'allow_task', 'allow_role_card', 'allow_always']);
 
 const BINDING_KEYS = ['submissionId', 'roleCardId', 'sessionId', 'uiMode'];
 const SCOPE_KEYS = ['roleCardId', 'sessionId', 'uiMode'];
@@ -31,6 +35,7 @@ const OPERATION_ACTION_LABELS = [
   [/^create/, () => t('新建')],
   [/^(enable|disable|toggle)/, () => t('开关')],
   [/^switch/, () => t('切换')],
+  [/^cancel/, () => t('取消')],
 ];
 
 export const resolveMaidConfirmationTone = (request = {}) => {
@@ -42,24 +47,40 @@ export const resolveMaidConfirmationTone = (request = {}) => {
   };
 };
 
-const describeRequest = (request = {}) => {
-  // 只读意图升级确认：不吃 allow-always 捷径、也不提供「始终允许」——
-  // 这是对单次意图误差的放行，不该沉淀成永久规则。
-  const escalated = request?.escalation === 'read_only_write';
-  const alwaysConfirm = request?.allowAlways === false;
-  const purpose = trim(request?.details?.purpose);
+// 删除、归档、取消女仆任务（之后不能再接着做）：可以在本任务内放行，但不按角色卡永久放行
+const NO_ROLE_CARD_REMEMBER_PATTERN = /^(delete|archive|cancel)/;
+
+// 这个请求能提供哪些「记住」选项：取决于请求种类与可用的身份（提交 ID、角色卡 ID）
+const resolveRememberOptions = (request = {}, scope = {}) => {
+  const none = { always: false, task: false, roleCard: false };
+  // 只读意图升级：对单次意图误差的放行，不该沉淀成规则；开启内置能力的「允许」就是开启本身
+  if (request?.escalation === 'read_only_write' || trim(request?.details?.purpose) === 'persistent_enable') return none;
+  // 让用户二选一的卡（例如动态配图没全部生成时要不要先发），不是权限，不能记住
+  if (request?.allowRemember === false) return none;
+  if (trim(request?.allowScope) === 'global') return { ...none, always: request?.allowAlways !== false };
   return {
-    escalated,
+    always: false,
+    task: true,
+    roleCard: Boolean(trim(scope.roleCardId)) && !NO_ROLE_CARD_REMEMBER_PATTERN.test(trim(request?.operationType).toLowerCase()),
+  };
+};
+
+const describeRequest = (request = {}, remember = resolveRememberOptions(request)) => {
+  const purpose = trim(request?.details?.purpose);
+  const canRemember = remember.always || remember.task || remember.roleCard;
+  return {
+    escalated: request?.escalation === 'read_only_write',
     purpose,
     capabilityTitle: purpose === 'persistent_enable' ? trim(request?.details?.capabilityTitle) : '',
-    alwaysConfirm,
-    allowAlways: !escalated && !alwaysConfirm,
+    allowAlways: remember.always,
+    allowTask: remember.task,
+    allowRoleCard: remember.roleCard,
     danger: request?.danger !== false,
     title: String(request?.title || '确认危险操作'),
     message: String(request?.message || '这个动作可能会覆盖、删除或替换已有内容。'),
     items: request?.details?.items,
     cancelLabel: String(request?.cancelText || '取消'),
-    confirmLabel: alwaysConfirm ? String(request?.confirmText || '确认执行') : '允许一次',
+    confirmLabel: canRemember || request?.allowAlways !== false ? '允许一次' : String(request?.confirmText || '确认执行'),
     ...resolveMaidConfirmationTone(request),
   };
 };
@@ -69,25 +90,50 @@ export const createMaidToolConfirmationRuntime = ({
   choose = null,
   canShowInline = () => false,
   getCurrentScope = null,
+  getRoleCardName = () => '',
   onChange = () => {},
   makeId = () => `maid_confirm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
 } = {}) => {
   const entries = new Map();
   let activeModalId = '';
+  // 「这个任务一律允许」：只记在记忆体，键是操作本身；重开 APP 或清空女仆对话（clearTaskAllowances）才失效。
+  // 只留最近的一些，避免长时间累积（Noa 留 200）
+  const taskAllowed = new Set();
+  const TASK_ALLOW_LIMIT = 200;
+  const taskAllowKey = request => allowStore?.buildKey?.(request)
+    || [trim(request?.toolName), trim(request?.kind), trim(request?.operationType)].filter(Boolean).join('|');
+  const roleCardNameOf = (roleCardId) => {
+    try { return trim(getRoleCardName?.(roleCardId)); } catch { return ''; }
+  };
 
   const notify = () => { try { onChange(); } catch {} };
 
-  const toDecision = (action, request) => {
-    if (action === 'allow_always' && describeRequest(request).allowAlways) {
-      const rule = allowStore?.allowAlways?.(request);
-      return { decision: 'allow', remembered: true, rule };
+  // 只记住这张确认实际提供过的选项；没提供的「记住」被送回来时按允许一次处理（与原来相同）
+  const toDecision = (action, entry) => {
+    const { request, remember, scope } = entry;
+    if (action === 'allow_once') return { decision: 'allow' };
+    if (action === 'allow_always' && remember.always) {
+      allowStore?.allowAlways?.(request);
+      return { decision: 'allow', remembered: 'global' };
     }
-    if (action === 'allow_once' || action === 'allow_always') return { decision: 'allow' };
+    if (action === 'allow_task' && remember.task) {
+      const key = taskAllowKey(request);
+      if (key) {
+        taskAllowed.add(key);
+        if (taskAllowed.size > TASK_ALLOW_LIMIT) taskAllowed.delete(taskAllowed.values().next().value);
+      }
+      return { decision: 'allow', remembered: 'task' };
+    }
+    if (action === 'allow_role_card' && remember.roleCard) {
+      allowStore?.allowForRoleCard?.(request, { roleCardId: scope.roleCardId, roleCardName: roleCardNameOf(scope.roleCardId) });
+      return { decision: 'allow', remembered: 'role_card' };
+    }
+    if (['allow_always', 'allow_task', 'allow_role_card'].includes(action)) return { decision: 'allow' };
     return { decision: 'deny' };
   };
 
-  const openModal = (request, { signal = null } = {}) => {
-    const info = describeRequest(request);
+  const openModal = (entry, { signal = null } = {}) => {
+    const info = describeRequest(entry.request, entry.remember);
     return choose?.({
       title: info.title,
       message: info.message,
@@ -99,6 +145,8 @@ export const createMaidToolConfirmationRuntime = ({
       signal,
       actions: [
         ...(info.allowAlways ? [{ id: 'allow_always', label: '始终允许', variant: 'link' }] : []),
+        ...(info.allowRoleCard ? [{ id: 'allow_role_card', label: t('这个角色卡一律允许'), variant: 'link' }] : []),
+        ...(info.allowTask ? [{ id: 'allow_task', label: t('这个任务一律允许'), variant: 'link' }] : []),
         { id: 'deny', label: info.cancelLabel, variant: 'ghost' },
         { id: 'allow_once', label: info.confirmLabel, primary: true },
       ],
@@ -112,7 +160,7 @@ export const createMaidToolConfirmationRuntime = ({
     if (activeModalId === entry.id) activeModalId = '';
     entry.cleanup?.();
     entry.modalController?.abort?.();
-    entry.resolve(toDecision(MAID_CONFIRMATION_ACTIONS.includes(action) ? action : 'deny', entry.request));
+    entry.resolve(toDecision(MAID_CONFIRMATION_ACTIONS.includes(action) ? action : 'deny', entry));
     notify();
     return true;
   };
@@ -125,7 +173,7 @@ export const createMaidToolConfirmationRuntime = ({
     activeModalId = entry.id;
     let result;
     try {
-      result = openModal(entry.request, { signal: entry.modalController?.signal || null });
+      result = openModal(entry, { signal: entry.modalController?.signal || null });
     } catch {
       settle(entry, 'deny');
       return;
@@ -142,9 +190,17 @@ export const createMaidToolConfirmationRuntime = ({
 
   const request = async (rawRequest, options = {}) => {
     const { signal = null, runId = '' } = options;
-    const info = describeRequest(rawRequest);
-    if (info.allowAlways && allowStore?.isAllowed?.(rawRequest)) {
-      return { decision: 'allow', remembered: true };
+    const scope = { submissionId: trim(options.submissionId), roleCardId: trim(options.roleCardId) };
+    const remember = resolveRememberOptions(rawRequest, scope);
+    // 旧的全局规则照旧生效，条件与原来相同：只读升级、标了每次都问（allowAlways: false）的请求不认
+    if (rawRequest?.escalation !== 'read_only_write' && rawRequest?.allowAlways !== false && allowStore?.isAllowed?.(rawRequest)) {
+      return { decision: 'allow', remembered: 'global' };
+    }
+    if (remember.roleCard && allowStore?.isAllowed?.(rawRequest, { roleCardId: scope.roleCardId })) {
+      return { decision: 'allow', remembered: 'role_card' };
+    }
+    if (remember.task && taskAllowed.has(taskAllowKey(rawRequest))) {
+      return { decision: 'allow', remembered: 'task' };
     }
     if (signal?.aborted) return { decision: 'deny' };
     const targetRunId = trim(runId);
@@ -159,6 +215,8 @@ export const createMaidToolConfirmationRuntime = ({
           .filter(item => item?.status === 'planned' && trim(item.id))
           .map(item => ({ id: trim(item.id), name: trim(item.label) })),
         request: rawRequest,
+        remember,
+        scope,
         mode: 'pending',
         settled: false,
         resolve,
@@ -182,7 +240,7 @@ export const createMaidToolConfirmationRuntime = ({
   };
 
   const publicEntry = entry => {
-    const info = describeRequest(entry.request);
+    const info = describeRequest(entry.request, entry.remember);
     return {
       id: entry.id,
       runId: entry.runId,
@@ -191,6 +249,9 @@ export const createMaidToolConfirmationRuntime = ({
       items: normalizeAppConfirmItems(info.items),
       danger: info.danger,
       allowAlways: info.allowAlways,
+      allowTask: info.allowTask,
+      allowRoleCard: info.allowRoleCard,
+      roleCardName: info.allowRoleCard ? roleCardNameOf(entry.scope.roleCardId) : '',
       confirmLabel: info.confirmLabel,
       cancelLabel: info.cancelLabel,
       tone: info.tone,
@@ -276,5 +337,7 @@ export const createMaidToolConfirmationRuntime = ({
       }
     },
     getPendingCount: () => entries.size,
+    // 清空女仆对话时调用：「这个任务一律允许」随之失效
+    clearTaskAllowances: () => { taskAllowed.clear(); },
   };
 };

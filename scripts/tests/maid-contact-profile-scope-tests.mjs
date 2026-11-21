@@ -60,7 +60,7 @@ test('real maid submit rejects a planner result after the active card changes', 
     reactPlanner: async () => ({ ok: true, action: 'final', message: '操作结束。' }),
   });
   const submit = createMaidCommandSubmit({
-    getVoiceRuntime: () => null, getOnboardingRuntime: () => null, matchMaidIntent: () => null,
+    getVoiceRuntime: () => null, getOnboardingRuntime: () => null,
     resolveMaidRuntimeConfig: async () => ({ configured: true }), logger,
     checkMaidVisionInput: async () => ({ ok: true }),
     maidSettingsStore: { setLastExchange() {}, getLastExchange: () => ({}) },

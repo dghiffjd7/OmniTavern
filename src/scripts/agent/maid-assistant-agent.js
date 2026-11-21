@@ -1,6 +1,5 @@
 import {
   findAppFeature,
-  searchAppFeatures,
 } from './app-feature-catalog.js';
 import {
   classifyMaidRunFailure,
@@ -15,19 +14,16 @@ import {
   resolveMaidRunContinuationFromRun,
 } from './maid-run-continuation.js';
 import {
+  MAID_IMPORTED_CARD_PLAN_TOOL,
   buildMaidImportedCardExecutionMessage,
-  buildMaidImportedCardPreviewMessage,
-  buildMaidImportedCardWorkflowSnapshot,
   classifyMaidImportedCardConfirmation,
-  classifyMaidImportedCardWorkflowIntent,
-  normalizeMaidImportedCardClassification,
   resolvePendingMaidImportedCardWorkflow,
   validateMaidImportedCardWorkflowSnapshot,
 } from './maid-imported-card-workflow.js';
 import { buildMaidSourceGroundingContext } from './maid-source-grounding.js';
-import { resolveMaidRunFollowup, handleMaidRunFollowup, runBelongsToMaidContext, settleMaidRunContinuation, getMaidContinuationPendingTodos, guardMaidContinuationResult } from './maid-run-followup.js';
+import { runBelongsToMaidContext, settleMaidRunContinuation, getMaidContinuationPendingTodos, guardMaidContinuationResult } from './maid-run-followup.js';
+import { MAID_TASK_RESUME_TOOL } from './tools/maid-task-tools.js';
 import { findUnsupportedMaidWebAmounts } from './maid-web-observations.js';
-import { findMaidVisualPreferenceConflict } from './maid-visual-preferences.js';
 import { findMaidImageTargetMismatch } from './maid-image-target-evidence.js';
 import { applyMaidResultPresentation } from './maid-result-presentation.js';
 import { createMaidAppDiscoveryPlan, shouldRecoverMaidAppDiscovery } from './maid-app-discovery-recovery.js';
@@ -47,7 +43,6 @@ import {
   buildConfirmedGroupPreviewPlan,
   buildGroupPreviewMessage,
   buildGroupCreationMessage,
-  isMaidGroupPreviewRequest,
 } from './maid-group-preview-workflow.js';
 import {
   ALREADY_DELETED_REASON,
@@ -115,149 +110,6 @@ const buildMaidCancelledResult = ({ input = '', steps = [] } = {}) => {
   };
 };
 
-const MAID_READ_INTENT_PATTERN = /(查询|查看|检查|确认|核对|读取|只读|只查|列出|列表|清单|统计|比较|分析|告诉我|有哪些|哪些|是否|有没有|当前(?:状态|情况)?|状态|情况|是什么|怎么样|如何|\b(?:show|list|read|check|inspect|verify|status|what|which|whether|inventory|identit(?:y|ies))\b)/iu;
-const MAID_COMPLETION_QUESTION_PATTERN = /(?:(?:弄好|做好|做完|办好|完成|结束)(?:了)?(?:吗|没(?:有)?|没有啊)|\b(?:is|was|has)\b[^.!?\n]{0,80}\b(?:done|finished|completed)\b)/iu;
-const MAID_NO_TOOL_INTENT_PATTERN = /(?:(?:不要|不得|禁止|无需|不用|不必)\s*(?:再)?(?:调用|使用|动用|执行)\s*(?:任何|任意|任一)?\s*工具|(?:不调用|不使用)\s*(?:任何|任意|任一)?\s*工具|\b(?:do\s+not|don't|dont|never)\s+(?:use|call)\s+(?:any\s+)?tools?\b|\bwithout\s+(?:using\s+)?tools?\b)/iu;
-const MAID_WRITE_VERB_PATTERN = /(创建|新建|添加|追加|新增|写入|保存|绑(?:定|上|到)|启用|禁用|修改|更改|更新|编辑|替换|覆盖|删除|删掉|移除|清空|清理|发布|发送|设置|切换|应用|修复|优化|生成|上传|导入|回复)/gu;
-const MAID_WRITE_COMMAND_CUE_PATTERN = /(?:^|[，,。；;！？!?])(?:请|麻烦|帮我|替我|给我|给(?:这些|那些|所有|全部|多个|每个|各个|上述|前述)|为我|我要|我想|需要|把|将|然后|接着|随后|再|并且|并|同时|顺便|之后|后再|就|分别|直接|立即|现在|若没有|如果没有|没有才|没有就|没有则|没有的话|缺少就|缺少才|缺少的|缺的|不存在时才|不存在则|不存在就|不存在再|不存在的话|若无|如无|执行|先执行).{0,48}$/u;
-const MAID_POSTCHECK_WRITE_CUE_PATTERN = /(?:^|[，,。；;！？!?])(?:检查|确认|核对|验证|查完|查看)[^，,。；;！？!?\n]{0,24}(?:后|之后)(?:(?:再|就|然后|接着|随后|仅|只)\s*)?$/u;
-const MAID_POSTCHECK_OBJECT_WRITE_CUE_PATTERN = /(?:^|[，,。；;！？!?])(?:检查|确认|核对|验证|查完|查看)[^，,。；;！？!?\n]{0,24}(?:后|之后)(?:(?:再|就|然后|接着|随后)\s*)?(?:把|将)\s*[^，,。；;！？!?\n]{0,32}$/u;
-const MAID_NEGATED_WRITE_CLAUSE_PATTERN = /(?:^|[，,、。；;！？!?\s]|请)(?:不要|别|无需|不用|禁止|避免|不可|不能)\s*(?:再|去|进行)?[^。；;！？!?\n]*$/u;
-const MAID_WRITE_STATE_SUFFIX_PATTERN = /^(?:(?:书|世界书|条目|内容|角色|用户|会话|聊天室|绑定|配置|记录))?(?:已|是否|有没有|状态|情况|仍|还|曾|过|了吗|吗|呢)/u;
-const MAID_READ_STATE_BEFORE_WRITE_PATTERN = /(?:是否(?:已经|已)?|有没有|有无|是不是|为何|为什么|怎么会|何时|哪里|谁|当前|现有|已有|原有|已|已经|曾经?|被|正在)\s*$/u;
-const MAID_READ_ACTION_BEFORE_WRITE_PATTERN = /(?:查询|查看|检查|确认|核对|读取|列出|统计|比较|分析)(?:一下|下)?\s*$/u;
-const MAID_NON_TOOL_REPLY_SUFFIX_PATTERN = /^(?:我|检查结果|核对结果|验证结果|结果|答案|结论|情况|说明)(?:[，,。；;！？!?\s]|$)/u;
-const MAID_ENGLISH_WRITE_PATTERN = /\b(?:create|add|append|write|save|bind|enable|disable|modify|update|edit|replace|overwrite|delete|remove|clear|clean|publish|send|set|switch|apply|repair|optimize|generate|upload|import|reply)\b/iu;
-const MAID_ENGLISH_NEGATED_WRITE_PATTERN = /\b(?:do\s+not|don't|dont|never|without)\s+(?:create|add|append|write|save|bind|enable|disable|modify|update|edit|replace|overwrite|delete|remove|clear|clean|publish|send|set|switch|apply|repair|optimize|generate|upload|import|reply)\b/iu;
-
-const hasExplicitMaidWriteIntent = (input = '') => {
-  const text = String(input ?? '').normalize('NFKC').toLowerCase().trim();
-  if (!text) return false;
-  if (MAID_ENGLISH_WRITE_PATTERN.test(text) && !MAID_ENGLISH_NEGATED_WRITE_PATTERN.test(text)) {
-    return true;
-  }
-  MAID_WRITE_VERB_PATTERN.lastIndex = 0;
-  for (const match of text.matchAll(MAID_WRITE_VERB_PATTERN)) {
-    const index = Number(match.index || 0);
-    const verb = match[0];
-    const clauseStart = Math.max(
-      text.lastIndexOf('。', index - 1),
-      text.lastIndexOf('；', index - 1),
-      text.lastIndexOf(';', index - 1),
-      text.lastIndexOf('！', index - 1),
-      text.lastIndexOf('!', index - 1),
-      text.lastIndexOf('？', index - 1),
-      text.lastIndexOf('?', index - 1),
-      text.lastIndexOf('\n', index - 1),
-    ) + 1;
-    const before = text.slice(clauseStart, index);
-    const localClauseStart = Math.max(
-      before.lastIndexOf('，'),
-      before.lastIndexOf(','),
-      before.lastIndexOf('、'),
-    ) + 1;
-    const localBefore = before.slice(localClauseStart);
-    const after = text.slice(index + verb.length, index + verb.length + 16);
-    if (MAID_NEGATED_WRITE_CLAUSE_PATTERN.test(before)) continue;
-    if (MAID_WRITE_STATE_SUFFIX_PATTERN.test(after)) continue;
-    if (
-      MAID_READ_STATE_BEFORE_WRITE_PATTERN.test(localBefore) ||
-      MAID_READ_ACTION_BEFORE_WRITE_PATTERN.test(localBefore) ||
-      (verb === '回复' && MAID_NON_TOOL_REPLY_SUFFIX_PATTERN.test(after))
-    ) {
-      continue;
-    }
-    if (
-      !before.trim() ||
-      MAID_WRITE_COMMAND_CUE_PATTERN.test(before) ||
-      MAID_POSTCHECK_WRITE_CUE_PATTERN.test(before) ||
-      MAID_POSTCHECK_OBJECT_WRITE_CUE_PATTERN.test(before)
-    ) {
-      return true;
-    }
-  }
-  return false;
-};
-
-export const classifyMaidOperationIntent = (input = '') => {
-  const text = String(input ?? '').normalize('NFKC').trim();
-  const noToolIntent = MAID_NO_TOOL_INTENT_PATTERN.test(text);
-  const readIntent = MAID_READ_INTENT_PATTERN.test(text) || MAID_COMPLETION_QUESTION_PATTERN.test(text);
-  const writeIntent = hasExplicitMaidWriteIntent(text);
-  return {
-    mode: noToolIntent
-      ? 'no_tool'
-      : (writeIntent ? 'write_allowed' : (readIntent ? 'read_only' : 'unspecified')),
-    source: 'maid_user_request',
-    reason: noToolIntent
-      ? 'explicit_no_tool'
-      : (writeIntent
-        ? 'explicit_write'
-        : (readIntent ? 'explicit_read_without_write' : 'intent_unspecified')),
-  };
-};
-
-const MAID_BACKGROUND_PRESENTATION_PATTERN = /(后台(?:执行|处理|完成)?|保持当前位置|留在当前(?:页面|界面|聊天室|会话)?|不要打开|别打开|无需打开|不用打开|不要进入|别进入|无需进入|不用进入|不要跳转|别跳转|不要切换(?:页面|界面|聊天室|会话))/iu;
-const MAID_SCOPED_NEGATED_NAVIGATION_PATTERN = /(?:不要|不得|别|无需|不用|禁止|避免|不可|不能|不(?=\s*(?:打开|进入|跳转|切(?:换)?到)))(?!\s*(?:忘(?:记|了)?|漏(?:掉)?|阻止|妨碍|拒绝|不))(?:(?![，,。；;！？!?\n]|但|但是|不过|然而).){0,32}?(?:打开|进入|跳转|切(?:换)?到)/iu;
-const MAID_GUIDE_PRESENTATION_PATTERN = /(一步一步|一步步|逐步|教我|指导我|引导我|带着我|手把手|怎么(?:操作|设置|配置|创建|使用)|如何(?:操作|设置|配置|创建|使用))/iu;
-const MAID_NEGATED_GUIDE_PATTERN = /(?:不要|别|无需|不用|取消|停止)\s*(?:再)?(?:引导|指导|教学|教程|一步一步|一步步)/iu;
-const MAID_REVEAL_PRESENTATION_PATTERN = /(打开(?:给我看)?|进入(?:这个|该|对应)?(?:界面|页面|聊天室|会话)?|跳转(?:到)?|带我(?:去)?看(?:看)?|带我去|切到(?:对应)?(?:界面|页面|聊天室|会话)|(?:做完|完成|处理完|创建后|结束后).{0,16}(?:打开|进入|跳转|带我去|显示(?:界面|页面)))/iu;
-const MAID_DEFERRED_REVEAL_PRESENTATION_PATTERN = /(?:(?:全部|都|整体|一切).{0,4})?(?:做完|完成|处理完|创建后|结束后|配置完|准备好)(?:以后|之后|后)?.{0,72}(?:打开|进入|跳转|带我(?:去)?看|显示(?:界面|页面)|切(?:换)?到)/iu;
-
-const hasMaidDeferredResultReveal = (input = '') => (
-  String(input ?? '')
-    .split(/[，,。；;！？!?\n]/u)
-    .map(item => item.trim())
-    .filter(Boolean)
-    .some(clause => (
-      MAID_DEFERRED_REVEAL_PRESENTATION_PATTERN.test(clause) &&
-      !MAID_SCOPED_NEGATED_NAVIGATION_PATTERN.test(clause)
-    ))
-);
-
-export const classifyMaidPresentationIntent = (input = '') => {
-  const text = String(input ?? '').normalize('NFKC').trim();
-  const explicitGuide = MAID_GUIDE_PRESENTATION_PATTERN.test(text) &&
-    !MAID_NEGATED_GUIDE_PATTERN.test(text);
-  if (text && !explicitGuide && hasMaidDeferredResultReveal(text)) {
-    return {
-      mode: 'reveal',
-      source: 'maid_user_request',
-      reason: 'explicit_deferred_result_reveal',
-    };
-  }
-  if (
-    !text ||
-    MAID_BACKGROUND_PRESENTATION_PATTERN.test(text) ||
-    MAID_SCOPED_NEGATED_NAVIGATION_PATTERN.test(text)
-  ) {
-    return {
-      mode: 'background',
-      source: 'maid_user_request',
-      reason: text ? 'explicit_background_or_no_navigation' : 'default_background',
-    };
-  }
-  if (explicitGuide) {
-    return {
-      mode: 'guide',
-      source: 'maid_user_request',
-      reason: 'explicit_teaching_or_step_by_step',
-    };
-  }
-  if (MAID_REVEAL_PRESENTATION_PATTERN.test(text)) {
-    return {
-      mode: 'reveal',
-      source: 'maid_user_request',
-      reason: 'explicit_navigation_or_result_reveal',
-    };
-  }
-  return {
-    mode: 'background',
-    source: 'maid_user_request',
-    reason: 'default_background',
-  };
-};
-
 const clone = (value) => {
   if (value === null || value === undefined) return value;
   if (typeof value !== 'object') return value;
@@ -266,42 +118,6 @@ const clone = (value) => {
   } catch {
     return Array.isArray(value) ? value.slice() : { ...value };
   }
-};
-
-const MAID_OPTIONAL_NAVIGATION_TOOLS = new Set([
-  'session.create',
-  'group.create',
-]);
-
-export const applyMaidPresentationPolicy = (plan = {}, presentationIntent = {}) => {
-  const next = clone(plan || {});
-  const mode = ['background', 'reveal', 'guide'].includes(trim(presentationIntent?.mode))
-    ? trim(presentationIntent.mode)
-    : 'background';
-  if (MAID_OPTIONAL_NAVIGATION_TOOLS.has(trim(next?.toolName))) {
-    next.args = {
-      ...(isPlainObject(next?.args) ? next.args : {}),
-      open: mode === 'guide',
-    };
-  }
-  if (['persona.create', 'user.create'].includes(trim(next?.toolName))) {
-    next.args = {
-      ...(isPlainObject(next?.args) ? next.args : {}),
-      setActive: mode === 'guide',
-    };
-  }
-  if (trim(next?.toolName) === 'chat.send_message') {
-    const args = isPlainObject(next?.args) ? next.args : {};
-    const role = trim(args.role, 'user').toLowerCase();
-    const triggersReply = role === 'user' && args.triggerReply !== false;
-    next.args = {
-      ...args,
-      // 当前正常回复链依赖目标成为 current；在显式 target 隔离完成前不可伪装成后台发送。
-      open: triggersReply || mode === 'reveal' || mode === 'guide',
-    };
-  }
-  if (mode === 'guide') next.forceGuide = true;
-  return next;
 };
 
 const stableForKey = (value) => {
@@ -390,21 +206,26 @@ export const aggregateMaidModelUsage = (entries = [], { toolCallCount = 0, abort
     const n = Number(value);
     return Number.isFinite(n) ? n : null;
   };
-  const hasTokens = list.some(e => finite(e.promptTokens) != null || finite(e.completionTokens) != null || finite(e.totalTokens) != null);
+  const hasEntryTokens = e => finite(e.promptTokens) != null || finite(e.completionTokens) != null || finite(e.totalTokens) != null;
+  const hasTokens = list.some(hasEntryTokens);
   const sum = (key) => list.reduce((acc, e) => {
     const v = finite(e[key]);
     return v != null ? acc + v : acc;
   }, 0);
-  const lastWith = (key) => {
-    for (let i = list.length - 1; i >= 0; i -= 1) {
-      if (trim(list[i][key])) return trim(list[i][key]);
+  const lastWith = (key, source = list) => {
+    for (let i = source.length - 1; i >= 0; i -= 1) {
+      if (trim(source[i][key])) return trim(source[i][key]);
     }
     return '';
   };
+  // provider/model 记实际产生结果的调用：失败的尝试（常是之后换上的备用模型）照实计入次数、耗时与 token，但不决定模型。
+  // 取最后一次带 token 的成功调用，没有就取最后一次成功调用；全部失败时留空（与任务卡 executionModel 同一规则）。
+  const succeeded = list.filter(e => trim(e.outcome) !== 'provider_request_failed');
+  const modelSource = succeeded.some(hasEntryTokens) ? succeeded.filter(hasEntryTokens) : succeeded;
   return {
     status: hasTokens ? 'recorded' : 'unknown',
-    provider: lastWith('provider'),
-    model: lastWith('model'),
+    provider: lastWith('provider', modelSource),
+    model: lastWith('model', modelSource),
     promptTokens: hasTokens ? sum('promptTokens') : null,
     completionTokens: hasTokens ? sum('completionTokens') : null,
     // total = prompt 和 + completion 和，避免个别轮缺 total 字段导致与分项不自洽
@@ -652,112 +473,7 @@ const createMaidRunTracker = ({ agentTaskRuntime = null, input = '', context = {
   };
 };
 
-const extractExplicitMaidChatWrites = (input = '') => {
-  const text = String(input ?? '').normalize('NFKC');
-  if (
-    !/(?:后台|保持当前(?:房间|聊天室|会话)|不(?:要|得)打开)/iu.test(text) ||
-    !/triggerReply\s*:\s*false/iu.test(text) ||
-    !/open\s*:\s*false/iu.test(text)
-  ) return [];
-  const writes = [];
-  const seen = new Set();
-  const pattern = /给\s*[「『“"']([^」』”"']{1,160})[」』”"']\s*(?:写(?:入)?|发送)\s*[「『“"']([^」』”"']{1,1000})[」』”"']/gu;
-  for (const match of text.matchAll(pattern)) {
-    const sessionName = trim(match?.[1]);
-    const content = trim(match?.[2]);
-    const key = `${normalizeText(sessionName)}:${content}`;
-    if (!sessionName || !content || seen.has(key)) continue;
-    seen.add(key);
-    writes.push({ sessionName, content, key });
-  }
-  return writes.length >= 2 ? writes.slice(0, 20) : [];
-};
-
-const hasSucceededMaidChatWrite = (steps = [], obligation = {}) => (
-  (Array.isArray(steps) ? steps : []).some(step => (
-    step?.status === 'succeeded' &&
-    trim(step?.toolName) === 'chat.send_message' &&
-    normalizeText(step?.args?.sessionName || step?.args?.sessionId || step?.args?.target || step?.args?.chatName) ===
-      normalizeText(obligation.sessionName) &&
-    trim(step?.args?.content || step?.args?.message || step?.args?.text) === trim(obligation.content)
-  ))
-);
-
-const hasSucceededMaidChatReadback = (steps = [], sessionName = '') => (
-  (Array.isArray(steps) ? steps : []).some(step => (
-    step?.status === 'succeeded' &&
-    trim(step?.toolName) === 'app.read_resource' &&
-    trim(step?.args?.resource || step?.output?.resource).toLowerCase() === 'chat' &&
-    normalizeText(step?.args?.sessionName || step?.args?.sessionId || step?.args?.target) === normalizeText(sessionName)
-  ))
-);
-
-const buildPendingExplicitMaidChatPlan = ({
-  input = '',
-  steps = [],
-  decision = {},
-} = {}) => {
-  const writes = extractExplicitMaidChatWrites(input);
-  if (!writes.length) return null;
-  const pendingWrite = writes.find(item => !hasSucceededMaidChatWrite(steps, item));
-  const trace = {
-    candidateSnapshotId: trim(decision?.candidateSnapshotId),
-    retrieverVersion: trim(decision?.retrieverVersion),
-    capabilityRoutingMode: trim(decision?.capabilityRoutingMode),
-  };
-  if (pendingWrite) {
-    return {
-      ok: true,
-      action: 'tool',
-      toolName: 'chat.send_message',
-      args: {
-        sessionName: pendingWrite.sessionName,
-        content: pendingWrite.content,
-        role: 'user',
-        triggerReply: false,
-        open: false,
-      },
-      featureId: 'chat.send_message',
-      title: `继续写入「${pendingWrite.sessionName}」`,
-      response: `继续处理尚未完成的「${pendingWrite.sessionName}」。`,
-      metadata: {
-        workflowTransition: 'remaining_chat_write',
-        obligationKey: pendingWrite.key,
-      },
-      ...trace,
-    };
-  }
-  const needsReadback = /(?:结构化\s*chat|chat\s*资源).{0,40}(?:读取|读回)|(?:读取|读回).{0,40}(?:最后一条|末条)消息/iu.test(
-    String(input ?? '').normalize('NFKC'),
-  );
-  if (needsReadback) {
-    const pendingReadback = writes.find(item => !hasSucceededMaidChatReadback(steps, item.sessionName));
-    if (pendingReadback) {
-      return {
-        ok: true,
-        action: 'tool',
-        toolName: 'app.read_resource',
-        args: {
-          resource: 'chat',
-          sessionName: pendingReadback.sessionName,
-          limit: 1,
-        },
-        featureId: 'app.resource.read',
-        title: `读回「${pendingReadback.sessionName}」末条消息`,
-        response: `核对「${pendingReadback.sessionName}」的写入结果。`,
-        metadata: {
-          workflowTransition: 'remaining_chat_readback',
-          obligationKey: `chat-readback:${pendingReadback.sessionName}`,
-        },
-        ...trace,
-      };
-    }
-  }
-  return buildPendingMaidFinalStatePlan({ input, steps, decision });
-};
-
 const resolveReactStepBudget = ({
-  input = '',
   plan = {},
   context = {},
   configuredMaxReactSteps = 40,
@@ -776,10 +492,7 @@ const resolveReactStepBudget = ({
   } else if (toolName === 'app.open_panel' || toolName === 'session.open' || toolName === 'session.open_config') {
     recommended = 10;
   } else if (toolName === 'chat.send_message') {
-    const explicitTargetCount = extractExplicitMaidChatWrites(input).length;
-    recommended = explicitTargetCount > 1
-      ? Math.min(hardMax, Math.max(10, explicitTargetCount * 3 + 4))
-      : 10;
+    recommended = 10;
   } else if (toolName === 'app.read_resource' || toolName === 'worldbook.read' || toolName === 'worldbook.list') {
     recommended = 14;
   } else if (toolName === 'web.search_images' || toolName === 'media.fetch_image') {
@@ -853,768 +566,8 @@ const getConsecutiveSameToolCount = (steps = []) => {
   return { count, toolName };
 };
 
-const MAID_READ_RESOURCE_KEYS = new Set([
-  'persona',
-  'user',
-  'preset',
-  'regex',
-  'variables',
-  'config',
-]);
-
 const stripNegatedMaidActionClauses = value => String(value ?? '')
   .replace(/(?:不要|不得|别|禁止|无需|不用|不可|不能|避免)\s*[^，,。；;！？!?\n]*/gu, ' ');
-
-const extractConditionalMaidProfileCreateObligation = ({
-  input = '',
-  operationIntentPolicy = {},
-} = {}) => {
-  if (operationIntentPolicy?.mode !== 'write_allowed') return null;
-  const text = String(input ?? '').normalize('NFKC');
-  const condition = text.match(
-    /(?:不存在|没有|缺少|若无|如无)(?:时|的话)?(?:才|就|则|再)?\s*(?:创建|新建|新增|添加)/iu,
-  );
-  if (!condition) return null;
-  const tail = text.slice(Number(condition.index || 0) + condition[0].length);
-  const target = trim(tail.match(/[「『“"']([^」』”"']{1,160})[」』”"']/u)?.[1]);
-  if (!target) return null;
-  const hasPersona = /角色卡|角色档案|人物卡/iu.test(text);
-  const hasUser = /用户清单|用户列表|用户名称|用户名|用户档案/iu.test(text);
-  if (hasPersona === hasUser) return null;
-  const resource = hasPersona ? 'persona' : 'user';
-  return {
-    resource,
-    target,
-    createTool: `${resource}.create`,
-    featureId: `${resource}.create`,
-    label: resource === 'persona' ? '角色卡' : '用户',
-  };
-};
-
-const maidProfileReadContainsTarget = (step = {}, obligation = {}) => (
-  step?.status === 'succeeded' &&
-  trim(step?.toolName) === 'app.read_resource' &&
-  trim(step?.args?.resource || step?.output?.resource).toLowerCase() === obligation.resource &&
-  (Array.isArray(step?.output?.items) ? step.output.items : []).some(item => (
-    normalizeText(item?.name || item?.id) === normalizeText(obligation.target)
-  ))
-);
-
-const isConclusiveMissingMaidProfileRead = (step = {}, obligation = {}) => {
-  if (
-    step?.status !== 'succeeded' ||
-    trim(step?.toolName) !== 'app.read_resource' ||
-    trim(step?.args?.resource || step?.output?.resource).toLowerCase() !== obligation.resource
-  ) return false;
-  const requestedTarget = trim(step?.args?.name || step?.args?.id || step?.args?.query);
-  if (requestedTarget && normalizeText(requestedTarget) === normalizeText(obligation.target)) return true;
-  const items = Array.isArray(step?.output?.items) ? step.output.items : [];
-  const count = Number(step?.output?.count);
-  return Number.isFinite(count) && count >= 0 && items.length >= count;
-};
-
-const buildMaidConditionalProfileCreateProgress = ({
-  input = '',
-  operationIntentPolicy = {},
-  steps = [],
-} = {}) => {
-  const obligation = extractConditionalMaidProfileCreateObligation({
-    input,
-    operationIntentPolicy,
-  });
-  if (!obligation) return null;
-  const source = Array.isArray(steps) ? steps : [];
-  const matchingReads = source.filter(step => (
-    trim(step?.toolName) === 'app.read_resource' &&
-    trim(step?.args?.resource || step?.output?.resource).toLowerCase() === obligation.resource
-  ));
-  const targetExists = matchingReads.some(step => maidProfileReadContainsTarget(step, obligation));
-  const created = source.some(step => (
-    step?.status === 'succeeded' &&
-    trim(step?.toolName) === obligation.createTool &&
-    normalizeText(step?.args?.name || step?.args?.target) === normalizeText(obligation.target)
-  ));
-  if (targetExists) {
-    const message = created
-      ? `已创建${obligation.label}「${obligation.target}」并读回确认；当前${obligation.label}未切换。`
-      : `${obligation.label}「${obligation.target}」已存在，因此没有重复创建，也没有切换当前${obligation.label}。`;
-    return {
-      complete: true,
-      finalDecision: {
-        ok: true,
-        action: 'final',
-        source: 'deterministic_conditional_create_completion',
-        message,
-      },
-    };
-  }
-  if (created) return null;
-  const conclusiveMissing = matchingReads.findLast(step => (
-    isConclusiveMissingMaidProfileRead(step, obligation)
-  ));
-  if (!conclusiveMissing) {
-    if (!matchingReads.length) return null;
-    return {
-      complete: false,
-      nextPlan: {
-        ok: true,
-        action: 'tool',
-        toolName: 'app.read_resource',
-        args: { resource: obligation.resource, name: obligation.target },
-        featureId: 'app.resource.read',
-        title: `精确确认${obligation.label}是否存在`,
-        response: `清单结果有截断，先精确确认「${obligation.target}」是否存在。`,
-        metadata: {
-          workflowTransition: 'conditional_create_target_probe',
-          obligationKey: `${obligation.resource}:${normalizeText(obligation.target)}`,
-        },
-      },
-    };
-  }
-  return {
-    complete: false,
-    nextPlan: {
-      ok: true,
-      action: 'tool',
-      toolName: obligation.createTool,
-      args: { name: obligation.target, setActive: false },
-      featureId: obligation.featureId,
-      title: `创建缺少的${obligation.label}`,
-      response: `清单中没有「${obligation.target}」，继续创建并读回确认。`,
-      metadata: {
-        workflowTransition: 'conditional_create_missing_target',
-        obligationKey: `${obligation.resource}:${normalizeText(obligation.target)}`,
-      },
-    },
-  };
-};
-
-const buildPendingMaidFinalStatePlan = ({
-  input = '',
-  steps = [],
-  decision = {},
-} = {}) => {
-  const positiveText = stripNegatedMaidActionClauses(String(input ?? '').normalize('NFKC'));
-  if (!/(?:最后|再|然后).{0,20}读取\s*APP\s*状态/iu.test(positiveText)) return null;
-  const hasState = (Array.isArray(steps) ? steps : []).some(step => (
-    step?.status === 'succeeded' && trim(step?.toolName) === 'app.get_current_state'
-  ));
-  if (hasState) return null;
-  return {
-    ok: true,
-    action: 'tool',
-    toolName: 'app.get_current_state',
-    args: {},
-    featureId: 'app.state.read',
-    title: '确认当前 APP 状态',
-    response: '最后确认当前房间没有变化。',
-    metadata: {
-      workflowTransition: 'remaining_state_verification',
-      obligationKey: 'app-state',
-    },
-    candidateSnapshotId: trim(decision?.candidateSnapshotId),
-    retrieverVersion: trim(decision?.retrieverVersion),
-    capabilityRoutingMode: trim(decision?.capabilityRoutingMode),
-  };
-};
-
-const getMaidRevealFinalMessage = (steps = [], decision = {}) => (
-  trim(decision?.message) ||
-  trim((Array.isArray(steps) ? steps : []).find(step => (
-    trim(step?.metadata?.workflowTransition) === 'result_reveal' &&
-    trim(step?.metadata?.revealFinalMessage)
-  ))?.metadata?.revealFinalMessage)
-);
-
-const getMaidRevealTargets = (steps = []) => {
-  const source = (Array.isArray(steps) ? steps : []).filter(step => (
-    step?.status === 'succeeded' &&
-    trim(step?.metadata?.workflowTransition) !== 'result_reveal'
-  ));
-  const personaStep = source.find(step => trim(step?.toolName) === 'persona.create');
-  const userStep = source.find(step => trim(step?.toolName) === 'user.create');
-  const groupStep = source.findLast(step => trim(step?.toolName) === 'group.create');
-  const sessionStep = source.find(step => trim(step?.toolName) === 'session.create');
-  const personaId = trim(personaStep?.output?.personaId || personaStep?.output?.profile?.id);
-  const userId = trim(userStep?.output?.userId || userStep?.output?.profile?.id);
-  const groupSessionId = trim(
-    groupStep?.output?.groupId ||
-    groupStep?.output?.group?.id ||
-    groupStep?.output?.sessionId,
-  );
-  const privateSessionId = trim(
-    (Array.isArray(sessionStep?.output?.sessionIds) ? sessionStep.output.sessionIds[0] : '') ||
-    (Array.isArray(sessionStep?.output?.sessions)
-      ? sessionStep.output.sessions[0]?.sessionId || sessionStep.output.sessions[0]?.id
-      : '') ||
-    sessionStep?.output?.sessionId ||
-    (Array.isArray(sessionStep?.args?.names) ? sessionStep.args.names[0] : '') ||
-    sessionStep?.args?.name,
-  );
-  return {
-    personaId,
-    userId,
-    sessionId: groupSessionId || privateSessionId,
-  };
-};
-
-const MAID_PERSONA_BUILD_REQUEST_PATTERN = /(?:(?:创建|建立|新建|导入|建|配好)(?:(?!(?:删除|清理|移除|归档)).){0,40}(?:角色卡|角色档案|人物卡)|(?:角色卡|角色档案|人物卡)(?:(?!(?:删除|清理|移除|归档)).){0,24}(?:创建|建立|新建|导入|建|配好)|\b(?:create|build|import)\b.{0,40}\b(?:persona|character\s*card)\b)/isu;
-const MAID_PERSONA_SCOPED_BUILD_REQUEST_PATTERN = /(?:(?:创建|建立|新建|新增|生成|配好|建|开)(?:(?!(?:角色卡|角色档案|人物卡|删除|清理|移除|归档|查看|读取|检查|保留|取消)).){0,48}(?:私聊|单聊|聊天室|会话|房间|群聊|群组|联系人)|\b(?:create|build|add)\b(?:(?!\b(?:persona|character\s*card|delete|remove|inspect|read|keep)\b).){0,48}\b(?:private\s*chat|chat|session|room|group|contact)\b)/isu;
-
-const hasMaidPersonaScopedBuildRequest = (input = '') => {
-  const text = String(input ?? '').normalize('NFKC');
-  return MAID_PERSONA_BUILD_REQUEST_PATTERN.test(text) &&
-    MAID_PERSONA_SCOPED_BUILD_REQUEST_PATTERN.test(text);
-};
-
-const getMaidPersonaStepTarget = (step = {}) => trim(
-  step?.output?.personaId ||
-  step?.output?.profile?.id ||
-  step?.args?.target ||
-  step?.args?.personaId ||
-  step?.args?.id ||
-  step?.args?.name,
-);
-
-const getLatestSucceededMaidPersonaSwitch = (steps = []) => (
-  (Array.isArray(steps) ? steps : []).findLast(step => (
-    step?.status === 'succeeded' &&
-    trim(step?.toolName) === 'persona.switch'
-  )) || null
-);
-
-const buildPendingMaidWorkScopePlan = ({
-  input = '',
-  steps = [],
-} = {}) => {
-  if (!hasMaidPersonaScopedBuildRequest(input)) return null;
-  const source = Array.isArray(steps) ? steps : [];
-  const personaStep = source.find(step => (
-    step?.status === 'succeeded' &&
-    trim(step?.toolName) === 'persona.create'
-  ));
-  const personaId = getMaidPersonaStepTarget(personaStep);
-  if (!personaId) return null;
-  const latestSwitch = getLatestSucceededMaidPersonaSwitch(source);
-  if (
-    latestSwitch &&
-    normalizeText(getMaidPersonaStepTarget(latestSwitch)) === normalizeText(personaId)
-  ) return null;
-  const attempted = source.some(step => (
-    trim(step?.metadata?.workflowTransition) === 'work_scope' &&
-    trim(step?.metadata?.workScopeKind) === 'persona'
-  ));
-  if (attempted) return null;
-  return {
-    ok: true,
-    action: 'tool',
-    toolName: 'persona.switch',
-    args: { target: personaId },
-    featureId: 'persona.switch',
-    title: '切换角色卡工作域',
-    response: '先切换到新角色卡的工作域，再继续建立其中的聊天室与群聊。',
-    metadata: {
-      workflowTransition: 'work_scope',
-      workScopeKind: 'persona',
-      workScopeTargetId: personaId,
-    },
-    source: 'deterministic_work_scope',
-  };
-};
-
-export const buildPendingMaidResultRevealPlan = ({
-  presentationIntent = {},
-  steps = [],
-  decision = {},
-} = {}) => {
-  if (trim(presentationIntent?.mode) !== 'reveal') return null;
-  const targets = getMaidRevealTargets(steps);
-  const completedKinds = new Set(
-    (Array.isArray(steps) ? steps : [])
-      .filter(step => (
-        step?.status === 'succeeded' &&
-        trim(step?.metadata?.workflowTransition) === 'result_reveal'
-      ))
-      .map(step => trim(step?.metadata?.revealKind))
-      .filter(Boolean),
-  );
-  const finalMessage = getMaidRevealFinalMessage(steps, decision);
-  const trace = {
-    candidateSnapshotId: trim(decision?.candidateSnapshotId),
-    retrieverVersion: trim(decision?.retrieverVersion),
-    capabilityRoutingMode: trim(decision?.capabilityRoutingMode),
-  };
-  const latestPersonaSwitch = getLatestSucceededMaidPersonaSwitch(steps);
-  const personaAlreadyActive = Boolean(
-    latestPersonaSwitch &&
-    normalizeText(getMaidPersonaStepTarget(latestPersonaSwitch)) === normalizeText(targets.personaId),
-  );
-  const buildRevealPlan = ({
-    kind,
-    toolName,
-    args,
-    featureId,
-    title,
-    response,
-  }) => ({
-    ok: true,
-    action: 'tool',
-    toolName,
-    args,
-    featureId,
-    title,
-    response,
-    metadata: {
-      workflowTransition: 'result_reveal',
-      revealKind: kind,
-      revealFinalMessage: finalMessage,
-      skipAutoVerification: true,
-    },
-    ...trace,
-  });
-  if (targets.personaId && !personaAlreadyActive && !completedKinds.has('persona')) {
-    return buildRevealPlan({
-      kind: 'persona',
-      toolName: 'persona.switch',
-      args: { target: targets.personaId },
-      featureId: 'persona.switch',
-      title: '激活主要角色卡',
-      response: '任务已经完成，我来激活主要角色卡。',
-    });
-  }
-  if (targets.userId && !completedKinds.has('user')) {
-    return buildRevealPlan({
-      kind: 'user',
-      toolName: 'user.switch',
-      args: { target: targets.userId },
-      featureId: 'user.switch',
-      title: '激活主要用户',
-      response: '继续激活这次任务的主要用户。',
-    });
-  }
-  if (targets.sessionId && !completedKinds.has('session')) {
-    return buildRevealPlan({
-      kind: 'session',
-      toolName: 'session.open',
-      args: { sessionId: targets.sessionId },
-      featureId: 'session.open',
-      title: '打开主要会话',
-      response: '最后打开一个主要会话给你查看。',
-    });
-  }
-  return null;
-};
-
-const hasMaidInteractiveActionRequest = (input = '') => {
-  const text = stripNegatedMaidActionClauses(String(input ?? '').normalize('NFKC'));
-  return /(打开|进入|点击|点开|按下|切换|跳转|返回|关闭|选择|勾选|滚动|展开|收起|导航|\b(?:open|enter|click|press|switch|navigate|select|scroll)\b)/iu.test(text);
-};
-
-const hasMaidDetailedReadRequest = (input = '') => (
-  /(完整|详情|描述|设定|简介|头像|正文|原文|具体(?:内容|数值|规则)?|提示词|挑出|选出|筛选|候选(?:清单|名单)?|归类|归纳|分析|判断|推荐|主要(?:人物|角色|成员)|变量[^。；;！？!?\n]{0,16}(?:值|内容)|\b(?:prompt|description|avatar|details?|content|value|base\s*url|endpoint|transport)\b)/iu
-    .test(String(input ?? '').normalize('NFKC'))
-);
-
-const getRequestedMaidReadKeys = (input = '') => {
-  const text = String(input ?? '').normalize('NFKC');
-  const patterns = [
-    ['state', /(APP\s*状态|当前状态|状态摘要|当前页面|哪个页面|当前位置|where\s+am\s+i)/iu],
-    ['todo', /(待办|任务清单|\btodo\b)/iu],
-    ['persona', /(角色卡|角色皮|character\s*cards?)/iu],
-    ['user', /(用户(?:名称|资料|清单|身份|资源)?|user\s+identit(?:y|ies)|current\s+user)/iu],
-    ['preset', /(?:\bpreset\b|预设)/iu],
-    ['regex', /(?:\bregex\b|正则)/iu],
-    ['variables', /(?:\bvariables?\b|变量)/iu],
-    ['config', /(模型档|模型配置|当前模型|服务商|\bprovider\b)/iu],
-  ];
-  return patterns
-    .filter(([, pattern]) => pattern.test(text))
-    .map(([key]) => key);
-};
-
-const getMaidReadStepKey = (step = {}) => {
-  if (step?.status !== 'succeeded') return '';
-  const toolName = trim(step?.toolName);
-  if (toolName === 'app.get_current_state') return 'state';
-  if (toolName === 'maid.todo.read') return 'todo';
-  if (toolName !== 'app.read_resource') return '';
-  const resource = trim(step?.output?.resource || step?.args?.resource).toLowerCase();
-  return MAID_READ_RESOURCE_KEYS.has(resource) ? resource : '';
-};
-
-const countObjectKeys = value => (isPlainObject(value) ? Object.keys(value).length : 0);
-
-const summarizeMaidProfileAssociations = (item = {}) => {
-  const associations = isPlainObject(item?.associations) ? item.associations : {};
-  const refs = [];
-  const worldbookId = trim(associations.worldbookId);
-  const systemPresetId = trim(associations.systemPresetId);
-  const regexSetId = trim(associations.regexSetId);
-  if (worldbookId) {
-    refs.push(`世界书「${worldbookId}」（${associations.worldbookEnabled === false ? '未启用' : '已启用'}）`);
-  }
-  if (systemPresetId) refs.push(`系统预设「${systemPresetId}」`);
-  if (regexSetId) refs.push(`正则集「${regexSetId}」`);
-  return `${trim(item?.name || item?.id, '未命名角色卡')}：${refs.length ? refs.join('、') : '未记录关联资源'}`;
-};
-
-const summarizeMaidProfileRead = (label, output = {}) => {
-  const items = Array.isArray(output?.items) ? output.items : [];
-  const count = Number.isFinite(Number(output?.count)) ? Number(output.count) : items.length;
-  const activeId = trim(output?.activeId);
-  const active = items.find(item => item?.active === true || (activeId && trim(item?.id) === activeId));
-  const activeName = trim(active?.name || activeId, '未设置');
-  const names = items.map(item => trim(item?.name)).filter(Boolean).slice(0, 8);
-  const includesAssociations = Array.isArray(output?.includedFields) &&
-    output.includedFields.some(field => trim(field).toLowerCase() === 'associations');
-  const associationSummaries = includesAssociations
-    ? items.slice(0, 8).map(summarizeMaidProfileAssociations)
-    : [];
-  return [
-    `${label}：共 ${count} 项；当前为「${activeName}」`,
-    names.length ? `本次返回：${names.join('、')}${items.length > names.length ? '…' : ''}` : '',
-    associationSummaries.length
-      ? `关联资源：${associationSummaries.join('；')}${items.length > associationSummaries.length ? '…' : ''}`
-      : '',
-  ].filter(Boolean).join('；');
-};
-
-const summarizeMaidReadResult = (key, output = {}) => {
-  if (key === 'state') {
-    return [
-      `APP 状态：页面 ${trim(output?.activePage, '未知')}`,
-      trim(output?.uiMode) ? `模式 ${trim(output.uiMode)}` : '',
-      trim(output?.sessionId) ? `当前会话「${trim(output.sessionId)}」` : '',
-    ].filter(Boolean).join('；');
-  }
-  if (key === 'todo') {
-    const todos = Array.isArray(output?.todos) ? output.todos : [];
-    if (!todos.length) return '待办：当前没有项目';
-    const count = Number.isFinite(Number(output?.count)) ? Number(output.count) : todos.length;
-    const completed = todos.filter(item => item?.status === 'completed').length;
-    const inProgress = todos.filter(item => item?.status === 'in_progress').length;
-    const pending = todos.filter(item => item?.status === 'pending').length;
-    return `待办：共 ${count} 项；已完成 ${completed}，进行中 ${inProgress}，待处理 ${pending}`;
-  }
-  if (key === 'persona') return summarizeMaidProfileRead('角色卡', output);
-  if (key === 'user') return summarizeMaidProfileRead('用户', output);
-  if (key === 'preset') {
-    const active = Object.entries(isPlainObject(output?.presets) ? output.presets : {})
-      .map(([scope, value]) => `${scope}=${trim(value?.activeId, '未设置')}`);
-    return `预设：${active.length ? active.join('、') : '未返回活动预设'}`;
-  }
-  if (key === 'regex') {
-    const count = Number.isFinite(Number(output?.count))
-      ? Number(output.count)
-      : countArrayItems(output?.sets);
-    const enabled = output?.session?.enabled === false ? '未启用' : '已启用';
-    return `正则：${enabled}，共 ${count} 个规则集`;
-  }
-  if (key === 'variables') {
-    return `变量：会话 ${countObjectKeys(output?.variables)} 项，全局 ${countObjectKeys(output?.globalVariables)} 项`;
-  }
-  if (key === 'config') {
-    const config = isPlainObject(output?.config) ? output.config : {};
-    return [
-      `模型配置：服务商 ${trim(config.provider, '未设置')}`,
-      `模型 ${trim(config.model, '未设置')}`,
-      trim(config.activeProfileId) ? `当前档 ${trim(config.activeProfileId)}` : '',
-    ].filter(Boolean).join('；');
-  }
-  return '';
-};
-
-const extractMaidQuotedValues = (value = '') => (
-  Array.from(String(value ?? '').matchAll(/[「『“"']([^」』”"']{1,160})[」』”"']/gu))
-    .map(match => trim(match?.[1]))
-    .filter(Boolean)
-);
-
-const buildMaidStructuredReadObligations = ({
-  input = '',
-  operationIntentPolicy = {},
-} = {}) => {
-  const text = String(input ?? '').normalize('NFKC');
-  if (
-    operationIntentPolicy?.mode !== 'read_only' ||
-    !/(?:审计|稽核|完整核对|最终核对)/iu.test(text) ||
-    hasMaidInteractiveActionRequest(text)
-  ) return [];
-  const obligations = [];
-  const auditPrefix = trim(
-    text.match(/(?:对|核对)\s*[「『“"']([^」』”"']{1,160})[」』”"']\s*(?:资源)?(?:做|进行)?(?:最终)?(?:只读)?(?:审计|核对)/iu)?.[1],
-  );
-  const add = (value) => {
-    if (!value?.key || obligations.some(item => item.key === value.key)) return;
-    obligations.push(value);
-  };
-  const worldbookMatch = text.match(
-    /读取(?:世界书)?\s*[「『“"']([^」』”"']{1,160})[」』”"']\s*(?:全文|完整)?(?:索引|目录)/iu,
-  );
-  if (worldbookMatch?.[1]) {
-    const name = trim(worldbookMatch[1]);
-    add({
-      key: `worldbook:${normalizeText(name)}`,
-      kind: 'worldbook',
-      target: name,
-      toolName: 'worldbook.read',
-      featureId: 'worldbook.read',
-      args: { name },
-      title: `读取世界书「${name}」索引`,
-    });
-  }
-  if (/(?:读取|查看|核对)(?:完整)?(?:会话|聊天室)(?:清单|列表)/iu.test(text)) {
-    add({
-      key: 'session-list',
-      kind: 'session-list',
-      auditPrefix,
-      toolName: 'session.list',
-      featureId: 'session.list',
-      args: {},
-      title: '读取完整会话清单',
-    });
-  }
-  if (/(?:读取|查看|核对)[^。；;！？!?\n]{0,40}用户[^。；;！？!?\n]{0,24}(?:清单|列表)/iu.test(text)) {
-    add({
-      key: 'resource:user',
-      kind: 'resource',
-      resource: 'user',
-      auditPrefix,
-      toolName: 'app.read_resource',
-      featureId: 'app.resource.read',
-      args: { resource: 'user' },
-      title: '读取用户清单',
-    });
-  }
-  if (/(?:读取|查看|核对)[^。；;！？!?\n]{0,64}角色卡[^。；;！？!?\n]{0,24}(?:清单|列表)/iu.test(text)) {
-    add({
-      key: 'resource:persona',
-      kind: 'resource',
-      resource: 'persona',
-      auditPrefix,
-      toolName: 'app.read_resource',
-      featureId: 'app.resource.read',
-      args: { resource: 'persona' },
-      title: '读取角色卡清单',
-    });
-  }
-  const profileSegment = text.match(/分别读取([^。；;！？!?\n]{1,480}?)的格式画像/iu)?.[1] || '';
-  extractMaidQuotedValues(profileSegment).forEach((target) => {
-    add({
-      key: `format-profile:${normalizeText(target)}`,
-      kind: 'format-profile',
-      target,
-      toolName: 'chat.read_format_profile',
-      featureId: 'chat.format.profile',
-      args: { sessionName: target },
-      title: `读取「${target}」格式画像`,
-    });
-  });
-  if (/(?:读取|查看|核对)\s*APP\s*状态/iu.test(text)) {
-    add({
-      key: 'app-state',
-      kind: 'state',
-      toolName: 'app.get_current_state',
-      featureId: 'app.state.read',
-      args: {},
-      title: '读取 APP 状态',
-    });
-  }
-  const hasTargetedIndex = obligations.some(item => item.kind === 'worldbook');
-  const hasTargetedProfiles = obligations.some(item => item.kind === 'format-profile');
-  return obligations.length >= 4 && (hasTargetedIndex || hasTargetedProfiles)
-    ? obligations
-    : [];
-};
-
-const resolveMaidStructuredWorldbookOutput = (obligation = {}, step = {}) => {
-  const output = isPlainObject(step?.output) ? step.output : {};
-  const toolName = trim(step?.toolName);
-  if (toolName === 'worldbook.read') {
-    const target = output?.name || output?.id || step?.args?.name || step?.args?.worldbookId || step?.args?.id;
-    return normalizeText(target) === normalizeText(obligation.target) ? output : null;
-  }
-  if (
-    toolName !== 'app.read_resource' ||
-    trim(step?.args?.resource || output?.resource).toLowerCase() !== 'worldbook' ||
-    normalizeText(step?.args?.name || step?.args?.worldbookId || step?.args?.id) !== normalizeText(obligation.target)
-  ) return null;
-  return (Array.isArray(output?.worldbooks) ? output.worldbooks : []).find(item => (
-    normalizeText(item?.name || item?.id) === normalizeText(obligation.target) &&
-    Array.isArray(item?.entries)
-  )) || null;
-};
-
-const maidStructuredReadObligationMatchesStep = (obligation = {}, step = {}) => {
-  if (step?.status !== 'succeeded') return false;
-  if (obligation.kind === 'worldbook') {
-    return Boolean(resolveMaidStructuredWorldbookOutput(obligation, step));
-  }
-  if (trim(step?.toolName) !== trim(obligation.toolName)) return false;
-  if (obligation.kind === 'resource') {
-    return trim(step?.output?.resource || step?.args?.resource).toLowerCase() === obligation.resource;
-  }
-  if (obligation.kind === 'format-profile') {
-    return normalizeText(
-      step?.output?.sessionId ||
-      step?.output?.profile?.sessionId ||
-      step?.args?.sessionName ||
-      step?.args?.sessionId ||
-      step?.args?.target,
-    ) === normalizeText(obligation.target);
-  }
-  return true;
-};
-
-const summarizeMaidStructuredRead = (obligation = {}, output = {}, step = {}) => {
-  if (obligation.kind === 'worldbook') {
-    const worldbook = resolveMaidStructuredWorldbookOutput(obligation, {
-      ...step,
-      output,
-    }) || output;
-    const entries = Array.isArray(worldbook?.entries) ? worldbook.entries : [];
-    const titles = entries
-      .map(item => trim(item?.title || item?.comment || item?.name || item?.id))
-      .filter(Boolean);
-    const counts = new Map();
-    titles.forEach(title => counts.set(normalizeText(title), (counts.get(normalizeText(title)) || 0) + 1));
-    const duplicateCount = Array.from(counts.values()).reduce((total, count) => total + Math.max(0, count - 1), 0);
-    const entryCount = Number.isFinite(Number(worldbook?.entryCount)) ? Number(worldbook.entryCount) : entries.length;
-    return `世界书「${obligation.target}」：共 ${entryCount} 条；标题：${titles.join('、') || '未返回'}；重复项 ${duplicateCount}`;
-  }
-  if (obligation.kind === 'session-list') {
-    const contacts = Array.isArray(output?.contacts) ? output.contacts : [];
-    const count = Number.isFinite(Number(output?.count)) ? Number(output.count) : contacts.length;
-    const names = contacts.map(item => trim(item?.name || item?.id)).filter(Boolean).slice(0, 12);
-    const auditItems = trim(obligation.auditPrefix)
-      ? contacts
-          .map(item => trim(item?.name || item?.id))
-          .filter(name => normalizeText(name).startsWith(normalizeText(obligation.auditPrefix)))
-      : [];
-    const auditCounts = new Map();
-    auditItems.forEach(name => auditCounts.set(normalizeText(name), (auditCounts.get(normalizeText(name)) || 0) + 1));
-    const duplicateCount = Array.from(auditCounts.values()).reduce(
-      (total, itemCount) => total + Math.max(0, itemCount - 1),
-      0,
-    );
-    return [
-      `会话清单：共 ${count} 项${names.length ? `；本次返回：${names.join('、')}${contacts.length > names.length ? '…' : ''}` : ''}`,
-      auditItems.length
-        ? `前缀「${obligation.auditPrefix}」：${auditItems.length} 项；重复名称 ${duplicateCount}；${auditItems.join('、')}`
-        : '',
-    ].filter(Boolean).join('\n');
-  }
-  if (obligation.kind === 'resource') {
-    const base = summarizeMaidReadResult(obligation.resource, output);
-    const auditItems = trim(obligation.auditPrefix) && Array.isArray(output?.items)
-      ? output.items.filter(item => (
-          normalizeText(item?.name || item?.id).startsWith(normalizeText(obligation.auditPrefix))
-        ))
-      : [];
-    const auditSummary = auditItems
-      .map(item => `${trim(item?.name || item?.id)}（${item?.active === true ? 'active' : 'inactive'}）`)
-      .join('、');
-    return [base, auditSummary ? `审计项：${auditSummary}` : ''].filter(Boolean).join('\n');
-  }
-  if (obligation.kind === 'format-profile') {
-    if (isPlainObject(output?.staleProfile) && !isPlainObject(output?.profile)) {
-      const reasons = Array.isArray(output.staleProfile.staleReasons)
-        ? output.staleProfile.staleReasons.map(trim).filter(Boolean).join('、')
-        : '';
-      return `格式画像「${obligation.target}」：已失效，需重新调查来源${reasons ? `（${reasons}）` : ''}`;
-    }
-    const profile = isPlainObject(output?.profile) ? output.profile : output;
-    const guide = trim(profile?.guide, '未设置');
-    const sources = (Array.isArray(profile?.sources) ? profile.sources : [])
-      .map(item => [trim(item?.type), trim(item?.ref)].filter(Boolean).join(':'))
-      .filter(Boolean);
-    return `格式画像「${obligation.target}」：${guide}${sources.length ? `；来源 ${sources.join('、')}` : ''}`;
-  }
-  if (obligation.kind === 'state') return summarizeMaidReadResult('state', output);
-  return '';
-};
-
-const buildMaidStructuredReadProgress = ({
-  input = '',
-  operationIntentPolicy = {},
-  steps = [],
-} = {}) => {
-  const obligations = buildMaidStructuredReadObligations({ input, operationIntentPolicy });
-  if (!obligations.length) return null;
-  const sourceSteps = Array.isArray(steps) ? steps : [];
-  if (sourceSteps.some(step => (
-    step?.status !== 'succeeded' ||
-    !obligations.some(obligation => maidStructuredReadObligationMatchesStep(obligation, step))
-  ))) return null;
-  const completed = obligations.map((obligation) => {
-    const step = sourceSteps.find(candidate => maidStructuredReadObligationMatchesStep(obligation, candidate)) || null;
-    return { obligation, step };
-  });
-  const pending = completed.find(item => !item.step)?.obligation || null;
-  if (pending) {
-    return {
-      complete: false,
-      nextPlan: {
-        ok: true,
-        action: 'tool',
-        toolName: pending.toolName,
-        args: clone(pending.args),
-        featureId: pending.featureId,
-        title: pending.title,
-        response: pending.title,
-        metadata: {
-          workflowTransition: 'structured_read_remaining_target',
-          obligationKey: pending.key,
-        },
-      },
-    };
-  }
-  const lines = completed
-    .map(({ obligation, step }) => summarizeMaidStructuredRead(obligation, step?.output || {}, step))
-    .filter(Boolean);
-  if (lines.length !== obligations.length) return null;
-  return {
-    complete: true,
-    finalDecision: {
-      ok: true,
-      action: 'final',
-      source: 'deterministic_structured_read_completion',
-      message: lines.join('\n'),
-    },
-  };
-};
-
-const buildDeterministicMaidReadDecision = ({
-  input = '',
-  operationIntentPolicy = {},
-  steps = [],
-} = {}) => {
-  if (
-    operationIntentPolicy?.mode !== 'read_only' ||
-    hasMaidInteractiveActionRequest(input) ||
-    hasMaidDetailedReadRequest(input)
-  ) return null;
-  const requestedKeys = getRequestedMaidReadKeys(input);
-  if (!requestedKeys.length) return null;
-  const latestByKey = new Map();
-  for (const step of Array.isArray(steps) ? steps : []) {
-    if (trim(step?.toolName) === 'maid.todo.write') continue;
-    const key = getMaidReadStepKey(step);
-    if (!key) return null;
-    latestByKey.set(key, step.output || {});
-  }
-  if (!requestedKeys.every(key => latestByKey.has(key))) return null;
-  const lines = requestedKeys
-    .map(key => summarizeMaidReadResult(key, latestByKey.get(key)))
-    .filter(Boolean);
-  if (lines.length !== requestedKeys.length) return null;
-  return {
-    ok: true,
-    action: 'final',
-    source: 'deterministic_read_completion',
-    message: lines.join('\n'),
-  };
-};
 
 const isRepeatedSuccessfulTodoWrite = (plan = {}, steps = []) => {
   if (trim(plan?.toolName) !== 'maid.todo.write') return false;
@@ -1715,19 +668,14 @@ const shouldAttemptReactPlanRecovery = ({
   reactPlanner = null,
 } = {}) => {
   if (typeof reactPlanner !== 'function' || !trim(input)) return false;
-  const reason = trim(plan?.reason);
-  if ([
+  return [
     'invalid_model_plan',
     'feature_not_found',
     'tool_not_allowed',
     'invalid_model_react_decision',
     'missing_final_message',
     'invalid_react_action',
-  ].includes(reason)) return true;
-  const text = compactText(input);
-  if (!text) return false;
-  if (/^(继续|请继续|好的|好|是的|对|没错|确认|允许|可以|再试一次|重试)$/u.test(text)) return true;
-  return /(刚失败|失败了|没生效|没有生效|没有更新|再试|重试|继续|确认|替换成|扩展版|重新)/u.test(text);
+  ].includes(trim(plan?.reason));
 };
 
 // 解析目录 verification.argsFrom 的取值路径，如 'result.worldbookId|args.name'。
@@ -2215,173 +1163,6 @@ const buildReusedGeneratedMediaExecution = (match = {}) => ({
   message: '',
 });
 
-const getWorldbookBatchBindingKey = (args = {}) => stableJsonStringify({
-  worldbookId: trim(args?.worldbookId || args?.name || args?.id),
-  sessions: (Array.isArray(args?.sessions) ? args.sessions : [])
-    .map(value => trim(value))
-    .filter(Boolean),
-  mode: trim(args?.mode, 'append') === 'replace' ? 'replace' : 'append',
-});
-
-const hasExplicitWorldbookPreviewApplyRequest = (input = '') => {
-  const text = stripNegatedMaidActionClauses(String(input ?? '').normalize('NFKC'));
-  return /(?:preview|预览)/iu.test(text) && (
-    /(?:实际|正式)(?:执行|应用)/iu.test(text) ||
-    /预览[^。；;！？!?\n]{0,80}(?:再|然后|随后)[^。；;！？!?\n]{0,40}(?:执行|应用|绑定)/iu.test(text)
-  );
-};
-
-const advanceRepeatedWorldbookPreviewToApply = ({
-  input = '',
-  plan = {},
-  steps = [],
-  operationIntentPolicy = {},
-} = {}) => {
-  if (
-    trim(plan?.toolName) !== 'worldbook.bind_sessions' ||
-    plan?.args?.preview !== true ||
-    operationIntentPolicy?.mode !== 'write_allowed' ||
-    !hasExplicitWorldbookPreviewApplyRequest(input)
-  ) return plan;
-  const key = getWorldbookBatchBindingKey(plan.args);
-  const previewStep = (Array.isArray(steps) ? steps : []).findLast(step => (
-    step?.status === 'succeeded' &&
-    trim(step?.toolName) === 'worldbook.bind_sessions' &&
-    step?.args?.preview === true &&
-    getWorldbookBatchBindingKey(step.args) === key &&
-    step?.output?.preview === true &&
-    Number(step?.output?.failedCount || 0) === 0 &&
-    Number(step?.output?.plannedCount || 0) > 0
-  ));
-  if (!previewStep) return plan;
-  return {
-    ...plan,
-    args: {
-      ...(isPlainObject(plan.args) ? plan.args : {}),
-      preview: false,
-    },
-    metadata: {
-      ...(isPlainObject(plan.metadata) ? plan.metadata : {}),
-      workflowTransition: 'preview_to_apply',
-      previewStepIndex: Number(previewStep.index || 0) || undefined,
-    },
-    title: trim(plan.title, '执行批量绑定'),
-    response: trim(plan.response, '预览已确认可处理，继续实际执行绑定。'),
-  };
-};
-
-const buildPendingWorldbookPreviewApplyPlan = ({
-  input = '',
-  steps = [],
-  decision = {},
-  operationIntentPolicy = {},
-} = {}) => {
-  if (
-    operationIntentPolicy?.mode !== 'write_allowed' ||
-    !hasExplicitWorldbookPreviewApplyRequest(input)
-  ) return null;
-  const source = Array.isArray(steps) ? steps : [];
-  const previewStep = source.findLast(step => (
-    step?.status === 'succeeded' &&
-    trim(step?.toolName) === 'worldbook.bind_sessions' &&
-    step?.args?.preview === true &&
-    step?.output?.preview === true &&
-    Number(step?.output?.failedCount || 0) === 0 &&
-    Number(step?.output?.plannedCount || 0) > 0
-  ));
-  if (!previewStep) return null;
-  const key = getWorldbookBatchBindingKey(previewStep.args);
-  const alreadyApplied = source.some(step => (
-    step?.status === 'succeeded' &&
-    trim(step?.toolName) === 'worldbook.bind_sessions' &&
-    step?.args?.preview !== true &&
-    getWorldbookBatchBindingKey(step.args) === key &&
-    step?.output?.preview !== true &&
-    Number(step?.output?.failedCount || 0) === 0
-  ));
-  if (alreadyApplied) return null;
-  return {
-    ok: true,
-    action: 'tool',
-    toolName: 'worldbook.bind_sessions',
-    args: {
-      ...(isPlainObject(previewStep.args) ? clone(previewStep.args) : {}),
-      preview: false,
-    },
-    featureId: 'worldbook.bind_sessions',
-    title: '执行已通过预览的批量绑定',
-    response: '预览全部可处理，继续实际执行绑定。',
-    metadata: {
-      workflowTransition: 'preview_to_apply',
-      previewStepIndex: Number(previewStep.index || 0) || undefined,
-    },
-    candidateSnapshotId: trim(decision?.candidateSnapshotId),
-    retrieverVersion: trim(decision?.retrieverVersion),
-    capabilityRoutingMode: trim(decision?.capabilityRoutingMode),
-  };
-};
-
-const hasExplicitWorldbookTailReadReveal = (input = '') => {
-  const text = stripNegatedMaidActionClauses(String(input ?? '').normalize('NFKC'));
-  return /(?:读出来给我看|读给我看|把[^。；;！？!?\n]{0,60}读出来|展示给我看|显示给我看|列出来给我看|让我看看|给我看(?:一下)?)/iu.test(text);
-};
-
-const findVerifiedWorldbookBindingForTailRead = (decision = {}, steps = [], input = '') => {
-  const toolName = trim(decision?.toolName);
-  const args = isPlainObject(decision?.args) ? decision.args : {};
-  if (hasExplicitWorldbookTailReadReveal(input)) return null;
-  const include = (Array.isArray(args.include) ? args.include : [])
-    .map(value => trim(value).toLowerCase())
-    .filter(Boolean);
-  const isSessionWorldbookRead = toolName === 'app.read_resource' &&
-    trim(args.resource).toLowerCase() === 'session' &&
-    include.length === 1 &&
-    include[0] === 'worldbooks';
-  const isWorldbookListRead = toolName === 'worldbook.list';
-  if (!isSessionWorldbookRead && !isWorldbookListRead) return null;
-  const readTarget = trim(args.sessionId || args.sessionName || args.target || args.chatName);
-  if (!readTarget) return null;
-  const source = Array.isArray(steps) ? steps : [];
-
-  for (let index = source.length - 1; index >= 0; index -= 1) {
-    const step = source[index];
-    if (step?.status !== 'succeeded') continue;
-    if (trim(step?.toolName) === 'worldbook.bind_session') {
-      const target = trim(step?.output?.sessionId || step?.args?.sessionId || step?.args?.sessionName);
-      if (target !== readTarget) continue;
-      const verified = source.slice(index + 1).some(candidate => (
-        candidate?.status === 'succeeded' &&
-        trim(candidate?.toolName) === 'worldbook.list' &&
-        trim(candidate?.metadata?.verificationFor) === 'worldbook.bind_session' &&
-        trim(candidate?.args?.sessionId || candidate?.args?.sessionName) === target
-      ));
-      if (verified) return { step, target };
-      continue;
-    }
-    if (
-      trim(step?.toolName) === 'worldbook.bind_sessions' &&
-      step?.args?.preview !== true &&
-      step?.output?.preview !== true
-    ) {
-      const targets = (Array.isArray(step?.args?.sessions) ? step.args.sessions : [])
-        .map(value => trim(value))
-        .filter(Boolean);
-      const succeededCount = Number(step?.output?.succeededCount || 0);
-      const verifiedCount = Number(step?.output?.verifiedCount || 0);
-      const failedCount = Number(step?.output?.failedCount || 0);
-      if (
-        targets.includes(readTarget) &&
-        succeededCount > 0 &&
-        verifiedCount >= succeededCount &&
-        failedCount === 0
-      ) {
-        return { step, target: readTarget };
-      }
-    }
-  }
-  return null;
-};
-
 const buildReactStepSnapshot = ({
   index = 0,
   plan = {},
@@ -2510,174 +1291,6 @@ const buildInterruptedMessage = ({ decision = {}, plan = {}, output = {}, execut
   ].filter(Boolean).join('\n');
 };
 
-const stripTrailingPunctuation = value => trim(value)
-  .replace(/[。.!！?？,，;；:：\s]+$/g, '')
-  .trim();
-
-const extractQuotedName = (text = '') => {
-  const raw = String(text || '');
-  const patterns = [
-    /[叫名为為]\s*[「『“"']([^」』”"']{1,80})[」』”"']/,
-    /[「『“"']([^」』”"']{1,80})[」』”"']/,
-  ];
-  for (const pattern of patterns) {
-    const match = raw.match(pattern);
-    if (match?.[1]) return stripTrailingPunctuation(match[1]);
-  }
-  return '';
-};
-
-const extractSessionName = (text = '') => {
-  const quoted = extractQuotedName(text);
-  if (quoted) return quoted;
-  const raw = String(text || '').trim();
-  const patterns = [
-    /(?:创建|新建|新增|添加|开)(?:一个|一個)?(?:叫|名为|名為)?\s*([^，。,.!?！？]{1,80}?)(?:的)?(?:聊天室|会话|好友|联系人)/,
-    /(?:创建|新建|新增|添加|开)(?:一个|一個)?(?:聊天室|会话|好友|联系人)\s*([^，。,.!?！？]{1,80})/,
-    /(?:聊天室|会话|好友|联系人)(?:叫|名为|名為)?\s*([^，。,.!?！？]{1,80})/,
-  ];
-  for (const pattern of patterns) {
-    const match = raw.match(pattern);
-    const value = stripTrailingPunctuation(match?.[1] || '');
-    if (!value) continue;
-    const cleaned = value
-      .replace(/^(一个|一個|叫|名为|名為)\s*/u, '')
-      .replace(/\s*(吧|一下|并打开|並打開|打开|進入|进入)$/u, '')
-      .trim();
-    if (cleaned) return cleaned;
-  }
-  return '';
-};
-
-const extractSessionNames = (text = '') => {
-  const raw = String(text || '').trim();
-  const quoted = Array.from(raw.matchAll(/[「『“"']([^」』”"']{1,80})[」』”"']/g))
-    .map(match => stripTrailingPunctuation(match?.[1] || ''))
-    .filter(Boolean);
-  if (quoted.length > 1) return Array.from(new Set(quoted)).slice(0, 20);
-  const explicitlyMultiple = /(?:两个|兩個|多个|多個|一些|几个|幾個|[2-9]\d*\s*[个個])\s*(?:聊天室|会话|好友|联系人)/u.test(raw);
-  if (quoted.length === 1 && !explicitlyMultiple) return quoted;
-  const patterns = [
-    /(?:创建|新建|新增|添加|开)(?:\s*(?:两个|兩個|多个|多個|一些|几个|幾個|\d+\s*个))?(?:聊天室|会话|好友|联系人)[，,：:\s]*(.{1,180})/u,
-    /(?:聊天室|会话|好友|联系人)[，,：:\s]*(.{1,180})/u,
-  ];
-  let source = '';
-  for (const pattern of patterns) {
-    const match = raw.match(pattern);
-    if (match?.[1]) {
-      source = match[1];
-      break;
-    }
-  }
-  if (!source) return [];
-  source = source
-    .replace(/^(分别|分別|为|為|叫|名为|名為)\s*/u, '')
-    .replace(/\s*(的|吧|一下|并打开|並打開|打开|進入|进入)$/u, '')
-    .trim();
-  const names = source
-    .split(/(?:和|与|及|以及|、|，|,|；|;|\s+and\s+)/iu)
-    .map(item => stripTrailingPunctuation(item)
-      .replace(/^(一个|一個|两个|兩個|多个|多個|聊天室|会话|好友|联系人)\s*/u, '')
-      .replace(/\s*(的|聊天室|会话|好友|联系人)$/u, '')
-      .trim())
-    .filter(item => item && !/^(两个|兩個|多个|多個|聊天室|会话|好友|联系人)$/.test(item));
-  return Array.from(new Set(names)).slice(0, 20);
-};
-
-const extractQuotedAfter = (text = '', keywords = []) => {
-  const raw = String(text || '');
-  for (const keyword of keywords) {
-    const index = raw.indexOf(keyword);
-    if (index < 0) continue;
-    const value = extractQuotedName(raw.slice(index));
-    if (value) return value;
-  }
-  return '';
-};
-
-const extractNamedTarget = (text = '', keywords = [], fallback = '') => (
-  extractQuotedAfter(text, keywords) || extractQuotedName(text) || fallback
-);
-
-const extractChatMessageContent = (text = '') => {
-  const quoted = extractQuotedAfter(text, ['消息', '内容', '发送', '发']);
-  if (quoted) return quoted;
-  const raw = String(text || '').trim();
-  const match = raw.match(/(?:发送|发)(?:消息)?\s*([^，。,.!?！？]{1,120})/);
-  const value = stripTrailingPunctuation(match?.[1] || '')
-    .replace(/^(一)?(个|条|点|句)\s*/u, '');
-  if (value && value !== '消息' && !/(到|给|至)?(?:聊天室|会话)/.test(value)) return value;
-  if (/晚上好/i.test(raw)) return '晚上好';
-  if (/\bhi\b/i.test(raw)) return 'hi';
-  return '';
-};
-
-const extractWorldEntries = (text = '') => {
-  const raw = String(text || '');
-  const entries = [];
-  const pattern = /条目\s*[「『“"']([^」』”"']{1,80})[」』”"'][^「『“"']{0,24}[「『“"']([^」』”"']{1,2000})[」』”"']/g;
-  let match = pattern.exec(raw);
-  while (match) {
-    const title = stripTrailingPunctuation(match[1]);
-    const content = trim(match[2]);
-    if (title && content) {
-      entries.push({
-        title,
-        content,
-        keys: [title],
-        constant: true,
-      });
-    }
-    match = pattern.exec(raw);
-  }
-  const compact = compactText(raw);
-  if (!entries.some(entry => compactText(entry.title).includes('大姐姐')) && compact.includes('大姐姐')) {
-    entries.push({
-      title: '温柔大姐姐',
-      content: '超级温柔、特别会照顾人的大姐姐，和用户是姐弟关系。她说话耐心，会主动关心用户的状态。',
-      keys: ['温柔大姐姐', '大姐姐', '姐姐'],
-      constant: true,
-    });
-  }
-  if (!entries.some(entry => compactText(entry.title).includes('青梅竹马')) && (compact.includes('青梅竹马') || compact.includes('大小姐'))) {
-    entries.push({
-      title: '傲娇大小姐青梅竹马',
-      content: '傲娇的大小姐青梅竹马，嘴上不坦率，但很在意用户，和用户从小熟识。',
-      keys: ['傲娇大小姐青梅竹马', '大小姐', '青梅竹马'],
-      constant: true,
-    });
-  }
-  return entries;
-};
-
-const resolvePanelFromFeature = (feature = null) => {
-  const panel = trim(feature?.panel);
-  if (panel) return panel;
-  const id = trim(feature?.id);
-  if (id === 'config.api.open') return 'config';
-  if (id === 'agent.center.open') return 'agent-center';
-  if (id === 'worldbook.open') return 'worldbook';
-  if (id === 'memory.open') return 'memory';
-  if (id === 'variables.open') return 'variables';
-  if (id === 'regex.open') return 'regex';
-  return '';
-};
-
-const buildPlan = ({
-  toolName = '',
-  args = {},
-  featureId = '',
-  title = '',
-  response = '',
-} = {}) => ({
-  ok: true,
-  toolName: trim(toolName),
-  args: isPlainObject(args) ? clone(args) : {},
-  featureId: trim(featureId),
-  title: trim(title),
-  response: trim(response),
-});
-
 const unsupportedPlan = (reason = 'unsupported_intent', message = '暂时还不会执行这个请求。') => ({
   ok: false,
   status: 'unsupported',
@@ -2688,223 +1301,6 @@ const unsupportedPlan = (reason = 'unsupported_intent', message = '暂时还不�
 const requireAiPlanner = (input = '') => {
   if (!trim(input)) return unsupportedPlan('empty_input', '请输入想让女仆做的事。');
   return unsupportedPlan('maid_planner_required', '女仆需要先由 AI 判定要调用哪个工具。');
-};
-
-export const planMaidAssistantCommand = (input = '', context = {}) => {
-  const text = trim(input);
-  if (!text) return unsupportedPlan('empty_input', '请输入想让女仆做的事。');
-  const normalized = normalizeText(text);
-  const compact = compactText(text);
-  const presentationIntent = classifyMaidPresentationIntent(text);
-  const shouldOpenOptionalResult = presentationIntent.mode === 'guide';
-
-  if (compact.includes('会话配置') || compact.includes('聊天室配置') || compact.includes('配置聊天室')) {
-    return buildPlan({
-      toolName: 'session.open_config',
-      args: {},
-      featureId: 'session.config.open',
-      title: '打开会话配置',
-      response: '我来打开当前会话配置。',
-    });
-  }
-
-  if (
-    /(当前|现在|目前).*(状态|资源|会话|页面)/.test(normalized) ||
-    compact.includes('当前状态') ||
-    compact.includes('用了哪些资源') ||
-    compact.includes('当前资源')
-  ) {
-    return buildPlan({
-      toolName: 'app.get_current_state',
-      args: {},
-      featureId: 'app.state.read',
-      title: '查看当前 APP 状态',
-      response: '我先查看当前 APP 状态。',
-    });
-  }
-
-  if (
-    /(发送|发).*(消息|hi|晚上好|聊天室|会话)/.test(normalized) ||
-    /(聊天室|会话).*(发送|发)/.test(normalized)
-  ) {
-    const sessionId = extractQuotedAfter(text, ['聊天室', '会话', '给', '到', '至']) || extractSessionName(text);
-    const content = extractChatMessageContent(text);
-    if (!content) return unsupportedPlan('missing_message_content', '请告诉我要发送什么消息。');
-    return buildPlan({
-      toolName: 'chat.send_message',
-      args: {
-        ...(sessionId ? { sessionId } : {}),
-        content,
-        role: 'user',
-        open: true,
-      },
-      featureId: 'chat.send_message',
-      title: '发送聊天消息',
-      response: sessionId ? `我来向「${sessionId}」发送消息。` : '我来发送消息。',
-    });
-  }
-
-  const worldbookWriteIntent = (
-    /(创建|新建|新增|写|绑定).*(世界书)/.test(normalized) ||
-    /(世界书).*(创建|新建|新增|写|绑定|条目)/.test(normalized)
-  ) &&
-    !/(删除|清理|去重|删掉|移除)/.test(normalized) &&
-    !(/绑定/.test(normalized) && /(聊天室|会话)/.test(normalized));
-  if (worldbookWriteIntent) {
-    const name = extractNamedTarget(text, ['世界书'], '女仆创建的世界书');
-    const personaName = extractQuotedAfter(text, ['角色卡', '角色']);
-    const entries = extractWorldEntries(text);
-    if (!entries.length) return unsupportedPlan('missing_worldbook_entries', '请告诉我要写入世界书的条目内容。');
-    return buildPlan({
-      toolName: 'worldbook.create',
-      args: {
-        name,
-        entries,
-        ...(personaName ? { personaName, bindToPersona: true } : {}),
-      },
-      featureId: 'worldbook.create',
-      title: '创建世界书',
-      response: `我来创建世界书「${name}」。`,
-    });
-  }
-
-  if (/(创建|新建|新增|添加).*(用户名称|用户名|用户)/.test(normalized)) {
-    const name = extractNamedTarget(text, ['用户名称', '用户名', '用户'], '');
-    if (!name) return unsupportedPlan('missing_user_name', '请告诉我要创建的用户名称。');
-    return buildPlan({
-      toolName: 'user.create',
-      args: { name, setActive: true },
-      featureId: 'user.create',
-      title: '创建用户名称',
-      response: `我来创建用户「${name}」。`,
-    });
-  }
-
-  if (/(切换|更换|使用|换成|设为当前).*(用户名称|用户名|用户)/.test(normalized)) {
-    const target = extractNamedTarget(text, ['用户名称', '用户名', '用户'], '');
-    if (!target) return unsupportedPlan('missing_user_name', '请告诉我要切换到哪个用户。');
-    return buildPlan({
-      toolName: 'user.switch',
-      args: { target },
-      featureId: 'user.switch',
-      title: '切换用户名称',
-      response: `我来切换到用户「${target}」。`,
-    });
-  }
-
-  if (
-    /(创建|新建|新增|添加).*(角色卡|角色)/.test(normalized) ||
-    /(角色卡|角色).*(创建|新建|新增|添加)/.test(normalized)
-  ) {
-    const name = extractNamedTarget(text, ['角色卡', '角色'], '');
-    if (!name) return unsupportedPlan('missing_persona_name', '请告诉我要创建的角色卡名称。');
-    return buildPlan({
-      toolName: 'persona.create',
-      args: { name, setActive: true },
-      featureId: 'persona.create',
-      title: '创建角色卡',
-      response: `我来创建角色卡「${name}」。`,
-    });
-  }
-
-  if (
-    /(切换|更换|使用|换成|设为当前).*(角色卡|角色)/.test(normalized) ||
-    /(角色卡|角色).*(切换|更换|使用|换成|设为当前)/.test(normalized)
-  ) {
-    const target = extractNamedTarget(text, ['角色卡', '角色'], '');
-    if (!target) return unsupportedPlan('missing_persona_name', '请告诉我要切换到哪个角色卡。');
-    return buildPlan({
-      toolName: 'persona.switch',
-      args: { target },
-      featureId: 'persona.switch',
-      title: '切换角色卡',
-      response: `我来切换到角色卡「${target}」。`,
-    });
-  }
-
-  if (
-    /(创建|新建|新增|添加|开).*(聊天室|会话|好友|联系人)/.test(normalized) ||
-    /(聊天室|会话|好友|联系人).*(创建|新建|新增|添加)/.test(normalized)
-  ) {
-    const names = extractSessionNames(text);
-    if (names.length > 1) {
-      return buildPlan({
-        toolName: 'session.create',
-        args: { names, open: shouldOpenOptionalResult },
-        featureId: 'session.create',
-        title: '创建聊天室',
-        response: `我来创建 ${names.length} 个聊天室。`,
-      });
-    }
-    const name = names[0] || extractSessionName(text);
-    if (!name) return unsupportedPlan('missing_session_name', '请告诉我要创建的聊天室名称。');
-    return buildPlan({
-      toolName: 'session.create',
-      args: { name, open: shouldOpenOptionalResult },
-      featureId: 'session.create',
-      title: '创建聊天室',
-      response: `我来创建聊天室「${name}」。`,
-    });
-  }
-
-  if (
-    /(打开|进入|切换).*(聊天室|会话)/.test(normalized) &&
-    !compact.includes('会话配置') &&
-    !compact.includes('聊天室配置')
-  ) {
-    const name = extractSessionName(text) || stripTrailingPunctuation(
-      text
-        .replace(/^(打开|进入|切换)\s*/u, '')
-        .replace(/(聊天室|会话)/gu, '')
-        .trim(),
-    );
-    if (!name) return unsupportedPlan('missing_session_id', '请告诉我要打开哪个聊天室。');
-    return buildPlan({
-      toolName: 'session.open',
-      args: { sessionId: name },
-      featureId: 'session.open',
-      title: '打开聊天室',
-      response: `我来打开聊天室「${name}」。`,
-    });
-  }
-
-  const matches = searchAppFeatures(text, { limit: 3 });
-  const feature = matches[0] || null;
-  if (feature && Number(feature.score || 0) >= 45) {
-    const panel = resolvePanelFromFeature(feature);
-    if (feature.id === 'app.state.read') {
-      return buildPlan({
-        toolName: 'app.get_current_state',
-        args: {},
-        featureId: feature.id,
-        title: feature.title,
-        response: '我先查看当前 APP 状态。',
-      });
-    }
-    if (feature.id === 'session.config.open') {
-      return buildPlan({
-        toolName: 'session.open_config',
-        args: {},
-        featureId: feature.id,
-        title: feature.title,
-        response: '我来打开当前会话配置。',
-      });
-    }
-    if (panel) {
-      return buildPlan({
-        toolName: 'app.open_panel',
-        args: {
-          panel,
-          ...(feature.id === 'config.api.open' ? { tab: 'chat' } : {}),
-        },
-        featureId: feature.id,
-        title: feature.title,
-        response: `我来打开${feature.title}。`,
-      });
-    }
-  }
-
-  return unsupportedPlan('unsupported_intent', '这个请求还没有接入女仆工具。');
 };
 
 const executeWithRegistry = async ({
@@ -2925,7 +1321,6 @@ export const createMaidAssistantAgent = ({
   capabilityRoutingRuntime = null,
   planner = requireAiPlanner,
   reactPlanner = null,
-  importedCardClassifier = null,
   chatResponder = null,
   guidedActionRuntime = null,
   prepareConversationContext = null,
@@ -3188,391 +1583,6 @@ export const createMaidAssistantAgent = ({
     steps: clone(steps),
     output: clone(output),
   });
-
-  const resolveImportedCardPersona = (result = {}, intent = {}) => {
-    const items = Array.isArray(result?.items) ? result.items : [];
-    const targetName = trim(intent?.targetPersonaName);
-    if (targetName) {
-      const targetKey = compactText(targetName);
-      const matches = items.filter(item => (
-        compactText(item?.id) === targetKey || compactText(item?.name) === targetKey
-      ));
-      if (matches.length === 1) return { persona: matches[0], reason: '' };
-      return {
-        persona: null,
-        reason: matches.length > 1 ? 'persona_target_ambiguous' : 'persona_target_not_found',
-      };
-    }
-    const activeId = trim(result?.activeId);
-    const active = items.find(item => (
-      item?.active === true || (activeId && trim(item?.id) === activeId)
-    )) || null;
-    if (active) return { persona: active, reason: '' };
-    return {
-      persona: null,
-      reason: items.length > 1 ? 'persona_target_required' : 'active_persona_not_found',
-    };
-  };
-
-  const isAmbiguousImportedCardEntry = (entry = {}) => {
-    const title = compactText(entry?.title || entry?.name || entry?.id);
-    const keys = [
-      ...(Array.isArray(entry?.keys) ? entry.keys : []),
-      ...(Array.isArray(entry?.secondaryKeys) ? entry.secondaryKeys : []),
-    ].map(item => trim(item)).filter(Boolean);
-    return (
-      /^(?:角色|人物|角色设定|人物设定|角色资料|人物资料|character|profile|设定)$/iu.test(title) ||
-      (!keys.length && /^(?:entry|条目|资料)\d*$/iu.test(title))
-    );
-  };
-
-  const runImportedCardPreviewWorkflow = async ({
-    input = '',
-    intent = {},
-    context = {},
-    tracker = null,
-    authorizePlan = null,
-  } = {}) => {
-    const steps = [];
-    if (intent?.requestedStrategy === 'isolated_session_worldbooks') {
-      return importedCardWorkflowFailure({
-        input,
-        status: 'needs_input',
-        reason: 'isolated_worldbook_strategy_not_supported_in_imported_card_workflow',
-        message: '这张导入卡已有共用世界书；当前有界流程只支持安全继承。若确实要为每个聊天室建立隔离世界书，请另行明确每位人物的隔离范围。',
-      });
-    }
-    if (typeof importedCardClassifier !== 'function') {
-      return importedCardWorkflowFailure({
-        input,
-        status: 'unsupported',
-        reason: 'imported_card_classifier_unavailable',
-        message: '导入角色卡的人物分类器尚未配置，未执行任何写入。',
-      });
-    }
-
-    const personaRead = await runImportedCardWorkflowTool({
-      plan: makeImportedCardWorkflowPlan({
-        toolName: 'app.read_resource',
-        args: {
-          resource: 'persona',
-          ...(trim(intent?.targetPersonaName) ? { name: trim(intent.targetPersonaName) } : {}),
-          include: ['associations'],
-        },
-        featureId: 'app.resource.read',
-        title: '读取目标角色卡关联资源',
-        response: '先确认目标角色卡及其关联世界书。',
-        phase: 'read_persona',
-      }),
-      context,
-      tracker,
-      steps,
-      authorizePlan,
-    });
-    if (!personaRead.ok) {
-      return importedCardWorkflowFailure({
-        input,
-        reason: 'persona_read_failed',
-        message: summarizeToolFailure(personaRead.output),
-        steps,
-        output: personaRead.result,
-      });
-    }
-    const resolvedPersona = resolveImportedCardPersona(personaRead.result, intent);
-    if (!resolvedPersona.persona) {
-      return importedCardWorkflowFailure({
-        input,
-        status: 'needs_input',
-        reason: resolvedPersona.reason,
-        message: resolvedPersona.reason === 'persona_target_ambiguous'
-          ? '找到多张同名角色卡，请先明确要处理的角色卡 ID。'
-          : '没有找到唯一的目标角色卡；请先切到目标角色卡，或在指令中写出角色卡名称。',
-        steps,
-        output: personaRead.result,
-      });
-    }
-    const persona = resolvedPersona.persona;
-    const activePersonaId = trim(personaRead.result?.activeId);
-    if (
-      persona?.active !== true &&
-      (!activePersonaId || trim(persona?.id) !== activePersonaId)
-    ) {
-      return importedCardWorkflowFailure({
-        input,
-        status: 'needs_input',
-        reason: 'target_persona_not_active',
-        message: `「${trim(persona?.name || persona?.id)}」目前不是活动角色卡。请先切换到它再预览，避免读取或冻结到其他角色卡的聊天室作用域。`,
-        steps,
-        output: personaRead.result,
-      });
-    }
-    const worldbookId = trim(persona?.associations?.worldbookId);
-    if (!worldbookId || persona?.associations?.worldbookEnabled === false) {
-      return importedCardWorkflowFailure({
-        input,
-        status: 'needs_input',
-        reason: worldbookId ? 'persona_worldbook_disabled' : 'persona_worldbook_missing',
-        message: worldbookId
-          ? `角色卡「${trim(persona?.name || persona?.id)}」关联的世界书目前未启用。`
-          : `角色卡「${trim(persona?.name || persona?.id)}」没有可继承的关联世界书。`,
-        steps,
-        output: personaRead.result,
-      });
-    }
-
-    const worldbookRead = await runImportedCardWorkflowTool({
-      plan: makeImportedCardWorkflowPlan({
-        toolName: 'worldbook.read',
-        args: { name: worldbookId, maxEntries: 200 },
-        featureId: 'worldbook.read',
-        title: '读取完整世界书紧凑索引',
-        response: '读取完整条目索引后再做一次人物分类。',
-        phase: 'read_worldbook_index',
-      }),
-      context,
-      tracker,
-      steps,
-      authorizePlan,
-    });
-    if (!worldbookRead.ok) {
-      return importedCardWorkflowFailure({
-        input,
-        reason: 'worldbook_read_failed',
-        message: summarizeToolFailure(worldbookRead.output),
-        steps,
-        output: worldbookRead.result,
-      });
-    }
-    const entryCount = Math.max(0, Math.trunc(Number(worldbookRead.result?.entryCount) || 0));
-    const returnedEntryCount = Math.max(
-      0,
-      Math.trunc(Number(worldbookRead.result?.returnedEntryCount) || 0),
-    );
-    if (
-      entryCount > 200 ||
-      returnedEntryCount !== entryCount ||
-      worldbookRead.result?.truncated === true
-    ) {
-      return importedCardWorkflowFailure({
-        input,
-        status: 'needs_input',
-        reason: 'worldbook_index_incomplete',
-        message: `关联世界书共有 ${entryCount} 条，但本轮只能安全取得 ${returnedEntryCount} 条完整索引；未分类、未创建任何资源。`,
-        steps,
-        output: worldbookRead.result,
-      });
-    }
-    let entries = (Array.isArray(worldbookRead.result?.entries) ? worldbookRead.result.entries : [])
-      .map(item => clone(item));
-    const ambiguousEntries = entries.filter(isAmbiguousImportedCardEntry).slice(0, 6);
-    for (const entry of ambiguousEntries) {
-      const detailRead = await runImportedCardWorkflowTool({
-        plan: makeImportedCardWorkflowPlan({
-          toolName: 'worldbook.read',
-          args: {
-            name: worldbookId,
-            entryId: trim(entry?.id),
-            includeContent: true,
-            maxEntries: 1,
-            maxContentLength: 1200,
-          },
-          featureId: 'worldbook.read',
-          title: `补读含糊条目「${trim(entry?.title || entry?.id)}」`,
-          response: '只补读标题不足以判断的少数条目。',
-          phase: 'read_ambiguous_entry',
-        }),
-        context,
-        tracker,
-        steps,
-        authorizePlan,
-      });
-      if (!detailRead.ok) continue;
-      const detailed = Array.isArray(detailRead.result?.entries)
-        ? detailRead.result.entries[0]
-        : null;
-      if (!detailed) continue;
-      entries = entries.map(item => (
-        trim(item?.id) === trim(entry?.id)
-          ? { ...item, content: trim(detailed?.content).slice(0, 1200) }
-          : item
-      ));
-    }
-
-    let rawClassification = null;
-    try {
-      rawClassification = await importedCardClassifier({
-        input: trim(input),
-        persona: { id: trim(persona?.id), name: trim(persona?.name || persona?.id) },
-        worldbook: {
-          id: trim(worldbookRead.result?.id || worldbookId),
-          name: trim(worldbookRead.result?.name || worldbookId),
-          entryCount,
-        },
-        entries,
-      }, context);
-    } catch (error) {
-      if (isMaidAbortError(error, context?.signal)) throw error;
-      return importedCardWorkflowFailure({
-        input,
-        reason: 'imported_card_classification_failed',
-        message: error?.message || '人物分类模型调用失败；未执行任何写入。',
-        steps,
-        output: worldbookRead.result,
-      });
-    }
-    const classification = normalizeMaidImportedCardClassification(rawClassification, {
-      entries,
-      requestedGroupName: intent?.requestedGroupName,
-      groupRequested: intent?.groupRequested === true,
-    });
-    if (!classification.ok) {
-      return importedCardWorkflowFailure({
-        input,
-        reason: classification.reason,
-        message: `人物分类结果未通过完整性校验（${classification.reason}）；未执行任何写入。`,
-        steps,
-        output: classification,
-      });
-    }
-
-    const worldbook = {
-      id: trim(worldbookRead.result?.id || worldbookId),
-      name: trim(worldbookRead.result?.name || worldbookId),
-      enabled: true,
-      entryCount,
-      returnedEntryCount,
-    };
-    if (intent?.createRequested !== true) {
-      const previewSnapshot = buildMaidImportedCardWorkflowSnapshot({
-        persona,
-        worldbook,
-        classification,
-      });
-      return {
-        ok: true,
-        status: 'succeeded',
-        responseType: 'workflow',
-        input: trim(input),
-        steps: clone(steps),
-        output: clone(worldbookRead.result),
-        classification: clone(classification),
-        message: buildMaidImportedCardPreviewMessage(previewSnapshot, { previewOnly: true }),
-      };
-    }
-
-    const sessionList = await runImportedCardWorkflowTool({
-      plan: makeImportedCardWorkflowPlan({
-        toolName: 'session.list',
-        args: { limit: 100, includeGroups: true },
-        featureId: 'session.list',
-        title: '读取当前角色卡会话清单',
-        response: '核对候选聊天室与群聊是否已经存在。',
-        phase: 'read_existing_sessions',
-      }),
-      context,
-      tracker,
-      steps,
-      authorizePlan,
-    });
-    if (!sessionList.ok) {
-      return importedCardWorkflowFailure({
-        input,
-        reason: 'session_list_failed',
-        message: summarizeToolFailure(sessionList.output),
-        steps,
-        output: sessionList.result,
-      });
-    }
-    const contacts = Array.isArray(sessionList.result?.contacts) ? sessionList.result.contacts : [];
-    const groupKey = compactText(classification?.group?.name);
-    const existingGroup = classification?.group?.enabled === true
-      ? contacts.find(item => (
-          compactText(item?.id) === groupKey || compactText(item?.name) === groupKey
-        ))
-      : null;
-    let existingGroupMembers = [];
-    if (existingGroup?.isGroup === true) {
-      const groupRead = await runImportedCardWorkflowTool({
-        plan: makeImportedCardWorkflowPlan({
-          toolName: 'app.read_resource',
-          args: {
-            resource: 'session',
-            id: trim(existingGroup?.id),
-            include: ['members'],
-          },
-          featureId: 'app.resource.read',
-          title: '冻结现有群聊成员',
-          response: '记录现有群聊的精确成员 ID。',
-          phase: 'read_existing_group',
-        }),
-        context,
-        tracker,
-        steps,
-        authorizePlan,
-      });
-      if (!groupRead.ok) {
-        return importedCardWorkflowFailure({
-          input,
-          reason: 'existing_group_read_failed',
-          message: summarizeToolFailure(groupRead.output),
-          steps,
-          output: groupRead.result,
-        });
-      }
-      existingGroupMembers = (groupRead.result?.sessions?.[0]?.members || [])
-        .map(item => trim(item?.id || item))
-        .filter(Boolean);
-    }
-    const snapshot = buildMaidImportedCardWorkflowSnapshot({
-      persona,
-      worldbook,
-      classification,
-      contacts,
-      existingGroupMembers,
-      revealRequested: intent?.revealRequested === true,
-    });
-    const privateConflict = snapshot.privateSessions.find(item => item.existingType === 'group');
-    if (privateConflict) {
-      return importedCardWorkflowFailure({
-        input,
-        status: 'needs_input',
-        reason: 'private_session_name_conflict',
-        message: `候选人物「${privateConflict.name}」与现有群聊同名，无法安全冻结建房清单。`,
-        steps,
-        output: snapshot,
-      });
-    }
-    if (snapshot.group.enabled && snapshot.group.existingType === 'private') {
-      return importedCardWorkflowFailure({
-        input,
-        status: 'needs_input',
-        reason: 'group_name_conflict',
-        message: `拟建群聊「${snapshot.group.name}」与现有私聊同名，请先换一个群名。`,
-        steps,
-        output: snapshot,
-      });
-    }
-    const validation = validateMaidImportedCardWorkflowSnapshot(snapshot);
-    if (!validation.ok) {
-      return importedCardWorkflowFailure({
-        input,
-        reason: validation.reason,
-        message: `冻结清单未通过校验（${validation.reason}）；未执行任何写入。`,
-        steps,
-        output: snapshot,
-      });
-    }
-    return {
-      ok: true,
-      status: 'awaiting_confirmation',
-      responseType: 'workflow',
-      input: trim(input),
-      steps: clone(steps),
-      output: clone(sessionList.result),
-      pendingWorkflow: validation.snapshot,
-      message: buildMaidImportedCardPreviewMessage(validation.snapshot),
-    };
-  };
 
   const sameImportedCardMemberSet = (left = [], right = []) => {
     const leftSet = Array.from(new Set(left.map(item => trim(item)).filter(Boolean))).sort();
@@ -4063,8 +2073,6 @@ export const createMaidAssistantAgent = ({
       ...(isPlainObject(context) ? context : {}),
       // Planner/ReAct context copies share this state; each run gets a fresh ref.
       maidProviderFcState: { fallbackReason: '', diagnostics: null },
-      operationIntentPolicy: classifyMaidOperationIntent(input),
-      presentationIntent: classifyMaidPresentationIntent(input),
       maidUserInput: trim(input),
       maidSourceGrounding: buildMaidSourceGroundingContext({ input, steps: [] }),
       maidVisualSpecLedger: isPlainObject(context?.maidVisualSpecLedger)
@@ -4085,59 +2093,6 @@ export const createMaidAssistantAgent = ({
         input: '',
         message: '这次没有收到指令内容，女仆先不行动～请告诉我需要做什么。',
       };
-    }
-    if (context.operationIntentPolicy.mode === 'no_tool') {
-      if (typeof chatResponder !== 'function') {
-        return {
-          ok: false,
-          status: 'unsupported',
-          responseType: 'chat',
-          input: trim(input),
-          reason: 'tools_forbidden_by_user',
-          message: '你要求本轮不调用工具，但当前没有可用的纯聊天回复能力。',
-        };
-      }
-      try {
-        throwIfMaidAborted(context?.signal);
-        const chatResult = await chatResponder(input, context, {
-          plan: {
-            ok: false,
-            status: 'unsupported',
-            reason: 'tools_forbidden_by_user',
-            message: '用户明确要求本轮不调用工具。',
-          },
-        });
-        throwIfMaidAborted(context?.signal);
-        if (chatResult?.ok && trim(chatResult.message)) {
-          return {
-            ok: true,
-            status: chatResult.status || 'responded',
-            responseType: 'chat',
-            source: chatResult.source || 'maid_chat_responder',
-            input: trim(input),
-            message: trim(chatResult.message),
-          };
-        }
-        return {
-          ok: false,
-          status: chatResult?.status || 'failed',
-          responseType: 'chat',
-          input: trim(input),
-          reason: chatResult?.reason || 'maid_chat_failed',
-          message: chatResult?.message || '女仆暂时无法在不调用工具的前提下回答。',
-        };
-      } catch (error) {
-        if (isMaidAbortError(error, context?.signal)) throw error;
-        logger?.warn?.('maid assistant no-tool chat response failed', error);
-        return {
-          ok: false,
-          status: 'failed',
-          responseType: 'chat',
-          input: trim(input),
-          reason: error?.message || 'maid_chat_failed',
-          message: error?.message || '女仆暂时无法在不调用工具的前提下回答。',
-        };
-      }
     }
     let capabilityRoutingConfigOverride = null;
     if (typeof getCapabilityRoutingConfigOverride === 'function') {
@@ -4169,7 +2124,8 @@ export const createMaidAssistantAgent = ({
           snapshot = capabilityRoutingRuntime.prepareDecision({
             requestId: trim(context?.capabilityRequestId),
             input,
-            context: decisionContext,
+            // 本轮自己的任务 run：候选看「之前的任务」状态时排除它
+            context: { ...decisionContext, maidRunId: tracker?.getRunId?.() || '' },
             steps: Array.isArray(decisionContext.maidReactSteps) ? decisionContext.maidReactSteps : [],
             phase,
             configOverride: capabilityRoutingConfigOverride,
@@ -4291,29 +2247,11 @@ export const createMaidAssistantAgent = ({
       return runImportedCardApplyWorkflow({
         input,
         pending: pendingImportedCardWorkflow,
-        context: {
-          ...context,
-          operationIntentPolicy: {
-            mode: 'write_allowed',
-            source: 'frozen_workflow_confirmation',
-            reason: 'confirmed_imported_card_session_setup',
-          },
-        },
-        tracker,
-        authorizePlan: authorizeDeterministicWorkflowPlan,
-      });
-    }
-    const importedCardIntent = classifyMaidImportedCardWorkflowIntent(input);
-    if (!groupWorkflow && importedCardIntent.matched && typeof importedCardClassifier === 'function') {
-      return runImportedCardPreviewWorkflow({
-        input,
-        intent: importedCardIntent,
         context,
         tracker,
         authorizePlan: authorizeDeterministicWorkflowPlan,
       });
     }
-
     // 上一轮留下的“待确认删除清单”：明确确认则原样执行，取消则作废，说了别的就视为放弃
     let confirmedPendingPlan = null;
     if (!groupWorkflow && !context.runContinuation && typeof agentTaskRuntime?.listRuns === 'function') {
@@ -4367,8 +2305,6 @@ export const createMaidAssistantAgent = ({
           closePending('consumed', 'succeeded', '用户已确认，按清单执行。');
           confirmedPendingPlan = authorizeDeterministicWorkflowPlan(buildConfirmedPendingActionPlan(pendingAction), []);
           Object.assign(context, pendingAction.snapshot.context);
-          // 用户确认的正是这份写入清单：本轮按允许写入处理，不再额外弹“只读请求要不要写入”（删除本身的确认照常）
-          context.operationIntentPolicy = { mode: 'write_allowed', source: 'confirmed_pending_action', reason: 'user_confirmed_pending_action' };
         } else {
           // 此时还不知道是改说别的事还是修改清单（由模型判断），摘要措辞对两种情况都成立
           closePending('superseded', 'cancelled', '收到新的指示，原待确认的删除清单已作废，未执行删除。');
@@ -4378,10 +2314,6 @@ export const createMaidAssistantAgent = ({
             featureId: trim(pendingAction.snapshot.featureId, pendingAction.snapshot.toolName),
             toolName: trim(pendingAction.snapshot.toolName),
           };
-          // 回复待确认的写入清单不是只读查询（“确认”一词会被当成“确认一下”）
-          if (context.operationIntentPolicy?.mode === 'read_only') {
-            context.operationIntentPolicy = { mode: 'unspecified', source: 'pending_action_revision', reason: 'reply_to_pending_write_list' };
-          }
         }
       }
     }
@@ -4549,7 +2481,6 @@ export const createMaidAssistantAgent = ({
         };
       }
     }
-    plan = groupWorkflow?.mode === 'confirm' ? plan : applyMaidPresentationPolicy(plan, context.presentationIntent);
     let currentPlan = plan;
     let lastExecution = null;
     let lastOutput = null;
@@ -4560,7 +2491,6 @@ export const createMaidAssistantAgent = ({
     const steps = [];
     const crossRunFallbackPlans = new Map();
     let stepBudget = resolveReactStepBudget({
-      input,
       plan,
       context,
       configuredMaxReactSteps: maxReactSteps,
@@ -4568,7 +2498,6 @@ export const createMaidAssistantAgent = ({
     let maxSteps = stepBudget.maxSteps;
     const expandStepBudget = (nextPlan = {}) => {
       const next = resolveReactStepBudget({
-        input,
         plan: nextPlan,
         context,
         configuredMaxReactSteps: maxReactSteps,
@@ -4601,25 +2530,7 @@ export const createMaidAssistantAgent = ({
             return { ...groupReplyResult(input, 'group_preview_scope_changed',
               t('页面或角色卡已变化，原建群清单不能继续使用。请重新预览。'), 'cancelled'), steps: clone(steps) };
           }
-          if (groupWorkflow.mode === 'preview') {
-            if (currentPlan.toolName === 'group.create') {
-              const originalModelPlan = clone(currentPlan);
-              currentPlan = { ...currentPlan, args: { ...currentPlan.args, preview: true,
-                open: ['reveal', 'guide'].includes(context.presentationIntent.mode) },
-                metadata: { ...currentPlan.metadata, workflowTransition: 'group_preview_only', originalModelPlan } };
-            } else if (toolRegistry?.get?.(currentPlan.toolName)?.capabilities?.write !== false) {
-              return { ...groupReplyResult(input, 'group_preview_write_blocked',
-                t('这轮只整理建群预览，未执行其他写入。请补充已有联系人或调整清单。'), 'failed'),
-                plan: clone(currentPlan), steps: clone(steps) };
-            }
-          }
         }
-        currentPlan = advanceRepeatedWorldbookPreviewToApply({
-          input,
-          plan: currentPlan,
-          steps,
-          operationIntentPolicy: context.operationIntentPolicy,
-        });
         context.maidSourceGrounding = buildMaidSourceGroundingContext({ input, steps });
         expandStepBudget(currentPlan);
         let crossRunResumeMatch = resolveCrossRunResumePlan({
@@ -4647,7 +2558,7 @@ export const createMaidAssistantAgent = ({
             }
           }
           crossRunFallbackPlans.set(crossRunResumeMatch.previous.argsDigest, clone(originalPlan));
-          currentPlan = applyMaidPresentationPolicy(verificationPlan, context.presentationIntent);
+          currentPlan = verificationPlan;
           crossRunResumeMatch = null;
         }
         if (trim(currentPlan.response) && typeof context?.onStatus === 'function') {
@@ -4660,15 +2571,6 @@ export const createMaidAssistantAgent = ({
         }
 
         let execution = null;
-        const visualConflict = findMaidVisualPreferenceConflict({ input, plan: currentPlan,
-          preferences: context.maidConversationContextRef?.current?.preferences || [] });
-        if (visualConflict) return {
-          ok: true, status: 'responded', responseType: 'chat', reason: 'maid_visual_preference_conflict',
-          input: trim(input), steps: clone(steps), preferenceConflict: visualConflict,
-          message: t('你之前说过不喜欢{colors}，但「{subject}」的拟定形象包含这些颜色。要保留设定，还是避开这些颜色？', {
-            colors: [...new Set(visualConflict.conflicts.map(item => t(item.color)))].join('、'), subject: visualConflict.subject,
-          }),
-        };
         const reusableSessionCreate = findVerifiedIdempotentSessionCreate(currentPlan, steps);
         const reusableGeneratedMedia = findGeneratedMediaAtQuota({
           input,
@@ -4708,11 +2610,7 @@ export const createMaidAssistantAgent = ({
             throwIfMaidAborted(context?.signal);
             execution = await executePlan(
               alreadyDeleted ? stripAlreadyDeletedTargets(currentPlan, alreadyDeleted) : currentPlan,
-              groupWorkflow?.mode === 'preview' && currentPlan.toolName === 'group.create'
-                ? { ...context, operationIntentPolicy: { mode: 'unspecified', source: 'group_preview_only' } }
-                : groupWorkflow?.mode === 'confirm'
-                  ? { ...context, operationIntentPolicy: { mode: 'write_allowed', source: 'confirmed_group_preview' } }
-                  : context,
+              context,
               tracker,
             );
             if (alreadyDeleted) {
@@ -4754,13 +2652,34 @@ export const createMaidAssistantAgent = ({
           if (pending) return {
             ok: true, status: 'awaiting_confirmation', responseType: 'workflow', source: 'app_group_preview',
             input: trim(input), plan: clone(currentPlan), output: clone(output), steps: clone(steps),
-            modelDraft: clone(currentPlan.metadata?.originalModelPlan || currentPlan),
+            modelDraft: clone(currentPlan),
             pendingWorkflow: pending, message: buildGroupPreviewMessage(pending),
           };
           if (groupWorkflow?.mode === 'preview') return {
             ...groupReplyResult(input, 'group_preview_unavailable',
               t('建群预览缺少有效的目标或作用域，未创建群聊。请重新预览。'), 'failed'),
             output: clone(output), steps: clone(steps),
+          };
+        }
+        // 角色卡世界书挑人物建房：工具冻结了建房清单时本轮停下，等用户下一句确认或取消（确认后由 runImportedCardApplyWorkflow 执行）
+        if (ok && currentPlan.toolName === MAID_IMPORTED_CARD_PLAN_TOOL) {
+          const planResult = unwrapToolOutputResult(output);
+          const frozen = planResult?.awaitingConfirmation === true
+            ? validateMaidImportedCardWorkflowSnapshot(planResult.pendingWorkflow)
+            : null;
+          if (frozen?.ok) return {
+            ok: true, status: 'awaiting_confirmation', responseType: 'workflow',
+            input: trim(input), plan: clone(currentPlan), output: clone(output), steps: clone(steps),
+            pendingWorkflow: frozen.snapshot, message: trim(planResult.message),
+          };
+        }
+        // 续跑任务：已排进与「继续」按钮同一条结构化续跑，本轮到此结束，续跑在本轮之后开始并自己回报
+        if (ok && currentPlan.toolName === MAID_TASK_RESUME_TOOL) {
+          const resumed = unwrapToolOutputResult(output);
+          if (resumed?.queued === true) return {
+            ok: true, status: 'succeeded', responseType: 'workflow', reason: 'maid_task_resume_queued',
+            input: trim(input), plan: clone(currentPlan), output: clone(output), steps: clone(steps),
+            message: t('已把任务「{goal}」排进续跑，接下来按原任务记录接着做。', { goal: trim(resumed.title) }),
           };
         }
         if (groupWorkflow?.mode === 'confirm' && currentPlan.toolName === 'group.create') {
@@ -4866,147 +2785,6 @@ export const createMaidAssistantAgent = ({
             expandStepBudget(currentPlan);
             continue;
           }
-        }
-
-        const pendingWorkScopePlan = ok
-          ? buildPendingMaidWorkScopePlan({ input, steps })
-          : null;
-        if (pendingWorkScopePlan) {
-          currentPlan = applyMaidPresentationPolicy(
-            authorizeDeterministicWorkflowPlan(pendingWorkScopePlan, steps),
-            context.presentationIntent,
-          );
-          expandStepBudget(currentPlan);
-          continue;
-        }
-
-        const conditionalProfileCreateProgress = ok
-          ? buildMaidConditionalProfileCreateProgress({
-              input,
-              operationIntentPolicy: context.operationIntentPolicy,
-              steps,
-            })
-          : null;
-        if (
-          conditionalProfileCreateProgress?.complete &&
-          conditionalProfileCreateProgress.finalDecision
-        ) {
-          return {
-            ok: true,
-            status: 'succeeded',
-            responseType: 'react',
-            input: trim(input),
-            plan: clone(plan),
-            finalDecision: clone(conditionalProfileCreateProgress.finalDecision),
-            output: clone(observedOutput),
-            steps: clone(steps),
-            guided: Boolean(observedExecution?.guided),
-            guide: clone(observedExecution?.guide || null),
-            reason: '',
-            message: conditionalProfileCreateProgress.finalDecision.message,
-          };
-        }
-        if (conditionalProfileCreateProgress?.nextPlan) {
-          currentPlan = applyMaidPresentationPolicy(
-            authorizeDeterministicWorkflowPlan(conditionalProfileCreateProgress.nextPlan, steps),
-            context.presentationIntent,
-          );
-          expandStepBudget(currentPlan);
-          continue;
-        }
-
-        const structuredReadProgress = ok
-          ? buildMaidStructuredReadProgress({
-              input,
-              operationIntentPolicy: context.operationIntentPolicy,
-              steps,
-            })
-          : null;
-        if (structuredReadProgress?.complete && structuredReadProgress.finalDecision) {
-          return {
-            ok: true,
-            status: 'succeeded',
-            responseType: 'react',
-            input: trim(input),
-            plan: clone(plan),
-            finalDecision: clone(structuredReadProgress.finalDecision),
-            output: clone(observedOutput),
-            steps: clone(steps),
-            guided: Boolean(observedExecution?.guided),
-            guide: clone(observedExecution?.guide || null),
-            reason: '',
-            message: structuredReadProgress.finalDecision.message,
-          };
-        }
-        if (structuredReadProgress?.nextPlan) {
-          currentPlan = applyMaidPresentationPolicy(
-            authorizeDeterministicWorkflowPlan(structuredReadProgress.nextPlan, steps),
-            context.presentationIntent,
-          );
-          expandStepBudget(currentPlan);
-          continue;
-        }
-
-        const deterministicReadDecision = ok
-          ? buildDeterministicMaidReadDecision({
-              input,
-              operationIntentPolicy: context.operationIntentPolicy,
-              steps,
-            })
-          : null;
-        if (deterministicReadDecision) {
-          return {
-            ok: true,
-            status: 'succeeded',
-            responseType: 'react',
-            input: trim(input),
-            plan: clone(plan),
-            finalDecision: clone(deterministicReadDecision),
-            output: clone(observedOutput),
-            steps: clone(steps),
-            guided: Boolean(observedExecution?.guided),
-            guide: clone(observedExecution?.guide || null),
-            reason: '',
-            message: deterministicReadDecision.message,
-          };
-        }
-
-        const revealWorkflowActive = (Array.isArray(steps) ? steps : []).some(step => (
-          trim(step?.metadata?.workflowTransition) === 'result_reveal'
-        ));
-        if (ok && revealWorkflowActive) {
-          const nextRevealPlan = buildPendingMaidResultRevealPlan({
-            presentationIntent: context.presentationIntent,
-            steps,
-          });
-          if (nextRevealPlan) {
-            currentPlan = applyMaidPresentationPolicy(
-              authorizeDeterministicWorkflowPlan(nextRevealPlan, steps),
-              context.presentationIntent,
-            );
-            expandStepBudget(currentPlan);
-            continue;
-          }
-          const finalMessage = getMaidRevealFinalMessage(steps) || '任务已经完成，并已打开主要结果。';
-          return {
-            ok: true,
-            status: 'succeeded',
-            responseType: 'react',
-            input: trim(input),
-            plan: clone(plan),
-            finalDecision: {
-              ok: true,
-              action: 'final',
-              message: finalMessage,
-              source: 'deterministic_result_reveal',
-            },
-            output: clone(observedOutput),
-            steps: clone(steps),
-            guided: Boolean(observedExecution?.guided),
-            guide: clone(observedExecution?.guide || null),
-            reason: '',
-            message: finalMessage,
-          };
         }
 
         if (countConsecutiveSearchWithoutEvidence(steps) >= 3) {
@@ -5130,25 +2908,6 @@ export const createMaidAssistantAgent = ({
               message: summarizeToolFailure(observedOutput),
             };
           }
-          const pendingRevealPlan = buildPendingMaidResultRevealPlan({
-            presentationIntent: context.presentationIntent,
-            steps,
-            decision: {
-              message: buildSuccessMessage({
-                plan: observedPlan,
-                output: observedOutput,
-                execution: observedExecution,
-              }),
-            },
-          });
-          if (pendingRevealPlan) {
-            currentPlan = applyMaidPresentationPolicy(
-              authorizeDeterministicWorkflowPlan(pendingRevealPlan, steps),
-              context.presentationIntent,
-            );
-            expandStepBudget(currentPlan);
-            continue;
-          }
           return {
             ok: true,
             status: 'succeeded',
@@ -5201,33 +2960,9 @@ export const createMaidAssistantAgent = ({
             });
           }
         }
-        if (decision?.ok && decision.action === 'final') {
-          const pendingWorkflowPlan = buildPendingWorldbookPreviewApplyPlan({
-            input,
-            steps,
-            decision,
-            operationIntentPolicy: context.operationIntentPolicy,
-          }) ||
-            buildPendingExplicitMaidChatPlan({ input, steps, decision }) ||
-            buildPendingMaidFinalStatePlan({ input, steps, decision }) ||
-            buildPendingMaidResultRevealPlan({
-              presentationIntent: context.presentationIntent,
-              steps,
-              decision,
-            });
-          if (pendingWorkflowPlan) {
-            currentPlan = applyMaidPresentationPolicy(
-              authorizeDeterministicWorkflowPlan(pendingWorkflowPlan, steps),
-              context.presentationIntent,
-            );
-            expandStepBudget(currentPlan);
-            continue;
-          }
-        }
         // Monetary coverage is advisory: historical comparisons and arithmetic
         // need model interpretation. Never let it override APP writes or pending workflows.
-        const onlyWebReads = context.operationIntentPolicy.mode !== 'write_allowed' &&
-          steps.length > 0 && steps.every(step => ['web.search', 'web.research', 'web.fetch_url'].includes(step.toolName));
+        const onlyWebReads = steps.length > 0 && steps.every(step => ['web.search', 'web.research', 'web.fetch_url'].includes(step.toolName));
         const unsupportedAmounts = onlyWebReads && decision?.ok && decision.action === 'final'
           ? findUnsupportedMaidWebAmounts({ input, steps, message: decision.message }) : [];
         if (unsupportedAmounts.length && !webEvidenceCorrectionUsed) {
@@ -5355,29 +3090,6 @@ export const createMaidAssistantAgent = ({
           };
         }
         if (decision.action === 'tool') {
-          const verifiedBinding = findVerifiedWorldbookBindingForTailRead(decision, steps, input);
-          if (verifiedBinding) {
-            const message = `世界书绑定已由工具完成并读回验证；没有再对「${verifiedBinding.target}」执行重复核对。`;
-            return {
-              ok: true,
-              status: 'succeeded',
-              responseType: 'react',
-              input: trim(input),
-              plan: clone(plan),
-              finalDecision: {
-                ok: true,
-                action: 'final',
-                message,
-                source: 'verified_write_tail_read_guard',
-              },
-              output: clone(observedOutput),
-              steps: clone(steps),
-              guided: Boolean(observedExecution?.guided),
-              guide: clone(observedExecution?.guide || null),
-              reason: '',
-              message,
-            };
-          }
           if (shouldStopDuplicateWorldbookWriteAfterVerification(decision, steps)) {
             return {
               ok: true,
@@ -5399,7 +3111,7 @@ export const createMaidAssistantAgent = ({
               message: '已经写入并读回验证成功；为避免重复追加相同世界书条目，本轮未再次执行重复写入。',
             };
           }
-          currentPlan = applyMaidPresentationPolicy(decision, context.presentationIntent);
+          currentPlan = decision;
           expandStepBudget(currentPlan);
           continue;
         }
@@ -5574,39 +3286,11 @@ export const createMaidAssistantAgent = ({
         && !resolvePendingMaidAction(runs, { context }) && !resolvePendingMaidImportedCardWorkflow(runs, { context })) {
         return groupReplyResult(input, 'group_preview_unavailable', t('这份建群清单已失效，请重新预览。'), 'cancelled');
       }
-      if (!groupWorkflow && isMaidGroupPreviewRequest(input)) {
-        if (!fresh || !trim(context.submissionId)) return groupReplyResult(input, 'group_preview_scope_unavailable',
-          t('建群预览缺少有效的目标或作用域，未创建群聊。请重新预览。'), 'failed');
-        groupWorkflow = { mode: 'preview', scope: fresh, originalGoal: trim(input) };
-      }
     }
     let runContinuation = isPlainObject(context?.runContinuation)
       ? context.runContinuation
       : null;
     const resumeRunId = runContinuation ? '' : extractMaidResumeRunId(input);
-    const previousRuns = agentTaskRuntime?.listRuns?.({ kind: 'maid_assistant', limit: 100 }) || [];
-    const pendingConfirmation = resolvePendingMaidAction(previousRuns, { context }) || resolvePendingMaidImportedCardWorkflow(previousRuns, { context });
-    if (!groupWorkflow && !runContinuation && !resumeRunId && !pendingConfirmation) {
-      const followup = resolveMaidRunFollowup({ input, context,
-        runs: previousRuns });
-      if (followup) {
-        const current = getCurrentContext?.();
-        if (current && trim(current.roleCardId) !== trim(context.roleCardId)) {
-          return groupReplyResult(input, 'maid_previous_task_scope_changed', t('角色卡已变化，请在原角色卡中处理这条任务。'), 'cancelled');
-        }
-        const reply = handleMaidRunFollowup({ followup, runtime: agentTaskRuntime, input, context });
-        if (reply) {
-          if (reply.reason === 'maid_previous_task_cancelled') {
-            let persisted = false;
-            try { persisted = await agentTaskRuntime?.flush?.() !== false; } catch {}
-            if (!persisted) return { ...reply, ok: false, reason: 'maid_previous_task_cancel_not_persisted',
-              message: t('已停止当前会话中的后续执行，但取消状态尚未确认保存，请稍后检查任务历史。') };
-          }
-          return reply;
-        }
-        runContinuation = followup.continuation;
-      }
-    }
     const requestedSourceId = resumeRunId || trim(runContinuation?.sourceRunId);
     if (requestedSourceId && typeof agentTaskRuntime?.getRun === 'function') {
       try {
@@ -5701,8 +3385,7 @@ export const createMaidAssistantAgent = ({
     try {
       const rawResult = await runPromptWithTracker(input, routedContext, tracker, groupWorkflow);
       const result = applyMaidResultPresentation(rawResult, {
-        input,
-        context: { ...routedContext, operationIntentPolicy: classifyMaidOperationIntent(input) },
+        context: routedContext,
         isWriteTool: name => toolRegistry?.get?.(name)?.capabilities?.write,
       });
       let capabilityRouting = null;

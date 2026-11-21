@@ -855,6 +855,8 @@ export const createHopscotchBoardPanel = ({
   });
   return {
     getConfigScope: () => target === 'global' ? 'global' : 'local',
+    // 别处（女仆）存了板之后重新载入；有未保存的草稿时不覆盖
+    refresh: () => refreshSettings(),
     // 截断提示通知的跳转：打开「正文生成」卡片，捲到防截断传输开关并短暂高亮
     openBodyToolTransport: async () => {
       const wait = () => new Promise(resolve => setTimeout(resolve, 100));

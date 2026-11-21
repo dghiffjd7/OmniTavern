@@ -4,6 +4,7 @@ import {
   MAID_SEMANTIC_MEMORY_MAX_RECORDS,
   MaidSemanticMemoryStore,
   buildMaidResourceStateKey,
+  getMaidSemanticMemoryDiskKey,
   getMaidSemanticMemoryStorageKey,
   validateMaidSemanticMemoryKey,
 } from '../../src/scripts/storage/maid-semantic-memory-store.js';
@@ -373,6 +374,130 @@ const createStore = async ({
   assert.equal([...kv.values()][0].memories.length, 0, 'the cleared state is persisted');
   assert.equal(await store.clearMemories(), 0);
   console.log('ok - semantic memories can be edited and cleared from settings');
+}
+
+{
+  // Windows 上 KV 档名带冒号会落进 NTFS 附加资料流，原子写入改名失败（os error 87）；磁盘键不得含 Windows 禁用字元
+  assert.equal(getMaidSemanticMemoryDiskKey('maid_default'), 'maid_semantic_memory_store_v1__maid_default');
+  assert.doesNotMatch(getMaidSemanticMemoryDiskKey('a:b*c?"<>|/\\d'), /[:*?"<>|/\\]/);
+  assert.equal(
+    getMaidSemanticMemoryStorageKey('maid_default'),
+    'maid_semantic_memory_store_v1:maid_default',
+    'localStorage 键维持原样，不搬移',
+  );
+
+  const { store, storage, kv } = await createStore();
+  await store.upsertMemory({ kind: 'preference', key: 'presentation.default', content: '默认后台执行。', confidence: 'explicit' });
+  assert.deepEqual([...kv.keys()], ['maid_semantic_memory_store_v1__maid_default'], 'KV 只写新磁盘键');
+  assert.ok(storage.getItem('maid_semantic_memory_store_v1:maid_default'), 'localStorage 照旧写原键');
+
+  const reloaded = new MaidSemanticMemoryStore({
+    storage: createStorage(),
+    loadKv: async key => kv.get(key) || {},
+    saveKv: async () => true,
+  });
+  await reloaded.load();
+  assert.equal(reloaded.listMemories()[0]?.content, '默认后台执行。', '从新磁盘键读回');
+  console.log('ok - semantic memory KV uses a disk key without colons and reads it back');
+}
+
+{
+  // 升级后新磁盘键还没有档案（load_kv 回 {}）：在 localStorage 与旧 KV 之间照 updatedAt 取较新的，旧副本不能盖掉新资料
+  const legacyKey = 'maid_semantic_memory_store_v1:maid_default';
+  const diskKey = 'maid_semantic_memory_store_v1__maid_default';
+  const stateWith = (updatedAt, contents) => ({
+    version: 1,
+    scopeId: 'maid_default',
+    updatedAt,
+    memories: contents.map((content, index) => ({
+      id: `m-${updatedAt}-${index}`, scopeId: 'maid_default', kind: 'important_event', key: `event.item_${index}`,
+      content, confidence: 'verified', createdAt: updatedAt, updatedAt,
+    })),
+  });
+  const openStore = async ({ local = null, legacy = null, disk = null, logger = { warn() {} } } = {}) => {
+    const storage = createStorage();
+    if (local) storage.setItem(legacyKey, JSON.stringify(local));
+    const kv = new Map([[legacyKey, legacy], [diskKey, disk]].filter(([, value]) => value));
+    const reads = [];
+    const writes = [];
+    const store = new MaidSemanticMemoryStore({
+      storage,
+      loadKv: async key => { reads.push(key); return kv.get(key) || {}; },
+      saveKv: async (key, value) => { writes.push(key); kv.set(key, JSON.parse(JSON.stringify(value))); },
+      now: () => 9000,
+      logger,
+    });
+    await store.load();
+    return { store, storage, kv, reads, writes };
+  };
+
+  const newerLocal = await openStore({
+    local: stateWith(5000, ['新的一', '新的二', '新的三']),
+    legacy: stateWith(3000, ['七月旧副本']),
+  });
+  assert.deepEqual(newerLocal.store.listMemories().map(item => item.content).sort(), ['新的一', '新的三', '新的二'].sort());
+  assert.deepEqual(newerLocal.reads, [diskKey, legacyKey]);
+
+  await newerLocal.store.upsertMemory({ kind: 'important_event', key: 'event.after_upgrade', content: '升级后第一笔。', confidence: 'verified' });
+  assert.deepEqual(newerLocal.writes, [diskKey], '第一次写入写进新磁盘键，旧存档名不写');
+  assert.equal(newerLocal.kv.get(diskKey).memories.length, 4, '新磁盘键接手 localStorage 的全部记忆');
+  assert.equal(newerLocal.kv.get(legacyKey).memories.length, 1, '旧存档原样保留');
+
+  const onlyLegacy = await openStore({ legacy: stateWith(3000, ['只有旧 KV']) });
+  assert.deepEqual(onlyLegacy.store.listMemories().map(item => item.content), ['只有旧 KV'], 'localStorage 被清掉时仍可从旧 KV 接回');
+
+  const diskPresent = await openStore({
+    local: stateWith(4000, ['localStorage']),
+    legacy: stateWith(8000, ['旧 KV 即使较新也不再读']),
+    disk: stateWith(6000, ['新磁盘键']),
+  });
+  assert.deepEqual(diskPresent.store.listMemories().map(item => item.content), ['新磁盘键']);
+  assert.deepEqual(diskPresent.reads, [diskKey], '新磁盘键已有档案时不读旧存档名');
+  console.log('ok - semantic memory migrates from localStorage or the legacy KV without older copies winning');
+}
+
+{
+  // KV 写入失败不再静默：带原因警告，localStorage 仍照写
+  const warnings = [];
+  const storage = createStorage();
+  const store = new MaidSemanticMemoryStore({
+    storage,
+    loadKv: async () => ({}),
+    saveKv: async () => { throw new Error('参数错误。 (os error 87)'); },
+    logger: { warn: (...args) => warnings.push(args) },
+  });
+  await store.load();
+  const created = await store.upsertMemory({ kind: 'preference', key: 'presentation.default', content: '默认后台执行。', confidence: 'explicit' });
+  assert.equal(created.ok, true);
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0][1].name, 'maid_semantic_memory_store_v1__maid_default');
+  assert.match(warnings[0][1].error, /os error 87/);
+  assert.ok(storage.getItem('maid_semantic_memory_store_v1:maid_default'));
+
+  // Tauri 命令回 Err(String) 时 invoke 以字串拒绝（例如 save_kv 的名称检查）：原因照样记下
+  const rejectedWarnings = [];
+  const rejected = new MaidSemanticMemoryStore({
+    storage: createStorage(),
+    loadKv: async () => ({}),
+    saveKv: () => Promise.reject('invalid_kv_name:"maid_semantic_memory_store_v1:maid_default"'),
+    logger: { warn: (...args) => rejectedWarnings.push(args) },
+  });
+  await rejected.load();
+  await rejected.upsertMemory({ kind: 'preference', key: 'presentation.default', content: '默认后台执行。', confidence: 'explicit' });
+  assert.match(rejectedWarnings[0][1].error, /^invalid_kv_name:/);
+
+  const localWarnings = [];
+  const failingLocal = new MaidSemanticMemoryStore({
+    storage: { getItem: () => null, setItem: () => { throw new Error('quota exceeded'); } },
+    loadKv: async () => ({}),
+    saveKv: async () => true,
+    logger: { warn: (...args) => localWarnings.push(args) },
+  });
+  await failingLocal.load();
+  await failingLocal.upsertMemory({ kind: 'preference', key: 'presentation.default', content: '默认后台执行。', confidence: 'explicit' });
+  assert.equal(localWarnings.length, 1);
+  assert.match(localWarnings[0][1].error, /quota exceeded/);
+  console.log('ok - semantic memory write failures are logged with the reason');
 }
 
 console.log('maid-semantic-memory-store-tests passed');

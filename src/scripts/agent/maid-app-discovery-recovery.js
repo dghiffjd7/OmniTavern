@@ -33,7 +33,6 @@ const hasMergeCommand = (text = '') => text.split(/[，,。；;！？!?\n]/u).so
 export const shouldRecoverMaidAppDiscovery = ({ input = '', decision = {}, context = {} } = {}) => {
   const text = trim(input).normalize('NFKC');
   if (!text || context.signal?.aborted || context.maidDiscoveryRecovery || context.runContinuation
-    || context.operationIntentPolicy?.mode === 'no_tool'
     || (Array.isArray(context.maidReactSteps) && context.maidReactSteps.length)) return false;
   if (noLookup.test(text) || cancellation.test(text) || discussion.test(text) || noMediaGeneration.test(text)) return false;
   if (/permission|denied|forbidden|cancel|aborted|not_configured|权限|拒绝/iu.test(trim(decision.reason))) return false;

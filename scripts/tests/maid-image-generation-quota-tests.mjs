@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createMaidAssistantAgent, classifyMaidOperationIntent } from '../../src/scripts/agent/maid-assistant-agent.js';
+import { createMaidAssistantAgent } from '../../src/scripts/agent/maid-assistant-agent.js';
 import { createAgentToolRegistry } from '../../src/scripts/agent/agent-tool-registry.js';
 const args = (prompt, target = 'Lilith', purpose = 'avatar') => ({prompt, target, purpose, subject: target,
   appearance:'pink hair',outfit:'black dress',style:'anime',targetAspectRatio:'1:1'});
@@ -31,17 +31,14 @@ const targets=await run('为两人各生成头像',[args('first','Lilith'),args(
 assert.equal(targets.calls.length,2,'Independent targets have independent quotas');
 console.log('ok - successful previews consume their target quota without claiming application or blocking requested variants');
 
-for(const input of ['昨天那个弄好了吗','刚才的头像做好了没','上次的任务完成了吗','Is the earlier task done yet?'])
-  assert.equal(classifyMaidOperationIntent(input).mode,'read_only',input);
-for(const input of ['请生成头像，弄好后设置','帮我生成头像，做好了吗再告诉我','头像做好了，再生成壁纸'])
-  assert.equal(classifyMaidOperationIntent(input).mode,'write_allowed',input);
-console.log('ok - task status questions are read-only; explicit generation commands retain their authorization');
 let billedCalls=0;
 const registry=createAgentToolRegistry({permissionEvaluator:{evaluateTool:()=>({decision:'allow',checks:[]})},logger:{warn(){}}});
+// 11/20 起不再用关键词把状态询问判成只读；付费生图一律先经工具自己的确认（媒体工具的 preflight）
 registry.register({name:'media.generate_image',capabilities:{read:false,write:true},riskLevel:'medium',
+  safety:{operationType:'generate_image',preflight:async()=>({destructive:true,kind:'media.generate_image',operationType:'generate_image'})},
   execute:async()=>{billedCalls++;return {ok:true,attachmentId:'must-not-be-generated'};}});
 const statusAgent=createMaidAssistantAgent({toolRegistry:registry,planner:async()=>plan(args('unrequested continuation')),logger:{warn(){},debug(){}}});
 const statusResult=await statusAgent.runPrompt('昨天那个弄好了吗');
-assert.equal(billedCalls,0);
-assert.equal(statusResult.steps[0].failureCode,'write_intent_required');
-console.log('ok - production registry rejects billed image generation selected during a status question');
+assert.equal(billedCalls,0,'没有用户确认就不扣费');
+assert.notEqual(statusResult.steps[0].status,'succeeded');
+console.log('ok - billed image generation chosen during a status question still waits for the tool confirmation');

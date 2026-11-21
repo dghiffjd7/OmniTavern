@@ -127,6 +127,14 @@ export const searchMaidCapabilityConcepts = (
   ) {
     add('group.members.update', 112, 'group_member_update');
   }
+  // 从角色卡世界书挑人物建房：卡或世界书、挑人物、聊天去向三者都提到时给出候选，用不用由模型决定
+  if (
+    /(?:角色卡|人物卡|世界书|character\s*cards?|world\s*books?)/iu.test(text) &&
+    /(?:挑|选出|筛选|识别|找出|候选|主要人物|主要角色|核心人物|核心角色|\bpick\b|\bselect\b|\bcandidates?\b|main\s+characters?)/iu.test(text) &&
+    /(?:长期聊天|私聊|单聊|聊天室|会话|房间|群聊|群组|联系人|private\s+chats?|chat\s*rooms?|group\s*chats?|contacts?)/iu.test(text)
+  ) {
+    add('session.character_rooms.plan', 112, 'card_character_rooms');
+  }
 
   if (has(/(?:raworiginal|rendered\s*text|latest\s*assistant|最后一轮\s*ai|末条消息|最近一条消息|局部变量|全局变量|local\s*vars?|global\s*vars?|\bvars?\b|后处理规则|后处理脚本|正规表达式|\bregexp\b|\bregex\b|\bpreset\b|角色皮|角色卡|character\s*cards?|user\s*identit(?:y|ies)|用户名称|当前身份)/iu)) {
     add('app.resource.read', 100, 'structured_resource');
@@ -183,6 +191,17 @@ export const searchMaidCapabilityConcepts = (
     if (/(?:分类|分组|归类|整理|categor|group)/iu.test(positiveText)) add('preset.groups', 108, 'preset_grouping');
     else if (deleteIntent.test(positiveText)) add(['preset.delete_many', 'preset.list'], 106, 'preset_batch_delete');
     else if (/(?:条目|entries?|entry)/iu.test(positiveText) && toggleIntent.test(positiveText)) add(['preset.prompt_entries.toggle', 'preset.list'], 108, 'preset_entry_toggle');
+    else if (/(?:复制|拷贝|另存|副本|copy|duplicate)/iu.test(positiveText)) add(['preset.copy', 'preset.list'], 108, 'preset_copy');
+    else if (/(?:改名|重命名|名字改|rename)/iu.test(positiveText)) add(['preset.rename', 'preset.list'], 108, 'preset_rename');
+    // 参数词只在说到预设时才认（「温度」也可能是天气）
+    else if (/(?:温度|temperature|top[\s_-]?[pk]|惩罚|penalty|回复长度|输出长度|最大长度|上下文长度|max[\s_-]?tokens|推理强度|请求推理|流式|stream)/iu.test(positiveText)) {
+      if (writeIntent.test(positiveText) || toggleIntent.test(positiveText) || /(?:调|设为|设成|改|降|升|提高|\d)/u.test(positiveText)) add(['preset.params.update', 'preset.read'], 108, 'preset_params');
+      else add('preset.read', 100, 'preset_params_read');
+    }
+    else if (/(?:条目|提示词|entr(?:y|ies)|内容|顺序|排序)/iu.test(positiveText) && (writeIntent.test(positiveText) || /(?:改|移到|放到|挪|排序|顺序)/u.test(positiveText))) {
+      add(['preset.prompt_entries.upsert', 'preset.read'], 108, 'preset_entry_edit');
+    }
+    else if (/(?:内容|写了什么|参数|条目)/u.test(positiveText) && has(/(?:看|查看|有哪些|是多少|读|列出)/u)) add('preset.read', 104, 'preset_read');
     else if (switchIntent.test(positiveText)) add(['preset.switch', 'preset.list'], 106, 'preset_switch');
     else if (has(/(?:有哪些|列出|列表|哪个|哪一个|当前|在用|查看|看看|list|which)/iu)) add('preset.list', 100, 'preset_inventory');
   }
@@ -198,12 +217,44 @@ export const searchMaidCapabilityConcepts = (
     else if (toggleIntent.test(positiveText)) add(['regex.toggle', 'regex.list'], 106, 'regex_toggle');
     else if (has(/(?:有哪些|列出|列表|哪些|查看|看看|list|which)/iu)) add('regex.list', 100, 'regex_inventory');
   }
+  // 脚本的总开关与三项权限、新建与改代码、读代码：说到权限／总开关时是设定，说到代码或写、改（不是启停）时是写脚本
+  const scriptPermissionIntent = /(?:权限|总开关|全局(?:脚本)?开关|(?:允许|不让|不许)[^，,。；;！？!?\n]{0,10}(?:读|改|修改|访问|联网|上网))/u;
+  const scriptSettingIntent = /(?:联网|上网|访问网络|网络访问|脚本功能[^，,。；;！？!?\n]{0,4}(?:开|关)|(?:开|关|启用|停用)[^，,。；;！？!?\n]{0,4}脚本功能)/u;
+  const scriptCreateIntent = /(?:新建|新增|创建|添加|写(?:一个|个|一段|段)|做(?:一个|个)|弄(?:一个|个)|\b(?:create|add)\b)/iu;
+  const scriptEditIntent = /(?:写(?![了的])|修改|编辑|改|替换|更新|去掉|删掉|删除|加上|加一段|\b(?:edit|update|modify|rewrite)\b)/iu;
+  const scriptCodeWords = /(?:代码|源码|\bcode\b)/iu;
   if (scriptNoun.test(positiveText)) {
     add('script.list', 84, 'script_domain');
     add('script.toggle_many', 58, 'script_domain');
-    if (deleteIntent.test(positiveText)) add(['script.delete_many', 'script.list'], 106, 'script_delete');
+    const wantsScriptSettings = scriptPermissionIntent.test(positiveText) || scriptSettingIntent.test(positiveText);
+    const wantsScriptWrite = scriptCreateIntent.test(positiveText) || (scriptEditIntent.test(positiveText)
+      && (scriptCodeWords.test(positiveText) || (!toggleIntent.test(positiveText) && !scriptPermissionIntent.test(positiveText))));
+    // 同一句兼有两种说法（如「写个脚本联网查天气」）时两个都给，由女仆按上下文选
+    const scriptWriteScore = wantsScriptSettings && wantsScriptWrite ? 106 : 108;
+    if (deleteIntent.test(positiveText) && !scriptCodeWords.test(positiveText)) add(['script.delete_many', 'script.list'], 106, 'script_delete');
+    else if (wantsScriptSettings || wantsScriptWrite) {
+      if (wantsScriptSettings) add(['script.settings.update', 'script.list'], scriptWriteScore, 'script_settings');
+      if (wantsScriptWrite) add(['script.upsert', 'script.read'], scriptWriteScore, 'script_write');
+    }
     else if (toggleIntent.test(positiveText) && !/(?:打开|进入|open).{0,6}(?:脚本|script).{0,6}(?:页面|面板|设置|panel|page)/iu.test(positiveText)) add(['script.toggle_many', 'script.list'], 106, 'script_toggle');
+    else if (scriptCodeWords.test(positiveText) || /写(?:了|的)什么/u.test(positiveText)) add('script.read', 104, 'script_read');
     else if (has(/(?:有哪些|列出|列表|哪些|查看|看看|list|which)/iu)) add('script.list', 100, 'script_inventory');
+  }
+
+  // 插件：查看、启停、从附件或网址安装、移除插件加到界面上的内容；「装了哪些」是查看，不是安装
+  if (/(?:插件|\bplugins?\b)/iu.test(positiveText)) {
+    add('plugin.list', 84, 'plugin_domain');
+    add('plugin.toggle_many', 58, 'plugin_domain');
+    const pluginUiWords = /(?:侧边栏|侧栏|卡片|弹窗|界面|\bui\b|sidebar|modal)/iu;
+    const pluginInstallIntent = /(?:安装(?!了)|装(?=\s*(?:插件|这|那|一下|上|个|好))|帮我装|导入|更新|升级|\binstall\b|https?:\/\/|github)/iu;
+    if (pluginUiWords.test(positiveText) && (deleteIntent.test(positiveText) || /(?:关掉|关闭|去掉|拿掉|收起|清掉)/u.test(positiveText))) add(['plugin.ui.remove', 'plugin.list'], 108, 'plugin_ui_remove');
+    else if (pluginInstallIntent.test(positiveText) && !/(?:装了|安装了|有哪些|哪些)/u.test(positiveText)) add(['plugin.install', 'plugin.list'], 108, 'plugin_install');
+    else if (toggleIntent.test(positiveText) && !/(?:打开|进入|open).{0,6}(?:插件|plugin).{0,6}(?:页面|面板|设置|panel|page)/iu.test(positiveText)) add(['plugin.toggle_many', 'plugin.list'], 106, 'plugin_toggle');
+    else if (pluginUiWords.test(positiveText)) {
+      add('plugin.list', 100, 'plugin_ui_read');
+      add('plugin.ui.remove', 96, 'plugin_ui_read');
+    }
+    else if (has(/(?:有哪些|列出|列表|哪些|查看|看看|状态|报错|错误|为什么|list|which)/iu)) add('plugin.list', 100, 'plugin_inventory');
   }
 
   const profileCreateIntent = /(?:创建|新建|新增|建立|建\s*(?:一[个位]?|个|位)|添加|\bcreate\b)/iu;
@@ -319,11 +370,62 @@ export const searchMaidCapabilityConcepts = (
   if (has(/agent\s*center|agent\s*中心|智能体中心/iu)) {
     add('agent.center.open', 100, 'agent_center');
   }
+  // Agent Center 里的 Agent（回复 Agent 如正文润色、输入助手、格式修复与文本建议的开关和模型）与小管家。
+  // 「润色这条回复」是一次性的 chat.message.optimize；说到每次／自动／回复后再调用模型，或 Agent／工作流时才是设定 Agent。
+  const agentNoun = /(?:正文润色|回复\s*agent|润色\s*agent|输入助手|(?:\bagent\b|智能体).{0,6}(?:设定|设置|配置|模型|开关|提示词)|(?:有哪些|哪些|列出|查看|看看).{0,6}(?:\bagent\b|智能体)|工作流|润色流程)/iu;
+  const everyReplyEdit = /(?:每次|每条|每轮|每一轮|自动|以后都|之后都).{0,16}(?:润色|编修|修改|改写|优化|校对)|(?:润色|编修|改写|校对).{0,12}(?:每次|每条|每轮|自动)|(?:生成|回复|正文).{0,8}(?:结束|完成|生成完|之后|后).{0,16}(?:调用|用).{0,10}(?:模型|ai)/iu;
+  const builtinAgentNoun = /(?:格式修复|文本建议|输入建议)/iu;
+  const agentConfigIntent = /(?:开启|启用|打开|关闭|关掉|停用|模型|换成|改成|设定|设置|配置|enable|disable)/iu;
+  const buildIntent = /(?:做一个|弄一个|帮我做|建一个|搞一个|加一个)/u;
+  if (agentNoun.test(positiveText) || everyReplyEdit.test(positiveText) || (builtinAgentNoun.test(positiveText) && agentConfigIntent.test(positiveText))) {
+    add('agent.list', 84, 'agent_domain');
+    add('agent.upsert', 58, 'agent_domain');
+    if (deleteIntent.test(positiveText)) add(['agent.delete_many', 'agent.list'], 106, 'agent_delete');
+    else if (writeIntent.test(positiveText) || toggleIntent.test(positiveText) || agentConfigIntent.test(positiveText) || everyReplyEdit.test(positiveText) || buildIntent.test(positiveText)) {
+      add(['agent.upsert', 'agent.list'], 108, 'agent_write');
+    } else if (has(/(?:有哪些|列出|列表|哪些|查看|看看|list|which)/iu)) add('agent.list', 100, 'agent_inventory');
+  }
+  if (/(?:小管家|存档命名|存档概述|消息翻译|贴图起名|生图描述转英文标签|steward)/iu.test(positiveText)) {
+    add('agent.list', 84, 'steward_domain');
+    if (writeIntent.test(positiveText) || toggleIntent.test(positiveText) || agentConfigIntent.test(positiveText) || deleteIntent.test(positiveText) || buildIntent.test(positiveText)) {
+      add(['steward.configure', 'agent.list'], 108, 'steward_write');
+    } else add('agent.list', 100, 'steward_inventory');
+  }
+  // 流程板（跳房子）：查看与调整房子；自定义板上只有放上板的回复 Agent 会在回复后执行
+  if (/(?:跳房子|流程板|编排板|流程里|流程中|hopscotch)/iu.test(positiveText) || /放(?:进|到|上).{0,6}(?:流程|板)/u.test(positiveText)) {
+    add('flow.read', 86, 'flow_domain');
+    if (writeIntent.test(positiveText) || toggleIntent.test(positiveText) || deleteIntent.test(positiveText)
+      || /(?:放进|放到|放上|加到|加进|移到|移掉|移除|排序|调整|改回|跟随)/u.test(positiveText)) {
+      add(['flow.update', 'flow.read'], 108, 'flow_write');
+    } else add('flow.read', 100, 'flow_inventory');
+  }
+  // 变量的设值与删除（读现值用 app.resource.read 的 variables）；变量规则另有面板，不在这里
+  if (/(?:变量|variables?|\bmvu\b)/iu.test(positiveText) && !/规则/u.test(positiveText)) {
+    if (deleteIntent.test(positiveText)) add(['variable.delete', 'app.resource.read'], 108, 'variable_delete');
+    else if (writeIntent.test(positiveText) || /(?:改成|改为|设为|设成|调成|调到|加到|减到|增加|减少)/u.test(positiveText)) add(['variable.set', 'app.resource.read'], 108, 'variable_set');
+  }
+  // 记忆表格的行与记忆设定
+  const memorySettingWords = /(?:注入位置|注入深度|预算|共享|带进|自动写入)/u;
+  const memoryTableToggle = /(?:开启|关闭|关掉|打开|启用|停用).{0,6}记忆表格/u;
+  if (/(?:记忆表格|记忆表|memory\s*tables?)/iu.test(positiveText) && !memorySettingWords.test(positiveText) && !memoryTableToggle.test(positiveText)) {
+    add('memory.rows.read', 86, 'memory_rows_domain');
+    if (deleteIntent.test(positiveText)) add(['memory.rows.delete', 'memory.rows.read'], 108, 'memory_rows_delete');
+    else if (writeIntent.test(positiveText) || /(?:改成|改为|补上|加一行|新增一行|修正)/u.test(positiveText)) add(['memory.rows.upsert', 'memory.rows.read'], 108, 'memory_rows_write');
+    else add('memory.rows.read', 100, 'memory_rows_read');
+  } else if (/记忆/u.test(positiveText) && (memorySettingWords.test(positiveText) || memoryTableToggle.test(positiveText) || /记忆.{0,6}(?:设定|设置)/u.test(positiveText))) {
+    add('memory.settings.read', 86, 'memory_settings_domain');
+    if (writeIntent.test(positiveText) || toggleIntent.test(positiveText) || /(?:改成|改为|设为|调成|调大|调小)/u.test(positiveText)) add(['memory.settings.update', 'memory.settings.read'], 108, 'memory_settings_write');
+    else add('memory.settings.read', 100, 'memory_settings_read');
+  }
   if (has(/(?:界面\s*ref|按钮\s*ref|点击|点开|click|按\s*ref|活动.*标签)/iu)) {
     add(['app.visible_panel.read', 'app.ui.click'], 98, 'ui_ref_click');
   }
   if (has(/(?:待办|任务清单|\btodo\b)/iu)) {
     add('maid.todo', 100, 'todo');
+  }
+  // 新手引导：提到新手、教程，或要人一步步教
+  if (has(/(?:新手|教程|教学|上手|一步步|一步一步|手把手|教我|指导我)/u)) {
+    add('maid.onboarding', 100, 'onboarding');
   }
   // 明说要随机才交给随机互动（选项常夹在中间，整词别名对不上）；只问哪个好是要建议，不算
   if (

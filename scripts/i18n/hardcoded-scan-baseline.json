@@ -2878,5 +2878,221 @@
     "text": "根据本轮对话判断好感度变化（-5~+5 之间的整数，只输出数字）。",
     "category": "prompt_fallback",
     "reason": "These literals are canonical fallbacks behind prompt-locale builders; English actual-send output is asserted by prompt-locale and memory-template tests."
+  },
+  {
+    "file": "src/scripts/plugins/script-runtime.js",
+    "text": "当前会话没有可用的 API 连线",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/tavern-api-router.js",
+    "text": "APP 不把 API Key 交给脚本：Key 只保存在 APP 的 API 设置里。脚本要调用模型时，请改用酒馆助手的 generate／generateRaw，由 APP 用当前会话的连线发出。",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/tavern-api-router.js",
+    "text": "脚本没有「访问网络」权限，所以读不到模型清单：请在「通用设置 → 角色卡脚本 → 脚本选项」打开「允许脚本访问网络」后重试。",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/tavern-api-router.js",
+    "text": "脚本没有「读取聊天记录」权限：请在「通用设置 → 角色卡脚本 → 脚本选项」打开「允许脚本读取聊天记录」后重试。",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/tavern-api-router.js",
+    "text": "读不到当前会话连线的模型清单：请到 APP 的 API 设置确认这条连线能正常连接。",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/tavern-api-router.js",
+    "text": "请求缺少世界书名称（name），APP 没有处理。",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/tavern-api-router.js",
+    "text": "请求缺少要计算的消息，APP 没有处理。",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/tavern-api-router.js",
+    "text": "APP 目前还不支持脚本单独调用酒馆生成接口（/api/backends/chat-completions/generate）。脚本要另外生成文字时，请改用酒馆助手的 generate／generateRaw。这次调用已记进调试面板的兼容缺口。",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/tavern-api-router.js",
+    "text": "APP 目前还不支持通过 /api/worldinfo/edit 改写世界书。脚本要写世界书时，请改用酒馆助手的 createOrReplaceWorldbook（每次写入会请用户确认）。这次调用已记进调试面板的兼容缺口。",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/tavern-api-router.js",
+    "text": "APP 目前还不支持通过 /api/presets/save 保存预设。脚本要改预设时，请改用酒馆助手的 updatePresetWith。这次调用已记进调试面板的兼容缺口。",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/tavern-api-router.js",
+    "text": "APP 目前只提供部分酒馆接口，\u0000 还没有对应的功能，依赖它的脚本功能暂时无法使用。这次调用已记进调试面板的兼容缺口。",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/tavern-api-worker.js",
+    "text": "请求体超过 APP 的大小上限，没有处理：\u0000",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/tavern-api-worker.js",
+    "text": "请求体不是有效的 JSON，APP 没有处理：\u0000",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/tavern-api-worker.js",
+    "text": "APP 处理酒馆接口 \u0000 时出错：\u0000",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/tavern-api-generate.js",
+    "text": "脚本没有「访问网络」权限，所以没有调用模型：请在「通用设置 → 角色卡脚本 → 脚本选项」打开「允许脚本访问网络」后重试。",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/tavern-api-generate.js",
+    "text": "请求缺少 messages，APP 没有调用模型。",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/tavern-api-generate.js",
+    "text": "APP 认不出是哪个脚本发出的请求，所以没有调用模型：单独调用模型要先由用户同意发出请求的脚本。",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/tavern-api-generate.js",
+    "text": "用户没有同意这个脚本单独调用模型（每次调用都会产生费用），这次没有发出请求。这次 APP 运行期间不再询问；重开 APP 后，脚本再次调用时会重新询问。",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/tavern-api-generate.js",
+    "text": "费用确认窗在用户作出选择前就关闭了（可能被别的确认窗取代），这次没有调用模型。脚本下次调用时会再询问。",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/tavern-api-generate.js",
+    "text": "当前会话没有可用的 API 连线，所以没有调用模型：请到 APP 的 API 设置确认这条连线后重试。",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/tavern-api-generate.js",
+    "text": "模型请求没有成功：请到 APP 的 API 设置确认当前会话的连线能正常使用。",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/tavern-api-generate.js",
+    "text": "模型请求没有成功（上游回应 HTTP {status}）：请到 APP 的 API 设置确认当前会话的连线能正常使用。",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/tavern-api-generate.js",
+    "text": "请求已取消。",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/script-runtime.js",
+    "text": "预设已不存在",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/tavern-api-router.js",
+    "text": "请求缺少世界书名称（name），APP 没有写入。",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/tavern-api-router.js",
+    "text": "请求里的 data 需要是带 entries 的世界书文件（entries 以 uid 为键），APP 没有写入。",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/tavern-api-router.js",
+    "text": "用户拒绝了这次写入，世界书「{name}」保持原样。",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/tavern-api-router.js",
+    "text": "写入世界书「{name}」时出错：{reason}",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/tavern-api-router.js",
+    "text": "APP 目前通过 /api/presets/save 只能保存对话预设（apiId: openai），{apiId} 类预设还没有对应的功能，依赖它的脚本功能暂时无法使用。这次调用已记进调试面板的兼容缺口。",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/tavern-api-router.js",
+    "text": "脚本没有「修改变量」权限，所以保存不了预设：请在「通用设置 → 角色卡脚本 → 脚本选项」打开「允许脚本修改变量」后重试。",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/tavern-api-router.js",
+    "text": "请求缺少 apiId、预设名称（name）或预设内容（preset），APP 没有保存。",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/tavern-api-router.js",
+    "text": "APP 里没有名为「{name}」的对话预设。脚本可以保存 APP 里已有的对话预设；要新增预设，请先在 APP 的预设面板导入或新建同名预设。",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/tavern-api-router.js",
+    "text": "APP 里有多个名为「{name}」的对话预设，请先在预设面板把名称改成不同的，再让脚本保存。",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/tavern-api-router.js",
+    "text": "用户拒绝了这次保存，对话预设「{name}」保持原样。",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/tavern-api-router.js",
+    "text": "保存对话预设「{name}」时出错：{reason}",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
+  },
+  {
+    "file": "src/scripts/plugins/script-runtime.js",
+    "text": "<!doctype html> <html> <head> <meta charset=\"utf-8\" /> <meta http-equiv=\"Content-Security-Policy\" content=\u0000 /> <base href=\u0000 /> </head> <body> <script> // base 指",
+    "category": "developer_diagnostic",
+    "reason": "Remaining literals are embedded worker/runtime source, debug logs, or diagnostics; user-facing errors from these files are registered in the UI catalog."
   }
 ]

@@ -255,7 +255,7 @@ console.log('ok - real inline approvals own voice confirmation, revisions and ca
   const contexts = [], saved = []; let ended = 0, cancelledInput = 0, confirmed = 0;
   const submit = createMaidCommandSubmit({
     getVoiceRuntime: () => ({ cancelInput: async () => cancelledInput++, endCall: async () => ended++ }), getOnboardingRuntime: () => null,
-    matchMaidIntent: () => null, hasConfiguredMaidProfile: () => true, resolveMaidRuntimeConfig: async () => ({ configured: true }), logger: {},
+    resolveMaidRuntimeConfig: async () => ({ configured: true }), logger: {},
     checkMaidVisionInput: async () => ({ ok: true }), maidSettingsStore: { setLastExchange() {}, getLastExchange: () => ({ source: 'done', requestPrompt: 'sent' }) },
     buildAppFeatureSearchContextText: () => '', getAppContext: () => ({ sessionId: 'current-room', activePage: 'current-page' }),
     maidAssistantAgent: { runPrompt: async (_, context) => { contexts.push(context); await context.requestToolConfirmation(); return { ok: true, message: 'verified', status: 'succeeded' }; } },
@@ -423,7 +423,7 @@ console.log('ok - real inline approvals own voice confirmation, revisions and ca
   const resolveRuntime = createVoiceAwareMaidRuntimeResolver({ resolveMaidRuntime: async () => ({ configured: false }), registry, createClient: config => ({ config }) });
   const contexts = [], visionModels = [];
   const submit = createMaidCommandSubmit({
-    getVoiceRuntime: () => ({ cancelInput: async () => {}, endCall: async () => {} }), matchMaidIntent: () => null, resolveMaidRuntimeConfig: resolveRuntime,
+    getVoiceRuntime: () => ({ cancelInput: async () => {}, endCall: async () => {} }), resolveMaidRuntimeConfig: resolveRuntime,
     checkMaidVisionInput: async (_attachments, context, runtime) => { visionModels.push(runtime.config.model); assert.equal(context.sessionId, 'original-room'); return { ok: true }; },
     getAppContext: () => ({ sessionId: 'new-room' }), maidSettingsStore: { setLastExchange() {}, getLastExchange: () => ({ source: 'done', requestPrompt: 'sent' }) },
     buildAppFeatureSearchContextText: () => '', recordMaidTurnFromResult: async () => {}, logger: { debug() {} },

@@ -154,7 +154,7 @@ test('merge recovery preserves negation, discussion, no-lookup and existing-evid
     assert.equal(shouldRecoverMaidAppDiscovery({ input, decision: capturedMergeUnsupported }), false, input);
   }
   const input = '把旧世界书的副本合并回去';
-  for (const context of [{ maidDiscoveryRecovery: {} }, { maidReactSteps: [{ toolName: 'worldbook.list', status: 'succeeded' }] }, { runContinuation: { successfulSteps: [] } }, { operationIntentPolicy: { mode: 'no_tool' } }]) {
+  for (const context of [{ maidDiscoveryRecovery: {} }, { maidReactSteps: [{ toolName: 'worldbook.list', status: 'succeeded' }] }, { runContinuation: { successfulSteps: [] } }]) {
     assert.equal(shouldRecoverMaidAppDiscovery({ input, decision: capturedMergeUnsupported, context }), false);
   }
   for (const options of [

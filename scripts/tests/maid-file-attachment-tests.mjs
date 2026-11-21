@@ -219,13 +219,16 @@ const card = {
     { id: 'file-1', kind: 'file', name: '星港.json', file: inspectJson('星港.json', { entries: [{ key: ['a'], content: 'x' }] }) },
   ];
   const summary = buildMaidFileAttachmentSummary(attachments);
-  assert.match(summary, /图片2 同时是角色卡「测试<b>卡<\/b>」：开场白 3，内嵌世界书 1 条，正则 1 条，脚本 2 个（附件ID img-2；可导入到：新建角色卡）/);
+  // 文件里读出的卡名是外部内容：包进标签，< > 转义（11/20 统一包法）
+  assert.match(summary, /^<maid_external_content source="attachments">\n/);
+  assert.doesNotMatch(summary, /<b>/);
+  assert.match(summary, /图片2 同时是角色卡「测试\\u003cb\\u003e卡\\u003c\/b\\u003e」：开场白 3，内嵌世界书 1 条，正则 1 条，脚本 2 个（附件ID img-2；可导入到：新建角色卡）/);
   assert.match(summary, /文件1「星港\.json」：世界书「星港」：1 条（附件ID file-1；可导入到：全局、角色卡、聊天室）/);
   assert.match(summary, /导入世界书或正则用 attachment\.import/);
   assert.match(summary, /角色卡用 target new_role_card，导入为新卡但默认不切换/);
   assert.match(summary, /导入后保持关闭/);
   const withRecent = buildMaidFileAttachmentSummary([], { recent: [{ id: 'old-1', name: '旧.json', file: inspectJson('旧.json', { entries: [{ key: ['a'], content: 'x' }] }) }] });
-  assert.match(withRecent, /之前上传、尚未导入的文件：\n「旧\.json」：世界书「旧」：1 条（附件ID old-1/);
+  assert.match(withRecent, /之前上传、尚未导入的文件：","「旧\.json」：世界书「旧」：1 条（附件ID old-1/);
   assert.doesNotMatch(summary, /卡内条目原文|"content"/, 'file contents never reach the prompt');
   assert.equal(buildMaidImageAttachmentSummary(attachments).split('\n').length, 2, 'file attachments are not counted as images');
   assert.equal(buildMaidUserContentWithImages('看看', attachments).filter(part => part.type === 'image_url').length, 2);
@@ -239,7 +242,6 @@ const card = {
     const received = [];
     const submit = createMaidCommandSubmit({
       getVoiceRuntime: () => null, getOnboardingRuntime: () => null,
-      matchMaidIntent: () => null, hasConfiguredMaidProfile: () => true,
       resolveMaidRuntimeConfig: async () => ({ configured: true }), logger: console,
       checkMaidVisionInput: async () => ({ ok: false, capability: { status: 'unsupported' }, message: '当前模型不支持图片' }),
       maidSettingsStore: { setLastExchange() {}, getLastExchange: () => ({}) },
@@ -353,7 +355,7 @@ const card = {
   console.log('ok - attachment import service plans and commits worldbook and regex imports without silent overwrites');
 }
 
-// 附件工具：无冲突直接导入；同一文件同一目标不重复；「current」按发送时的卡；覆盖／替换卡绑定／正则需要确认；不支持的格式如实拒绝
+// 附件工具：导入一律先确认（2026-11-20）；同一文件同一目标不重复；「current」按发送时的卡；覆盖／替换卡绑定／正则在确认里单独列出；不支持的格式如实拒绝
 {
   const { createAttachmentImportAgentTools } = await import('../../src/scripts/agent/tools/attachment-import-tools.js');
   const { createAttachmentImportService } = await import('../../src/scripts/import/attachment-import-service.js');
@@ -403,7 +405,9 @@ const card = {
 
   registry.markSubmitted('wb', { roleCardId: 'p-test', sessionId: 'rp:p-test' });
   const direct = await run({ attachmentId: 'wb', target: 'role_card', roleCard: 'current' }, { context: { roleCardId: 'p-other', sessionId: 'rp:p-other' } });
-  assert.equal(direct.preflight.destructive, false, 'a new worldbook bound to a card without one needs no confirmation');
+  assert.deepEqual([direct.preflight.destructive, direct.preflight.kind, direct.preflight.operationType, direct.preflight.danger], [true, 'attachment.import', 'import_worldbook_file', false],
+    'a new worldbook is confirmed too, with the same stable kind/operationType');
+  assert.deepEqual(direct.preflight.details.items, [], 'nothing is replaced or rewritten, so no extra items are listed');
   assert.deepEqual([direct.result.ok, direct.result.worldbookId, direct.result.verified, direct.result.targetName], [true, '星港', true, '测试']);
   assert.deepEqual(binds, [['role_card', 'p-test', '星港']], '"current" means the card when the file was sent, not after switching');
   const again = await run({ attachmentId: 'wb', target: 'role_card', roleCard: 'current' });
@@ -412,6 +416,7 @@ const card = {
   assert.deepEqual(registry.listRecent().map(item => item.id).includes('wb'), false, 'imported files leave the recent list');
 
   const conflict = await run({ attachmentId: 'wb', target: 'global' });
+  assert.equal(conflict.preflight.destructive, false, 'an unresolved name conflict writes nothing, so it needs no confirmation');
   assert.equal(conflict.result.reason, 'worldbook_name_conflict');
   const copied = await run({ attachmentId: 'wb', target: 'global', onNameConflict: 'copy' });
   assert.deepEqual([copied.result.worldbookId, binds.at(-1)], ['星港 (2)', ['global', '星港 (2)']]);
@@ -457,10 +462,10 @@ const card = {
   assert.deepEqual(derived.map(item => [item.entryPath, item.origin]), [['书/灯塔.json', 'archive']]);
   assert.equal((await run({ attachmentId: 'pack', entry: '书/灯塔.json', target: 'role_card', roleCard: 'current' })).result.alreadyImported, true);
   assert.equal((await run({ attachmentId: 'pack', entry: '没有.json', target: 'global' })).result.reason, 'entry_not_found');
-  console.log('ok - attachment tools import worldbooks and regex with confirmations only where content is replaced or rewritten');
+  console.log('ok - attachment tools confirm every worldbook and regex import and list replaced or rewritten content');
 }
 
-// 角色卡走导入服务：默认全导、不切换；含正则时一次确认；重名先问；失败回滚如实返回。脚本导入后保持关闭，作用域 ID 用实际卡／预设
+// 角色卡走导入服务：默认全导、不切换；导入前一次确认（含正则时列出正则）；重名先问；失败回滚如实返回。脚本导入前确认、导入后保持关闭，作用域 ID 用实际卡／预设
 {
   const { createAttachmentImportAgentTools } = await import('../../src/scripts/agent/tools/attachment-import-tools.js');
   const registry = createMaidFileAttachmentRegistry();
@@ -503,7 +508,9 @@ const card = {
     return { preflight, result: await importTool.execute(args, { ...context, toolSafety }) };
   };
   const plain = await run({ attachmentId: 'card-plain', target: 'new_role_card' });
-  assert.equal(plain.preflight.destructive, false, 'a card without regex imports without a confirmation');
+  assert.deepEqual([plain.preflight.destructive, plain.preflight.kind, plain.preflight.operationType], [true, 'attachment.import', 'import_character_card_file'],
+    'a card without regex is confirmed too');
+  assert.deepEqual(plain.preflight.details.items.map(item => item.id), ['worldbook', 'greetings']);
   assert.deepEqual([plain.result.ok, plain.result.switchedToNewCard, commits[0].activate], [true, false, false], 'the import does not switch cards by default');
   assert.deepEqual(Object.values(commits[0].include).every(Boolean), true, 'everything is imported by default');
 
@@ -519,17 +526,20 @@ const card = {
   assert.deepEqual([broken.result.ok, broken.result.step, broken.result.rolledBack], [false, 'worldbook', true]);
 
   const toCard = await run({ attachmentId: 'scripts', target: 'role_card', roleCard: '测试' });
-  assert.equal(toCard.preflight.destructive, false);
+  assert.deepEqual([toCard.preflight.destructive, toCard.preflight.kind, toCard.preflight.operationType], [true, 'attachment.import', 'import_script_file']);
+  assert.deepEqual(toCard.preflight.details.items.map(item => item.label), ['a', 'b']);
+  const declinedScripts = await run({ attachmentId: 'scripts', target: 'global' }, {}, false);
+  assert.deepEqual([declinedScripts.result.reason, scriptImports.length], ['confirmation_required', 1], 'a declined script import writes nothing');
   assert.deepEqual([scriptImports[0].scope, scriptImports[0].scopeId, scriptImports[0].scripts.length], ['character', 'p-test', 2]);
   assert.deepEqual([toCard.result.ok, toCard.result.enabled, toCard.result.runnableCount, toCard.result.scriptsRunGlobally], [true, false, 1, false]);
   await run({ attachmentId: 'scripts', target: 'preset', preset: 'current' }, { sessionId: 'rp:p-test' });
   assert.deepEqual([scriptImports[1].scope, scriptImports[1].scopeId], ['preset', 'preset-1']);
   assert.equal((await run({ attachmentId: 'scripts', target: 'preset', preset: '不存在' })).result.reason, 'preset_not_found');
   assert.equal((await run({ attachmentId: 'preset-json', target: 'global' })).result.reason, 'target_not_supported_for_format');
-  console.log('ok - character cards import through the shared service by default without switching, and scripts are imported disabled');
+  console.log('ok - character cards import through the shared service by default without switching, and scripts are confirmed and imported disabled');
 }
 
-// 预设：走预设面板同一导入流程并切换；只有写入附带正则时确认；exclude 排除；整套设定档交给面板
+// 预设：走预设面板同一导入流程并切换；导入前确认（附带正则时列出）；exclude 排除；整套设定档交给面板
 {
   const { createAttachmentImportAgentTools } = await import('../../src/scripts/agent/tools/attachment-import-tools.js');
   const registry = createMaidFileAttachmentRegistry();
@@ -552,7 +562,10 @@ const card = {
     return { preflight, result: await importTool.execute(args, { toolSafety }) };
   };
   const plain = await run({ attachmentId: 'plain', target: 'preset_library' });
-  assert.equal(plain.preflight.destructive, false);
+  assert.deepEqual([plain.preflight.destructive, plain.preflight.kind, plain.preflight.operationType], [true, 'attachment.import', 'import_preset_file'],
+    'importing a preset also switches the current preset, so it is confirmed');
+  assert.deepEqual(plain.preflight.details.items, []);
+  assert.doesNotMatch(plain.preflight.message, /正则/);
   assert.deepEqual([plain.result.ok, plain.result.switchedToPreset, plain.result.presetName], [true, true, '平淡']);
   assert.deepEqual(calls[0].decisions, { includeRegex: true, includeScripts: true });
   const regexed = await run({ attachmentId: 'with-regex', target: 'preset_library' });
@@ -563,10 +576,11 @@ const card = {
   assert.equal(registry2Free.result.alreadyImported, true, 'the same preset file is not imported twice');
   register('with-regex-2', '带正则2.json', { prompts: [], temperature: 1, boundRegexSets: [{ name: 'a', rules: [] }] });
   const excluded = await run({ attachmentId: 'with-regex-2', target: 'preset_library', exclude: ['regex'] });
-  assert.equal(excluded.preflight.destructive, false, 'excluding regex removes the confirmation');
+  assert.equal(excluded.preflight.destructive, true);
+  assert.equal(excluded.preflight.details.items.some(item => item.id === 'regex'), false, 'excluded regex is not listed');
   assert.deepEqual(calls.at(-1).decisions, { includeRegex: false, includeScripts: true });
   assert.equal((await run({ attachmentId: 'bundle', target: 'preset_library' })).result.reason, 'preset_bundle_requires_panel');
-  console.log('ok - presets import through the panel flow, switch like the manual import and confirm only bundled regex');
+  console.log('ok - presets import through the panel flow, switch like the manual import and are confirmed first');
 }
 
 // 直接导入 .js：按一个脚本导入，源码原样保留，导入后保持关闭
@@ -588,8 +602,9 @@ const card = {
     scriptStore: { importTavernHelperScripts: async (args) => { imports.push(args); return { count: 1, ids: ['s1'], runnableIds: ['s1'], compatibility: { runnableCount: 1, blockedCount: 0, blocked: [] } }; } },
   });
   const args = { attachmentId: 'js-1', target: 'global' };
-  await importTool.safety.preflight(args, {});
-  const result = await importTool.execute(args, { toolSafety: { decision: 'not_required' } });
+  const preflight = await importTool.safety.preflight(args, {});
+  assert.deepEqual([preflight.destructive, preflight.operationType], [true, 'import_script_file']);
+  const result = await importTool.execute(args, { toolSafety: { decision: 'allow', request: preflight } });
   assert.deepEqual([result.ok, result.enabled, imports[0].scope, imports[0].scripts[0].name, imports[0].scripts[0].content], [true, false, 'global', '计数器', source]);
   console.log('ok - a .js attachment imports as one disabled script with its source unchanged');
 }

@@ -408,6 +408,16 @@ export const getReasoningCapability = ({ provider, model, baseUrl } = {}) => {
   };
 };
 
+// 这次请求要不要思考、强度多少：会话（其次模式）的推理覆盖优先，没有覆盖时用预设本身的设定。
+// 主生成与脚本单独调用模型共用，两边才不会各算各的。
+export const resolveEffectiveReasoningSetting = ({ sessionReasoning = null, modeReasoning = null, preset = null } = {}) => {
+  const override = sessionReasoning || modeReasoning;
+  return {
+    requestReasoning: override ? override.request_reasoning === true : preset?.request_reasoning === true,
+    reasoningEffort: override?.reasoning_effort || preset?.reasoning_effort,
+  };
+};
+
 export const buildReasoningRequestOptions = ({
   provider,
   model,

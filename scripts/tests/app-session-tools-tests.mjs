@@ -190,6 +190,23 @@ const createHarness = () => {
 }
 
 {
+  // 用户决定（2026-11-20）：会新建联系人的 session.create 一律先确认；全是已有联系人（只复用）时不弹
+  const h = createHarness();
+  h.contacts.set('A', { id: 'A', name: 'A', isGroup: false });
+  const create = getTool(h.tools, 'session.create');
+  const preflight = await create.safety.preflight({ names: ['A', '精灵女王', '暗夜女王', 'group:x'] });
+  assert.equal(preflight.destructive, true);
+  assert.deepEqual([preflight.kind, preflight.operationType, preflight.danger], ['session.create', 'create_session', false]);
+  assert.deepEqual(preflight.details.items.map(item => item.label), ['精灵女王', '暗夜女王'], 'only names that will really be created are listed');
+  assert.equal(preflight.onDeny.result.created, false);
+  const again = await create.safety.preflight({ name: '另一个' });
+  assert.deepEqual([again.kind, again.operationType], [preflight.kind, preflight.operationType], 'kind/operationType stay stable regardless of names');
+  assert.equal((await create.safety.preflight({ name: 'A', open: true })).destructive, false, 'reusing an existing contact needs no confirmation');
+  assert.equal((await create.safety.preflight({ name: 'rp:x' })).destructive, false, 'reserved names create nothing');
+  console.log('ok - session.create confirms every new contact and skips pure reuse');
+}
+
+{
   const h = createHarness();
   h.contacts.set('B', { id: 'B', name: 'Beta', isGroup: false });
   const open = await getTool(h.tools, 'session.open').execute({ sessionId: 'Beta' });

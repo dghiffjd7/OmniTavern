@@ -11,7 +11,7 @@ export const isPreApprovedByPlan = (approvedPlan, request = {}) => {
 };
 
 export const createMaidCommandSubmit = ({
-  getVoiceRuntime, getOnboardingRuntime, matchMaidIntent, hasConfiguredMaidProfile, resolveMaidRuntimeConfig,
+  getVoiceRuntime, getOnboardingRuntime, resolveMaidRuntimeConfig,
   logger, checkMaidVisionInput, maidSettingsStore, buildAppFeatureSearchContextText, getAppContext,
   maidAssistantAgent, resolveSelectionRegion, requestMaidToolConfirmation, recordMaidTurnFromResult, toast,
   markFileAttachmentsSubmitted = null, listRecentFileAttachments = null, buildResultActions = null,
@@ -19,24 +19,6 @@ export const createMaidCommandSubmit = ({
   return async (text, controls = {}) => {
       await getVoiceRuntime()?.cancelInput();
       if (controls.source !== 'maid_realtime') await getVoiceRuntime()?.endCall();
-      const intent = controls.context?.maidSkillContext?.loaded?.some(item => item.source === 'user') ? null : matchMaidIntent(text);
-      if (intent) {
-        if (intent.kind === 'skip') getOnboardingRuntime()?.skip?.();
-        let flowId = String(intent.flowId || '').trim();
-        if (flowId === 'first-chat' && !hasConfiguredMaidProfile()) flowId = 'setup-api';
-        if (flowId) getOnboardingRuntime()?.startFlow?.(flowId);
-        return {
-          ok: true,
-          responseType: 'local',
-          message: flowId === 'setup-api' && intent.flowId === 'first-chat'
-            ? '主人还没给我接上大脑呢～先把 API 接好，我就陪你完成第一次对话。'
-            : intent.reply,
-          actions: (Array.isArray(intent.chips) ? intent.chips : []).map(chip => ({
-            label: chip.label,
-            onClick: () => getOnboardingRuntime()?.startFlow?.(chip.flowId),
-          })),
-        };
-      }
       const appContext = getAppContext?.() || {};
       const maidTurnContext = { ...appContext, ...controls.context,
         roleCardId: appContext.roleCardId, agentId: appContext.agentId,

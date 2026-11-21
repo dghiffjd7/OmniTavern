@@ -1,3 +1,6 @@
+import { t } from '../../i18n/index.js';
+import { confirmRequest } from './preset-regex-script-tools.js';
+
 const trim = (value, fallback = '') => {
   const text = String(value ?? '').trim();
   return text || fallback;
@@ -384,7 +387,7 @@ export const createAppSessionAgentTools = ({
     {
       name: 'session.create',
       title: 'Create chat session',
-      description: 'Create one or more private contacts and chat sessions in the background; open only the primary result when explicitly requested.',
+      description: 'Create one or more private contacts and chat sessions in the background; open only the primary result when explicitly requested. Chats are created under the active character card; to create them under a new card, first create it with persona.create setActive:true or switch to it with persona.switch.',
       source: 'maid-app-session',
       permissions: [],
       riskLevel: 'medium',
@@ -398,9 +401,28 @@ export const createAppSessionAgentTools = ({
         confirmation: 'allow_once',
       },
       safety: {
-        operationType: 'create',
-        destructive: 'never',
-        description: 'Creates a new chat session/contact or reuses an existing one; it does not overwrite existing chat content.',
+        operationType: 'create_session',
+        destructive: 'conditional',
+        description: 'Creates new chat sessions/contacts after user confirmation; reusing an existing one needs no confirmation and does not overwrite chat content.',
+        preflight: async (args = {}) => {
+          // 只列真的会新建的名字；全都已存在（只是复用）或名字不可用时什么都不会改，不弹确认
+          const planned = resolveCreateSessionNames(args).filter(name => (
+            !isGroupLikeId(name) && !isRpLikeId(name) &&
+            !(contactsStore?.getContact?.(name) || findContact(contactsStore, name))
+          ));
+          if (!planned.length) return { destructive: false, operationType: 'create_session' };
+          return confirmRequest({
+            kind: 'session.create',
+            operationType: 'create_session',
+            title: t('新建聊天室'),
+            message: t('将新建 {count} 个私聊联系人和聊天室。', { count: planned.length }),
+            confirmText: t('新建'),
+            danger: false,
+            items: planned.map(name => ({ id: name, label: name })),
+            denyReason: 'session_create_cancelled',
+            denyResult: { created: false },
+          });
+        },
       },
       schema: {
         type: 'object',

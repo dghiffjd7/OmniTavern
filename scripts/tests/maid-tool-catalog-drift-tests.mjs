@@ -13,17 +13,25 @@ import { registerMaidTodoTools } from '../../src/scripts/agent/tools/maid-todo-t
 import { registerMaidMemoryTools } from '../../src/scripts/agent/tools/maid-memory-tools.js';
 import { registerMaidCapabilityAgentTools } from '../../src/scripts/agent/tools/maid-capability-tools.js';
 import { registerGuideStartFlowTools } from '../../src/scripts/agent/tools/guide-start-flow-tools.js';
+import { registerImportedCardRoomTools } from '../../src/scripts/agent/tools/imported-card-room-tools.js';
 import { registerChatFormatRepairTools } from '../../src/scripts/agent/tools/chat-format-tools.js';
 import { registerWebSearchAgentTools } from '../../src/scripts/agent/tools/web-search-tools.js';
 import { registerMomentsAgentTools } from '../../src/scripts/agent/tools/moments-tools.js';
 import { registerPresetRegexScriptAgentTools } from '../../src/scripts/agent/tools/preset-regex-script-tools.js';
+import { registerAgentConfigAgentTools } from '../../src/scripts/agent/tools/agent-config-tools.js';
+import { registerFlowBoardAgentTools } from '../../src/scripts/agent/tools/flow-board-tools.js';
+import { registerPresetEditAgentTools } from '../../src/scripts/agent/tools/preset-edit-tools.js';
+import { registerScriptEditAgentTools } from '../../src/scripts/agent/tools/script-edit-tools.js';
+import { registerVariableEditAgentTools } from '../../src/scripts/agent/tools/variable-edit-tools.js';
+import { registerMemoryTableEditAgentTools } from '../../src/scripts/agent/tools/memory-table-edit-tools.js';
+import { registerMemorySettingsAgentTools } from '../../src/scripts/agent/tools/memory-settings-tools.js';
 import { registerAttachmentImportAgentTools } from '../../src/scripts/agent/tools/attachment-import-tools.js';
+import { registerMaidTaskTools } from '../../src/scripts/agent/tools/maid-task-tools.js';
+import { registerWorldbookCompareTools } from '../../src/scripts/agent/tools/worldbook-compare-tools.js';
 
 // 已注册但不进入功能目录的元工具/本地工具。
 // 新工具默认必须进目录；确需豁免时在这里登记并写明原因。
 const CATALOG_EXEMPT_TOOLS = new Set([
-  // 四项内建新手流程由本地意图路由直接启动，不进入女仆模型上下文。
-  'guide.start_flow',
   // 自建文字 Agent 专用：只调用已「始终允许」的 MCP 工具；女仆用 mcp.search／mcp.call。
   'mcp.lookup',
 ]);
@@ -40,10 +48,20 @@ registerMaidTodoTools(registry, {});
 registerMaidMemoryTools(registry, {});
 registerMaidCapabilityAgentTools(registry, {});
 registerGuideStartFlowTools(registry, {});
+registerImportedCardRoomTools(registry, {});
+registerMaidTaskTools(registry, {});
+registerWorldbookCompareTools(registry, {});
 registerChatFormatRepairTools(registry, {});
 registerWebSearchAgentTools(registry, {});
 registerMomentsAgentTools(registry, {});
 registerPresetRegexScriptAgentTools(registry, {});
+registerAgentConfigAgentTools(registry, {});
+registerFlowBoardAgentTools(registry, {});
+registerPresetEditAgentTools(registry, {});
+registerScriptEditAgentTools(registry, {});
+registerVariableEditAgentTools(registry, {});
+registerMemoryTableEditAgentTools(registry, {});
+registerMemorySettingsAgentTools(registry, {});
 registerAttachmentImportAgentTools(registry, {});
 const { registerMcpAgentTools } = await import('../../src/scripts/agent/tools/mcp-tools.js');
 registerMcpAgentTools(registry, {});
@@ -51,6 +69,9 @@ registerMcpAgentTools(registry, {});
 globalThis.localStorage = globalThis.localStorage || { getItem: () => null, setItem() {}, removeItem() {} };
 const { registerAttachmentFileAgentTools } = await import('../../src/scripts/agent/tools/attachment-file-tools.js');
 registerAttachmentFileAgentTools(registry, {});
+// 插件工具经 plugin-store 引入 logger（加载时读 localStorage），同样在补环境后动态加载
+const { registerPluginAgentTools } = await import('../../src/scripts/agent/tools/plugin-tools.js');
+registerPluginAgentTools(registry, {});
 
 const registeredNames = new Set(registry.listTools().map(tool => tool.name));
 const features = listAppFeatures();

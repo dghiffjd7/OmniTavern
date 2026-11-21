@@ -2,21 +2,15 @@ import assert from 'node:assert/strict';
 
 import {
   aggregateMaidModelUsage,
-  applyMaidPresentationPolicy,
   buildContinueHint,
-  classifyMaidPresentationIntent,
-  classifyMaidOperationIntent,
   createMaidAssistantAgent,
-  planMaidAssistantCommand,
 } from '../../src/scripts/agent/maid-assistant-agent.js';
 import { setPromptLocale } from '../../src/scripts/i18n/prompt-locale.js';
 import { buildMaidModelReActMessages } from '../../src/scripts/agent/maid-model-planner.js';
 import { createAgentTaskRuntime } from '../../src/scripts/agent/agent-task-runtime.js';
 import { createAgentToolRegistry } from '../../src/scripts/agent/agent-tool-registry.js';
-import {
-  classifyMaidImportedCardWorkflowIntent,
-  normalizeMaidImportedCardClassification,
-} from '../../src/scripts/agent/maid-imported-card-workflow.js';
+import { normalizeMaidImportedCardClassification } from '../../src/scripts/agent/maid-imported-card-workflow.js';
+import { createImportedCardRoomTools } from '../../src/scripts/agent/tools/imported-card-room-tools.js';
 import { fingerprintMaidToolCall } from '../../src/scripts/agent/maid-run-continuation.js';
 import { AgentRunStore } from '../../src/scripts/storage/agent-run-store.js';
 
@@ -31,252 +25,6 @@ assert.match(englishContinueHint, /Original user goal: Finish the task/);
 assert.match(englishContinueHint, /Completed steps .*session\.list \(Read sessions\)/);
 assert.doesNotMatch(englishContinueHint, /\p{Script=Han}/u);
 setPromptLocale('zh-CN');
-
-{
-  assert.equal(classifyMaidPresentationIntent('创建聊天室「小美」').mode, 'background');
-  assert.equal(classifyMaidPresentationIntent('查看世界书里有哪些人物').mode, 'background');
-  assert.equal(classifyMaidPresentationIntent('创建聊天室「小美」，不要打开，留在当前页面').mode, 'background');
-  assert.equal(
-    classifyMaidPresentationIntent('重复执行幂等核对，不要逐房重复绑定或打开页面。').mode,
-    'background',
-    '同一分句内的并列否定必须覆盖后面的打开动作',
-  );
-  assert.equal(
-    classifyMaidPresentationIntent('不要重复绑定；完成后打开页面给我看。').mode,
-    'reveal',
-    '跨分句的明确打开要求不能被前一分句的否定吞掉',
-  );
-  assert.equal(
-    classifyMaidPresentationIntent('不要忘了在完成后打开页面给我看。').mode,
-    'reveal',
-    '否定“忘记”不等于否定后面的打开动作',
-  );
-  assert.equal(
-    classifyMaidPresentationIntent(
-      '先读取会话清单，再只用一次 session.create(names[]) 补齐三个单聊，open:false，不得逐房创建或进入。',
-    ).mode,
-    'background',
-    '“不得”必须否定同一分句内的进入动作，不能被 reveal 反向命中',
-  );
-  assert.equal(classifyMaidPresentationIntent('创建聊天室「小美」，做好以后打开给我看').mode, 'reveal');
-  assert.equal(classifyMaidPresentationIntent('批量处理完后带我去看主要结果').mode, 'reveal');
-  assert.equal(
-    classifyMaidPresentationIntent(
-      '过程中都放在后台做，不要每建一个东西就跳页面。全部完成后再一次性切换到新角色卡和新用户，并只打开建好的群聊给我看。',
-    ).mode,
-    'reveal',
-    '过程后台与最终一次性展示可以同时成立，最终展示语义必须优先',
-  );
-  assert.equal(classifyMaidPresentationIntent('带我看看 Agent Center').mode, 'reveal');
-  assert.equal(classifyMaidPresentationIntent('帮我看看世界书有哪些').mode, 'background');
-  assert.equal(classifyMaidPresentationIntent('请一步步引导我创建世界书').mode, 'guide');
-  assert.equal(
-    classifyMaidPresentationIntent('请一步步引导我创建世界书，完成后再打开给我看').mode,
-    'guide',
-    '明确教学流程仍应优先于结束后的展示动作',
-  );
-
-  const background = applyMaidPresentationPolicy({
-    ok: true,
-    toolName: 'session.create',
-    args: { name: '小美', open: true },
-    featureId: 'session.create',
-  }, { mode: 'background' });
-  assert.equal(background.args.open, false, 'optional navigation must be disabled for background work');
-
-  const coordinatedBackground = applyMaidPresentationPolicy({
-    ok: true,
-    toolName: 'session.create',
-    args: { names: ['小美', '小夏'], open: true },
-    featureId: 'session.create',
-  }, classifyMaidPresentationIntent('不要逐房重复绑定或打开页面。'));
-  assert.equal(coordinatedBackground.args.open, false, 'coordinated negation must keep session creation in the background');
-
-  const prohibitedBackground = applyMaidPresentationPolicy({
-    ok: true,
-    toolName: 'session.create',
-    args: { names: ['观测站', '档案室', '检查站'], open: true },
-    featureId: 'session.create',
-  }, classifyMaidPresentationIntent(
-    '先读取会话清单，再只用一次 session.create(names[]) 补齐三个单聊，open:false，不得逐房创建或进入。',
-  ));
-  assert.equal(prohibitedBackground.args.open, false, '“不得进入”必须把批量建房强制留在后台');
-
-  const reveal = applyMaidPresentationPolicy({
-    ok: true,
-    toolName: 'session.create',
-    args: { names: ['小美', '小夏'], open: false },
-    featureId: 'session.create',
-  }, { mode: 'reveal' });
-  assert.equal(reveal.args.open, false, 'result reveal is deferred until the task has finished');
-
-  const deferredPersona = applyMaidPresentationPolicy({
-    ok: true,
-    toolName: 'persona.create',
-    args: { name: '主角色卡', setActive: true },
-    featureId: 'persona.create',
-  }, { mode: 'reveal' });
-  assert.equal(deferredPersona.args.setActive, false, 'character activation is deferred until final reveal');
-
-  const deferredGroup = applyMaidPresentationPolicy({
-    ok: true,
-    toolName: 'group.create',
-    args: { name: '主群聊', members: ['A', 'B'], open: true },
-    featureId: 'group.create',
-  }, { mode: 'reveal' });
-  assert.equal(deferredGroup.args.open, false, 'group creation must not navigate before final reveal');
-
-  const guide = applyMaidPresentationPolicy({
-    ok: true,
-    toolName: 'worldbook.create',
-    args: { name: '测试世界书', entries: [{ title: 'A', content: 'B' }] },
-    featureId: 'worldbook.create',
-  }, { mode: 'guide' });
-  assert.equal(guide.forceGuide, true, 'explicit teaching semantics must remain distinct from background execution');
-
-  const replySend = applyMaidPresentationPolicy({
-    ok: true,
-    toolName: 'chat.send_message',
-    args: { sessionId: '小美', content: '晚上好', role: 'user', open: false },
-    featureId: 'chat.send_message',
-  }, { mode: 'background' });
-  assert.equal(replySend.args.open, true, 'reply-triggering sends must stay foreground until the send pipeline supports target isolation');
-
-  const appendOnlySend = applyMaidPresentationPolicy({
-    ok: true,
-    toolName: 'chat.send_message',
-    args: {
-      sessionId: '小美',
-      content: '系统记录',
-      role: 'system',
-      triggerReply: false,
-      open: true,
-    },
-    featureId: 'chat.send_message',
-  }, { mode: 'background' });
-  assert.equal(appendOnlySend.args.open, false, 'append-only sends may stay in the background');
-  console.log('ok - maid presentation intent defaults to background and distinguishes reveal from guide');
-}
-
-{
-  assert.equal(
-    classifyMaidOperationIntent('查询「冻结观察会话-A-0728」的世界书绑定，确认原绑定仍在且新增书已启用。').mode,
-    'read_only',
-  );
-  assert.equal(
-    classifyMaidOperationIntent('只查询当前绑定，不要绑定、修改或新增任何内容。').mode,
-    'read_only',
-  );
-  assert.equal(
-    classifyMaidOperationIntent('先查询当前绑定，然后把「雾港规则」绑定到会话 A。').mode,
-    'write_allowed',
-  );
-  assert.equal(
-    classifyMaidOperationIntent('根据刚才读取到的回应，分别回复姐姐和发小。').mode,
-    'write_allowed',
-  );
-  assert.equal(
-    classifyMaidOperationIntent('新增书是否已经启用？').mode,
-    'read_only',
-  );
-  assert.equal(
-    classifyMaidOperationIntent('character cards inventory：总数＋active name，只读。').mode,
-    'read_only',
-  );
-  assert.equal(
-    classifyMaidOperationIntent('user identities 列表与当前身份，只查别换。').mode,
-    'read_only',
-  );
-  assert.equal(
-    classifyMaidOperationIntent('清理测试用的房间').mode,
-    'write_allowed',
-  );
-  assert.equal(
-    classifyMaidOperationIntent('哪些房是测试用的').mode,
-    'read_only',
-  );
-  assert.equal(
-    classifyMaidOperationIntent('不要调用任何工具，只根据长期记忆回答。').mode,
-    'no_tool',
-  );
-  console.log('ok - maid operation intent distinguishes read-only observations from explicit writes');
-}
-
-{
-  // v4f 观察修复：条件式/预览式显式授权应判为 write_allowed（obs-03-001/034/028 原句形态）
-  assert.equal(
-    classifyMaidOperationIntent('先确认「冻结观察会话-A-0728」是否已有；没有才创建。').mode,
-    'write_allowed',
-  );
-  assert.equal(
-    classifyMaidOperationIntent('检查后仅创建缺少的「冻结观察会话-B-0728」和「冻结观察会话-C-0728」。').mode,
-    'write_allowed',
-  );
-  assert.equal(
-    classifyMaidOperationIntent('执行格式修复，并在应用 diff 前取消。').mode,
-    'write_allowed',
-  );
-  assert.equal(
-    classifyMaidOperationIntent('如果没有这本世界书就新建一本。').mode,
-    'write_allowed',
-  );
-  assert.equal(
-    classifyMaidOperationIntent('先确认「护栏验证房-2128」这个聊天室是否已存在；没有的话才创建它。').mode,
-    'write_allowed',
-  );
-  assert.equal(
-    classifyMaidOperationIntent('读取用户清单；不存在时才创建「V4F-V2备用用户-0731」，但不要切换成它。').mode,
-    'write_allowed',
-    '“不存在时才创建”是明确的条件写入授权',
-  );
-  assert.equal(
-    classifyMaidOperationIntent('读取角色卡清单；不存在时才创建「V4F-V2备用角色卡-0731」，但不得设为当前角色卡。').mode,
-    'write_allowed',
-    '条件创建角色卡不得被清单读取语义降为 read_only',
-  );
-  // 反向锚定：纯查询与否定式写入仍是 read_only
-  assert.equal(
-    classifyMaidOperationIntent('检查会话列表，告诉我有几间。').mode,
-    'read_only',
-  );
-  assert.equal(
-    classifyMaidOperationIntent('只查看绑定情况，不要创建任何东西。').mode,
-    'read_only',
-  );
-  // 状态查询中的写动词只是被查询对象，不能因此解除只读护栏
-  [
-    '确认后告诉我会话 A 是否绑定到世界书 B。',
-    '检查后告诉我这本世界书是否已经启用。',
-    '核对后说明为什么生成失败。',
-    '确认后列出被修改的条目。',
-    '检查后告诉我已删除的聊天室。',
-    '验证后告诉我消息是否发送成功。',
-    '查完后告诉我当前设置。',
-    '检查后只回复检查结果，不要进行任何修改。',
-  ].forEach((input) => {
-    assert.equal(
-      classifyMaidOperationIntent(input).mode,
-      'read_only',
-      `状态查询不应授权写入：${input}`,
-    );
-  });
-  assert.equal(
-    classifyMaidOperationIntent('确认现状后再把 A 绑定到 B。').mode,
-    'write_allowed',
-    '带前置核对的明确写入不应多触发一次只读升级确认',
-  );
-  assert.equal(
-    classifyMaidOperationIntent('给这些房都绑上世界书「精灵抱抱」。').mode,
-    'write_allowed',
-    '明确批量绑定措辞应直接授权写入',
-  );
-  assert.equal(
-    classifyMaidOperationIntent('检查这些房有没有绑上世界书「精灵抱抱」，不要修改。').mode,
-    'read_only',
-    '批量绑定状态查询不得误授权写入',
-  );
-  console.log('ok - conditional explicit writes classify as write_allowed while pure reads stay read_only');
-}
 
 {
   // 多轮 ReAct usage 求和：至少一轮返回 token → recorded 且各项相加；latency 求和为模型总耗时
@@ -324,94 +72,32 @@ setPromptLocale('zh-CN');
 }
 
 {
-  const plan = planMaidAssistantCommand('创建一个叫「A」的聊天室');
-  assert.equal(plan.ok, true);
-  assert.equal(plan.toolName, 'session.create');
-  assert.deepEqual(plan.args, { name: 'A', open: false });
-  console.log('ok - maid assistant planner maps create-room wording to background session.create');
-}
+  // 失败的任务：token 全来自 DeepSeek，最后几次是备用模型的失败尝试。次数照实计入，模型不记成备用模型
+  const usage = aggregateMaidModelUsage([
+    { provider: 'deepseek', model: 'deepseek-v4-flash', promptTokens: 1000, completionTokens: 50, latencyMs: 800 },
+    { provider: 'deepseek', model: 'deepseek-v4-flash', promptTokens: 1200, completionTokens: 40, latencyMs: 900 },
+    { provider: 'makersuite', model: 'gemini-4-carbon', latencyMs: 300, outcome: 'provider_request_failed' },
+    // 失败的尝试也可能带回 token（服务商回了 usage 但没有可用内容）：照实相加，仍不决定模型
+    { provider: 'makersuite', model: 'gemini-4-carbon', promptTokens: 100, completionTokens: 5, latencyMs: 200, outcome: 'provider_request_failed' },
+  ], { toolCallCount: 1 });
+  assert.equal(usage.provider, 'deepseek');
+  assert.equal(usage.model, 'deepseek-v4-flash');
+  assert.equal(usage.modelCallCount, 4);
+  assert.equal(usage.promptTokens, 2300);
+  assert.equal(usage.completionTokens, 95);
+  assert.equal(usage.latencyMs, 2200);
 
-{
-  const plan = planMaidAssistantCommand('帮我创建两个聊天室，精灵女王和暗夜女王的');
-  assert.equal(plan.ok, true);
-  assert.equal(plan.toolName, 'session.create');
-  assert.deepEqual(plan.args, { names: ['精灵女王', '暗夜女王'], open: false });
-  console.log('ok - maid assistant planner maps multi-room wording to background session.create names');
-}
+  const noTokens = aggregateMaidModelUsage([
+    { provider: 'deepseek', model: 'deepseek-v4-flash', latencyMs: 800 },
+    { provider: 'makersuite', model: 'gemini-4-carbon', latencyMs: 300, outcome: 'provider_request_failed' },
+  ]);
+  assert.deepEqual([noTokens.status, noTokens.provider, noTokens.model], ['unknown', 'deepseek', 'deepseek-v4-flash'], '没有 token 时取最后一次成功调用');
 
-{
-  const plan = planMaidAssistantCommand('创建聊天室「A」，做好以后打开给我看');
-  assert.equal(plan.ok, true);
-  assert.equal(plan.toolName, 'session.create');
-  assert.deepEqual(plan.args, { name: 'A', open: false });
-  console.log('ok - explicit reveal semantics defer opening until task completion');
-}
-
-{
-  const plan = planMaidAssistantCommand('我想配置当前聊天室的会话配置');
-  assert.equal(plan.ok, true);
-  assert.equal(plan.toolName, 'session.open_config');
-  console.log('ok - maid assistant planner maps session config wording to session.open_config');
-}
-
-{
-  const plan = planMaidAssistantCommand('我想设置 API');
-  assert.equal(plan.ok, true);
-  assert.equal(plan.toolName, 'app.open_panel');
-  assert.equal(plan.args.panel, 'config');
-  console.log('ok - maid assistant planner maps API wording to config panel');
-}
-
-{
-  const plan = planMaidAssistantCommand('创建一个名为「测试角色卡」的新角色卡');
-  assert.equal(plan.ok, true);
-  assert.equal(plan.toolName, 'persona.create');
-  assert.deepEqual(plan.args, { name: '测试角色卡', setActive: true });
-  console.log('ok - maid assistant planner maps character card creation');
-}
-
-{
-  const plan = planMaidAssistantCommand('创建一个名为「小悠」的新用户名称');
-  assert.equal(plan.ok, true);
-  assert.equal(plan.toolName, 'user.create');
-  assert.deepEqual(plan.args, { name: '小悠', setActive: true });
-  console.log('ok - maid assistant planner maps user profile creation');
-}
-
-{
-  const plan = planMaidAssistantCommand('切换到用户「小悠」');
-  assert.equal(plan.ok, true);
-  assert.equal(plan.toolName, 'user.switch');
-  assert.deepEqual(plan.args, { target: '小悠' });
-  console.log('ok - maid assistant planner maps user profile switching');
-}
-
-{
-  const plan = planMaidAssistantCommand('切换到角色卡「测试角色卡」');
-  assert.equal(plan.ok, true);
-  assert.equal(plan.toolName, 'persona.switch');
-  assert.deepEqual(plan.args, { target: '测试角色卡' });
-  console.log('ok - maid assistant planner maps character card switching');
-}
-
-{
-  const plan = planMaidAssistantCommand('为角色卡「测试角色卡」创建世界书「测试世界书」，包含条目「温柔大姐姐」内容「超级温柔特别会照顾人，和用户为姐弟关系。」和条目「傲娇大小姐青梅竹马」内容「傲娇的大小姐青梅竹马。」');
-  assert.equal(plan.ok, true);
-  assert.equal(plan.toolName, 'worldbook.create');
-  assert.equal(plan.args.name, '测试世界书');
-  assert.equal(plan.args.personaName, '测试角色卡');
-  assert.equal(plan.args.bindToPersona, true);
-  assert.equal(plan.args.entries.length, 2);
-  assert.match(plan.args.entries[0].content, /姐弟关系/);
-  console.log('ok - maid assistant planner maps worldbook creation');
-}
-
-{
-  const plan = planMaidAssistantCommand('在聊天室「温柔大姐姐」发送消息「晚上好」');
-  assert.equal(plan.ok, true);
-  assert.equal(plan.toolName, 'chat.send_message');
-  assert.deepEqual(plan.args, { sessionId: '温柔大姐姐', content: '晚上好', role: 'user', open: true });
-  console.log('ok - reply-triggering chat sends stay foreground until target-isolated generation exists');
+  const allFailed = aggregateMaidModelUsage([
+    { provider: 'makersuite', model: 'gemini-4-carbon', latencyMs: 300, outcome: 'provider_request_failed' },
+  ]);
+  assert.deepEqual([allFailed.provider, allFailed.model, allFailed.modelCallCount], ['', '', 1], '全部失败时不认定执行模型');
+  console.log('ok - aggregateMaidModelUsage attributes the model to the call that produced the result, not failed fallbacks');
 }
 
 {
@@ -447,7 +133,7 @@ setPromptLocale('zh-CN');
   assert.equal(calls[0].toolName, 'app.open_panel');
   assert.equal(calls[0].args.panel, 'worldbook');
   assert.equal(calls[0].context.sessionId, 's1');
-  assert.equal(calls[0].context.operationIntentPolicy.mode, 'unspecified');
+  assert.equal(calls[0].context.operationIntentPolicy, undefined, '程序不再用关键词判断读写意图（11/20）');
   assert.equal(statuses.length, 1);
   assert.equal(statuses[0].stage, 'planned');
   assert.equal(statuses[0].message, '我来打开世界书。');
@@ -511,7 +197,7 @@ setPromptLocale('zh-CN');
     planner: async () => ({
       ok: true,
       toolName: 'session.create',
-      args: { name: '后台测试房', open: true },
+      args: { name: '打开测试房', open: true },
       featureId: 'session.create',
       title: '创建聊天室',
     }),
@@ -533,13 +219,13 @@ setPromptLocale('zh-CN');
     },
     logger: { warn() {} },
   });
-  const result = await agent.runPrompt('创建聊天室「后台测试房」');
+  const result = await agent.runPrompt('创建聊天室「打开测试房」，不要打开');
   assert.equal(result.ok, true);
   assert.deepEqual(calls[0], {
     toolName: 'session.create',
-    args: { name: '后台测试房', open: false },
-  });
-  console.log('ok - maid execution policy overrides model-requested optional navigation for background work');
+    args: { name: '打开测试房', open: true },
+  }, '要不要打开照模型给的参数，执行层不看原话改写');
+  console.log('ok - maid execution keeps the model-provided open argument');
 }
 
 {
@@ -640,7 +326,7 @@ setPromptLocale('zh-CN');
         return {
           toolName,
           status: 'succeeded',
-          result: { ok: true, switched: true, opened: true, sessionId: args.sessionId || args.target },
+          result: { ok: true, sessionId: args.sessionId || args.target },
         };
       },
     },
@@ -656,154 +342,11 @@ setPromptLocale('zh-CN');
     'app.read_resource',
     'group.create',
     'session.list',
-    'persona.switch',
-    'user.switch',
-    'session.open',
-  ]);
-  assert.equal(calls[0].args.setActive, false);
-  assert.equal(calls[2].args.setActive, false);
-  assert.equal(calls[4].args.open, false);
-  assert.deepEqual(calls.slice(-3).map(call => call.args), [
-    { target: 'persona-main' },
-    { target: 'user-main' },
-    { sessionId: 'group:service-club' },
-  ]);
-  console.log('ok - explicit reveal activates only the main persona/user and opens one main session after completion');
-}
-
-{
-  const calls = [];
-  let activePersonaId = 'persona-legacy';
-  let reactIndex = 0;
-  const reactDecisions = [
-    {
-      ok: true,
-      action: 'tool',
-      toolName: 'session.create',
-      args: { names: ['沈岚', '苏绮'], open: true },
-      featureId: 'session.create',
-      title: '创建人物私聊',
-    },
-    {
-      ok: true,
-      action: 'tool',
-      toolName: 'group.create',
-      args: { name: '夜航社', members: ['沈岚', '苏绮'], open: true },
-      featureId: 'group.create',
-      title: '创建群聊',
-    },
-    {
-      ok: true,
-      action: 'final',
-      message: '整套企划已经建立完成。',
-    },
-  ];
-  const agent = createMaidAssistantAgent({
-    planner: async () => ({
-      ok: true,
-      toolName: 'persona.create',
-      args: { name: '月影港·夜航社', setActive: true },
-      featureId: 'persona.create',
-      title: '创建主角色卡',
-    }),
-    reactPlanner: async () => reactDecisions[reactIndex++],
-    toolRegistry: {
-      executeTool: async (toolName, args) => {
-        calls.push({ toolName, args, activePersonaId });
-        if (toolName === 'persona.create') {
-          return {
-            toolName,
-            status: 'succeeded',
-            result: {
-              ok: true,
-              created: true,
-              personaId: 'persona-moonlit',
-              profile: { id: 'persona-moonlit', name: '月影港·夜航社' },
-            },
-          };
-        }
-        if (toolName === 'persona.switch') {
-          activePersonaId = args.target;
-          return {
-            toolName,
-            status: 'succeeded',
-            result: {
-              ok: true,
-              switched: true,
-              personaId: activePersonaId,
-              profile: { id: activePersonaId, name: '月影港·夜航社' },
-            },
-          };
-        }
-        if (toolName === 'session.create') {
-          return {
-            toolName,
-            status: 'succeeded',
-            result: {
-              ok: true,
-              created: true,
-              sessionIds: ['沈岚', '苏绮'],
-              scopePersonaId: activePersonaId,
-            },
-          };
-        }
-        if (toolName === 'group.create') {
-          return {
-            toolName,
-            status: 'succeeded',
-            result: {
-              ok: true,
-              created: true,
-              verified: true,
-              group: { id: 'group:night-voyage', name: '夜航社' },
-              scopePersonaId: activePersonaId,
-            },
-          };
-        }
-        if (toolName === 'session.open') {
-          return {
-            toolName,
-            status: 'succeeded',
-            result: { ok: true, opened: true, sessionId: args.sessionId },
-          };
-        }
-        if (toolName === 'session.list') {
-          return {
-            toolName,
-            status: 'succeeded',
-            result: { ok: true, sessions: [] },
-          };
-        }
-        return {
-          toolName,
-          status: 'succeeded',
-          result: { ok: true, resource: args.resource, items: [] },
-        };
-      },
-    },
-    logger: { warn() {}, debug() {} },
-  });
-  const result = await agent.runPrompt([
-    '我想从零配好一整套聊天企划。先建一张「月影港·夜航社」角色卡，',
-    '分别给沈岚和苏绮建立私聊，再建立真群聊「夜航社」。',
-    '过程中都放在后台做，不要每建一个东西就跳页面。',
-    '全部完成后再一次性切换到新角色卡，并只打开「夜航社」给我看。',
-  ].join(''));
-  assert.equal(result.ok, true);
-  const personaSwitches = calls.filter(call => call.toolName === 'persona.switch');
-  assert.equal(personaSwitches.length, 1, '工作域已切换到目标角色卡时，最终展示不能重复切换');
-  const workScopeSwitchIndex = calls.findIndex(call => call.toolName === 'persona.switch');
-  const firstScopedWriteIndex = calls.findIndex(call => call.toolName === 'session.create');
-  assert.ok(workScopeSwitchIndex >= 0 && workScopeSwitchIndex < firstScopedWriteIndex);
-  assert.equal(calls[firstScopedWriteIndex].activePersonaId, 'persona-moonlit');
-  assert.equal(
-    calls.find(call => call.toolName === 'group.create')?.activePersonaId,
-    'persona-moonlit',
-    '群聊必须创建在新角色卡的作用域内',
-  );
-  assert.equal(calls.at(-1).toolName, 'session.open');
-  assert.deepEqual(calls.at(-1).args, { sessionId: 'group:night-voyage' });
-  console.log('ok - full persona setup switches work scope before scoped writes and reveals only the final group');
+  ], '完成后切卡、切用户、打开结果都由模型决定，执行层不再自动追加');
+  assert.equal(calls[0].args.setActive, true);
+  assert.equal(calls[2].args.setActive, true);
+  assert.equal(calls[4].args.open, true);
+  console.log('ok - creation args follow the model and the agent appends no automatic switch or reveal steps');
 }
 
 {
@@ -838,9 +381,8 @@ setPromptLocale('zh-CN');
   const result = await agent.runPrompt('查询「冻结观察会话-A-0728」的世界书绑定，确认原绑定仍在且新增书已启用。');
   assert.equal(result.ok, true);
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].context.operationIntentPolicy.mode, 'read_only');
-  assert.equal(calls[0].context.operationIntentPolicy.source, 'maid_user_request');
-  console.log('ok - maid assistant carries original read-only intent into tool execution context');
+  assert.equal(calls[0].context.operationIntentPolicy, undefined, '查询句不再被关键词判成只读；要不要写交给模型，写入照工具确认');
+  console.log('ok - read-like requests carry no keyword intent policy into tool execution');
 }
 
 {
@@ -858,9 +400,10 @@ setPromptLocale('zh-CN');
     name: 'worldbook.bind_session',
     riskLevel: 'medium',
     capabilities: { read: true, write: true },
+    // 11/20 起会动到内容的工具一律弹确认；挡住写入的是工具自己的确认，不再是关键词判出的只读
     safety: {
       operationType: 'bind_worldbook_to_session',
-      destructive: 'never',
+      preflight: async () => ({ destructive: true, kind: 'worldbook.bind_session', operationType: 'bind_worldbook_to_session' }),
     },
     execute: async () => {
       writes += 1;
@@ -898,11 +441,10 @@ setPromptLocale('zh-CN');
     logger: { warn() {} },
   });
   const result = await agent.runPrompt('查询「冻结观察会话-A-0728」的世界书绑定，确认原绑定仍在且新增书已启用。');
-  assert.equal(result.ok, false);
-  assert.equal(writes, 0);
+  assert.equal(writes, 0, '没有确认就不写');
   assert.equal(result.steps[1].toolName, 'worldbook.bind_session');
-  assert.equal(result.steps[1].failureCode, 'write_intent_required');
-  console.log('ok - obs-03-016 read-only request cannot execute a later worldbook binding write');
+  assert.notEqual(result.steps[1].status, 'succeeded');
+  console.log('ok - obs-03-016 a write after a read-like request still needs the tool confirmation');
 }
 
 {
@@ -1896,40 +1438,20 @@ for (const stopReason of ['feature_not_found', 'invalid_model_plan']) {
 }
 
 {
+  // 「不要调用工具」也交给模型判断，程序不再按关键词跳过规划（11/20）
   let plannerCalls = 0;
-  let toolCalls = 0;
   const agent = createMaidAssistantAgent({
     planner: async () => {
       plannerCalls += 1;
-      return {
-        ok: true,
-        toolName: 'app.get_current_state',
-        args: {},
-        featureId: 'app.state.read',
-      };
+      return { ok: false, status: 'unsupported', reason: 'invalid_model_plan', message: '模型没有返回有效计划。' };
     },
-    chatResponder: async (_input, context) => ({
-      ok: true,
-      status: 'responded',
-      source: 'test_no_tool_chat',
-      message: `记忆回答 / ${context.operationIntentPolicy.mode}`,
-    }),
-    toolRegistry: {
-      executeTool: async () => {
-        toolCalls += 1;
-        return { ok: true };
-      },
-    },
+    chatResponder: async () => ({ ok: true, status: 'responded', message: '记忆回答' }),
+    toolRegistry: { executeTool: async () => ({ ok: true }) },
     logger: { warn() {} },
   });
-  const result = await agent.runPrompt('不要调用任何工具，只根据长期记忆回答我的偏好。');
-  assert.equal(result.ok, true);
-  assert.equal(result.responseType, 'chat');
-  assert.equal(result.source, 'test_no_tool_chat');
-  assert.equal(plannerCalls, 0, '明确 no-tool 请求不得进入工具规划器');
-  assert.equal(toolCalls, 0, '明确 no-tool 请求不得执行任何工具');
-  assert.match(result.message, /no_tool/);
-  console.log('ok - explicit no-tool requests bypass planning and use the plain chat responder');
+  await agent.runPrompt('不要调用任何工具，只根据长期记忆回答我的偏好。');
+  assert.equal(plannerCalls, 1, '不按关键词绕过模型');
+  console.log('ok - no-tool wording reaches the model instead of a keyword shortcut');
 }
 
 {
@@ -2590,7 +2112,7 @@ const runGeneratedMediaQuotaProbe = async input => {
           include: ['worldbooks'],
         },
         featureId: 'app.resource.read',
-        title: '重复读回绑定',
+        title: '读回绑定',
       },
       {
         ok: true,
@@ -2644,259 +2166,11 @@ const runGeneratedMediaQuotaProbe = async input => {
   assert.equal(result.ok, true);
   assert.deepEqual(
     calls.map(call => call.toolName),
-    ['worldbook.bind_session', 'worldbook.list'],
-    '目录声明的自动验证已成功后，不应再次执行同目标 app.read_resource 尾读',
-  );
-  assert.equal(result.finalDecision?.source, 'verified_write_tail_read_guard');
-  console.log('ok - verified worldbook binding closes before a redundant cross-capability tail read');
-}
-
-{
-  const runBindingTailRead = async ({ input, include }) => {
-    const calls = [];
-    let reactIndex = 0;
-    const agent = createMaidAssistantAgent({
-      planner: async () => ({
-        ok: true,
-        toolName: 'worldbook.bind_session',
-        args: { worldbookId: '展示书', sessionName: '展示房', mode: 'append' },
-        featureId: 'worldbook.bind_session',
-        title: '绑定世界书',
-      }),
-      reactPlanner: async () => ([
-        {
-          ok: true,
-          action: 'tool',
-          toolName: 'app.read_resource',
-          args: {
-            resource: 'session',
-            sessionName: '展示房',
-            include,
-          },
-          featureId: 'app.resource.read',
-          title: '读取会话资料',
-        },
-        {
-          ok: true,
-          action: 'final',
-          message: '已展示读取结果。',
-        },
-      ][reactIndex++]),
-      toolRegistry: {
-        executeTool: async (toolName, args) => {
-          calls.push({ toolName, args });
-          if (toolName === 'worldbook.bind_session') {
-            return {
-              toolName,
-              status: 'succeeded',
-              result: {
-                ok: true,
-                bound: true,
-                sessionId: args.sessionName,
-                worldbookId: args.worldbookId,
-              },
-            };
-          }
-          if (toolName === 'worldbook.list') {
-            return {
-              toolName,
-              status: 'succeeded',
-              result: {
-                ok: true,
-                worldbooks: [{ id: '展示书', boundToCurrentSession: true }],
-              },
-            };
-          }
-          return {
-            toolName,
-            status: 'succeeded',
-            result: {
-              ok: true,
-              resource: 'session',
-              members: ['甲', '乙'],
-              worldbooks: ['展示书'],
-            },
-          };
-        },
-      },
-      logger: { warn() {}, debug() {} },
-    });
-    return {
-      result: await agent.runPrompt(input),
-      calls,
-    };
-  };
-
-  const explicit = await runBindingTailRead({
-    input: '把「展示书」绑定到「展示房」，然后把绑定内容读出来给我看。',
-    include: ['worldbooks'],
-  });
-  assert.deepEqual(
-    explicit.calls.map(call => call.toolName),
     ['worldbook.bind_session', 'worldbook.list', 'app.read_resource'],
-    '用户明确要求展示时不能用自动验证结果替代真实尾读',
+    '自动验证之后模型要再读一次，执行层照做，不看原话拦截',
   );
-
-  const composite = await runBindingTailRead({
-    input: '把「展示书」绑定到「展示房」，最后核对会话资料。',
-    include: ['members', 'worldbooks'],
-  });
-  assert.deepEqual(
-    composite.calls.map(call => call.toolName),
-    ['worldbook.bind_session', 'worldbook.list', 'app.read_resource'],
-    '复合读取不能因为包含 worldbooks 而吞掉 members',
-  );
-  console.log('ok - binding tail-read guard preserves explicit reveals and composite session reads');
-}
-
-{
-  const calls = [];
-  let reactCalls = 0;
-  const sessions = ['观测站', '档案室', '检查站'];
-  const agent = createMaidAssistantAgent({
-    planner: async () => ({
-      ok: true,
-      toolName: 'worldbook.bind_sessions',
-      args: { worldbookId: '档案库', sessions, mode: 'append', preview: true },
-      featureId: 'worldbook.bind_sessions',
-      title: '预览三房绑定',
-    }),
-    reactPlanner: async () => {
-      reactCalls += 1;
-      if (reactCalls === 1) {
-        return {
-          ok: true,
-          action: 'tool',
-          toolName: 'worldbook.bind_sessions',
-          args: { worldbookId: '档案库', sessions, mode: 'append', preview: true },
-          featureId: 'worldbook.bind_sessions',
-          title: '重复预览三房绑定',
-        };
-      }
-      return {
-        ok: true,
-        action: 'final',
-        message: '三房绑定已经实际执行并验证。',
-      };
-    },
-    toolRegistry: {
-      executeTool: async (toolName, args) => {
-        calls.push({ toolName, args });
-        if (args.preview === true) {
-          return {
-            toolName,
-            status: 'succeeded',
-            result: {
-              ok: true,
-              preview: true,
-              worldbookId: args.worldbookId,
-              mode: args.mode,
-              requestedCount: sessions.length,
-              plannedCount: sessions.length,
-              failedCount: 0,
-              results: sessions.map(sessionId => ({ sessionId, status: 'planned' })),
-            },
-            summary: 'batch worldbook binding preview completed',
-          };
-        }
-        return {
-          toolName,
-          status: 'succeeded',
-          result: {
-            ok: true,
-            preview: false,
-            worldbookId: args.worldbookId,
-            mode: args.mode,
-            requestedCount: sessions.length,
-            succeededCount: sessions.length,
-            failedCount: 0,
-            verifiedCount: sessions.length,
-            results: sessions.map(sessionId => ({ sessionId, status: 'succeeded', verified: true })),
-          },
-          summary: 'batch worldbook binding completed',
-        };
-      },
-    },
-    logger: { warn() {} },
-  });
-  const result = await agent.runPrompt(
-    '把世界书「档案库」追加绑定到三个测试房。先调用一次 worldbook.bind_sessions 且 preview:true；只有三项预览都可处理时，再以完全相同的 sessions[]、mode:append 实际执行一次。',
-  );
-  assert.equal(result.ok, true);
-  assert.deepEqual(
-    calls.map(call => call.args.preview),
-    [true, false],
-    '写入已获授权且预览全部可处理时，模型重复 preview 必须推进为一次 apply',
-  );
-  assert.equal(result.steps[1].metadata?.workflowTransition, 'preview_to_apply');
-  console.log('ok - repeated successful batch preview advances once to the authorized apply phase');
-}
-
-{
-  const previewFlags = [];
-  const toolNames = [];
-  const sessions = ['观测站', '档案室', '检查站'];
-  const agent = createMaidAssistantAgent({
-    planner: async () => ({
-      ok: true,
-      toolName: 'worldbook.bind_sessions',
-      args: { worldbookId: '档案库', sessions, mode: 'append', preview: true },
-      featureId: 'worldbook.bind_sessions',
-      title: '预览三房绑定',
-    }),
-    reactPlanner: async () => ({
-      ok: true,
-      action: 'final',
-      message: '预览完成。',
-    }),
-    toolRegistry: {
-      executeTool: async (toolName, args) => {
-        toolNames.push(toolName);
-        if (toolName === 'app.get_current_state') {
-          return {
-            toolName,
-            status: 'succeeded',
-            result: { activePage: 'chat', uiMode: 'chat', sessionId: '格式修复测试' },
-            summary: 'state page=chat session=格式修复测试',
-          };
-        }
-        previewFlags.push(args.preview);
-        return {
-          toolName,
-          status: 'succeeded',
-          result: args.preview === true
-            ? {
-                ok: true,
-                preview: true,
-                plannedCount: sessions.length,
-                failedCount: 0,
-                results: sessions.map(sessionId => ({ sessionId, status: 'planned' })),
-              }
-            : {
-                ok: true,
-                preview: false,
-                succeededCount: sessions.length,
-                verifiedCount: sessions.length,
-                failedCount: 0,
-                results: sessions.map(sessionId => ({ sessionId, status: 'succeeded', verified: true })),
-              },
-          summary: args.preview === true ? 'batch preview completed' : 'batch binding completed',
-        };
-      },
-    },
-    logger: { warn() {} },
-  });
-  const result = await agent.runPrompt(
-    '把世界书「档案库」追加绑定到三个测试房。先 preview，三项都可处理时再实际执行绑定；最后读取 APP 状态。',
-  );
-  assert.equal(result.ok, true);
-  assert.deepEqual(previewFlags, [true, false], '模型在 preview 后提前 final 也不能跳过用户明确要求的 apply');
-  assert.deepEqual(
-    toolNames,
-    ['worldbook.bind_sessions', 'worldbook.bind_sessions', 'app.get_current_state'],
-    '完成 apply 后仍须履行用户明确要求的最终 APP 状态核对',
-  );
-  console.log('ok - successful preview cannot prematurely final before the explicit apply phase');
+  assert.equal(result.message, '已完成绑定并验证。');
+  console.log('ok - a model-requested read after a verified binding is executed');
 }
 
 {
@@ -2963,7 +2237,6 @@ const runGeneratedMediaQuotaProbe = async input => {
 
 {
   const calls = [];
-  let reactCalls = 0;
   const agent = createMaidAssistantAgent({
     planner: async () => ({
       ok: true,
@@ -2978,68 +2251,35 @@ const runGeneratedMediaQuotaProbe = async input => {
       featureId: 'chat.send_message',
       title: '写入观测站消息',
     }),
-    reactPlanner: async (_input, context) => {
-      reactCalls += 1;
-      const sentTargets = (context.maidReactSteps || [])
-        .filter(step => step.toolName === 'chat.send_message' && step.status === 'succeeded')
-        .map(step => step.args.sessionName);
-      return {
-        ok: true,
-        action: 'final',
-        message: sentTargets.length < 3
-          ? `继续处理第 ${sentTargets.length + 1} 个房间。`
-          : '三房消息均已写入，当前房间没有变化。',
-      };
-    },
+    reactPlanner: async () => ({
+      ok: true,
+      action: 'final',
+      message: '观测站已写入。',
+    }),
     toolRegistry: {
       executeTool: async (toolName, args) => {
         calls.push({ toolName, args });
-        if (toolName === 'chat.send_message') {
-          return {
-            toolName,
-            status: 'succeeded',
-            result: { ok: true, sessionId: args.sessionName, sessionName: args.sessionName },
-            summary: `sent message to ${args.sessionName}`,
-          };
-        }
-        if (toolName === 'app.read_resource') {
-          return {
-            toolName,
-            status: 'succeeded',
-            result: {
-              ok: true,
-              resource: 'chat',
-              messages: [{ role: 'user', content: `OBS-${args.sessionName === '观测站' ? 'A' : (args.sessionName === '档案室' ? 'B' : 'C')}` }],
-            },
-            summary: `read resource chat for ${args.sessionName}`,
-          };
-        }
         return {
           toolName,
           status: 'succeeded',
-          result: { activePage: 'chat', uiMode: 'chat', sessionId: '格式修复测试' },
-          summary: 'state page=chat session=格式修复测试',
+          result: { ok: true, sessionId: args.sessionName, sessionName: args.sessionName },
+          summary: `sent message to ${args.sessionName}`,
         };
       },
     },
     logger: { warn() {} },
   });
   const result = await agent.runPrompt(
-    '保持当前房间不变，向三个测试房后台各写一条用户消息：给「观测站」写“OBS-A”，给「档案室」写“OBS-B”，给「检查站」写“OBS-C”；全部必须 triggerReply:false、open:false。然后分别用结构化 chat 资源读取三房最后一条消息，逐一核对角色与完整正文；最后读取 APP 状态证明仍在「格式修复测试」。',
+    '保持当前房间不变，向三个测试房后台各写一条用户消息：给「观测站」写“OBS-A”，给「档案室」写“OBS-B”，给「检查站」写“OBS-C”；全部必须 triggerReply:false、open:false。最后读取 APP 状态。',
   );
   assert.equal(result.ok, true);
+  assert.equal(result.message, '观测站已写入。');
   assert.deepEqual(
-    calls.filter(call => call.toolName === 'chat.send_message').map(call => [call.args.sessionName, call.args.content]),
-    [['观测站', 'OBS-A'], ['档案室', 'OBS-B'], ['检查站', 'OBS-C']],
-    '模型提前 final 时必须从显式目标账本继续尚未发送的 sibling 目标',
+    calls.map(call => call.toolName),
+    ['chat.send_message'],
+    '模型给出最终回答就结束；执行层不再按原话补发其余房间、读回或读取 APP 状态',
   );
-  assert.deepEqual(
-    calls.filter(call => call.toolName === 'app.read_resource').map(call => call.args.sessionName),
-    ['观测站', '档案室', '检查站'],
-  );
-  assert.equal(calls.at(-1).toolName, 'app.get_current_state');
-  assert.ok(reactCalls >= 3);
-  console.log('ok - explicit multi-room message ledger prevents premature final and completes remaining targets');
+  console.log('ok - the model final answer ends the task without keyword-built follow-up steps');
 }
 
 {
@@ -3218,239 +2458,6 @@ const runGeneratedMediaQuotaProbe = async input => {
     planner: async () => ({
       ok: true,
       toolName: 'app.read_resource',
-      args: { resource: 'persona' },
-      featureId: 'app.resource.read',
-      title: '读取角色卡',
-    }),
-    reactPlanner: async () => {
-      reactCalls += 1;
-      return {
-        ok: true,
-        action: 'tool',
-        toolName: 'app.read_resource',
-        args: { resource: 'persona' },
-        featureId: 'app.resource.read',
-        title: '重复读取角色卡',
-      };
-    },
-    toolRegistry: {
-      executeTool: async toolName => ({
-        toolName,
-        status: 'succeeded',
-        result: {
-          ok: true,
-          resource: 'persona',
-          activeId: 'p1',
-          count: 2,
-          items: [
-            { id: 'p1', name: '女仆能力测试', active: true },
-            { id: 'p2', name: '精灵女王', active: false },
-          ],
-        },
-        summary: 'read resource persona',
-      }),
-    },
-    logger: { warn() {} },
-  });
-  const result = await agent.runPrompt('读取角色卡清单，告诉我当前活动角色卡以及角色卡总数。');
-  assert.equal(result.ok, true);
-  assert.equal(result.finalDecision?.source, 'deterministic_read_completion');
-  assert.match(result.message, /角色卡：共 2 项/);
-  assert.match(result.message, /女仆能力测试/);
-  assert.equal(reactCalls, 0, '一次读取已经满足请求时不应再调用 ReAct');
-  console.log('ok - 单一角色卡读取在结果足够时确定性收口');
-}
-
-{
-  const cases = [
-    {
-      resource: 'user',
-      createTool: 'user.create',
-      target: 'V4F-V2备用用户-0731',
-      prompt: '读取用户清单；不存在时才创建「V4F-V2备用用户-0731」，但不要切换成它。',
-      activeId: 'user-current',
-    },
-    {
-      resource: 'persona',
-      createTool: 'persona.create',
-      target: 'V4F-V2备用角色卡-0731',
-      prompt: '读取角色卡清单；不存在时才创建「V4F-V2备用角色卡-0731」，但不得设为当前角色卡。',
-      activeId: 'persona-current',
-    },
-  ];
-  for (const testCase of cases) {
-    const calls = [];
-    let created = false;
-    const agent = createMaidAssistantAgent({
-      planner: async () => ({
-        ok: true,
-        toolName: 'app.read_resource',
-        args: { resource: testCase.resource },
-        featureId: 'app.resource.read',
-        title: '读取清单',
-      }),
-      reactPlanner: async () => {
-        throw new Error('条件创建的剩余目标不应依赖模型自行补做');
-      },
-      toolRegistry: {
-        executeTool: async (toolName, args) => {
-          calls.push({ toolName, args });
-          if (toolName === testCase.createTool) {
-            created = true;
-            return {
-              toolName,
-              status: 'succeeded',
-              result: {
-                ok: true,
-                created: true,
-                [`${testCase.resource}Id`]: `${testCase.resource}-created`,
-                name: testCase.target,
-              },
-            };
-          }
-          if (toolName === 'app.read_resource') {
-            const items = [
-              { id: testCase.activeId, name: '当前项目', active: true },
-              ...(created
-                ? [{ id: `${testCase.resource}-created`, name: testCase.target, active: false }]
-                : []),
-            ];
-            return {
-              toolName,
-              status: 'succeeded',
-              result: {
-                ok: true,
-                resource: testCase.resource,
-                activeId: testCase.activeId,
-                count: items.length,
-                items,
-              },
-            };
-          }
-          throw new Error(`unexpected tool ${toolName}`);
-        },
-      },
-      logger: { warn() {} },
-    });
-    const result = await agent.runPrompt(testCase.prompt);
-    assert.equal(result.ok, true);
-    assert.equal(result.finalDecision?.source, 'deterministic_conditional_create_completion');
-    assert.deepEqual(
-      calls.map(call => call.toolName),
-      ['app.read_resource', testCase.createTool, 'app.read_resource'],
-      '缺项时应创建一次并复验一次',
-    );
-    assert.deepEqual(calls[1].args, { name: testCase.target, setActive: false });
-    assert.match(result.message, /已创建/);
-  }
-  console.log('ok - conditional user/persona creation completes missing targets without switching');
-}
-
-{
-  const calls = [];
-  let reactCalls = 0;
-  const target = 'V4F-V2备用角色卡-0731';
-  const agent = createMaidAssistantAgent({
-    planner: async () => ({
-      ok: true,
-      toolName: 'app.read_resource',
-      args: { resource: 'persona' },
-      featureId: 'app.resource.read',
-      title: '读取角色卡清单',
-    }),
-    reactPlanner: async () => {
-      reactCalls += 1;
-      return { ok: true, action: 'final', message: '不应调用模型收口。' };
-    },
-    toolRegistry: {
-      executeTool: async (toolName, args) => {
-        calls.push({ toolName, args });
-        return {
-          toolName,
-          status: 'succeeded',
-          result: {
-            ok: true,
-            resource: 'persona',
-            activeId: 'persona-current',
-            count: 2,
-            items: [
-              { id: 'persona-current', name: '当前角色卡', active: true },
-              { id: 'persona-existing', name: target, active: false },
-            ],
-          },
-        };
-      },
-    },
-    logger: { warn() {} },
-  });
-  const result = await agent.runPrompt(
-    '读取角色卡清单；不存在时才创建「V4F-V2备用角色卡-0731」，但不得设为当前角色卡。',
-  );
-  assert.equal(result.ok, true);
-  assert.equal(result.finalDecision?.source, 'deterministic_conditional_create_completion');
-  assert.deepEqual(calls.map(call => call.toolName), ['app.read_resource']);
-  assert.equal(reactCalls, 0);
-  assert.match(result.message, /已存在/);
-  console.log('ok - conditional creation reuses an existing target without duplicate writes');
-}
-
-{
-  let reactCalls = 0;
-  const agent = createMaidAssistantAgent({
-    planner: async () => ({
-      ok: true,
-      toolName: 'app.read_resource',
-      args: { resource: 'persona', id: 'p1', include: ['associations'] },
-      featureId: 'app.resource.read',
-      title: '读取角色卡关联资源',
-    }),
-    reactPlanner: async () => {
-      reactCalls += 1;
-      return { ok: true, action: 'final', message: '不应依赖模型补写关联资源。' };
-    },
-    toolRegistry: {
-      executeTool: async toolName => ({
-        toolName,
-        status: 'succeeded',
-        result: {
-          ok: true,
-          resource: 'persona',
-          activeId: 'p1',
-          count: 1,
-          includedFields: ['associations'],
-          items: [{
-            id: 'p1',
-            name: '精灵女王',
-            active: true,
-            associations: {
-              worldbookId: '精灵抱抱',
-              worldbookEnabled: true,
-              systemPresetId: '精灵预设',
-              regexSetId: '精灵正则',
-            },
-          }],
-        },
-        summary: 'read resource persona associations',
-      }),
-    },
-    logger: { warn() {} },
-  });
-  const result = await agent.runPrompt('读取精灵女王角色卡关联了哪些资源。');
-  assert.equal(result.ok, true);
-  assert.equal(result.finalDecision?.source, 'deterministic_read_completion');
-  assert.match(result.message, /世界书「精灵抱抱」.*已启用/);
-  assert.match(result.message, /系统预设「精灵预设」/);
-  assert.match(result.message, /正则集「精灵正则」/);
-  assert.equal(reactCalls, 0, '关联引用已是结构化事实，不应再调用 ReAct 重述');
-  console.log('ok - 角色卡关联资源读取由确定性摘要完整收口');
-}
-
-{
-  let reactCalls = 0;
-  const agent = createMaidAssistantAgent({
-    planner: async () => ({
-      ok: true,
-      toolName: 'app.read_resource',
       args: { resource: 'persona', id: 'p1', include: ['associations'] },
       featureId: 'app.resource.read',
       title: '读取海贼王角色卡关联资源',
@@ -3573,377 +2580,6 @@ const runGeneratedMediaQuotaProbe = async input => {
 }
 
 {
-  let reactCalls = 0;
-  const agent = createMaidAssistantAgent({
-    planner: async () => ({
-      ok: true,
-      toolName: 'app.read_resource',
-      args: { resource: 'persona' },
-      featureId: 'app.resource.read',
-      title: '读取角色卡',
-    }),
-    reactPlanner: async () => {
-      reactCalls += 1;
-      if (reactCalls > 1) throw new Error('不应在两个请求资源都成功后再次调用 ReAct');
-      return {
-        ok: true,
-        action: 'tool',
-        toolName: 'app.read_resource',
-        args: { resource: 'user' },
-        featureId: 'app.resource.read',
-        title: '读取用户',
-      };
-    },
-    toolRegistry: {
-      executeTool: async (toolName, args) => ({
-        toolName,
-        status: 'succeeded',
-        result: args.resource === 'persona'
-          ? {
-              ok: true,
-              resource: 'persona',
-              activeId: 'p1',
-              count: 2,
-              items: [{ id: 'p1', name: '女仆能力测试', active: true }],
-            }
-          : {
-              ok: true,
-              resource: 'user',
-              activeId: 'u1',
-              count: 3,
-              items: [{ id: 'u1', name: '阿兰', active: true }],
-            },
-        summary: `read resource ${args.resource}`,
-      }),
-    },
-    logger: { warn() {} },
-  });
-  const result = await agent.runPrompt('分别读取角色卡与用户清单，只比较总数和当前项，禁止切换。');
-  assert.equal(result.ok, true);
-  assert.match(result.message, /角色卡：共 2 项/);
-  assert.match(result.message, /用户：共 3 项/);
-  assert.equal(reactCalls, 1, '应只在缺少用户资源时调用一次 ReAct');
-  console.log('ok - 多资源只读请求在所有明确资源都返回后收口');
-}
-
-{
-  let reactCalls = 0;
-  const resources = ['preset', 'regex', 'variables'];
-  const agent = createMaidAssistantAgent({
-    planner: async () => ({
-      ok: true,
-      toolName: 'app.read_resource',
-      args: { resource: resources[0] },
-      featureId: 'app.resource.read',
-      title: '读取 preset',
-    }),
-    reactPlanner: async () => {
-      reactCalls += 1;
-      if (reactCalls >= resources.length) throw new Error('三个请求资源都成功后不应再次调用 ReAct');
-      const resource = resources[reactCalls];
-      return {
-        ok: true,
-        action: 'tool',
-        toolName: 'app.read_resource',
-        args: { resource },
-        featureId: 'app.resource.read',
-        title: `读取 ${resource}`,
-      };
-    },
-    toolRegistry: {
-      executeTool: async (toolName, args) => {
-        const outputs = {
-          preset: {
-            ok: true,
-            resource: 'preset',
-            presets: { openai: { activeId: 'Default' }, sysprompt: { activeId: '写作' } },
-          },
-          regex: {
-            ok: true,
-            resource: 'regex',
-            count: 1,
-            session: { enabled: true },
-            sets: [{ id: 'r1', name: '输出清理' }],
-          },
-          variables: {
-            ok: true,
-            resource: 'variables',
-            variables: { mood: 'calm' },
-            globalVariables: { app: 'phone', lang: 'zh' },
-          },
-        };
-        return {
-          toolName,
-          status: 'succeeded',
-          result: outputs[args.resource],
-          summary: `read resource ${args.resource}`,
-        };
-      },
-    },
-    logger: { warn() {} },
-  });
-  const result = await agent.runPrompt('依次读取当前会话的 preset、regex、variables 三种结构化资源，分别给出简短摘要。');
-  assert.equal(result.ok, true);
-  assert.match(result.message, /预设：openai=Default、sysprompt=写作/);
-  assert.match(result.message, /正则：已启用，共 1 个规则集/);
-  assert.match(result.message, /变量：会话 1 项，全局 2 项/);
-  assert.equal(reactCalls, 2);
-  console.log('ok - preset/regex/variables 只读组合在第三项后确定性收口');
-}
-
-{
-  const calls = [];
-  let reactCalls = 0;
-  const profileTargets = ['观测站', '档案室', '检查站'];
-  const agent = createMaidAssistantAgent({
-    planner: async () => ({
-      ok: true,
-      toolName: 'worldbook.read',
-      args: { name: '档案库' },
-      featureId: 'worldbook.read',
-      title: '读取世界书索引',
-    }),
-    reactPlanner: async () => {
-      reactCalls += 1;
-      return {
-        ok: true,
-        action: 'tool',
-        toolName: 'worldbook.read',
-        args: { name: '档案库', includeContent: reactCalls % 2 === 0 },
-        featureId: 'worldbook.read',
-        title: '重复读取世界书',
-      };
-    },
-    toolRegistry: {
-      executeTool: async (toolName, args) => {
-        calls.push({ toolName, args });
-        if (toolName === 'worldbook.read') {
-          return {
-            toolName,
-            status: 'succeeded',
-            result: {
-              ok: true,
-              name: '档案库',
-              entryCount: 5,
-              entries: ['站长', '档案员', '观测站', '检查站', '临时草稿']
-                .map(title => ({ title })),
-            },
-            summary: 'read worldbook 档案库 (5 entries)',
-          };
-        }
-        if (toolName === 'session.list') {
-          return {
-            toolName,
-            status: 'succeeded',
-            result: {
-              count: 4,
-              contacts: ['观测站', '档案室', '检查站', '中继站'].map(name => ({ id: name, name })),
-            },
-            summary: 'listed 4 session(s)',
-          };
-        }
-        if (toolName === 'app.read_resource') {
-          return {
-            toolName,
-            status: 'succeeded',
-            result: {
-              ok: true,
-              resource: args.resource,
-              count: 1,
-              items: [{ id: `${args.resource}-1`, name: `测试${args.resource}`, active: false }],
-            },
-            summary: `read resource ${args.resource}`,
-          };
-        }
-        if (toolName === 'chat.read_format_profile') {
-          return {
-            toolName,
-            status: 'succeeded',
-            result: {
-              ok: true,
-              sessionId: args.sessionName,
-              profile: { sessionId: args.sessionName, guide: `<${args.sessionName}>...</${args.sessionName}>` },
-            },
-            summary: `format profile found for ${args.sessionName}`,
-          };
-        }
-        return {
-          toolName,
-          status: 'succeeded',
-          result: { activePage: 'chat', uiMode: 'chat', sessionId: '格式修复测试' },
-          summary: 'state page=chat session=格式修复测试',
-        };
-      },
-    },
-    logger: { warn() {} },
-  });
-  const result = await agent.runPrompt(
-    '进行最终只读审计，不得补写或打开页面：读取「档案库」全文索引；读取完整会话清单；读取测试用户与测试角色卡清单；分别读取「观测站」「档案室」「检查站」的格式画像；再读取 APP 状态。',
-  );
-  assert.equal(result.ok, true);
-  assert.deepEqual(
-    calls.map(call => [
-      call.toolName,
-      call.args.resource || call.args.name || call.args.sessionName || '',
-    ]),
-    [
-      ['worldbook.read', '档案库'],
-      ['session.list', ''],
-      ['app.read_resource', 'user'],
-      ['app.read_resource', 'persona'],
-      ['chat.read_format_profile', '观测站'],
-      ['chat.read_format_profile', '档案室'],
-      ['chat.read_format_profile', '检查站'],
-      ['app.get_current_state', ''],
-    ],
-    '结构化只读审计应按剩余目标各读一次，不受模型重复 worldbook 参数影响',
-  );
-  assert.equal(reactCalls, 0, '可完整解析的只读审计应由剩余目标账本确定性推进并收口');
-  assert.equal(result.finalDecision?.source, 'deterministic_structured_read_completion');
-  assert.match(result.message, /档案库.*5 条/);
-  assert.match(result.message, /格式画像.*观测站/);
-  assert.match(result.message, /当前会话「格式修复测试」/);
-  console.log('ok - structured read audit executes each remaining target once and closes deterministically');
-}
-
-{
-  const calls = [];
-  let reactCalls = 0;
-  const agent = createMaidAssistantAgent({
-    planner: async () => ({
-      ok: true,
-      toolName: 'app.read_resource',
-      args: { resource: 'worldbook', name: '档案库', includeContent: false },
-      featureId: 'app.resource.read',
-      title: '通过通用资源读取档案库',
-    }),
-    reactPlanner: async () => {
-      reactCalls += 1;
-      return {
-        ok: true,
-        action: 'final',
-        message: '提前结束。',
-      };
-    },
-    toolRegistry: {
-      executeTool: async (toolName, args) => {
-        calls.push({ toolName, args });
-        if (toolName === 'app.read_resource') {
-          return {
-            toolName,
-            status: 'succeeded',
-            result: {
-              ok: true,
-              resource: 'worldbook',
-              count: 2,
-              worldbooks: [{
-                id: '档案库',
-                name: '档案库',
-                entryCount: 5,
-                entries: ['站长', '档案员', '观测站', '检查站', '临时草稿']
-                  .map(title => ({ title })),
-              }, {
-                id: '其他资料',
-                name: '其他资料',
-                entryCount: 1,
-                entries: [{ title: '无关项' }],
-              }],
-            },
-            summary: 'read resource worldbook',
-          };
-        }
-        if (toolName === 'session.list') {
-          return {
-            toolName,
-            status: 'succeeded',
-            result: { count: 1, contacts: [{ id: '观测站', name: '观测站' }] },
-            summary: 'listed 1 session(s)',
-          };
-        }
-        if (toolName === 'chat.read_format_profile') {
-          return {
-            toolName,
-            status: 'succeeded',
-            result: {
-              ok: true,
-              sessionId: '观测站',
-              profile: { sessionId: '观测站', guide: '<station>...</station>' },
-            },
-            summary: 'format profile found for 观测站',
-          };
-        }
-        return {
-          toolName,
-          status: 'succeeded',
-          result: { activePage: 'chat', uiMode: 'chat', sessionId: '格式修复测试' },
-          summary: 'state page=chat session=格式修复测试',
-        };
-      },
-    },
-    logger: { warn() {} },
-  });
-  const result = await agent.runPrompt(
-    '进行最终只读审计，不得补写或打开页面：读取「档案库」全文索引；读取完整会话清单；分别读取「观测站」的格式画像；再读取 APP 状态。',
-  );
-  assert.equal(result.ok, true);
-  assert.deepEqual(
-    calls.map(call => [
-      call.toolName,
-      call.args.resource || call.args.name || call.args.sessionName || '',
-    ]),
-    [
-      ['app.read_resource', 'worldbook'],
-      ['session.list', ''],
-      ['chat.read_format_profile', '观测站'],
-      ['app.get_current_state', ''],
-    ],
-    '精确目标的通用 worldbook 结构化读取应等价满足索引义务，并推进其余目标',
-  );
-  assert.equal(reactCalls, 0);
-  assert.match(result.message, /档案库.*5 条/);
-  assert.doesNotMatch(result.message, /无关项/);
-  console.log('ok - exact generic worldbook resource reads can seed the structured audit ledger');
-}
-
-{
-  let reactCalls = 0;
-  const agent = createMaidAssistantAgent({
-    planner: async () => ({
-      ok: true,
-      toolName: 'maid.todo.read',
-      args: {},
-      featureId: 'maid.todo',
-      title: '读取待办',
-    }),
-    reactPlanner: async () => {
-      reactCalls += 1;
-      return {
-        ok: true,
-        action: 'tool',
-        toolName: 'maid.todo.read',
-        args: {},
-        featureId: 'maid.todo',
-        title: '重复读取待办',
-      };
-    },
-    toolRegistry: {
-      executeTool: async toolName => ({
-        toolName,
-        status: 'succeeded',
-        result: { ok: true, count: 0, todos: [] },
-        summary: 'todos listed',
-      }),
-    },
-    logger: { warn() {} },
-  });
-  const result = await agent.runPrompt('再次读取待办，确认三项是否都完成。');
-  assert.equal(result.ok, true);
-  assert.match(result.message, /待办：当前没有项目/);
-  assert.equal(reactCalls, 0);
-  console.log('ok - 待读取一次成功后直接汇报而不重复核对');
-}
-
-{
   const calls = [];
   let reactCalls = 0;
   const todos = [{ content: '读取当前 APP 状态', status: 'in_progress' }];
@@ -3967,14 +2603,18 @@ const runGeneratedMediaQuotaProbe = async input => {
           title: '重复记录清单',
         };
       }
-      return {
-        ok: true,
-        action: 'tool',
-        toolName: 'app.get_current_state',
-        args: {},
-        featureId: 'app.state.read',
-        title: '读取当前状态',
-      };
+      if (reactCalls === 2) {
+        return {
+          ok: true,
+          action: 'tool',
+          toolName: 'app.get_current_state',
+          args: {},
+          featureId: 'app.state.read',
+          title: '读取当前状态',
+        };
+      }
+      // 读完由模型自己收尾（11/20 起不再由程序按只读意图整理答案）
+      return { ok: true, action: 'final', message: '当前页面是 chat。' };
     },
     toolRegistry: {
       executeTool: async toolName => {
@@ -4001,7 +2641,7 @@ const runGeneratedMediaQuotaProbe = async input => {
   assert.equal(result.ok, true);
   assert.deepEqual(calls, ['maid.todo.write', 'app.get_current_state'], '相同清单不应重复写入工具');
   assert.equal(result.steps.some(step => step.output?.reason === 'todo_unchanged'), true);
-  assert.match(result.message, /APP 状态：页面 chat/);
+  assert.match(result.message, /chat/);
   console.log('ok - 相同 todo 写入被视为无进展并引导模型执行具体读取');
 }
 
@@ -4232,36 +2872,6 @@ const runGeneratedMediaQuotaProbe = async input => {
 }
 
 {
-  const previewOnly = classifyMaidImportedCardWorkflowIntent(
-    '我刚切到「海贼王」角色卡，帮我从自带世界书挑出适合长期聊天的主要人物；这一步只给候选，别创建聊天室。',
-  );
-  assert.equal(previewOnly.matched, true);
-  assert.equal(previewOnly.createRequested, false);
-  assert.equal(previewOnly.targetPersonaName, '海贼王');
-
-  const createFlow = classifyMaidImportedCardWorkflowIntent(
-    '从当前导入角色卡的世界书挑主要人物，给他们建立私聊和一个群聊，先让我确认。',
-  );
-  assert.equal(createFlow.matched, true);
-  assert.equal(createFlow.createRequested, true);
-  assert.equal(createFlow.groupRequested, true);
-
-  const naturalStagedPreview = classifyMaidImportedCardWorkflowIntent(
-    '我现在就在「海贼王」这张导入角色卡里。你帮我从它自带的世界书里挑出适合长期聊天的草帽一伙主要成员，准备给每个人各建一个私聊，再建一个「草帽一伙」群聊。先把候选名单、会创建的内容和世界书处理方式列给我确认；这一步先不要真的创建。',
-  );
-  assert.equal(naturalStagedPreview.matched, true);
-  assert.equal(
-    naturalStagedPreview.createRequested,
-    true,
-    '自然语言中的较长确认预览说明仍应进入跨轮冻结流程',
-  );
-  assert.equal(naturalStagedPreview.groupRequested, true);
-
-  assert.equal(
-    classifyMaidImportedCardWorkflowIntent('建立两个普通测试聊天室').matched,
-    false,
-    '普通建房不能被导入角色卡工作流误拦',
-  );
   const incomplete = normalizeMaidImportedCardClassification({
     entries: [{ entryId: 'e1', kind: 'character' }],
     candidates: [{ entryId: 'e1', name: '甲', confidence: 1, reason: '主角' }],
@@ -4270,10 +2880,10 @@ const runGeneratedMediaQuotaProbe = async input => {
   });
   assert.equal(incomplete.ok, false);
   assert.equal(incomplete.reason, 'classification_coverage_incomplete');
-  console.log('ok - imported-card bounded workflow intent stays narrow and separates read-only preview');
+  console.log('ok - imported-card classification must cover every worldbook entry');
 }
 
-{
+const buildImportedCardHarness = () => {
   const worldEntries = Array.from({ length: 97 }, (_, index) => ({
     id: `entry-${index + 1}`,
     title: `明确条目-${index + 1}`,
@@ -4286,9 +2896,7 @@ const runGeneratedMediaQuotaProbe = async input => {
     { entryId: 'entry-3', name: '娜美', confidence: 0.98, reason: '核心航海士' },
   ];
   const contacts = new Map();
-  let activePersonaId = 'persona-one-piece';
-  let classifierCalls = 0;
-  let normalPlannerCalls = 0;
+  const state = { activePersonaId: 'persona-one-piece', classifierCalls: 0, classifierInputs: [] };
   const calls = [];
   const allowAll = { evaluateTool: () => ({ decision: 'allow', checks: [] }) };
   const registry = createAgentToolRegistry({ permissionEvaluator: allowAll, logger: { warn() {} } });
@@ -4317,11 +2925,11 @@ const runGeneratedMediaQuotaProbe = async input => {
         return {
           ok: true,
           resource: 'persona',
-          activeId: activePersonaId,
+          activeId: state.activePersonaId,
           items: [{
             id: 'persona-one-piece',
             name: '海贼王',
-            active: activePersonaId === 'persona-one-piece',
+            active: state.activePersonaId === 'persona-one-piece',
             associations: {
               worldbookId: 'world-one-piece',
               worldbookEnabled: true,
@@ -4376,8 +2984,8 @@ const runGeneratedMediaQuotaProbe = async input => {
     }),
     makeTool('persona.switch', async (args = {}) => {
       calls.push({ toolName: 'persona.switch', args: structuredClone(args) });
-      activePersonaId = args.target;
-      return { ok: true, personaId: activePersonaId };
+      state.activePersonaId = args.target;
+      return { ok: true, personaId: state.activePersonaId };
     }),
     makeTool('session.create', async (args = {}) => {
       calls.push({ toolName: 'session.create', args: structuredClone(args) });
@@ -4421,13 +3029,11 @@ const runGeneratedMediaQuotaProbe = async input => {
       return { ok: true, sessionId: args.sessionId };
     }),
   ]);
-  const store = new AgentRunStore();
-  const runtime = createAgentTaskRuntime({ store, toolRegistry: registry, logger: { warn() {} } });
-  const agent = createMaidAssistantAgent({
-    agentTaskRuntime: runtime,
-    toolRegistry: registry,
-    importedCardClassifier: async ({ entries }) => {
-      classifierCalls += 1;
+  registry.registerMany(createImportedCardRoomTools({
+    executeTool: (name, args, context) => registry.executeTool(name, args, context),
+    classify: async ({ input, entries }) => {
+      state.classifierCalls += 1;
+      state.classifierInputs.push(input);
       assert.equal(entries.length, 97, '分类器必须拿到完整紧凑索引');
       return {
         entries: entries.map(entry => ({
@@ -4442,60 +3048,138 @@ const runGeneratedMediaQuotaProbe = async input => {
         },
       };
     },
+  }));
+  const store = new AgentRunStore();
+  const runtime = createAgentTaskRuntime({ store, toolRegistry: registry, logger: { warn() {} } });
+  return { registry, runtime, store, calls, state, contacts };
+};
+
+{
+  // 导入卡挑人物建房改成模型可调用的工具：模型传 createRooms/groupName/openWhenDone，工具冻结清单，确认后照旧执行
+  const h = buildImportedCardHarness();
+  let plannerCalls = 0;
+  const agent = createMaidAssistantAgent({
+    agentTaskRuntime: h.runtime,
+    toolRegistry: h.registry,
     planner: async () => {
-      normalPlannerCalls += 1;
-      return { ok: false, reason: 'normal_planner_must_not_run' };
+      plannerCalls += 1;
+      return plannerCalls === 1
+        ? {
+            ok: true,
+            toolName: 'session.plan_character_rooms',
+            featureId: 'session.character_rooms.plan',
+            args: { createRooms: true, groupName: '草帽一伙', criteria: '草帽一伙主要成员', openWhenDone: true },
+            title: '挑人物建房',
+          }
+        : { ok: false, reason: 'normal_planner_must_not_run' };
     },
     logger: { warn() {}, debug() {} },
   });
 
   const preview = await agent.runPrompt(
-    '我现在就在「海贼王」角色卡。请从这张导入卡自带的世界书挑出草帽一伙主要人物，给每个人建立私聊并建一个「草帽一伙」群聊；先给我确认，先不要真的创建，也不要新建或直接绑定世界书。',
+    '我现在就在「海贼王」角色卡。请从这张导入卡自带的世界书挑出草帽一伙主要人物，给每个人建立私聊并建一个「草帽一伙」群聊；先给我确认，建好后打开群聊。',
     { source: 'maid_realtime', voiceCallId: 'import-call', submissionId: 'import-preview' },
   );
   assert.equal(preview.ok, true);
   assert.equal(preview.status, 'awaiting_confirmation');
-  assert.equal(classifierCalls, 1);
-  assert.equal(normalPlannerCalls, 0);
+  assert.equal(h.state.classifierCalls, 1);
+  assert.deepEqual(h.state.classifierInputs, ['草帽一伙主要成员'], '挑人物范围由模型的 criteria 参数传给分类器');
+  assert.equal(plannerCalls, 1);
   assert.match(preview.message, /路飞/);
   assert.match(preview.message, /继承角色卡世界书/);
-  assert.equal(calls.some(call => call.toolName === 'session.create'), false);
-  assert.equal(calls.some(call => call.toolName === 'group.create'), false);
+  assert.equal(h.calls.some(call => ['session.create', 'group.create', 'persona.switch'].includes(call.toolName)), false);
   assert.equal(
-    calls.find(call => call.toolName === 'worldbook.read').args.maxEntries,
+    h.calls.find(call => call.toolName === 'worldbook.read').args.maxEntries,
     200,
-    '执行层应自动提升到有界完整索引上限',
+    '工具按有界完整索引上限读取',
   );
-  const pendingRun = store.listRuns({ kind: 'maid_assistant' })[0];
+  const pendingRun = h.store.listRuns({ kind: 'maid_assistant' })[0];
   assert.equal(pendingRun.status, 'waiting_permission');
   assert.equal(pendingRun.metadata.maidStatus, 'awaiting_confirmation');
   assert.equal(pendingRun.metadata.pendingWorkflow.candidates.length, 3);
-  assert.deepEqual(
-    pendingRun.metadata.pendingWorkflow.candidates.map(item => item.entryId),
-    ['entry-1', 'entry-2', 'entry-3'],
-  );
+  assert.equal(pendingRun.metadata.pendingWorkflow.group.name, '草帽一伙');
+  assert.equal(pendingRun.metadata.pendingWorkflow.revealRequested, true);
 
   const applied = await agent.runPrompt('好', { source: 'maid_realtime', voiceCallId: 'import-call', submissionId: 'import-apply' });
   assert.equal(applied.ok, true);
   assert.equal(applied.status, 'succeeded');
-  assert.equal(classifierCalls, 1, '确认轮必须消费冻结快照，不得重新分类');
-  assert.equal(normalPlannerCalls, 0);
+  assert.equal(h.state.classifierCalls, 1, '确认轮必须消费冻结快照，不得重新分类');
+  assert.equal(plannerCalls, 1);
   assert.deepEqual(
-    calls.find(call => call.toolName === 'session.create').args.names,
+    h.calls.find(call => call.toolName === 'session.create').args.names,
     ['路飞', '索隆', '娜美'],
   );
   assert.deepEqual(
-    calls.find(call => call.toolName === 'group.create').args.members,
+    h.calls.find(call => call.toolName === 'group.create').args.members,
     ['路飞', '索隆', '娜美'],
   );
+  assert.deepEqual(h.calls.at(-1), { toolName: 'session.open', args: { sessionId: 'group:crew' } });
   assert.match(applied.message, /3.*私聊/u);
   assert.match(applied.message, /群聊/u);
-  const runs = store.listRuns({ kind: 'maid_assistant' });
+  const runs = h.store.listRuns({ kind: 'maid_assistant' });
   const consumedRun = runs.find(run => run.id === pendingRun.id);
   assert.equal(consumedRun.status, 'succeeded');
   assert.equal(consumedRun.metadata.pendingWorkflow.state, 'consumed');
   assert.equal(runs[0].status, 'succeeded');
-  console.log('ok - imported-card P3 freezes a zero-write preview and consumes it on natural confirmation');
+  console.log('ok - imported-card room tool freezes a zero-write plan and the confirmation applies it');
+}
+
+{
+  const h = buildImportedCardHarness();
+  const agent = createMaidAssistantAgent({
+    agentTaskRuntime: h.runtime,
+    toolRegistry: h.registry,
+    planner: async () => ({
+      ok: true,
+      toolName: 'session.plan_character_rooms',
+      featureId: 'session.character_rooms.plan',
+      args: {},
+      title: '只挑候选',
+    }),
+    reactPlanner: async (_input, context) => {
+      const step = context.maidReactSteps.at(-1);
+      assert.equal(step.output.createRooms, false);
+      assert.equal(step.output.candidates.length, 3);
+      return { ok: true, action: 'final', message: '候选：路飞、索隆、娜美。' };
+    },
+    logger: { warn() {}, debug() {} },
+  });
+  const result = await agent.runPrompt('帮我从当前角色卡的世界书挑出主要人物，这一步只给候选。');
+  assert.equal(result.ok, true);
+  assert.equal(result.status, 'succeeded');
+  assert.equal(result.pendingWorkflow, undefined);
+  assert.equal(result.message, '候选：路飞、索隆、娜美。');
+  assert.equal(h.calls.some(call => call.toolName === 'session.list'), false, '只列候选时不读会话清单、不冻结清单');
+  assert.equal(h.store.listRuns({ kind: 'maid_assistant' }).some(run => run.status === 'waiting_permission'), false);
+  console.log('ok - imported-card room tool lists candidates only when createRooms is omitted');
+}
+
+{
+  const h = buildImportedCardHarness();
+  const agent = createMaidAssistantAgent({
+    agentTaskRuntime: h.runtime,
+    toolRegistry: h.registry,
+    planner: async () => ({
+      ok: true,
+      toolName: 'session.plan_character_rooms',
+      featureId: 'session.character_rooms.plan',
+      args: { createRooms: true, worldbookStrategy: 'isolated_session_worldbooks' },
+      title: '隔离世界书建房',
+    }),
+    reactPlanner: async (_input, context) => {
+      const step = context.maidReactSteps.at(-1);
+      assert.equal(step.status, 'failed');
+      assert.equal(step.output.reason, 'isolated_worldbook_strategy_not_supported_in_imported_card_workflow');
+      assert.equal(step.output.needsInput, true);
+      return { ok: true, action: 'final', message: '目前只能继承角色卡世界书。' };
+    },
+    logger: { warn() {}, debug() {} },
+  });
+  const result = await agent.runPrompt('从角色卡世界书挑人物，每个私聊用隔离世界书。');
+  assert.equal(result.message, '目前只能继承角色卡世界书。');
+  assert.equal(h.calls.length, 0, '不支持的世界书策略在读取前就停下');
+  assert.equal(h.state.classifierCalls, 0);
+  console.log('ok - imported-card room tool reports the unsupported isolated worldbook strategy without reading');
 }
 
 {

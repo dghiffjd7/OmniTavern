@@ -101,6 +101,8 @@ export const createMcpAgentTools = ({ getManager = () => null, getServer = () =>
           ].join('\n'),
           danger: false,
           allowAlways: true,
+          // 自建文字 Agent 只能用已全局始终允许的 MCP 工具，所以 MCP 维持全局范围（11/20 用户定）
+          allowScope: 'global',
           argsPreview: { serverId: trim(args.serverId), toolName: trim(args.toolName) },
         };
       },

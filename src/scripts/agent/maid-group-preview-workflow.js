@@ -3,14 +3,6 @@ import { t } from '../i18n/index.js';
 export const MAID_GROUP_PREVIEW_KIND = 'maid_group_preview';
 export const MAID_GROUP_PREVIEW_TTL_MS = 30 * 60 * 1000;
 
-export const isMaidGroupPreviewRequest = (input = '') => {
-  const text = String(input ?? '').trim();
-  const groupCreation = /(?:建群|(?:创建|建立|新建|建|开)[^，,。；;！？!?\n]{0,24}群|群聊[^，,。；;！？!?\n]{0,12}(?:创建|建立)|\b(?:create|build|start)\b[^.;!?\n]{0,40}\bgroup\b)/iu;
-  const preview = /(?:先|只)\s*(?:(?:给我|給我|让我|讓我)\s*)?(?:预览|預覽)|(?:先|只)\s*(?:(?:给我|給我|让我|讓我)\s*)?(?:看(?:看|一下)?|列(?:出|个|個)?|展示|整理)[^，,。；;！？!?\n]{0,24}(?:清单|清單|方案|计划|計劃)|\bpreview\b[^.;!?\n]{0,40}\b(?:first|only)\b|\b(?:first|only)\b[^.;!?\n]{0,40}\bpreview\b/iu;
-  const excluded = /^(?:怎么|怎麼|如何|怎样|怎樣|为什么|為什麼|什么是|什麼是|how\b|what\b)|(?:有什么作用|有什麼作用|是什么意思|是什麼意思)[？?\s]*$|(?:不要|别|別|不用|无需|無需|不必|不想|不打算|取消)\s*(?:先)?\s*(?:预览|預覽|看(?:看|一下)?(?:清单|清單|方案))|(?:^|[，,。；;！？!?\n])\s*(?:算了)?(?:不要了|取消|停止)[。.!！\s]*$/iu;
-  return groupCreation.test(text) && preview.test(text) && !excluded.test(text);
-};
-
 const trim = value => String(value ?? '').trim();
 const object = value => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const clone = value => JSON.parse(JSON.stringify(value));

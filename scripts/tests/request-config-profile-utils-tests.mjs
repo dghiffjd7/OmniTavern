@@ -120,7 +120,7 @@ test('agent task preset: an explicit presetId picks generation params without se
   const body = source.slice(start, start + 2400);
   assert.match(body, /const explicitPreset = explicitPresetId \? this\.presets\?\.getPreset\?\.\('openai', explicitPresetId\) : null;/);
   assert.match(body, /if \(!explicitPreset\) \{\s*const state = this\.presets\?\.getSelectionState\?\.\(\);\s*if \(!state\?\.enabled\?\.openai\) return withoutPreset\(\);\s*\}/);
-  assert.match(body, /const overrideReasoning = explicitPreset \? null : \(sessionReasoning \|\| modeReasoning\);/);
+  assert.match(body, /sessionReasoning: explicitPreset \? null : sessionReasoning,\s*modeReasoning: explicitPreset \? null : modeReasoning,/);
   // 模型档不受 presetId 影响：只按会话／模式／任务类型解析
   const resolver = source.slice(source.search(/^  async resolveRequestRuntimeConfig\(/m)).slice(0, 600);
   assert.doesNotMatch(resolver, /presetId/);
@@ -137,7 +137,7 @@ test('background tasks can ask for no reasoning: preset reasoning is ignored and
   assert.match(body, /const withoutPreset = \(\) => \(reasoningOff \? buildReasoningRequestOptions\(\{ provider: runtimeConfig\?\.provider, model: runtimeConfig\?\.model, baseUrl: runtimeConfig\?\.baseUrl, requestReasoning: false \}\) : \{\}\);/);
   assert.match(body, /if \(!p \|\| typeof p !== 'object'\) return withoutPreset\(\);/);
   // 推理关掉后采样规则也按不推理算，预设温度得以保留
-  assert.match(body, /const effectiveRequestReasoning = reasoningOff\s*\? false\s*: overrideReasoning/);
+  assert.match(body, /const effectiveRequestReasoning = reasoningOff \? false : effectiveReasoning\.requestReasoning;/);
 });
 
 for (const { name, fn } of tests) {

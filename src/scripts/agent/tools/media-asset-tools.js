@@ -1,3 +1,4 @@
+import { t } from '../../i18n/index.js';
 import { normalizeMaidImageAttachments } from '../maid-attachment-parts.js';
 import { normalizeMaidImageGenerationContext } from '../maid-image-generation-context.js';
 import { readImageHeaderDimensions } from '../../utils/image.js';
@@ -8,6 +9,8 @@ import {
   validateMaidVisualAspect,
   validateMaidVisualAttachmentTarget,
 } from '../maid-visual-spec.js';
+import { confirmRequest } from './preset-regex-script-tools.js';
+import { buildMaidVisualPreferenceReminder } from '../maid-visual-preferences.js';
 
 const trim = (value, fallback = '') => {
   const text = String(value ?? '').trim();
@@ -475,8 +478,29 @@ export const createMaidMediaAssetTools = ({
     const target = resolveTarget?.(args);
     const snapshot = createAvatarWriteSnapshot({ target, store });
     if (args && typeof args === 'object') snapshots?.set?.(args, snapshot);
-    if (!target?.id || !trim(target.avatar)) {
+    if (!target?.id) {
       return { destructive: false, operationType: 'set_avatar' };
+    }
+    if (!trim(target.avatar)) {
+      // 第一次设置头像也要用户确认；覆盖已有头像走下面的覆盖确认
+      return {
+        destructive: true,
+        kind: `${kind}.avatar.set`,
+        operationType: 'set_avatar',
+        title: kind === 'contact' ? t('设置联系人头像') : t('设置头像'),
+        message: t('将为「{name}」设置头像。', { name: trim(target.name || target.id) }),
+        confirmText: t('设置'),
+        cancelText: t('取消'),
+        danger: false,
+        details: {
+          targetId: trim(target.id),
+          targetScopeId: snapshot.scopeId,
+        },
+        onDeny: {
+          action: 'skip',
+          reason: 'avatar_set_cancelled',
+        },
+      };
     }
     return {
       destructive: true,
@@ -596,6 +620,34 @@ export const createMaidMediaAssetTools = ({
       // 生图时长跟随生图模型配置的请求超时。
       timeoutMs: 0,
       outputLimit: 800,
+      safety: {
+        operationType: 'create_generated_image',
+        destructive: 'conditional',
+        // 每次生图都要用户确认（会调用生图模型、可能产生费用）；没有生图配置或提示词为空时不会生成，不弹确认
+        preflight: async (args = {}, context = {}) => {
+          const prompt = trim(args.prompt);
+          if (typeof generateImageAttachment !== 'function' || !prompt) {
+            return { destructive: false, operationType: 'create_generated_image' };
+          }
+          // 记忆里不喜欢的颜色出现在这次的生图参数里时，卡上多一行提醒
+          const reminder = buildMaidVisualPreferenceReminder({
+            args, preferences: context?.maidConversationContextRef?.current?.preferences,
+          });
+          return confirmRequest({
+            kind: 'media.generate_image',
+            operationType: 'create_generated_image',
+            title: t('生成图片'),
+            message: [
+              t('将用当前生图模型为「{target}」生成一张图片，可能产生费用。', { target: trim(args.target || args.subject) }),
+              reminder,
+            ].filter(Boolean).join('\n'),
+            confirmText: t('生成'),
+            danger: false,
+            items: [{ id: 'prompt', label: prompt.length > 120 ? `${prompt.slice(0, 119)}…` : prompt, meta: t('提示词') }],
+            denyReason: 'image_generation_cancelled',
+          });
+        },
+      },
       schema: {
         type: 'object',
         required: [
@@ -768,6 +820,27 @@ export const createMaidMediaAssetTools = ({
         undo: 'none',
         modelContext: 'allowlist',
         confirmation: 'allow_once',
+      },
+      safety: {
+        operationType: 'create_downloaded_image',
+        destructive: 'conditional',
+        // 下载进女仆附件前要用户确认；没有联网下载能力或地址不是 http(s) 时不会下载，不弹确认
+        preflight: async (args = {}) => {
+          const url = trim(args.url);
+          if (typeof fetchRemoteImage !== 'function' || !/^https?:\/\//i.test(url)) {
+            return { destructive: false, operationType: 'create_downloaded_image' };
+          }
+          return confirmRequest({
+            kind: 'media.fetch_image',
+            operationType: 'create_downloaded_image',
+            title: t('下载网络图片'),
+            message: t('将联网下载这张图片，放进女仆附件，之后可用于头像或壁纸。'),
+            confirmText: t('下载'),
+            danger: false,
+            items: [{ id: 'url', label: url.length > 160 ? `${url.slice(0, 159)}…` : url }],
+            denyReason: 'image_fetch_cancelled',
+          });
+        },
       },
       schema: {
         type: 'object',
@@ -1081,8 +1154,29 @@ export const createMaidMediaAssetTools = ({
           const sessionId = trim(target?.id);
           const snapshot = createWallpaperWriteSnapshot({ target, chatStore, contactsStore });
           if (args && typeof args === 'object') wallpaperPreflightSnapshots.set(args, snapshot);
-          if (!sessionId || !snapshot.hasExistingWallpaper) {
+          if (!sessionId) {
             return { destructive: false, operationType: 'set_wallpaper' };
+          }
+          if (!snapshot.hasExistingWallpaper) {
+            // 第一次设置壁纸也要用户确认；覆盖已有壁纸走下面的覆盖确认
+            return {
+              destructive: true,
+              kind: 'session.wallpaper.set',
+              operationType: 'set_wallpaper',
+              title: t('设置聊天室壁纸'),
+              message: t('将为聊天室「{name}」设置壁纸。', { name: trim(target.name || sessionId) }),
+              confirmText: t('设置'),
+              cancelText: t('取消'),
+              danger: false,
+              details: {
+                sessionId,
+                targetScopeId: snapshot.chatScopeId,
+              },
+              onDeny: {
+                action: 'skip',
+                reason: 'wallpaper_set_cancelled',
+              },
+            };
           }
           return {
             destructive: true,

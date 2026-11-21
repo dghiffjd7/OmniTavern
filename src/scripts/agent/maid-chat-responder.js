@@ -6,7 +6,6 @@ import {
 } from './maid-prompt-defaults.js';
 import {
   buildAppFeatureSearchContextText,
-  getMaidModelFeatureContext,
   listAppFeatures,
 } from './app-feature-catalog.js';
 import {
@@ -82,9 +81,8 @@ export const buildMaidChatResponderMessages = ({
   maidPrompt = DEFAULT_MAID_PROMPT,
   voiceConversation = false,
 } = {}) => {
-  const modelFeatureContext = getMaidModelFeatureContext(features);
   const appContext = buildAppFeatureSearchContextText(input, {
-    features: modelFeatureContext.features,
+    features: Array.isArray(features) ? features : [],
     limit: 5,
   });
   const memoryText = trim(conversationContext?.memoryText);
@@ -113,7 +111,6 @@ export const buildMaidChatResponderMessages = ({
       content: [
         getLocalizedMaidPrompt(trim(maidPrompt, DEFAULT_MAID_PROMPT), { voiceConversation }),
         getLocalizedMaidOperationSafetyPrompt({ voiceConversation }),
-        modelFeatureContext.awareness,
         '你可以参考 <maid_memory> 和 <maid_history> 来延续对话、理解“刚才那个”等省略指代；不要编造不存在的历史。',
         MAID_MEMORY_REFERENCE_RULE,
         context.maidSkillContext ? MAID_SKILL_INSTRUCTIONS : '',

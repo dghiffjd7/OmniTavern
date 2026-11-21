@@ -304,6 +304,8 @@ const normalizeSafetyPreflightResult = (result = {}, tool = {}, args = {}) => {
     cancelText: trim(src.cancelText || '取消'),
     danger: src.danger !== false,
     allowAlways: src.allowAlways !== false,
+    // 'global'：确认窗提供全局「始终允许」（MCP）；其余写入提供「这个任务／这个角色卡」
+    allowScope: trim(src.allowScope),
     argsPreview: clone(src.argsPreview || args),
     details: isPlainObject(src.details) ? clone(src.details) : null,
     onDeny: {
@@ -513,6 +515,7 @@ export const createAgentToolRegistry = ({
       cancelText: preflight.cancelText,
       danger: preflight.danger,
       allowAlways: preflight.allowAlways,
+      allowScope: preflight.allowScope,
       argsPreview: preflight.argsPreview,
       details: preflight.details,
     };

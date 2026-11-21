@@ -377,6 +377,7 @@ export class CharacterCardImporter {
           leadText: `检测到 ${result.count} 条脚本。`,
           settings,
           compatibility,
+          tavernFeatures: result.tavernFeatures,
         });
         if (runnableIds.length) {
           const choice = await appChoice({

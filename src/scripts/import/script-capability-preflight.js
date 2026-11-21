@@ -84,6 +84,42 @@ export const hasTopLevelAwait = (value) => {
   }
 };
 
+// 脚本运行时据此把脚本交给隔离 iframe（模块环境）而不是 Worker；导入兼容报告也按它判断运行环境
+// 只解析、不执行：让 JS 引擎判断能不能当一般脚本（函数主体）编译。SyntaxError 回 false，其他错误（例如环境不允许 eval）回 null。
+const compilesAsClassicScript = (text) => {
+  try {
+    new Function(text);
+    return true;
+  } catch (error) {
+    return error instanceof SyntaxError ? false : null;
+  }
+};
+// 同一份代码只编译一次（运行时每次同步都会判断）
+const classicCompileCache = new Map();
+const classicCompileOf = (text) => {
+  if (classicCompileCache.has(text)) return classicCompileCache.get(text);
+  const result = compilesAsClassicScript(text);
+  classicCompileCache.set(text, result);
+  if (classicCompileCache.size > 32) classicCompileCache.delete(classicCompileCache.keys().next().value);
+  return result;
+};
+
+export const isModuleLikeScript = (content, compatibility = null) => {
+  const text = String(content || '');
+  if (!text) return false;
+  // 只认语句起点的模块语法：脚本内嵌 HTML/字符串里的 `id="btn-import"`、`bam-btn-export`
+  // 一类字面量不能把普通 worker 脚本改判进 iframe（iframe API 面更窄，误判会静默丢功能）。
+  const moduleSyntax = /(^|[;{}()\n])\s*import\s*(?:['"]|\{|\*|[\w$]+\s+from\s)/.test(text)
+    || /(^|[;{}()\n])\s*export\s*(?:default\s|const\s|let\s|var\s|function[\s(*]|class\s|async\s|\{|\*)/.test(text);
+  // 文字规则命中时再请 JS 引擎确认：能当一般脚本编译，表示 import／export 只出现在字串、模板字串或正则里
+  // （11/20：内嵌了 `import … from '/scripts/…'` 模板字串的脚本被误判成模块，进了 base 指向 CDN 的 iframe）。
+  if (moduleSyntax) return classicCompileOf(text) !== true;
+  if (typeof compatibility?.signals?.topLevelAwait === 'boolean') {
+    return compatibility.signals.topLevelAwait;
+  }
+  return hasTopLevelAwait(text);
+};
+
 const getScriptContent = (scriptOrContent) => (
   scriptOrContent && typeof scriptOrContent === 'object'
     ? String(scriptOrContent.content || '')

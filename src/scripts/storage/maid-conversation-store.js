@@ -4,6 +4,7 @@ import { formatMaidMemoryDate, isExplicitMaidPreferenceInstruction } from '../ag
 import { findMaidPendingMoment, normalizeMaidResultBasis } from '../agent/maid-result-basis.js';
 import { normalizeMaidResultCards, summarizeMaidChoiceCard, summarizeMaidPlanCard } from '../agent/maid-result-cards.js';
 import { selectMaidContextScope } from './maid-context-scope.js';
+import { escapeMaidPromptAngles } from '../agent/maid-external-content.js';
 
 export const MAID_CONVERSATION_STORE_KEY = 'maid_conversation_store_v1';
 export const MAID_CONVERSATION_STORE_VERSION = 1;
@@ -194,20 +195,22 @@ const includedRealtimeTranscripts = realtimeHistory => {
 const formatMaidResultBasisContext = (turn = {}, indent = '') => {
   const basis = normalizeMaidResultBasis(turn.resultBasis);
   if (!basis && isRealtimeTranscript(turn)) return '';
+  // 来源标题与网址来自网页等外部内容：标上 externalContent，整段 < > 转义（11/20 统一包法）
   const sources = (basis?.sources || []).slice(0, 2).map(source => ({
+    externalContent: true,
     title: truncate(source.title, 80),
     kind: source.kind,
     ...(source.url.length <= 240 ? { url: source.url } : { origin: new URL(source.url).origin }),
   }));
   // This records observed work, not whether the answer is correct or current.
   // Missing legacy metadata must not inherit evidence from status or toolName.
-  return `${indent}resultBasis: ${JSON.stringify({
+  return `${indent}resultBasis: ${escapeMaidPromptAngles(JSON.stringify({
     kind: basis?.kind || 'unverified',
     ...(basis?.recordedAt ? { recordedAt: basis.recordedAt } : {}),
     sources,
     ...(basis?.artifacts?.length ? { artifacts: basis.artifacts } : {}),
     ...(basis?.pendingMoment ? { pendingMoment: basis.pendingMoment } : {}),
-  })}`;
+  }))}`;
 };
 
 const formatMaidHistoryTurn = (turn = {}) => [

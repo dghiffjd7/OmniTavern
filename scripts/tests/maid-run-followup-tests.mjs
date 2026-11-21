@@ -2,10 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createMaidAssistantAgent } from '../../src/scripts/agent/maid-assistant-agent.js';
 import { createAgentTaskRuntime } from '../../src/scripts/agent/agent-task-runtime.js';
-import { createMaidTodoTools } from '../../src/scripts/agent/tools/maid-todo-tools.js';
 import { buildMaidRunContinuationSnapshot } from '../../src/scripts/agent/maid-run-continuation.js';
 import { AgentRunStore } from '../../src/scripts/storage/agent-run-store.js';
-import { classifyMaidRunFollowup, resolveMaidRunFollowup, settleMaidRunContinuation, guardMaidContinuationResult } from '../../src/scripts/agent/maid-run-followup.js';
+import { cancelMaidRunChain, isMaidRunResumable, settleMaidRunContinuation, guardMaidContinuationResult } from '../../src/scripts/agent/maid-run-followup.js';
 import { createMaidTaskInputPersistence } from '../../src/scripts/ui/maid-run-resume-utils.js';
 
 const logger = { debug() {}, warn() {} };
@@ -28,69 +27,7 @@ const makeFixture = () => {
   return { store, runtime, sourceId: source.id };
 };
 
-// Reduced J01/J02/J03 decisions from the real 2026-09-30 records. The APP
-// entry point, run store and todo tools are real; no model/network calls here.
-test('plain continue resolves the interrupted run in the current card', async () => {
-  const { runtime, sourceId } = makeFixture(); let received;
-  const agent = createMaidAssistantAgent({ agentTaskRuntime: runtime, logger,
-    planner: async (_input, context) => { received = context; return { ok: true, action: 'final', message: '继续处理' }; },
-  });
-  await agent.runPrompt('继续', scope);
-  assert.equal(received?.runContinuation?.sourceRunId, sourceId);
-  assert.equal(received.runContinuation.remainingTodos.length, 2);
-});
-
-test('a progress question reads the previous run instead of a new empty todo list', async () => {
-  const { runtime, sourceId } = makeFixture(); const observations = [];
-  const tools = createMaidTodoTools({ getRun: runtime.getRun, updateRun: runtime.updateRun });
-  const registry = { executeTool: async (name, args, context) => {
-    const result = await tools.find(t => t.name === name).execute(args, context);
-    observations.push(result); return { toolName: name, status: 'succeeded', result };
-  } };
-  const agent = createMaidAssistantAgent({ agentTaskRuntime: runtime, toolRegistry: registry, logger,
-    planner: async () => ({ ok: true, action: 'tool', featureId: 'maid.todo', toolName: 'maid.todo.read', args: {} }),
-    reactPlanner: async () => ({ ok: true, action: 'final', message: '报告任务进度' }),
-  });
-  const result = await agent.runPrompt('昨天那个弄好了吗', scope);
-  // A local, evidence-backed status reply is also valid and avoids a model call.
-  if (observations.length) assert.equal(observations[0].todos.length, 3);
-  else assert.match(result.message, /小雪[\s\S]*莉莉丝[\s\S]*阿凯/);
-  assert.equal(runtime.getRun(sourceId).metadata.continuable, true);
-});
-
-test('stored progress preserves the failure source and distinguishes stale todos from actual receipts', async () => {
-  const { runtime, sourceId } = makeFixture(); let modelCalls = 0;
-  const step = runtime.startStep(sourceId, { input: { toolName: 'contact.set_avatar', args: {} } });
-  runtime.finishStep(sourceId, step.id, { status: 'succeeded', output: {
-    summary: 'set contact avatar 小雪', result: { ok: true, target: { name: '小雪' } },
-  } });
-  runtime.updateRun(sourceId, { metadata: { todos: runtime.getRun(sourceId).metadata.todos.map(todo => ({ ...todo, status: 'pending' })) } });
-  const agent = createMaidAssistantAgent({ agentTaskRuntime: runtime, logger,
-    chatResponder: async () => { modelCalls++; return { ok: true, message: '小雪已完成，其余因生图服务报错中断。' }; },
-  });
-  const result = await agent.runPrompt('昨天那个弄好了吗', scope);
-  assert.match(result.message, /规划模型请求失败/);
-  assert.doesNotMatch(result.message, /生图服务报错/);
-  assert.match(result.message, /成功操作记录/);
-  assert.match(result.message, /未同步/);
-  assert.equal(modelCalls, 0);
-});
-
-test('cancel a previous interrupted task persists cancellation and clears resume state', async () => {
-  const { runtime, sourceId } = makeFixture();
-  const agent = createMaidAssistantAgent({ agentTaskRuntime: runtime, logger,
-    planner: async () => ({ ok: false, reason: 'unsupported_intent' }),
-    chatResponder: async () => ({ ok: true, message: '已取消头像任务。' }),
-  });
-  await agent.runPrompt('算了那个不用了', scope);
-  const run = runtime.getRun(sourceId);
-  assert.equal(run.status, 'cancelled');
-  assert.equal(run.metadata.continuable, false);
-  assert.equal(run.metadata.continuationSnapshot, null);
-  assert.equal(run.metadata.todos[0].status, 'completed');
-  assert.equal(run.metadata.todos[1].status, 'cancelled');
-});
-
+// 11/21 起继续／进度／取消由模型调用任务工具（见 maid-task-tools-tests），这里只测任务链的作用域、续接与取消。
 test('task attachment persistence captures the owning card as well as the session', async () => {
   const persistence = createMaidTaskInputPersistence({ referenceStore: {}, native: false });
   const saved = await persistence.persist([], scope);
@@ -107,32 +44,10 @@ test('resume supplied through UI controls cannot cross cards or replay a cancell
   const foreign = await agent.runPrompt('继续', { ...scope, roleCardId: 'other-card', runContinuation: snapshot });
   assert.equal(foreign.reason, 'maid_previous_task_unavailable');
   assert.throws(() => agent.prepareSkillTaskContext('继续', { ...scope, roleCardId: 'other-card', runContinuation: snapshot }), /scope_mismatch/);
-  await agent.runPrompt('算了那个不用了', scope);
+  cancelMaidRunChain({ runtime, run: runtime.getRun(sourceId), context: scope });
   const cancelled = await agent.runPrompt('继续', { ...scope, runContinuation: snapshot });
   assert.equal(cancelled.reason, 'maid_previous_task_unavailable');
   assert.equal(calls, 0);
-});
-
-test('sentence-final particles such as 喵 do not hide a task followup', () => {
-  // 11/14：用户说「继续喵」「请继续喵」被当成新任务，上一轮的待办和已读记录都没接上
-  for (const input of ['继续喵', '请继续喵', '继续喵～', '继续吧喵！', '接着做呀']) assert.equal(classifyMaidRunFollowup(input), 'resume', input);
-  assert.equal(classifyMaidRunFollowup('取消那个任务喵'), 'cancel');
-  assert.equal(classifyMaidRunFollowup('那个任务做好了吗喵'), 'status');
-  assert.equal(classifyMaidRunFollowup('继续任务「换头像」喵'), 'resume');
-  for (const input of ['继续给另一个角色换头像喵', '好的喵！继续扩写其她人喵']) assert.equal(classifyMaidRunFollowup(input), '', input);
-});
-
-test('task followups preserve negation, ordinary chat, voice and ambiguous ownership', () => {
-  const { runtime } = makeFixture();
-  for (const input of ['不要取消那个任务', '昨天那个弄好了，继续聊吧', '继续给另一个角色换头像', '任务进度怎么样，顺便删掉旧群']) {
-    assert.equal(classifyMaidRunFollowup(input), '', input);
-  }
-  const runs = runtime.listRuns();
-  assert.equal(resolveMaidRunFollowup({ input: '继续', context: { ...scope, roleCardId: 'other' }, runs }), null);
-  assert.equal(resolveMaidRunFollowup({ input: '继续', context: { ...scope, source: 'maid_realtime' }, runs }), null);
-  const second = { ...runs[0], id: 'run:other', metadata: { ...runs[0].metadata, goal: '另一条任务' } };
-  assert.equal(resolveMaidRunFollowup({ input: '取消那个任务', context: scope, runs: [...runs, second] }).ambiguous, true);
-  assert.equal(resolveMaidRunFollowup({ input: '取消任务「另一条任务」', context: scope, runs: [...runs, second] }).run.id, second.id);
 });
 
 const resumeChild = ({ runtime, sourceId }, { finishTodos = true, toolName = 'contact.set_avatar', output = { ok: true }, continuable = false } = {}) => {
@@ -171,26 +86,17 @@ test('todos alone, failed business output and unfinished obligations never close
   }
 });
 
-test('a second interruption hands off to one current task and cancellation closes its chain', async () => {
+test('a second interruption hands off to one current task and cancellation closes its chain', () => {
   const fixture = makeFixture();
   const child = resumeChild(fixture, { finishTodos: false, continuable: true });
   settleMaidRunContinuation({ ...fixture, ...child, context: scope });
-  const next = resolveMaidRunFollowup({ input: '继续', context: scope, runs: fixture.runtime.listRuns() });
-  assert.equal(next.run.id, child.childRun.id);
-  const agent = createMaidAssistantAgent({ agentTaskRuntime: fixture.runtime, logger });
-  await agent.runPrompt('算了那个不用了', scope);
+  assert.deepEqual(fixture.runtime.listRuns().filter(isMaidRunResumable).map(run => run.id), [child.childRun.id]);
+  const cancelled = cancelMaidRunChain({ runtime: fixture.runtime, run: fixture.runtime.getRun(child.childRun.id), context: scope });
+  assert.deepEqual(cancelled.sort(), [fixture.sourceId, child.childRun.id].sort());
   for (const id of [fixture.sourceId, child.childRun.id]) {
     assert.equal(fixture.runtime.getRun(id).status, 'cancelled');
     assert.equal(fixture.runtime.getRun(id).metadata.continuable, false);
   }
-});
-
-test('a failed cancellation save does not claim persistent success', async () => {
-  const { runtime } = makeFixture();
-  const agent = createMaidAssistantAgent({ agentTaskRuntime: { ...runtime, flush: async () => false }, logger });
-  const result = await agent.runPrompt('算了那个不用了', scope);
-  assert.equal(result.ok, false);
-  assert.equal(result.reason, 'maid_previous_task_cancel_not_persisted');
 });
 
 test('a restart without a continuation snapshot still closes every owned ancestor', () => {

@@ -2,6 +2,7 @@
 // 文件原文只从附件缓存读取，模型只传附件 ID 和目标，不改写文件内容。
 import { t } from '../../i18n/index.js';
 import { extractScriptTree } from '../../import/script-tree-utils.js';
+import { buildTavernFeatureSummary } from '../../import/tavern-feature-report.js';
 import { CARD_ASSET_SKIP_LABELS } from '../../utils/character-card-assets.js';
 import { resolveWorldbookCurrentPersona } from '../worldbook-resource-ownership.js';
 import { listZipEntries } from '../../utils/zip-archive.js';
@@ -25,6 +26,12 @@ const ARCHIVE_LIST_MAX = 100;
 const LIBRARY_LIST_LIMIT = 30;
 
 const failure = (reason, extra = {}) => ({ ok: false, reason, ...extra });
+// 脚本树（可含文件夹）展开成脚本名，供导入确认列出
+const listScriptNames = (nodes = [], depth = 0) => (Array.isArray(nodes) ? nodes : []).flatMap((node) => {
+  if (!node || typeof node !== 'object' || depth > 8) return [];
+  if (node.type === 'folder' || Array.isArray(node.scripts)) return listScriptNames(node.scripts, depth + 1);
+  return [trim(node.name) || t('未命名脚本')];
+});
 
 const listItems = store => (typeof store?.getAll === 'function' ? store.getAll()
   : typeof store?.listContacts === 'function' ? store.listContacts() : []).filter(Boolean);
@@ -254,16 +261,28 @@ export const createAttachmentImportAgentTools = ({
     return { entry, format, target, targetLabel, targetKey, plan, doneKey: `${entry.hash}|${format}|${targetKey}` };
   };
 
+  // 用户决定（2026-11-20）：会改动用户内容的导入一律先确认；已导入过的同一文件同一目标不再确认（preflight 直接跳过）。
+  // 每次调用只出一张卡：带正则、覆盖、换绑等情况仍用各自的说明与条目。
   const confirmationFor = (snap) => {
-    if (snap.format === 'script') return null;
+    if (snap.format === 'script') {
+      const names = listScriptNames(snap.plan.scripts);
+      return {
+        destructive: true, kind: 'attachment.import', operationType: 'import_script_file', danger: false,
+        title: t('导入脚本'),
+        message: t('将从附件向「{target}」导入 {count} 个脚本，导入后保持关闭，需要时再单独启用。', { target: snap.targetLabel || t('全局'), count: names.length }),
+        confirmText: t('导入'), cancelText: t('取消'), allowAlways: false,
+        details: { items: names.slice(0, 100).map((name, index) => ({ id: `script_${index}`, label: name })) },
+        onDeny: { action: 'skip', reason: 'attachment_import_cancelled', result: { ok: false, skipped: true, reason: 'attachment_import_cancelled' } },
+      };
+    }
     if (snap.format === 'character_card') {
-      // 只有写入卡内正则时确认（与其他正则写入一致），确认里列出本次会导入的全部内容
+      // 确认里列出本次会导入的全部内容；写入卡内正则时单独说明（与其他正则写入一致）
       const { card, include, activate } = snap.plan;
-      if (!include.regex || !card.counts.regexRules) return null;
+      const withRegex = include.regex && card.counts.regexRules;
       const items = [
         include.worldbook ? { id: 'worldbook', label: t('世界书 {count} 条', { count: card.counts.worldEntries }) } : null,
         include.greetings && card.counts.greetings ? { id: 'greetings', label: t('开场白 {count} 个', { count: card.counts.greetings }) } : null,
-        { id: 'regex', label: t('正则 {count} 条', { count: card.counts.regexRules }), meta: t('会改变聊天内容的显示或发送给模型的文本') },
+        withRegex ? { id: 'regex', label: t('正则 {count} 条', { count: card.counts.regexRules }), meta: t('会改变聊天内容的显示或发送给模型的文本') } : null,
         include.scripts && card.counts.scripts ? { id: 'scripts', label: t('脚本 {count} 个', { count: card.counts.scripts }), meta: t('导入后保持关闭，需要时再单独启用') } : null,
         include.system_prompt && card.hasSystemPrompt ? { id: 'system_prompt', label: t('系统提示词（另存为预设，不启用）') } : null,
         include.expressions && card.counts.expressions ? { id: 'expressions', label: t('表情 {count} 张（作为该角色的表情贴图包）', { count: card.counts.expressions }) } : null,
@@ -280,32 +299,35 @@ export const createAttachmentImportAgentTools = ({
       };
     }
     if (snap.format === 'preset') {
-      // 与手动导入一样会切换为当前预设；只有写入附带正则时需要确认
-      if (!snap.plan.includeRegex || !snap.plan.regexSetCount) return null;
+      // 与手动导入一样会切换为当前预设；写入附带正则时另作说明
+      const withRegex = snap.plan.includeRegex && snap.plan.regexSetCount;
       return {
         destructive: true, kind: 'attachment.import', operationType: 'import_preset_file', danger: false,
         title: t('导入预设「{name}」', { name: snap.entry.inspection?.title || snap.entry.name }),
-        message: t('将导入预设并切换为当前创意写作预设，同时导入附带的正则。'),
+        message: withRegex ? t('将导入预设并切换为当前创意写作预设，同时导入附带的正则。') : t('将导入预设并切换为当前创意写作预设。'),
         confirmText: t('导入'), cancelText: t('取消'), allowAlways: false,
         details: { items: [
-          { id: 'regex', label: t('附带正则 {count} 组', { count: snap.plan.regexSetCount }), meta: t('绑定到该预设，会改变聊天内容的显示或发送给模型的文本') },
+          ...(withRegex ? [{ id: 'regex', label: t('附带正则 {count} 组', { count: snap.plan.regexSetCount }), meta: t('绑定到该预设，会改变聊天内容的显示或发送给模型的文本') }] : []),
           ...(snap.plan.includeScripts && snap.plan.scriptCount ? [{ id: 'scripts', label: t('附带脚本 {count} 个', { count: snap.plan.scriptCount }), meta: t('导入后保持关闭，需要时再单独启用') }] : []),
         ] },
         onDeny: { action: 'skip', reason: 'attachment_import_cancelled', result: { ok: false, skipped: true, reason: 'attachment_import_cancelled' } },
       };
     }
     if (snap.format === 'worldbook') {
+      // 同名冲突又没选覆盖或副本：提交时会原样退回冲突，什么都不写，不弹确认
+      if (snap.plan.conflict && !snap.plan.overwrite) return null;
       const items = [];
       if (snap.plan.overwrite) items.push({ id: 'overwrite', label: t('覆盖同名世界书「{name}」', { name: snap.plan.worldId }), meta: t('现有 {before} 条 → 导入 {after} 条', { before: snap.plan.conflict.existingCount, after: snap.plan.conflict.incomingCount }) });
       if (snap.target.previousWorldbookId && snap.target.previousWorldbookId !== snap.plan.worldId) {
         items.push({ id: 'replace_binding', label: t('更换角色卡「{persona}」绑定的世界书', { persona: snap.targetLabel }), meta: t('「{previous}」→「{next}」，原世界书仍会保留', { previous: snap.target.previousWorldbookId, next: snap.plan.worldId }) });
       }
       if (snap.plan.boundRegexSets.length) items.push({ id: 'regex', label: t('附带正则 {count} 组', { count: snap.plan.boundRegexSets.length }), meta: t('导入后绑定到该世界书，会改变聊天内容的显示或发送给模型的文本') });
-      if (!items.length) return null;
       return {
         destructive: true, kind: 'attachment.import', operationType: 'import_worldbook_file', danger: items.some(item => item.id !== 'regex'),
         title: t('导入世界书「{name}」', { name: snap.plan.worldId }),
-        message: t('将从附件导入世界书「{name}」（{count} 条），请确认以下内容。', { name: snap.plan.worldId, count: snap.plan.entryCount }),
+        message: items.length
+          ? t('将从附件导入世界书「{name}」（{count} 条），请确认以下内容。', { name: snap.plan.worldId, count: snap.plan.entryCount })
+          : t('将从附件导入世界书「{name}」（{count} 条）。', { name: snap.plan.worldId, count: snap.plan.entryCount }),
         confirmText: t('导入'), cancelText: t('取消'), allowAlways: false,
         details: { items },
         onDeny: { action: 'skip', reason: 'attachment_import_cancelled', result: { ok: false, skipped: true, reason: 'attachment_import_cancelled' } },
@@ -431,11 +453,14 @@ export const createAttachmentImportAgentTools = ({
         const scope = SCRIPT_SCOPES[snap.target.type];
         const scopeId = scope === 'character' ? snap.target.roleCardId : scope === 'preset' ? snap.target.presetId : '';
         const imported = await scriptStore.importTavernHelperScripts({ scripts: snap.plan.scripts, scope, scopeId, source: 'maid-attachment' });
+        // 导入兼容报告：脚本用到的酒馆功能与支持情况（没有用到时不带）
+        const tavernFeatures = buildTavernFeatureSummary(imported?.tavernFeatures);
         result = {
           ok: Number(imported?.count || 0) > 0, format: 'script', scope, scopeId, targetName: snap.targetLabel || t('全局'),
           importedCount: Number(imported?.count || 0), scriptIds: imported?.ids || [],
           runnableCount: Number(imported?.compatibility?.runnableCount || 0),
           blocked: imported?.compatibility?.blocked || [],
+          ...(tavernFeatures ? { tavernFeatures } : {}),
           enabled: false, scriptsRunGlobally: getScriptSettings()?.scriptEnabled === true,
           notice: '脚本已导入但保持关闭；用户要启用时用 script.toggle_many，由 APP 确认。被兼容性检查拦下的脚本无法启用。',
         };
@@ -459,6 +484,7 @@ export const createAttachmentImportAgentTools = ({
             rolledBack: committed?.rolledBack === true, message: '导入失败，本次创建的内容已全部撤销。',
           });
         }
+        const tavernFeatures = buildTavernFeatureSummary(committed.scripts?.tavernFeatures);
         result = {
           ok: true, format: 'character_card', roleCardId: committed.personaId, roleCardName: committed.displayName,
           switchedToNewCard: committed.activated === true, worldbookId: committed.worldbookId,
@@ -468,6 +494,7 @@ export const createAttachmentImportAgentTools = ({
             expressions: committed.expressionCount || 0, background: committed.backgroundSet === true,
           },
           excluded: Object.entries(include).filter(([, on]) => !on).map(([part]) => part),
+          ...(tavernFeatures ? { tavernFeatures } : {}),
           ...(card.v3 && (card.v3.groupOnlyGreetings || card.v3.droppedAssets) ? {
             notImported: { groupOnlyGreetings: card.v3.groupOnlyGreetings, assets: card.v3.droppedAssets, skippedAssets: (card.v3.skippedAssets || []).slice(0, 20) },
           } : {}),

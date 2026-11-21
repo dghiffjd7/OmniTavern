@@ -23,7 +23,6 @@ const fullyLocalizedDefinitionFiles = [
   'src/scripts/memory/default-template.js',
   'src/scripts/memory/outline-section-utils.js',
   'src/scripts/ui/maid-guide-spotlight.js',
-  'src/scripts/ui/maid-intent-presets.js',
   'src/scripts/ui/maid-onboarding-entry-ui.js',
   'src/scripts/ui/maid-onboarding-flows.js',
   'src/scripts/ui/maid-onboarding-runtime.js',
@@ -197,7 +196,6 @@ assert.doesNotMatch(guide, /\p{Script=Han}/u, 'the guide included in the actual 
 for (const source of [
   '主人好呀，我是你的贴身女仆',
   '给女仆接上大脑',
-  '欢迎回家，主人～我备好了 4 堂新手小课，选一堂就能跟着聚光灯一步步完成：',
   '主人还没给我接上大脑呢～要我带你把 API 配好吗？',
 ]) {
   const translated = translateUiText(source);

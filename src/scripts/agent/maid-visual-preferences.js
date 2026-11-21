@@ -1,5 +1,8 @@
-// A conservative preflight for explicit, unqualified color dislikes. Nuanced
-// preferences (e.g. only disliking a background color) remain model decisions.
+import { t } from '../i18n/index.js';
+
+// 生图确认卡上的颜色提醒：语义记忆里明确记着不喜欢某颜色，而这次生图的提示参数用到了它。
+// 只看生图参数与记忆，不看用户这句话；不中止、不发问，要不要照样生成由用户在确认卡上决定。
+// 带限定的偏好（例如只是不喜欢粉色背景）不算。
 const COLORS = [
   ['粉色', '粉色|粉红色|粉紅色|粉红|粉紅|pink'],
   ['红色', '红色|紅色|红发|紅髮|red|scarlet'],
@@ -18,25 +21,23 @@ const dislikes = (text, aliases) => {
   const colors = colorPattern(aliases);
   return new RegExp(`(?:不喜欢|不喜歡|讨厌|討厭|避免|不要)(?:用|使用)?(?:${colors})(?=$|[系。.!，,；;\\s])|\\b(?:dislike|hate|avoid|do not like|don't like)\\s+(?:the colou?r\\s+)?(?:${colors})(?=$|[.!;,\\s])`, 'iu').test(text);
 };
-const explicitlyChosen = (input, aliases) => {
-  const pattern = new RegExp(colorPattern(aliases), 'iu');
-  const clauses = trim(input).split(/[，,。.!；;！？?\n]+/u).filter(part => pattern.test(part));
-  const last = clauses.at(-1) || '';
-  return Boolean(last) && !dislikes(last, aliases) && !/不要|别用|別用|不想|忘掉|忘记|忘記|取消|do not|don't|without|forget/iu.test(last);
-};
 
-export const findMaidVisualPreferenceConflict = ({ input = '', plan = {}, preferences = [] } = {}) => {
-  if (plan.toolName !== 'media.generate_image') return null;
-  const args = plan.args || {};
-  // Do not match negativePrompt: it correctly excludes an unwanted color.
+export const findMaidVisualPreferenceConflict = ({ args = {}, preferences = [] } = {}) => {
+  // negativePrompt 本来就是排除颜色，不算用到
   const design = [args.appearance, args.outfit, args.style, args.prompt].map(trim).join('\n');
   const conflicts = [];
-  for (const memory of preferences) {
-    if (memory.kind !== 'preference' || memory.status !== 'active' || memory.explicit !== true) continue;
+  for (const memory of Array.isArray(preferences) ? preferences : []) {
+    if (memory?.kind !== 'preference' || memory.status !== 'active' || memory.explicit !== true) continue;
     for (const [label, aliases] of COLORS) {
       if (dislikes(trim(memory.content), aliases) && new RegExp(colorPattern(aliases), 'iu').test(design)
-        && !explicitlyChosen(input, aliases)) conflicts.push({ memoryId: memory.id, color: label });
+        && !conflicts.some(item => item.color === label)) conflicts.push({ memoryId: memory.id, color: label });
     }
   }
   return conflicts.length ? { subject: trim(args.subject || args.target), conflicts } : null;
+};
+
+export const buildMaidVisualPreferenceReminder = ({ args = {}, preferences = [] } = {}) => {
+  const conflict = findMaidVisualPreferenceConflict({ args, preferences });
+  if (!conflict) return '';
+  return t('记忆里记着你不喜欢{colors}。', { colors: conflict.conflicts.map(item => t(item.color)).join('、') });
 };

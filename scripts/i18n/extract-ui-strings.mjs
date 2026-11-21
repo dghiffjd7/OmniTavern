@@ -66,7 +66,6 @@ const FULL_UI_DEFINITION_FILES = new Set([
   path.join(PROJECT_ROOT, 'src/scripts/memory/outline-section-utils.js'),
   path.join(UI_ROOT, 'agent-center-card-catalog.js'),
   path.join(UI_ROOT, 'maid-guide-spotlight.js'),
-  path.join(UI_ROOT, 'maid-intent-presets.js'),
   path.join(UI_ROOT, 'maid-onboarding-entry-ui.js'),
   path.join(UI_ROOT, 'maid-onboarding-flows.js'),
   path.join(UI_ROOT, 'maid-onboarding-runtime.js'),

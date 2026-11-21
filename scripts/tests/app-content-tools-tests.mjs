@@ -112,6 +112,65 @@ const createProfileStore = (prefix = 'profile') => {
   console.log('ok - app content tools switch persona and user profiles');
 }
 
+// 11/20: creating or switching cards/users always asks first; reusing an existing
+// name without switching, or switching to the already active one, changes nothing.
+{
+  const personaStore = createProfileStore('persona');
+  const userStore = createProfileStore('user');
+  const existingPersona = await personaStore.create({ name: 'Role A' });
+  const otherPersona = await personaStore.create({ name: 'Role B' });
+  const existingUser = await userStore.create({ name: 'User A' });
+  await personaStore.setActive(existingPersona.id);
+  await userStore.setActive(existingUser.id);
+  const tools = createAppContentAgentTools({ personaStore, userStore });
+  const preflight = (name, args) => getTool(tools, name).safety.preflight(args);
+
+  const createCard = await preflight('persona.create', { name: 'Role New', setActive: true });
+  assert.equal(createCard.destructive, true);
+  assert.equal(createCard.kind, 'persona.create');
+  assert.equal(createCard.operationType, 'create_character_card');
+  assert.equal(createCard.danger, false);
+  assert.match(createCard.message, /新建角色卡「Role New」，创建后会切换为当前角色卡/);
+  assert.equal((await preflight('persona.create', { name: 'Role New' })).message, '将新建角色卡「Role New」。');
+  assert.equal((await preflight('persona.create', { name: 'Role A' })).destructive, false, 'reusing an existing card changes nothing');
+  assert.equal((await preflight('persona.create', { name: 'Role A', setActive: true })).destructive, false, 'already active');
+  const reuseAndSwitch = await preflight('persona.create', { name: 'Role B', setActive: true });
+  assert.equal(reuseAndSwitch.operationType, 'switch_active');
+  assert.equal((await preflight('persona.create', { name: 'Role A', allowDuplicate: true })).operationType, 'create_character_card');
+
+  const createUser = await preflight('user.create', { name: 'User New' });
+  assert.equal(createUser.kind, 'user.create');
+  assert.equal(createUser.operationType, 'create_user_profile');
+  assert.equal((await preflight('user.create', { name: 'User A' })).destructive, false);
+
+  const switchCard = await preflight('persona.switch', { target: 'Role B' });
+  assert.equal(switchCard.destructive, true);
+  assert.equal(switchCard.kind, 'persona.switch');
+  assert.equal(switchCard.operationType, 'switch_active');
+  assert.equal(switchCard.message, '将把当前角色卡切换为「Role B」。');
+  assert.equal((await preflight('persona.switch', { target: 'Role A' })).destructive, false, 'already active');
+  assert.equal((await preflight('persona.switch', { target: 'Missing' })).destructive, false, 'missing target fails in execute');
+  const newUser = await userStore.create({ name: 'User B' });
+  const switchUser = await preflight('user.switch', { userId: newUser.id });
+  assert.equal(switchUser.kind, 'user.switch');
+  assert.equal(switchUser.operationType, 'switch_active');
+  assert.equal((await preflight('user.switch', { name: 'User A' })).destructive, false);
+
+  const registry = createAgentToolRegistry({
+    permissionEvaluator: createAgentPermissionEvaluator({ defaultDecision: AGENT_PERMISSION_DECISIONS.allow }),
+    logger: { warn: () => {} },
+  });
+  registry.registerMany(tools);
+  const denied = await registry.executeTool('persona.create', { name: 'Role Denied' }, { requestToolConfirmation: () => ({ decision: 'deny' }) });
+  assert.equal(denied.status, 'skipped');
+  assert.equal(denied.result.created, false);
+  assert.equal(personaStore.getAll().some(item => item.name === 'Role Denied'), false);
+  const deniedSwitch = await registry.executeTool('persona.switch', { target: 'Role B' }, { requestToolConfirmation: () => ({ decision: 'deny' }) });
+  assert.equal(deniedSwitch.result.switched, false);
+  assert.equal(personaStore.getActiveId(), existingPersona.id);
+  console.log('ok - creating and switching cards or users asks first unless nothing would change');
+}
+
 {
   const personaStore = createProfileStore('persona');
   const original = await personaStore.create({ name: '原角色' });
@@ -553,8 +612,29 @@ const createProfileStore = (prefix = 'profile') => {
   assert.equal(bindResult.bound, true);
   assert.deepEqual(sessionWorldIds.get('chat-b'), ['Role A World']);
   assert.deepEqual(boundSessions.at(-1), { sessionId: 'chat-b', worldIds: ['Role A World'], options: { silent: false } });
+  // 11/20: binding a book to a chat always asks; replace says it replaces existing bindings.
+  const bindSessionTool = getTool(tools, 'worldbook.bind_session');
+  const appendBinding = await bindSessionTool.safety.preflight({ sessionId: 'chat-b', worldbookId: 'Role A World' });
+  assert.equal(appendBinding.destructive, true);
+  assert.equal(appendBinding.kind, 'worldbook.bind_session');
+  assert.equal(appendBinding.operationType, 'bind_worldbook_to_session');
+  assert.equal(appendBinding.danger, false);
+  const replaceBinding = await bindSessionTool.safety.preflight({ sessionId: 'chat-b', worldbookId: 'Role A World', mode: 'replace' });
+  assert.equal(replaceBinding.operationType, 'replace_session_worldbooks');
+  assert.equal(replaceBinding.danger, true);
+  assert.match(replaceBinding.message, /替换聊天室「chat-b」现有的全部世界书绑定/);
 
   saved.set('Writing Aggregate', { name: 'Writing Aggregate', entries: [] });
+  const bindRpTool = getTool(tools, 'worldbook.bind_rp_session');
+  const rpBinding = await bindRpTool.safety.preflight({ personaName: 'Role A', worldbookId: 'Writing Aggregate' });
+  assert.equal(rpBinding.destructive, true);
+  assert.equal(rpBinding.kind, 'worldbook.bind_rp_session');
+  assert.equal(rpBinding.operationType, 'bind_worldbook_to_rp_session');
+  assert.match(rpBinding.message, /追加绑定到角色卡「Role A」的创作会话/);
+  const rpReplace = await bindRpTool.safety.preflight({ personaName: 'Role A', worldbookId: 'Writing Aggregate', mode: 'replace' });
+  assert.equal(rpReplace.operationType, 'replace_rp_session_worldbooks');
+  assert.equal(rpReplace.danger, true);
+  assert.equal((await bindRpTool.safety.preflight({ personaName: 'Missing', worldbookId: 'Writing Aggregate' })).destructive, false);
   const bindRpResult = await getTool(tools, 'worldbook.bind_rp_session').execute({
     personaName: 'Role A',
     worldbookId: 'Writing Aggregate',
@@ -1272,10 +1352,25 @@ const createProfileStore = (prefix = 'profile') => {
     logger: { warn: () => {} },
   });
   registry.registerMany(tools);
+  const sendRequests = [];
   const aliasResult = await registry.executeTool('chat.send_message', {
     sessionName: '温柔大姐姐',
     message: '妈妈',
+  }, { requestToolConfirmation: request => { sendRequests.push(request); return { decision: 'allow' }; } });
+  assert.equal(sendRequests.length, 1, 'sending a chat message always asks first');
+  assert.equal(sendRequests[0].kind, 'chat.send_message');
+  assert.equal(sendRequests[0].operationType, 'append_user_message');
+  assert.equal(sendRequests[0].danger, false);
+  assert.match(sendRequests[0].message, /以用户身份在「温柔大姐姐」发送消息，不会触发角色回复：「妈妈」/);
+  const deniedSend = await registry.executeTool('chat.send_message', { sessionName: '温柔大姐姐', message: '不发' }, {
+    requestToolConfirmation: () => ({ decision: 'deny' }),
   });
+  assert.equal(deniedSend.status, 'skipped');
+  assert.equal(deniedSend.result.sent, false);
+  assert.equal(messages.get('sister').length, 2, 'a denied message is not written');
+  const sendTool = getTool(tools, 'chat.send_message');
+  assert.equal((await sendTool.safety.preflight({ sessionName: '温柔大姐姐', content: '旁白', role: 'system' })).operationType, 'append_system_message');
+  assert.equal((await sendTool.safety.preflight({ sessionName: '温柔大姐姐', content: '' })).destructive, false);
   assert.equal(aliasResult.status, 'succeeded');
   assert.equal(aliasResult.result.ok, true);
   assert.equal(aliasResult.result.sent, true);
@@ -1339,6 +1434,43 @@ const createProfileStore = (prefix = 'profile') => {
   assert.deepEqual(opened, [['elf', '精灵女王']]);
   assert.deepEqual(active, ['elf']);
   console.log('ok - app content tools can route user sends through the reply-triggering send pipeline');
+}
+
+{
+  // 会触发回复的发送：正常回复链要求目标成为当前会话，open:false 也照样进入聊天室；只写不回的照 open 参数
+  const contacts = new Map([['elf', { id: 'elf', name: '精灵女王' }]]);
+  const opened = [];
+  const switched = [];
+  const appended = [];
+  const sendCalls = [];
+  const tools = createAppContentAgentTools({
+    contactsStore: {
+      listContacts: () => Array.from(contacts.values()),
+      getContact: id => contacts.get(id) || null,
+    },
+    chatStore: {
+      getCurrent: () => 'default',
+      switchSession: id => switched.push(id),
+      appendMessage: (message, id) => appended.push([id, message.content]),
+    },
+    enterChatRoom: async id => opened.push(id),
+    setActiveSession: () => {},
+    sendChatMessage: async (_content, options) => {
+      sendCalls.push(options);
+      return true;
+    },
+  });
+  const sendTool = getTool(tools, 'chat.send_message');
+  const replied = await sendTool.execute({ sessionName: '精灵女王', content: '晚上好', open: false });
+  assert.equal(replied.requestTriggered, true);
+  assert.deepEqual(opened, ['elf'], '触发回复的发送一律进入目标聊天室');
+  assert.equal(sendCalls[0].open, true);
+  await sendTool.execute({ sessionName: '精灵女王', content: '旁白', role: 'system', open: false });
+  await sendTool.execute({ sessionName: '精灵女王', content: '只写', triggerReply: false, open: false });
+  assert.deepEqual(opened, ['elf'], '不触发回复的写入照 open:false 留在后台');
+  assert.deepEqual(switched, ['elf']);
+  assert.deepEqual(appended, [['elf', '旁白'], ['elf', '只写']]);
+  console.log('ok - chat send tool always opens reply-triggering sends and keeps append-only writes in the background');
 }
 
 {
@@ -1535,6 +1667,14 @@ const createProfileStore = (prefix = 'profile') => {
   assert.equal(missing.reason, 'reference_image_not_found');
   assert.deepEqual(missing.missingReferenceImages, ['missing-ref']);
   assert.equal(generated.length, 1);
+  // 11/20: image generation may cost money, so it always asks first.
+  const imageRequest = await tool.safety.preflight({ sessionId: 'elf', prompt: '月下的精灵女王' });
+  assert.equal(imageRequest.destructive, true);
+  assert.equal(imageRequest.kind, 'chat.generate_image');
+  assert.equal(imageRequest.operationType, 'generate_image');
+  assert.equal(imageRequest.danger, false);
+  assert.match(imageRequest.message, /发到「精灵女王」，生图可能产生费用。提示词：「月下的精灵女王」/);
+  assert.equal((await tool.safety.preflight({ sessionId: 'nobody', prompt: 'x' })).destructive, false, 'a missing chat fails in execute');
   console.log('ok - chat.generate_image resolves referenced maid attachments and rejects missing references');
 }
 
@@ -1592,6 +1732,16 @@ const createProfileStore = (prefix = 'profile') => {
   assert.equal(already.ok, true);
   assert.equal(already.switched, false);
   assert.equal(already.alreadyActive, true);
+  // 11/20: switching the active profile asks first; already active / not found / ambiguous changes nothing.
+  const switchTool = getTool(tools, 'config.switch_profile');
+  const switchRequest = await switchTool.safety.preflight({ scope: 'image', profileName: 'oai' });
+  assert.equal(switchRequest.destructive, true);
+  assert.equal(switchRequest.kind, 'config.switch_profile');
+  assert.equal(switchRequest.operationType, 'switch_profile');
+  assert.equal(switchRequest.message, '将把生图使用的模型配置切换为「oai」（gpt-image-2）。');
+  for (const profileName of ['byteplus', 'a', 'midjourney']) {
+    assert.equal((await switchTool.safety.preflight({ scope: 'image', profileName })).destructive, false, profileName);
+  }
   console.log('ok - app content tools list and switch model profiles with fuzzy matching');
 }
 
@@ -1717,6 +1867,60 @@ const createProfileStore = (prefix = 'profile') => {
     '执行阶段应重新读取确认期间的用户改动，再只修改指定条目',
   );
   console.log('ok - worldbook update re-reads after confirmation and preserves intervening user edits');
+}
+
+// 11/20: settings-only updates and additions to an empty book also ask (non-danger);
+// updates that would change nothing still do not ask.
+{
+  const clone = value => JSON.parse(JSON.stringify(value));
+  const saved = new Map([
+    ['Flags World', { name: 'Flags World', entries: [{ id: 'entry-a', comment: 'A', content: 'keep-A' }] }],
+    ['Empty World', { name: 'Empty World', entries: [] }],
+  ]);
+  const fallbackRequests = [];
+  const tools = createAppContentAgentTools({
+    getWorldInfo: async id => clone(saved.get(id) || null),
+    saveWorldInfo: async (id, data) => saved.set(id, clone(data)),
+    confirmDestructiveWrite: async request => { fallbackRequests.push(request); return false; },
+  });
+  const update = getTool(tools, 'worldbook.update_entries');
+  const flagsArgs = { worldbookId: 'Flags World', updates: [{ entryId: 'entry-a', disabled: true }] };
+  const flags = await update.safety.preflight(flagsArgs);
+  assert.equal(flags.destructive, true);
+  assert.equal(flags.kind, 'worldbook.update_entries');
+  assert.equal(flags.operationType, 'update_worldbook_entries');
+  assert.equal(flags.danger, false);
+  assert.match(flags.message, /更新世界书「Flags World」中的 1 项/);
+  const overwrite = await update.safety.preflight({ worldbookId: 'Flags World', updates: [{ entryId: 'entry-a', content: 'new' }] });
+  assert.equal(overwrite.operationType, 'update_existing_entries', 'text overwrites keep the existing danger card');
+  assert.equal(overwrite.danger, true);
+  const emptyBook = await update.safety.preflight({ worldbookId: 'Empty World', createMissing: true, updates: [{ title: 'New', content: 'body' }] });
+  assert.equal(emptyBook.destructive, true);
+  assert.equal(emptyBook.operationType, 'update_worldbook_entries');
+  assert.equal((await update.safety.preflight({ worldbookId: 'Flags World', updates: [{ entryId: 'missing', disabled: true }] })).destructive, false, 'no matching entry changes nothing');
+  assert.equal((await update.safety.preflight({ worldbookId: 'Missing World', updates: [{ entryId: 'entry-a', disabled: true }] })).destructive, false);
+
+  // Without a registry approval the tool-local fallback asks with the same non-danger wording.
+  const before = JSON.stringify(saved.get('Flags World'));
+  const cancelled = await update.execute({ worldbookId: 'Flags World', updates: [{ entryId: 'entry-a', disabled: true }] });
+  assert.equal(cancelled.reason, 'worldbook_update_cancelled');
+  assert.equal(fallbackRequests.length, 1);
+  assert.equal(fallbackRequests[0].danger, false);
+  assert.equal(fallbackRequests[0].cancelText, '取消');
+  assert.equal(JSON.stringify(saved.get('Flags World')), before);
+  // An approved registry card is the only confirmation; the fallback does not ask again.
+  const registry = createAgentToolRegistry({
+    permissionEvaluator: createAgentPermissionEvaluator({ defaultDecision: AGENT_PERMISSION_DECISIONS.allow }),
+    logger: { warn: () => {} },
+  });
+  registry.registerMany(tools);
+  let asks = 0;
+  const output = await registry.executeTool('worldbook.update_entries', flagsArgs, { requestToolConfirmation: () => { asks += 1; return true; } });
+  assert.equal(output.result.ok, true);
+  assert.equal(asks, 1);
+  assert.equal(fallbackRequests.length, 1);
+  assert.notEqual(JSON.stringify(saved.get('Flags World')), before);
+  console.log('ok - worldbook settings-only updates ask once and no-op updates do not ask');
 }
 
 {
@@ -2141,9 +2345,15 @@ const createWorldbookSafetyHarness = (worlds, dependencies = {}) => {
   const persona = await personaStore.create({ name: 'Unbound' });
   await personaStore.setActive(persona.id);
   const harness = createWorldbookSafetyHarness([], { personaStore, assignWorldToPersona: () => false });
+  const createRequests = [];
   const failedBinding = await harness.registry.executeTool('worldbook.create', {
     entries: [{ title: 'Saved', content: 'keep-this-on-binding-failure' }],
-  });
+  }, { requestToolConfirmation: request => { createRequests.push(request); return true; } });
+  assert.equal(createRequests.length, 1, 'creating a new card book asks once');
+  assert.equal(createRequests[0].kind, 'worldbook.create');
+  assert.equal(createRequests[0].operationType, 'create_worldbook');
+  assert.equal(createRequests[0].danger, false);
+  assert.match(createRequests[0].message, /将新建世界书「Unbound 世界书」并写入 1 个条目，并绑定到角色卡「Unbound」。/);
   assert.equal(failedBinding.result.reason, 'persona_binding_save_failed');
   assert.equal(failedBinding.result.worldbookSaved, true);
   assert.equal(harness.records.get('Unbound 世界书').entries.length, 1);
@@ -2267,9 +2477,13 @@ const createWorldbookSafetyHarness = (worlds, dependencies = {}) => {
   }
   assert.equal(harness.records.get('Active World').entries[0].content, 'keep-active');
   assert.equal(harness.records.get('Target World').entries[0].content, 'keep-target');
+  const ordinaryRequests = [];
   const ordinary = await harness.registry.executeTool('worldbook.create', {
     sessionId: 'chat:ordinary', entries: [{ title: 'Normal', content: 'ordinary-session' }],
-  });
+  }, { requestToolConfirmation: request => { ordinaryRequests.push(request); return true; } });
+  assert.equal(ordinaryRequests.length, 1);
+  assert.equal(ordinaryRequests[0].operationType, 'append_worldbook_entries');
+  assert.match(ordinaryRequests[0].message, /将向世界书「Active World」追加 1 个条目；不会改动已有条目。/);
   assert.equal(ordinary.result.ok, true);
   assert.equal(ordinary.result.worldbookId, 'Active World');
   assert.equal(writes, 1, 'a non-RP session still uses the active card');

@@ -50,10 +50,9 @@ test('explicit group preview persists a real waiting workflow without approval o
   assert.equal(h.approvals.length, 0); assert.equal(h.writes.length, 0);
 });
 
-test('revision invalidates the old preview, stays preview-only, then exact confirmation reaches APP approval', async () => {
+test('revision invalidates the old preview, the model previews again, then exact confirmation reaches APP approval', async () => {
   const h = await harness(); await h.submit(original); const firstId = h.runs()[0].id;
-  // Simulate a model forgetting preview=true. The application must keep the revised task read-only.
-  h.setPlan(plan('周末公会', false)); const revised = await h.submit(correction);
+  h.setPlan(plan('周末公会', true)); const revised = await h.submit(correction);
   assert.equal(revised.status, 'awaiting_confirmation');
   assert.equal(h.runs().find(run => run.id === firstId).metadata.pendingWorkflow.state, 'superseded');
   assert(h.plannerCalls.at(-1).input.includes(original)); assert(h.plannerCalls.at(-1).input.includes(correction));
@@ -91,21 +90,13 @@ test('an old preview cannot authorize creation after the actual current session 
   assert.equal(h.writes.length, 0); assert.equal(h.approvals.length, 0);
 });
 
-test('the request to open the group survives preview and a short confirmation', async () => {
+test('the model open argument survives preview and a short confirmation', async () => {
   const h = await harness();
+  h.setPlan({ ...plan(), args: { ...plan().args, open: true } });
   await h.submit(original + '确认创建完成后打开给我看。');
   assert.equal(h.opened.length, 0);
   await h.submit('确认');
   assert.equal(h.writes.length, 1); assert.deepEqual(h.opened, [h.writes[0].id]);
-});
-
-test('preview-only cannot execute an unrelated write selected by the planner', async () => {
-  const h = await harness();
-  h.setPlan({ ok: true, action: 'tool', toolName: 'group.update_members', featureId: 'group.members.update',
-    args: { group: 'existing-group', addMembers: ['friend:a'] } });
-  const result = await h.submit(original);
-  assert.equal(result.reason, 'group_preview_write_blocked');
-  assert.equal(h.approvals.length, 0); assert.equal(h.writes.length, 0);
 });
 
 test('expired group preview closes its waiting run and cannot create', async () => {
@@ -119,7 +110,7 @@ test('expired group preview closes its waiting run and cannot create', async () 
   assert.equal(h.writes.length, 0); assert.equal(h.approvals.length, 0);
 });
 
-test('captured native preview respects the explicit bare negative 不打开', async () => {
+test('captured native preview keeps the model open:false argument', async () => {
   const h = await harness();
   const result = await h.submit('先给我看建群清单：群名远足小队，成员阿凯和Luna，先不创建，也不打开群聊。');
   assert.equal(result.pendingWorkflow.open, false);

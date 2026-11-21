@@ -134,7 +134,7 @@ const runAmountAdvisory = async ({ input = '查询游戏当前价格', onDecisio
   const agent = createMaidAssistantAgent({
     planner: async () => ({ ok: true, toolName: 'web.search', featureId: 'web.search', args: { query: 'game price' } }),
     reactPlanner: async (_input, decisionContext) => {
-      decisions.push({ feedback: decisionContext.maidWebEvidenceFeedback, intent: decisionContext.operationIntentPolicy.mode });
+      decisions.push({ feedback: decisionContext.maidWebEvidenceFeedback, intent: decisionContext.operationIntentPolicy?.mode });
       return onDecision ? onDecision(decisions.length, decisionContext, originalFinal) : { ...originalFinal };
     },
     toolRegistry: { executeTool: async (toolName, args) => {
@@ -149,18 +149,18 @@ const runAmountAdvisory = async ({ input = '查询游戏当前价格', onDecisio
   return { result: await agent.runPrompt(input, context), calls, decisions, originalFinal };
 };
 
-test('advisory cannot run before pending APP state verification', async () => {
-  const { result, calls, decisions } = await runAmountAdvisory({ input: '先查询游戏当前价格，最后读取APP状态。' });
+test('request wording does not append an APP state read after the model final', async () => {
+  // 11/21 起不再按「最后读取APP状态」字眼补步骤：要不要读由模型决定
+  const { result, calls } = await runAmountAdvisory({ input: '先查询游戏当前价格，最后读取APP状态。' });
   assert.equal(result.ok, true);
-  assert.deepEqual(calls, ['web.search', 'app.get_current_state']);
-  assert.equal(decisions.filter(item => item.feedback).length, 0, 'the pending APP step must run before any optional price correction');
+  assert.deepEqual(calls, ['web.search']);
 });
 
-test('advisory skips explicit write intent even before any APP write has run', async () => {
+test('advisory depends on the steps actually run, not on write wording in the request', async () => {
+  // 11/20 起不再按句中有没有「写入」判断意图：只要目前只做过网页读取，就照常核对一次金额
   const { decisions } = await runAmountAdvisory({ input: '查询游戏当前价格，并把结果写入备忘录。' });
-  assert.equal(decisions[0].intent, 'write_allowed');
-  assert.equal(decisions.length, 1);
-  assert.equal(decisions.filter(item => item.feedback).length, 0);
+  assert.equal(decisions[0].intent, undefined);
+  assert.equal(decisions.filter(item => item.feedback).length, 1);
 });
 
 test('advisory does not add calls to a mixed web and APP read sequence', async () => {

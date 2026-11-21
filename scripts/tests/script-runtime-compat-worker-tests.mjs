@@ -338,6 +338,9 @@ assert.equal(isEsmLikeScriptForTests('module.exports = {}; exports.foo = 1;'), f
 assert.equal(isEsmLikeScriptForTests('const data = { import: fn, export: gn };'), false);
 assert.equal(isEsmLikeScriptForTests('const value = await Promise.resolve(1);'), true);
 assert.equal(isEsmLikeScriptForTests('async function load() { return await Promise.resolve(1); }'), false);
+// 11/20：前面有含引号的正则、模板字串里有从行首开始的 import（泉此方悬浮窗的形态），不是模块
+assert.equal(isEsmLikeScriptForTests("const quote = /['\"]/;\nconst source = `const a = 1;\nimport { worldInfoCache } from '/scripts/world-info.js';\nexport const b = 2;`;\nrun(source);"), false);
+assert.equal(isEsmLikeScriptForTests("const text = 'line\\nimport { a } from \"b\"';"), false);
 console.log('ok - script runtime recognizes actual ESM import and export syntax');
 
 {
@@ -2043,8 +2046,38 @@ console.log('ok - script runtime recognizes actual ESM import and export syntax'
   const classicInlineScripts = Array.from(iframeHtml.matchAll(/<script(?![^>]*type="module")[^>]*>([\s\S]*?)<\/script>/g))
     .map(match => match[1])
     .filter(Boolean);
-  assert.equal(classicInlineScripts.length, 1);
-  assert.doesNotThrow(() => new Function(classicInlineScripts[0]));
+  assert.equal(classicInlineScripts.length, 2);
+  classicInlineScripts.forEach(source => assert.doesNotThrow(() => new Function(source)));
+  // 11/20：base 指向 CDN，脚本打酒馆的相对路径会解析成 CDN 网址、把请求内容送出去；第一段脚本在本机挡下
+  {
+    const guard = classicInlineScripts[0];
+    assert.match(guard, /document\.baseURI/);
+    const sent = [];
+    class FakeXhr { open(method, url) { sent.push(['xhr', String(url)]); } }
+    const sandbox = {
+      URL, JSON, Promise, String, TypeError,
+      Response: class { constructor(body, init = {}) { this.body = body; this.status = init.status; } },
+      document: { baseURI: 'https://testingcf.jsdelivr.net/' },
+      navigator: { sendBeacon: (url) => { sent.push(['beacon', String(url)]); return true; } },
+      XMLHttpRequest: FakeXhr,
+      fetch: (input) => { sent.push(['fetch', String(input?.url || input)]); return Promise.resolve('network'); },
+    };
+    sandbox.window = sandbox;
+    vm.runInNewContext(guard, sandbox);
+    assert.equal((await sandbox.window.fetch('/api/backends/chat-completions/generate', { method: 'POST' })).status, 501);
+    assert.equal((await sandbox.window.fetch('api/chats/get')).status, 501);
+    assert.equal((await sandbox.window.fetch({ url: 'https://testingcf.jsdelivr.net/api/worldinfo/get' })).status, 501, '已补成完整网址的 Request 也挡');
+    assert.equal(await sandbox.window.fetch('https://cdn.jsdelivr.net/npm/lodash/lodash.min.js'), 'network');
+    assert.equal(await sandbox.window.fetch('npm/vue@3/+esm'), 'network', 'CDN 上一般的相对路径照常');
+    assert.throws(() => new sandbox.XMLHttpRequest().open('POST', '/api/chats/get'), /模块脚本环境不支持酒馆后端接口/);
+    new sandbox.XMLHttpRequest().open('GET', 'https://example.com/data.json');
+    assert.equal(sandbox.navigator.sendBeacon('/api/chats/get', 'x'), false);
+    assert.deepEqual(sent, [
+      ['fetch', 'https://cdn.jsdelivr.net/npm/lodash/lodash.min.js'],
+      ['fetch', 'npm/vue@3/+esm'],
+      ['xhr', 'https://example.com/data.json'],
+    ], '打酒馆接口的请求一个都没有送出');
+  }
 
   const full = await runtime.processRpc('context.getContext', { sessionId: 's1' });
   assert.equal(full.stat_data.mood, 'calm');

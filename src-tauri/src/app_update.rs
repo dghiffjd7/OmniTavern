@@ -29,8 +29,11 @@ pub async fn app_update_install(
         return Ok(json!({ "status": "in_progress" }));
     };
 
+    // 检查和下载都走通用设置里的网络代理
     let updater = app
-        .updater()
+        .updater_builder()
+        .configure_client(|builder| crate::network_proxy::apply_network_proxy(builder, None))
+        .build()
         .map_err(|error| format!("updater_unavailable:{error}"))?;
     let Some(update) = updater
         .check()

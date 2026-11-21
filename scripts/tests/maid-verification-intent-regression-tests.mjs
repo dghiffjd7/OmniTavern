@@ -6,7 +6,6 @@ import { createMaidAssistantAgent } from '../../src/scripts/agent/maid-assistant
 import { createMaidCapabilityRoutingRuntime } from '../../src/scripts/agent/maid-capability-routing.js';
 import { createAppGuidedActionRuntime } from '../../src/scripts/ui/app-guided-action-runtime-utils.js';
 import { createMaidCommandSubmit } from '../../src/scripts/ui/maid-command-submit-runtime.js';
-import { matchMaidIntent } from '../../src/scripts/ui/maid-intent-presets.js';
 
 const logger = { debug() {}, warn() {} };
 const createHarness = () => {
@@ -76,13 +75,13 @@ test('verification cannot acquire write capabilities and still honors read permi
   assert.equal(harness.routing.validatePlan(readPlan).ok, false, 'permission changes must invalidate a projected read');
 });
 
-test('401 log reaches the agent while an explicit API tutorial keeps the local onboarding path', async () => {
+test('error logs and tutorial requests both reach the agent; starting a guide is the model\'s choice', async () => {
+  // 11/21 用户定：新手入口交给模型（guide.start_flow 在功能目录 maid.onboarding），提交时不再按关键词截走
   const received = [], flows = [];
   let exchange = {};
   const submit = createMaidCommandSubmit({
     getVoiceRuntime: () => null,
     getOnboardingRuntime: () => ({ startFlow: id => flows.push(id) }),
-    matchMaidIntent, hasConfiguredMaidProfile: () => true,
     resolveMaidRuntimeConfig: async () => ({ configured: true }), logger,
     checkMaidVisionInput: async () => ({ ok: true }),
     maidSettingsStore: { setLastExchange: value => { exchange = value; }, getLastExchange: () => exchange },
@@ -95,8 +94,24 @@ test('401 log reaches the agent while an explicit API tutorial keeps the local o
   assert.equal(answer.responseType, 'chat');
   assert.deepEqual(received, [input]);
   assert.deepEqual(flows, []);
-  const lesson = await submit('教我配置 API');
-  assert.equal(lesson.responseType, 'local');
+  for (const text of ['教我配置 API', '新手教程', '建一个叫新手村的世界书', '跳过这一段']) {
+    const answer = await submit(text);
+    assert.equal(answer.responseType, 'chat', text);
+  }
+  assert.deepEqual(flows, []);
+  assert.deepEqual(received, [input, '教我配置 API', '新手教程', '建一个叫新手村的世界书', '跳过这一段']);
+});
+
+test('without a maid API the local setup button still starts the API guide', async () => {
+  const flows = [];
+  const submit = createMaidCommandSubmit({
+    getVoiceRuntime: () => null,
+    getOnboardingRuntime: () => ({ startFlow: id => flows.push(id) }),
+    resolveMaidRuntimeConfig: async () => ({ configured: false }), logger,
+    maidAssistantAgent: { runPrompt: async () => assert.fail('no model call without an API') },
+  });
+  const answer = await submit('教我配置 API');
+  assert.equal(answer.responseType, 'local');
+  answer.actions[0].onClick();
   assert.deepEqual(flows, ['setup-api']);
-  assert.equal(received.length, 1);
 });

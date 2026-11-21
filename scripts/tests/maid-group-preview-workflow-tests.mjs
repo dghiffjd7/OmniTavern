@@ -17,21 +17,6 @@ const run = (snapshot = build()) => ({ id: 'run-preview', status: 'waiting_permi
   metadata: { submissionId: 'submission-preview', pendingWorkflow: snapshot } });
 const nextContext = () => ({ ...scope, submissionId: 'submission-next' });
 
-test('explicit preview entry keeps direct creation, knowledge questions and negated preview outside this workflow', () => {
-  for (const input of [
-    '建个群叫旅行队，成员阿凯和Luna，先预览，等我确认。',
-    '先看建群清单，不要创建。', '先列出建群方案，等我确认。',
-    '先看一下群聊创建方案，名字叫旅行队。', '只预览建群，不要真的创建。',
-    'Create a group with Kai and Luna; preview the plan first.',
-  ]) assert.equal(workflow.isMaidGroupPreviewRequest(input), true, input);
-  for (const input of [
-    '建个群叫旅行队，成员阿凯和Luna', '如何先预览建群清单？',
-    '怎么预览创建群聊？', '不要预览，直接建群。', '不用先看清单，直接创建群聊。',
-    '先看建群清单。算了不要了。', '先看一下群成员清单', '先看建群方案有什么作用？',
-    'How do I preview group creation?',
-  ]) assert.equal(workflow.isMaidGroupPreviewRequest(input), false, input);
-});
-
 test('successful real group preview freezes exact identities without the temporary group id or permission', () => {
   const raw = step(), ctx = context();
   const snapshot = build([raw], ctx);

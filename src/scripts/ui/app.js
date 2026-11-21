@@ -75,6 +75,9 @@ import { MAID_CONTACT_PROFILE_PERMISSION_RULES, registerContactProfileAgentTools
 import { registerImageAgentTools } from '../agent/tools/image-tools.js';
 import { registerMemoryAgentTools } from '../agent/tools/memory-tools.js';
 import { registerVariableAgentTools } from '../agent/tools/variable-tools.js';
+import { registerVariableEditAgentTools } from '../agent/tools/variable-edit-tools.js';
+import { registerMemoryTableEditAgentTools } from '../agent/tools/memory-table-edit-tools.js';
+import { registerMemorySettingsAgentTools } from '../agent/tools/memory-settings-tools.js';
 import { registerWorldbookAgentTools } from '../agent/tools/worldbook-tools.js';
 import { createMaidAssistantAgent } from '../agent/maid-assistant-agent.js';
 import { buildMaidResultBasis } from '../agent/maid-result-basis.js';
@@ -113,7 +116,14 @@ import { registerAppSessionAgentTools } from '../agent/tools/app-session-tools.j
 import { registerGroupChatAgentTools } from '../agent/tools/group-chat-agent-tools.js';
 import { registerAppContentAgentTools } from '../agent/tools/app-content-tools.js';
 import { registerPresetRegexScriptAgentTools } from '../agent/tools/preset-regex-script-tools.js';
+import { registerAgentConfigAgentTools } from '../agent/tools/agent-config-tools.js';
+import { registerFlowBoardAgentTools } from '../agent/tools/flow-board-tools.js';
+import { registerPresetEditAgentTools } from '../agent/tools/preset-edit-tools.js';
+import { registerScriptEditAgentTools } from '../agent/tools/script-edit-tools.js';
+import { resolveRequestConfigProfileId } from './chat/request-config-profile-utils.js';
+import { getReasoningSamplerPolicy } from '../api/model-capabilities.js';
 import { registerAttachmentImportAgentTools } from '../agent/tools/attachment-import-tools.js';
+import { registerPluginAgentTools } from '../agent/tools/plugin-tools.js';
 import { extractArchiveEntryToLibrary, registerAttachmentFileAgentTools } from '../agent/tools/attachment-file-tools.js';
 import { createAttachmentImportService } from '../import/attachment-import-service.js';
 import { registerMaidMediaAssetTools } from '../agent/tools/media-asset-tools.js';
@@ -129,6 +139,9 @@ import { registerMomentsAgentTools } from '../agent/tools/moments-tools.js';
 import { registerMaidTodoTools } from '../agent/tools/maid-todo-tools.js';
 import { registerMaidMemoryTools } from '../agent/tools/maid-memory-tools.js';
 import { registerGuideStartFlowTools } from '../agent/tools/guide-start-flow-tools.js';
+import { registerImportedCardRoomTools } from '../agent/tools/imported-card-room-tools.js';
+import { registerMaidTaskTools } from '../agent/tools/maid-task-tools.js';
+import { registerWorldbookCompareTools } from '../agent/tools/worldbook-compare-tools.js';
 import { AgentRunStore } from '../storage/agent-run-store.js';
 import { CapabilityRetrievalStore } from '../storage/capability-retrieval-store.js';
 import { MaidGuideStore } from '../storage/maid-guide-store.js';
@@ -150,6 +163,7 @@ import { chatFcLocalCapabilityStore } from '../storage/chat-fc-local-capability-
 import { chatStructuredRouteEvidenceStore } from '../storage/chat-structured-route-evidence-store.js';
 import { renderTemplateTextAsync, templateSettings } from '../plugins/template-engine.js';
 import { ScriptRuntime } from '../plugins/script-runtime.js';
+import { createScriptModelCallRunTracker } from '../plugins/script-model-call-run.js';
 import { ChatStore } from '../storage/chat-store.js';
 import { ConfigManager } from '../storage/config.js';
 import { ContactProfileStore } from '../storage/contact-profile-store.js';
@@ -210,6 +224,7 @@ import {
 } from '../utils/media-assets.js';
 import { pickSavePath } from '../utils/save-dialog.js';
 import { safeInvoke } from '../utils/tauri.js';
+import { syncNetworkProxy } from '../utils/network-proxy.js';
 import { createMaidSelectionMode } from './maid-selection-mode.js';
 import { captureMaidViewportRegion } from './maid-region-capture-utils.js';
 import { createMaidSubAgentRuntime } from './maid-sub-agent-runtime.js';
@@ -313,7 +328,6 @@ import { createPresetPreviewDiscoveryGuide } from './preset-preview-discovery-gu
 import {
   MAID_ONBOARDING_TARGET_SELECTORS,
 } from './maid-onboarding-flows.js';
-import { matchMaidIntent } from './maid-intent-presets.js';
 import { createMaidOnboardingAppAdapter } from './maid-onboarding-app-adapter.js';
 import { createAgentUiClickRuntime } from './agent-ui-click-runtime.js';
 import { buildMaidRunResumeSubmission, createMaidTaskInputPersistence } from './maid-run-resume-utils.js';
@@ -3624,6 +3638,37 @@ const initApp = async () => {
   registerVariableAgentTools(agentToolRegistry, {
     getPreviewVariableCommands: () => agentWritePreviewRuntimes.previewVariableCommands,
   });
+  // 女仆改变量与记忆表格的行：算变化用现有预览、写入用聊天 AI 待确认写入同一组提交处理器
+  registerVariableEditAgentTools(agentToolRegistry, {
+    getCurrentSessionId: () => chatStore.getCurrent(),
+    resolveUseGlobal: sid => isSharedVariableSession(sid),
+    isVariableRuntimeEnabled,
+    previewVariableCommands: args => agentWritePreviewRuntimes.previewVariableCommands(args),
+    commitVariables: input => agentWritePreviewRuntimes.variableCommit.commit(input),
+    listVariables: ({ sessionId, useGlobal }) => (useGlobal ? chatStore.listGlobalVariables?.() : chatStore.listVariables?.(sessionId)) || {},
+  });
+  registerMemoryTableEditAgentTools(agentToolRegistry, {
+    getCurrentSessionId: () => chatStore.getCurrent(),
+    getUiMode: () => uiMode,
+    loadMemoryContext: sid => loadSessionMemoryActionContext({
+      memoryTemplateStore,
+      memoryTableStore,
+      sessionId: sid,
+      isGroup: String(sid || '').startsWith('group:') || Boolean(contactsStore.getContact?.(sid)?.isGroup),
+      uiMode,
+      filterTables: true,
+    }),
+    previewMemoryActions: args => agentWritePreviewRuntimes.previewMemoryActions(args),
+    commitMemory: input => agentWritePreviewRuntimes.memoryCommit.commit(input),
+  });
+  // 女仆查看与修改记忆设定（白名单键）；照通用设定面板逐键发出变更事件
+  registerMemorySettingsAgentTools(agentToolRegistry, {
+    getSettings: () => appSettings.get(),
+    updateSettings: (patch) => {
+      appSettings.update(patch);
+      Object.keys(patch).forEach(key => window.dispatchEvent(new CustomEvent('app-settings-changed', { detail: { key, value: appSettings.get()[key] } })));
+    },
+  });
   registerWorldbookAgentTools(agentToolRegistry, {
     getPreviewWorldbookActions: () => agentWritePreviewRuntimes.previewWorldbookActions,
   });
@@ -3980,6 +4025,71 @@ const initApp = async () => {
     // 女仆帮忙分类预设（分类存储改动时自身会发 preset-groups-changed）
     presetGroupStore,
   });
+  // 女仆编辑预设：条目内容／新增／排序、生成参数、复制、改名（与预设面板保存同一条路）
+  registerPresetEditAgentTools(agentToolRegistry, {
+    presetStore,
+    regexStore,
+    scriptStore,
+    getCurrentSessionId: () => chatStore.getCurrent(),
+    getUiMode: () => (uiMode === 'rp' ? 'rp' : 'chat'),
+    onPresetsChanged: () => window.dispatchEvent(new CustomEvent('preset-changed')),
+    // 当前会话所用连线会忽略的参数：与发送时同一套连线解析，推理模式停用的取样参数＋连线档排除的参数
+    getIgnoredParams: (preset = {}) => {
+      const resolved = resolveRequestConfigProfileId({ presetStore, sessionId: chatStore.getCurrent(), uiMode: uiMode === 'rp' ? 'rp' : 'chat' });
+      const profileId = String(resolved?.profileId || chatConfigManager.getActiveProfileId?.() || '').trim();
+      const profile = (profileId && chatConfigManager.getProfileById?.(profileId)) || chatConfigManager.get?.() || {};
+      const policy = getReasoningSamplerPolicy({ provider: profile.provider, model: profile.model, baseUrl: profile.baseUrl, requestReasoning: preset.request_reasoning !== false });
+      let excluded = profile.excludedGenerationParams;
+      if (typeof excluded === 'string') { try { excluded = JSON.parse(excluded); } catch { excluded = []; } }
+      return [...new Set([...(policy.disabledFields || []), ...(Array.isArray(excluded) ? excluded : [])])];
+    },
+  });
+  // 女仆读写脚本代码与脚本设定：脚本经 scriptStore（含兼容性检查）、写入后重载脚本；
+  // 设定照设置面板写 appSettings，并逐键发出 app-settings-changed（脚本运行时据此重新同步）
+  registerScriptEditAgentTools(agentToolRegistry, {
+    scriptStore,
+    presetStore,
+    getCurrentPersonaId: () => personaStore.getActive?.()?.id || '',
+    getPersonaName: personaId => personaStore.get?.(personaId)?.name || '',
+    getScriptSettings: () => appSettings.get(),
+    updateScriptSettings: (patch) => {
+      appSettings.update(patch);
+      Object.keys(patch).forEach(key => window.dispatchEvent(new CustomEvent('app-settings-changed', { detail: { key, value: appSettings.get()[key] } })));
+    },
+    onScriptsChanged: () => window.appBridge.restartScriptWorker?.('脚本已重新加载'),
+  });
+  // 女仆设定 Agent Center 的 Agent 与小管家：经 Agent 设定服务（与编辑器同一套检查），服务在聊天室装配后才建立，执行时再取
+  registerAgentConfigAgentTools(agentToolRegistry, {
+    getActions: () => agentToolsRuntime?.actions,
+    getContext: () => getAgentConfigContext(),
+    listPresets: () => presetStore.listSummaries?.('openai') || [],
+    // 与回复后实际执行同一个判断：当轮的板（自定义板只跑放在板上的回复 Agent）
+    getFlowBoard: ({ place, sessionId } = {}) => {
+      if (!hopscotchTurnRuntime || !sessionId) return null;
+      const resolved = hopscotchTurnRuntime.resolveBoard(sessionId, { place: place === 'writing' ? 'writing' : 'chat' });
+      return {
+        custom: resolved.source !== 'derived',
+        agentIds: (resolved.board?.rows || []).flatMap(row => row.houses).filter(house => house.kind === 'text_edit' && house.enabled !== false).map(house => house.config?.agentId),
+      };
+    },
+  });
+  // 保存流程板时把板上记忆的形态（融合＝同回复，房子＝独立请求）写回写作的写表方式；面板与女仆共用
+  const setWritingMemoryAutoExtractMode = (mode) => {
+    if (appSettings.get().memoryAutoExtractModeWriting === mode) return;
+    appSettings.update({ memoryAutoExtractModeWriting: mode });
+    window.dispatchEvent(new CustomEvent('app-settings-changed', { detail: { key: 'memoryAutoExtractModeWriting', value: mode } }));
+  };
+  // 女仆查看与调整流程板（跳房子）：板与执行期在聊天室装配后才建立，执行时再取
+  registerFlowBoardAgentTools(agentToolRegistry, {
+    getRuntime: () => hopscotchTurnRuntime,
+    getBoardStore: () => hopscotchBoardStore,
+    getContext: () => getAgentConfigContext(),
+    listTextAgents: scope => agentConfigStore.list(getAgentConfigContext(), scope).filter(item => item.config.kind === 'text_edit').map(item => item.config),
+    isHopscotchEnabled: () => appSettings.get().creativeHopscotchEnabled === true,
+    enableHopscotch: value => appSettings.update({ creativeHopscotchEnabled: value === true }),
+    setMemoryAutoExtractMode: setWritingMemoryAutoExtractMode,
+    onSaved: () => hopscotchBoardPanel?.refresh?.(),
+  });
   // 女仆通用文件工具（读、搜、取出、写文件、打包）：文件库在女仆输入条装配处创建，这里按需读取
   registerAttachmentFileAgentTools(agentToolRegistry, {
     getAttachmentRegistry: () => maidFileAttachmentRegistry,
@@ -4015,6 +4125,14 @@ const initApp = async () => {
         scriptCount: presetPanel.extractPresetScripts(json).length,
       };
     },
+  });
+  // 女仆管理插件（查看、启停、从附件或网址安装、移除插件界面）：与插件面板同一套 store／runtime；文件库较晚建立，执行时再取
+  registerPluginAgentTools(agentToolRegistry, {
+    pluginStore,
+    pluginRuntime,
+    getUiManager: () => pluginUiManager,
+    getAttachmentRegistry: () => maidFileAttachmentRegistry,
+    onPluginsChanged: () => pluginPanel.refreshIfOpen(),
   });
   const buildCurrentMaidImageGenerationContext = ({
     config = {},
@@ -4174,6 +4292,16 @@ const initApp = async () => {
   });
   registerGuideStartFlowTools(agentToolRegistry, {
     startFlow: flowId => maidOnboardingRuntime?.startFlow?.(flowId) === true,
+  });
+  // 女仆之前的任务：续跑与任务历史的「继续」按钮同一条（buildMaidRunResumeSubmission → submitTask），只排队不等结果
+  registerMaidTaskTools(agentToolRegistry, {
+    agentTaskRuntime,
+    resumeRun: (run) => {
+      if (!maidCommandInputRuntime) return false;
+      const submission = buildMaidRunResumeSubmission(run);
+      void maidCommandInputRuntime.submitTask(submission.text, submission.controls);
+      return true;
+    },
   });
   registerWebSearchAgentTools(agentToolRegistry, {
     httpRequest: payload => safeInvoke('public_http_request', payload),
@@ -4424,6 +4552,7 @@ const initApp = async () => {
     getConversationContext: getMaidConversationContext,
     logger,
     isBuiltinCapabilityEnabled: id => maidSettingsStore.getBuiltinCapability(id)?.enabled === true,
+    listMaidRuns: () => agentTaskRuntime.listRuns({ kind: 'maid_assistant', limit: 100 }),
   });
   const maidPlanner = createMaidModelBackedPlanner({
     resolveRuntimeConfig: resolveMaidTaskRuntimeConfig,
@@ -4455,6 +4584,13 @@ const initApp = async () => {
     onDebugSnapshot: recordMaidDebugSnapshot,
     logger,
   });
+  registerImportedCardRoomTools(agentToolRegistry, {
+    executeTool: (name, args, context) => agentToolRegistry.executeTool(name, args, context),
+    classify: maidImportedCardClassifier,
+  });
+  registerWorldbookCompareTools(agentToolRegistry, {
+    executeTool: (name, args, context) => agentToolRegistry.executeTool(name, args, context),
+  });
   const maidChatResponder = createMaidChatResponder({
     resolveRuntimeConfig: resolveMaidTaskRuntimeConfig,
     createClient: config => new LLMClient(config),
@@ -4477,7 +4613,6 @@ const initApp = async () => {
     capabilityRoutingRuntime: maidCapabilityRoutingRuntime,
     planner: maidPlanner,
     reactPlanner: maidReActPlanner,
-    importedCardClassifier: maidImportedCardClassifier,
     chatResponder: maidChatResponder,
     guidedActionRuntime: maidGuidedActionRuntime,
     prepareConversationContext: prepareMaidConversationContext,
@@ -4558,6 +4693,8 @@ const initApp = async () => {
       sessionId: chatStore.getCurrent(),
       uiMode,
     }),
+    // 「这个角色卡一律允许」的规则记下卡名，女仆设置的规则清单才看得出是哪张卡
+    getRoleCardName: roleCardId => String(personaStore.get?.(roleCardId)?.name || ''),
     canShowInline: runId => maidCommandInputRuntime?.hasRunCard?.(runId) === true
       || executionFlowRuntime?.hasRunCard?.(runId) === true
       || maidVoiceRuntime?.canShowApproval?.(runId) === true,
@@ -5149,7 +5286,10 @@ const initApp = async () => {
             signal: opts.signal || null,
             maxReactSteps: opts.maxReactSteps || maidSettingsStore.getMaxReactSteps?.(),
             resolveMaidSelectionRegion: regionId => maidSelectionMode.resolveCaptureRegion(regionId),
-            requestToolConfirmation: requestMaidToolConfirmation,
+            // 与女仆输入条相同：确认带上角色卡等范围，卡上才有「这个角色卡一律允许」
+            requestToolConfirmation: (request, confirmOptions = {}) => requestMaidToolConfirmation(request, {
+              ...confirmOptions, roleCardId: maidTurnContext.roleCardId, sessionId: maidTurnContext.sessionId, uiMode: maidTurnContext.uiMode,
+            }),
           });
           await recordMaidTurnFromResult({
             input,
@@ -24928,7 +25068,12 @@ const initApp = async () => {
       message: `这项操作无法恢复。确定永久删除这条长期记忆吗？\n\n${String(memory?.content || '').trim()}`,
       danger: true,
     }),
-    clearHistoryContext: () => maidConversationStore.clearHistory(),
+    // 清空女仆对话：「这个任务一律允许」随之失效（对应 Noa 的会话）
+    clearHistoryContext: async () => {
+      const cleared = await maidConversationStore.clearHistory();
+      maidToolConfirmationRuntime.clearTaskAllowances();
+      return cleared;
+    },
     clearMemoryTable: () => maidConversationStore.clearMemoryRows(),
     confirmMemoryAction: ({ title, message }) => appConfirm({ title, message, danger: true }),
     // 女仆文件库（下面才创建，这里按需读取）
@@ -25144,8 +25289,7 @@ const initApp = async () => {
     onSubmit: createMaidCommandSubmit({
       getVoiceRuntime: () => maidVoiceRuntime,
       getOnboardingRuntime: () => maidOnboardingRuntime,
-      // hasConfiguredMaidProfile 在后面才赋值为真实实现，这里必须在调用时再读取
-      matchMaidIntent, hasConfiguredMaidProfile: () => hasConfiguredMaidProfile(), resolveMaidRuntimeConfig: resolveMaidTaskRuntimeConfig,
+      resolveMaidRuntimeConfig: resolveMaidTaskRuntimeConfig,
       logger, checkMaidVisionInput, maidSettingsStore, buildAppFeatureSearchContextText,
       markFileAttachmentsSubmitted: (attachments, turnContext) => attachments.forEach(item => maidFileAttachmentRegistry.markSubmitted(item.id, turnContext)),
       listRecentFileAttachments: options => maidFileAttachmentRegistry.listRecent(options),
@@ -27564,6 +27708,16 @@ const initApp = async () => {
     }
   };
 
+  // 脚本单独调用模型（酒馆 /generate）的执行流记录：运行记录＋创意写作泳道模型栏（同摘要压缩）
+  scriptRuntime?.setContext({
+    modelCallRunTracker: createScriptModelCallRunTracker({
+      agentTaskRuntime,
+      getLaneRuntime: () => creativeExecutionLaneRuntime,
+      completeLaneIfIdle: completeCreativeExecutionIfIdle,
+      logger,
+    }),
+  });
+
   const isSummaryCompactionGroupSession = (sessionId = '') => {
     const contact = contactsStore?.getContact?.(sessionId) || null;
     return Boolean(contact?.isGroup) || String(sessionId || '').startsWith('group:');
@@ -28966,11 +29120,7 @@ const initApp = async () => {
     getWritePreviewSwitch: () => Boolean(agentCenterPanel.getAgentCardById(AGENT_FEATURE_IDS.writePreview)),
     getEnabled: () => appSettings.get().creativeHopscotchEnabled === true,
     enable: value => appSettings.update({ creativeHopscotchEnabled: value === true }),
-    setMemoryAutoExtractMode: (mode) => {
-      if (appSettings.get().memoryAutoExtractModeWriting === mode) return;
-      appSettings.update({ memoryAutoExtractModeWriting: mode });
-      window.dispatchEvent(new CustomEvent('app-settings-changed', { detail: { key: 'memoryAutoExtractModeWriting', value: mode } }));
-    },
+    setMemoryAutoExtractMode: setWritingMemoryAutoExtractMode,
   });
   hopscotchTurnRuntime.subscribe(() => agentToolsRuntime.toolbox.refresh());
   patchDebugUiRegistry((registry) => {
@@ -36482,6 +36632,12 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (err) {
       console.warn('settings hydrate skipped', err);
       recordBootError(`settings hydrate skipped: ${getRuntimeErrorMessage(err)}`);
+    }
+    try {
+      // 原生请求开始前先套用通用设置里的网络代理
+      await syncNetworkProxy(safeInvoke, appSettings.get());
+    } catch (err) {
+      console.warn('network proxy sync skipped', err);
     }
     markBootPhase('language-bootstrap');
     const languageState = await bootstrapAppLanguage({ appSettings });

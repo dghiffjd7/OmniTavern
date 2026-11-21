@@ -77,10 +77,15 @@ test('initial and ReAct planners share a conditional collision contract, without
 test('collision observations preserve missing descriptions honestly and leave ordinary creation unchanged', async () => {
   const existing = { id: 'existing-id', name: 'Existing', isGroup: false };
   const h = makeHarness(existing);
-  const reuse = await h.registry.executeTool('session.create', { name: existing.name, open: false });
+  const confirmations = [];
+  const requestToolConfirmation = (request) => { confirmations.push(request); return true; };
+  const reuse = await h.registry.executeTool('session.create', { name: existing.name, open: false }, { requestToolConfirmation });
   assert.equal(reuse.result.contact.description, '', 'a missing description is not invented from the user request');
   assert.deepEqual(h.effects, []);
-  const create = await h.registry.executeTool('session.create', { name: 'New character', open: false });
+  assert.equal(confirmations.length, 0, 'reusing an existing contact changes nothing and needs no confirmation');
+  const create = await h.registry.executeTool('session.create', { name: 'New character', open: false }, { requestToolConfirmation });
+  assert.deepEqual(confirmations.map(request => [request.kind, request.operationType]), [['session.create', 'create_session']],
+    'creating a new contact always asks the user first');
   assert.equal(create.result.created, true);
   assert.equal(create.result.sessionId, 'New character');
   assert.deepEqual(h.effects, ['contact', 'message', 'refresh']);

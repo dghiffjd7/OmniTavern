@@ -897,3 +897,89 @@ const attachment = {
   assert.equal(users.get('u1').avatar, 'maid-user-avatar');
   console.log('ok - shared guarded avatar setter is wired for user profiles');
 }
+
+{
+  // 用户决定（2026-11-20）：第一次设头像／壁纸、生图、下载网络图片也都要确认；kind／operationType 不随目标变化
+  const makeStore = items => {
+    const map = new Map(items.map(item => [item.id, item]));
+    return {
+      map,
+      getAll: () => Array.from(map.values()),
+      listContacts: () => Array.from(map.values()),
+      get: id => map.get(id) || null,
+      getContact: id => map.get(id) || null,
+      getActive: () => Array.from(map.values())[0] || null,
+      update: async (id, patch) => { const next = { ...map.get(id), ...patch }; map.set(id, next); return next; },
+      upsertContact: patch => map.set(patch.id, { ...map.get(patch.id), ...patch }),
+    };
+  };
+  const personaStore = makeStore([{ id: 'p1', name: '角色A', avatar: '' }, { id: 'p2', name: '角色B', avatar: 'old' }]);
+  const userStore = makeStore([{ id: 'u1', name: '用户A', avatar: '' }]);
+  const contactsStore = makeStore([{ id: 'room-1', name: '聊天室A', avatar: '' }, { id: 'room-2', name: '聊天室B', avatar: '' }]);
+  const settings = new Map([['room-1', {}], ['room-2', { wallpaper: { path: 'old.jpg' } }]]);
+  let confirmedLocally = 0;
+  let prepared = 0;
+  const tools = createMaidMediaAssetTools({
+    personaStore,
+    userStore,
+    contactsStore,
+    chatStore: { getSessionSettings: id => settings.get(id) || {}, setSessionSettings: (id, next) => settings.set(id, next) },
+    getCurrentSessionId: () => 'room-1',
+    generateImageAttachment: async () => ({}),
+    fetchRemoteImage: async () => ({}),
+    confirmDestructiveWrite: async () => { confirmedLocally += 1; return true; },
+    prepareImage: async () => { prepared += 1; return { dataUrl: 'new-avatar', width: 256, height: 256, mime: 'image/webp', bytes: 100 }; },
+  });
+  const preflight = (name, args = {}) => getTool(tools, name).safety.preflight(args, {});
+  const pick = result => [result.destructive, result.kind, result.operationType];
+
+  assert.deepEqual(pick(await preflight('persona.set_avatar', { target: '角色A' })), [true, 'persona.avatar.set', 'set_avatar']);
+  assert.deepEqual(pick(await preflight('persona.set_avatar', { target: '角色B' })), [true, 'persona.avatar.replace', 'replace_existing'], 'replacing keeps its own danger card');
+  assert.equal((await preflight('persona.set_avatar', { target: '不存在' })).destructive, false, 'no target means nothing would change');
+  assert.deepEqual(pick(await preflight('user.set_avatar', { target: '用户A' })), [true, 'user.avatar.set', 'set_avatar']);
+  assert.deepEqual(pick(await preflight('contact.set_avatar', { target: '聊天室A' })), [true, 'contact.avatar.set', 'set_avatar']);
+  assert.equal((await preflight('persona.set_avatar', { target: '角色A' })).danger, false);
+  assert.deepEqual(pick(await preflight('session.set_wallpaper', { target: '聊天室A' })), [true, 'session.wallpaper.set', 'set_wallpaper']);
+  assert.deepEqual(pick(await preflight('session.set_wallpaper', { target: '聊天室B' })), [true, 'session.wallpaper.replace', 'replace_existing']);
+
+  const imageArgs = { prompt: '小雪，头像', subject: '小雪', target: '小雪', purpose: 'avatar', appearance: '黑发', outfit: '白色衬衫', style: '动漫', targetAspectRatio: '1:1' };
+  const generate = await preflight('media.generate_image', imageArgs);
+  assert.deepEqual(pick(generate), [true, 'media.generate_image', 'create_generated_image']);
+  assert.match(generate.message, /费用/);
+  assert.equal(generate.details.items[0].label, '小雪，头像', 'the card previews the prompt');
+  assert.equal((await getTool(createMaidMediaAssetTools(), 'media.generate_image').safety.preflight(imageArgs, {})).destructive, false, 'no image model means nothing is generated');
+  const fetched = await preflight('media.fetch_image', { url: 'https://img.example.com/a.jpg' });
+  assert.deepEqual(pick(fetched), [true, 'media.fetch_image', 'create_downloaded_image']);
+  assert.equal((await preflight('media.fetch_image', { url: 'ftp://img.example.com/a.jpg' })).destructive, false);
+  assert.equal(getTool(tools, 'media.fetch_image').capabilities.write, false, 'catalog capability stays as declared');
+
+  const registry = createAgentToolRegistry({
+    permissionEvaluator: createAgentPermissionEvaluator({ defaultDecision: AGENT_PERMISSION_DECISIONS.allow }),
+    logger: { warn() {} },
+  });
+  registry.registerMany(tools);
+  const requests = [];
+  const denied = await registry.executeTool('persona.set_avatar', { target: '角色A' }, {
+    maidAttachments: [attachment],
+    requestToolConfirmation: (request) => { requests.push(request); return false; },
+  });
+  assert.equal(denied.status, 'skipped');
+  assert.equal(denied.result.reason, 'avatar_set_cancelled');
+  assert.equal(prepared, 0);
+  assert.equal(personaStore.map.get('p1').avatar, '');
+  const allowed = await registry.executeTool('persona.set_avatar', { target: '角色A' }, {
+    maidAttachments: [attachment],
+    requestToolConfirmation: (request) => { requests.push(request); return true; },
+  });
+  assert.equal(allowed.result.ok, true);
+  assert.equal(personaStore.map.get('p1').avatar, 'new-avatar');
+  assert.deepEqual(requests.map(request => request.kind), ['persona.avatar.set', 'persona.avatar.set']);
+  const replaced = await registry.executeTool('persona.set_avatar', { target: '角色B' }, {
+    maidAttachments: [attachment],
+    requestToolConfirmation: (request) => { requests.push(request); return true; },
+  });
+  assert.equal(replaced.result.ok, true);
+  assert.equal(requests.at(-1).kind, 'persona.avatar.replace');
+  assert.equal(confirmedLocally, 0, 'a registry confirmation is never followed by the app-level dialog');
+  console.log('ok - first avatars, first wallpapers, image generation and image downloads all confirm with stable kinds');
+}

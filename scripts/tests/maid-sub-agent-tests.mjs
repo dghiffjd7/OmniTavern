@@ -261,12 +261,6 @@ import { createVoiceAwareMaidRuntimeResolver, createVoiceTaskModelRegistry } fro
   console.log('ok - sub-agent confirmation is task-scoped and never offers a main model that does not exist');
 }
 
-{
-  // hasConfiguredMaidProfile 在后面才赋值为真实实现：提交器必须在调用时读取，否则“首次聊天”永远被引导去配置 API
-  const appSource = readFileSync(new URL('../../src/scripts/ui/app.js', import.meta.url), 'utf8');
-  assert.match(appSource, /hasConfiguredMaidProfile: \(\) => hasConfiguredMaidProfile\(\), resolveMaidRuntimeConfig: resolveMaidTaskRuntimeConfig/);
-  console.log('ok - the command submitter reads the configured-profile check lazily');
-}
 
 console.log('maid-sub-agent-tests passed');
 

@@ -2949,6 +2949,7 @@ const AGENT_KIND_LABELS = Object.freeze({
     lineage_layout: '血缘图排版',
     creative_execution_lane: '执行泳道',
     summary_compaction: '摘要压缩',
+    script_generation: '脚本调用模型',
     moment_comment: '动态评论',
     moment_publish: '动态发布',
     phone_format: '手机格式',

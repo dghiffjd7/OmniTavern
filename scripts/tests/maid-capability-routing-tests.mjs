@@ -211,6 +211,7 @@ const createCatalogRoutingHarness = () => {
     ['打开建群界面让我自己选', 'group.create.open', 'group_create_panel'],
     ['只读确认「草帽一伙」群聊有哪些成员', 'app.resource.read', 'group_member_read'],
     ['只打开这个群聊给我看', 'session.open', 'session_open'],
+    ['从当前角色卡的世界书挑出主要人物，给他们建私聊和一个群聊', 'session.character_rooms.plan', 'card_character_rooms'],
   ];
   for (const [input, featureId, conceptCode] of fixtures) {
     const result = retriever.retrieve(input, { features: catalogFeatures, limit: 8 });
@@ -218,7 +219,7 @@ const createCatalogRoutingHarness = () => {
     assert.ok(match, `${input} should retrieve ${featureId}`);
     assert.ok(match.conceptCodes.includes(conceptCode), `${featureId} should expose ${conceptCode}`);
   }
-  console.log('ok - v4 retriever separates group creation, member reads/updates, opening, and create-panel navigation');
+  console.log('ok - v4 retriever separates group creation, member reads/updates, opening, create-panel navigation and card character rooms');
 }
 
 {
@@ -423,11 +424,9 @@ const createCatalogRoutingHarness = () => {
   for (const featureId of ['session.list', 'app.resource.read', 'worldbook.list', 'app.state.read']) {
     assert.equal(snapshot.candidateIds.has(featureId), true, `只读审计应召回 ${featureId}`);
   }
-  for (const featureId of ['session.delete_many', 'persona.delete_many', 'worldbook.delete_many']) {
-    assert.equal(snapshot.candidateIds.has(featureId), false, `“清理后/已不存在/不得补删”不得召回 ${featureId}`);
-  }
+  // 11/20 起不再按「有没有删除字眼」把删除功能剔出候选：要不要删由模型判断，真的删除照样弹确认
   runtime.finishRequest(request.id, { ok: true });
-  console.log('ok - post-cleanup read-only audit excludes destructive capabilities');
+  console.log('ok - post-cleanup read-only audit recalls every read capability');
 }
 
 {
@@ -1106,13 +1105,11 @@ const createCatalogRoutingHarness = () => {
   });
   const request = runtime.beginRequest({ input: '查看危险记录' });
   const snapshot = runtime.prepareDecision({ requestId: request.id, input: '查看危险记录' });
-  assert.equal(snapshot.excluded[0].reason, 'risk_intent_not_explicit');
   runtime.observeDecision(snapshot, {
     ok: true,
     featureId: 'mislabelled.danger',
     toolName: 'danger.delete',
   });
-  assert.equal(policyLog.decisions[0].policyExcluded, true);
   assert.equal(policyLog.decisions[0].cohort.riskLevel, 'high');
   console.log('ok - Tool Registry risk cannot be downgraded by catalog metadata');
 }
@@ -1323,8 +1320,7 @@ console.log('maid-capability-routing-tests passed');
   const input = '确认，但保留「批测乙」，只删甲。';
   const request = runtime.beginRequest({ input });
   const plain = runtime.prepareDecision({ requestId: request.id, input, phase: 'planner', configOverride: { mode: 'bounded' } });
-  assert.equal(plain.candidateIds.has('regex.delete_many'), false, 'without a pending list the gate still applies');
-  assert.equal(plain.excluded.some(item => item.id === 'regex.delete_many' && item.reason === 'risk_intent_not_explicit'), true);
+  assert.equal(plain.excluded.some(item => item.reason === 'risk_intent_not_explicit'), false, '不再按删除字眼剔除候选（11/20）');
   const revision = runtime.prepareDecision({
     requestId: request.id, input, phase: 'planner', configOverride: { mode: 'bounded' },
     context: { pendingActionRevision: { featureId: 'regex.delete_many', toolName: 'regex.delete_many' } },

@@ -23,9 +23,20 @@ import { createMaidMemoryTools } from '../../src/scripts/agent/tools/maid-memory
 import { createMaidCapabilityAgentTools } from '../../src/scripts/agent/tools/maid-capability-tools.js';
 import { createMcpAgentTools } from '../../src/scripts/agent/tools/mcp-tools.js';
 import { createGuideStartFlowTools } from '../../src/scripts/agent/tools/guide-start-flow-tools.js';
+import { createImportedCardRoomTools } from '../../src/scripts/agent/tools/imported-card-room-tools.js';
+import { createMaidTaskTools } from '../../src/scripts/agent/tools/maid-task-tools.js';
+import { createWorldbookCompareTools } from '../../src/scripts/agent/tools/worldbook-compare-tools.js';
 import { createChatFormatRepairTools } from '../../src/scripts/agent/tools/chat-format-tools.js';
 import { createMomentsAgentTools } from '../../src/scripts/agent/tools/moments-tools.js';
 import { createPresetRegexScriptAgentTools } from '../../src/scripts/agent/tools/preset-regex-script-tools.js';
+import { createAgentConfigAgentTools } from '../../src/scripts/agent/tools/agent-config-tools.js';
+import { createFlowBoardAgentTools } from '../../src/scripts/agent/tools/flow-board-tools.js';
+import { createPresetEditAgentTools } from '../../src/scripts/agent/tools/preset-edit-tools.js';
+import { createScriptEditAgentTools } from '../../src/scripts/agent/tools/script-edit-tools.js';
+import { createVariableEditAgentTools } from '../../src/scripts/agent/tools/variable-edit-tools.js';
+import { createMemoryTableEditAgentTools } from '../../src/scripts/agent/tools/memory-table-edit-tools.js';
+import { createMemorySettingsAgentTools } from '../../src/scripts/agent/tools/memory-settings-tools.js';
+import { createVariablePreviewCommandsRuntime, createVariablePreviewCommitRuntime } from '../../src/scripts/ui/agent-write-preview-runtime-utils.js';
 import { createPresetGroupStore } from '../../src/scripts/storage/preset-group-store.js';
 import { createContactProfileAgentTools } from '../../src/scripts/agent/tools/contact-profile-tools.js';
 import { createAttachmentImportAgentTools } from '../../src/scripts/agent/tools/attachment-import-tools.js';
@@ -36,6 +47,8 @@ const { createAttachmentImportService } = await import('../../src/scripts/import
 const { inspectAttachmentFile } = await import('../../src/scripts/import/attachment-file-inspector.js');
 const { createMaidFileAttachmentRegistry } = await import('../../src/scripts/ui/maid-file-attachments.js');
 const { createAttachmentFileAgentTools } = await import('../../src/scripts/agent/tools/attachment-file-tools.js');
+const { createPluginAgentTools } = await import('../../src/scripts/agent/tools/plugin-tools.js');
+const { PluginStore } = await import('../../src/scripts/storage/plugin-store.js');
 
 const getTool = (tools, name) => tools.find(tool => tool.name === name);
 
@@ -238,14 +251,16 @@ const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
 }
 
 {
+  // 11/21 用户定：新手入口交给模型，开启引导的工具进功能目录
   const feature = findAppFeature('女仆新手任务');
   assert.equal(feature.id, 'maid.onboarding');
-  assert.deepEqual(feature.tools, []);
-  assert.equal(feature.maidModelContext, 'awareness_only');
+  assert.deepEqual(feature.tools, ['guide.start_flow']);
+  assert.equal(feature.directAction, 'guide.start_flow');
+  assert.equal(feature.maidModelContext, undefined);
   const knowledge = buildAppFeatureKnowledgeText([feature]);
-  assert.match(knowledge, /内建新手任务/);
-  assert.doesNotMatch(knowledge, /guide\.start_flow|setup-api|add-friend|first-chat|meet-maid/);
-  console.log('ok - app feature catalog exposes only awareness of local built-in onboarding');
+  assert.match(knowledge, /guide\.start_flow/);
+  for (const flowId of ['setup-api', 'add-friend', 'first-chat', 'meet-maid']) assert.match(knowledge, new RegExp(flowId));
+  console.log('ok - app feature catalog lets the maid model start the built-in onboarding guides');
 }
 
 {
@@ -588,6 +603,25 @@ const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
   const guideTools = createGuideStartFlowTools({
     startFlow: flowId => startedGuideFlows.push(flowId),
   });
+  const taskScope = { roleCardId: 'catalog-card', uiMode: 'chat' };
+  const taskRuns = new Map([['run:catalog-task', { id: 'run:catalog-task', kind: 'maid_assistant', status: 'failed', updatedAt: 1000,
+    metadata: { goal: '目录测试任务', maidTaskScope: taskScope, continuable: true, reason: 'provider_request_failed',
+      todos: [{ content: '第一步', status: 'completed' }, { content: '第二步', status: 'pending' }] }, steps: [] }]]);
+  const resumedTaskRuns = [];
+  const taskTools = createMaidTaskTools({
+    agentTaskRuntime: {
+      getRun: id => taskRuns.get(id) || null,
+      listRuns: () => Array.from(taskRuns.values()),
+      finishRun: (id, patch) => {
+        const run = taskRuns.get(id);
+        if (!run) return null;
+        Object.assign(run, { ...patch, metadata: { ...run.metadata, ...(patch?.metadata || {}) } });
+        return run;
+      },
+      flush: async () => true,
+    },
+    resumeRun: run => { resumedTaskRuns.push(run.id); return true; },
+  });
   const formatProfiles = new Map();
   const formatTools = createChatFormatRepairTools({
     repairMessageFormat: async args => ({ ok: true, applied: true, formatHint: args.formatHint }),
@@ -644,9 +678,7 @@ const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
   const catalogPresetBindings = {};
   const catalogRegex = { global: { enabled: true, rules: [{ id: 'g1', scriptName: '规则', findRegex: 'a', replaceString: '' }] }, sets: {}, session: {} };
   const catalogScripts = [{ id: 's1', name: '脚本', enabled: false, compatibility: { blocked: false } }];
-  const presetRegexScriptTools = createPresetRegexScriptAgentTools({
-    presetGroupStore: createPresetGroupStore({ storage: null, saveKv: async () => {}, logger: null }),
-    presetStore: {
+  const catalogPresetStore = {
       getState: () => ({ builtinActive: { openai: 'builtin' } }),
       getEnabled: () => true,
       list: type => Object.entries(catalogPresets[type] || {}).map(([id, data]) => ({ id, ...JSON.parse(JSON.stringify(data)) })),
@@ -655,9 +687,53 @@ const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
       getResolvedActiveId: (type, ctx) => ({ presetId: catalogPresetBindings[`${type}:${ctx.sessionId}`] || 'main', source: 'session', mode: 'chat' }),
       setSessionBinding: async (type, sid, id) => { catalogPresetBindings[`${type}:${sid}`] = id; },
       setActive: async () => {},
-      upsert: async (type, { id, name, data }) => { catalogPresets[type][id] = { ...data, name }; },
+      upsert: async (type, { id, name, data }) => { const presetId = id || `copy_${Object.keys(catalogPresets[type]).length}`; catalogPresets[type][presetId] = { ...data, name }; return presetId; },
       remove: async (type, id) => { delete catalogPresets[type][id]; },
+  };
+  const presetEditTools = createPresetEditAgentTools({ presetStore: catalogPresetStore, getCurrentSessionId: () => current });
+  const catalogVarStore = {
+    vars: { 金币: 1, 临时: 'x' },
+    listVariables() { return structuredClone(this.vars); },
+    listGlobalVariables() { return {}; },
+    setVariable(key, value) { this.vars[key] = structuredClone(value); return true; },
+    deleteVariable(key) { if (!(key in this.vars)) return false; delete this.vars[key]; return true; },
+  };
+  const variableEditTools = createVariableEditAgentTools({
+    getCurrentSessionId: () => current || 'catalog',
+    previewVariableCommands: createVariablePreviewCommandsRuntime({ chatStore: catalogVarStore }),
+    commitVariables: createVariablePreviewCommitRuntime({ chatStore: catalogVarStore }).commit,
+    listVariables: () => catalogVarStore.listVariables(),
+  });
+  const catalogMemoryRows = [{ id: 'm1', table_id: 'profile', contact_id: 'c', row_data: { nickname: '甲' } }];
+  const catalogMemoryContext = () => ({
+    tableOrder: ['profile'],
+    tableById: new Map([['profile', { id: 'profile', name: '档案', columns: [{ id: 'nickname', name: '称呼' }] }]]),
+    allRows: structuredClone(catalogMemoryRows),
+    rowsById: new Map(catalogMemoryRows.map(row => [row.id, structuredClone(row)])),
+  });
+  const memoryTableEditTools = createMemoryTableEditAgentTools({
+    getCurrentSessionId: () => current || 'catalog',
+    loadMemoryContext: async () => catalogMemoryContext(),
+    previewMemoryActions: async ({ actions }) => ({ entries: actions.map((action, index) => {
+      const row = catalogMemoryRows.find(item => item.id === action.rowId);
+      if (action.action === 'delete') return { index, kind: 'delete', rowId: action.rowId, diff: { before: row.row_data, after: null } };
+      if (action.action === 'update') return { index, kind: 'update', rowId: action.rowId, diff: { before: row.row_data, after: { ...row.row_data, ...action.data } } };
+      return { index, kind: 'insert', diff: { before: null, after: action.data } };
+    }) }),
+    commitMemory: async ({ args }) => {
+      for (const action of args.actions) {
+        if (action.action === 'delete') catalogMemoryRows.splice(catalogMemoryRows.findIndex(row => row.id === action.rowId), 1);
+        else if (action.action === 'update') Object.assign(catalogMemoryRows.find(row => row.id === action.rowId).row_data, action.data);
+        else catalogMemoryRows.push({ id: `m${catalogMemoryRows.length + 2}`, table_id: action.tableId, row_data: { ...action.data } });
+      }
+      return { status: 'committed' };
     },
+  });
+  const catalogMemorySettings = { memoryInjectPosition: 'before_latest_user', memoryInjectDepth: 0 };
+  const memorySettingsTools = createMemorySettingsAgentTools({ getSettings: () => ({ ...catalogMemorySettings }), updateSettings: patch => Object.assign(catalogMemorySettings, patch) });
+  const presetRegexScriptTools = createPresetRegexScriptAgentTools({
+    presetGroupStore: createPresetGroupStore({ storage: null, saveKv: async () => {}, logger: null }),
+    presetStore: catalogPresetStore,
     regexStore: {
       getGlobal: () => JSON.parse(JSON.stringify(catalogRegex.global)),
       setGlobal: async next => { catalogRegex.global = { enabled: true, rules: next.rules.map((rule, index) => ({ id: rule.id || `n${index}`, ...rule })) }; },
@@ -673,6 +749,43 @@ const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
       deleteScript: async (_scope, _id, scriptId) => { catalogScripts.splice(catalogScripts.findIndex(item => item.id === scriptId), 1); return true; },
     },
     getCurrentSessionId: () => current,
+  });
+  // 脚本代码与设定：另一份最小夹具（上面的 s1 会被删除动作删掉）；真实存储与确认流程在 maid-script-tools-tests 里测
+  const catalogEditScripts = [{ id: 'e1', name: '编辑用脚本', content: 'console.log(1);', info: '', enabled: false, compatibility: { blocked: false } }];
+  const catalogScriptSettings = { scriptEnabled: false };
+  const scriptEditTools = createScriptEditAgentTools({
+    scriptStore: {
+      listScopes: () => ({ character: [], preset: [] }),
+      getScripts: scope => (scope === 'global' ? JSON.parse(JSON.stringify(catalogEditScripts)) : []),
+      upsertScript: async (_scope, _id, script) => { const id = `e${catalogEditScripts.length + 1}`; catalogEditScripts.push({ ...script, id, enabled: false, authorized: false }); return id; },
+      updateScript: async (_scope, _id, scriptId, patch) => { Object.assign(catalogEditScripts.find(item => item.id === scriptId), patch); return true; },
+    },
+    getScriptSettings: () => ({ ...catalogScriptSettings }),
+    updateScriptSettings: patch => Object.assign(catalogScriptSettings, patch),
+  });
+  // 插件：真的 PluginStore（node 下只存在记忆体），runtime、界面管理与下载用最小替身；完整流程在 maid-plugin-tools-tests 里测
+  const catalogPluginManifest = (id, name) => ({ id, name, version: '1.0.0', apiVersion: '1', main: 'index.js', permissions: ['chat.read'] });
+  const catalogPluginStore = new PluginStore();
+  await catalogPluginStore.ready;
+  await catalogPluginStore.installPlugin({ manifest: catalogPluginManifest('cat.plugin', '目录插件'), code: 'module.exports = async () => {};' });
+  const catalogPluginRunning = new Set();
+  const catalogPluginSidebars = [{ pluginId: 'cat.plugin', id: 'side', title: '目录侧边栏' }];
+  const catalogPluginTools = createPluginAgentTools({
+    pluginStore: catalogPluginStore,
+    pluginRuntime: {
+      enablePlugin: async id => { catalogPluginRunning.add(id); },
+      disablePlugin: async id => { catalogPluginRunning.delete(id); },
+      getStatus: id => ({ status: catalogPluginRunning.has(id) ? 'running' : 'stopped', error: null }),
+    },
+    getUiManager: () => ({
+      listSidebars: () => catalogPluginSidebars.slice(),
+      listCards: () => [],
+      getActiveModal: () => null,
+      unregisterSidebar: (pluginId, id) => { catalogPluginSidebars.splice(catalogPluginSidebars.findIndex(item => item.pluginId === pluginId && item.id === id), 1); },
+    }),
+    invoke: async cmd => (cmd === 'http_request'
+      ? { ok: true, status: 200, body: Buffer.from('zip').toString('base64'), headers: {} }
+      : { manifestText: JSON.stringify(catalogPluginManifest('cat.second', '目录插件二')), mainText: 'module.exports = async () => {};' }),
   });
   const contactProfiles = new Map();
   const contactProfileTools = createContactProfileAgentTools({
@@ -724,7 +837,7 @@ const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
       call: async ({ toolName, arguments: callArgs }) => ({ serverId: 'srv', serverName: '目录 MCP', toolName, isError: false, text: String(callArgs.text), truncated: false }),
     }),
   });
-  const tools = [...navTools, ...sessionTools, ...groupTools, ...contentTools, ...mediaTools, ...captureTools, ...webTools, ...todoTools, ...maidMemoryTools, ...guideTools, ...formatTools, ...momentsTools, ...presetRegexScriptTools, ...contactProfileTools, ...attachmentTools, ...attachmentFileTools, ...capabilityTools, ...mcpTools];
+  const tools = [...navTools, ...sessionTools, ...groupTools, ...contentTools, ...mediaTools, ...captureTools, ...webTools, ...todoTools, ...maidMemoryTools, ...guideTools, ...formatTools, ...momentsTools, ...presetRegexScriptTools, ...scriptEditTools, ...createAgentConfigAgentTools({}), ...createFlowBoardAgentTools({}), ...presetEditTools, ...variableEditTools, ...memoryTableEditTools, ...memorySettingsTools, ...contactProfileTools, ...attachmentTools, ...attachmentFileTools, ...capabilityTools, ...mcpTools, ...catalogPluginTools, ...createImportedCardRoomTools({}), ...taskTools, ...createWorldbookCompareTools({})];
   const worldbookRegistry = createAgentToolRegistry({
     permissionEvaluator: { evaluateTool: () => ({ decision: 'allow', checks: [] }) },
     logger: { warn() {} },
@@ -1168,9 +1281,28 @@ const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
       return;
     }
     if (feature.id === 'maid.onboarding') {
-      assert.equal(feature.maidModelContext, 'awareness_only');
-      assert.deepEqual(feature.tools, []);
-      assert.deepEqual(startedGuideFlows, []);
+      const result = await getTool(tools, feature.directAction).execute({ flowId: 'setup-api' });
+      assert.equal(result.started, true);
+      assert.deepEqual(startedGuideFlows, ['setup-api']);
+      return;
+    }
+    if (feature.id === 'maid.task.status') {
+      const listed = await getTool(tools, 'maid.task.list').execute({}, taskScope);
+      assert.deepEqual(listed.tasks.map(task => [task.id, task.resumable]), [['run:catalog-task', true]]);
+      const read = await getTool(tools, 'maid.task.read').execute({ taskId: 'run:catalog-task' }, taskScope);
+      assert.deepEqual(read.task.todos.map(todo => todo.content), ['第一步', '第二步']);
+      return;
+    }
+    if (feature.id === 'maid.task.resume') {
+      const result = await getTool(tools, feature.directAction).execute({ taskId: 'run:catalog-task' }, taskScope);
+      assert.equal(result.queued, true);
+      assert.deepEqual(resumedTaskRuns, ['run:catalog-task']);
+      return;
+    }
+    if (feature.id === 'maid.task.cancel') {
+      const result = await getTool(tools, feature.directAction).execute({ taskId: 'run:catalog-task' }, taskScope);
+      assert.deepEqual([result.taskCancelled, result.persisted], [true, true]);
+      assert.equal(taskRuns.get('run:catalog-task').status, 'cancelled');
       return;
     }
     if (feature.id === 'app.errors.read') {
@@ -1186,6 +1318,18 @@ const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
       'preset.delete_many': { type: 'openai', presets: ['备用'] },
       'preset.groups.list': {},
       'preset.groups': { assignments: [{ preset: '备用', group: '测试' }] },
+      'preset.read': {},
+      'preset.prompt_entries.upsert': { preset: '主', entries: [{ entry: 'main', content: '目录测试内容' }] },
+      'preset.params.update': { preset: '主', params: { temperature: 0.5 } },
+      'preset.copy': { preset: '主', name: '主副本' },
+      'preset.rename': { preset: '主副本', name: '主副本二' },
+      'variable.set': { values: [{ path: '金币', value: 2 }] },
+      'variable.delete': { paths: ['临时'] },
+      'memory.rows.read': {},
+      'memory.rows.upsert': { rows: [{ table: '档案', rowId: 'm1', values: [{ column: '称呼', value: '乙' }] }] },
+      'memory.rows.delete': { rows: [{ table: 'profile', rowId: 'm1' }] },
+      'memory.settings.read': {},
+      'memory.settings.update': { settings: { memoryInjectDepth: 2 } },
       'regex.list': {},
       'regex.toggle': { targets: ['g1'], enabled: false },
       'regex.upsert_rules': { rules: [{ scriptName: '新规则', findRegex: 'b', replaceString: 'c' }] },
@@ -1193,6 +1337,13 @@ const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
       'script.list': {},
       'script.toggle_many': { scripts: ['s1'], enabled: true },
       'script.delete_many': { scripts: ['s1'] },
+      'script.read': { script: 'e1' },
+      'script.upsert': { items: [{ name: '目录新脚本', scope: 'global', content: 'console.log(2);' }] },
+      'script.settings.update': { allowNetwork: true },
+      'plugin.list': {},
+      'plugin.toggle_many': { plugins: ['目录插件'], enabled: true },
+      'plugin.install': { url: 'https://example.com/cat-second.zip' },
+      'plugin.ui.remove': { items: [{ pluginId: 'cat.plugin', id: 'side', kind: 'sidebar' }] },
     };
     if (presetRegexScriptArgs[feature.id]) {
       const tool = getTool(tools, feature.directAction);
@@ -1205,7 +1356,9 @@ const escapeRegex = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
     }
     if (feature.id === 'attachment.inspect' || feature.id === 'attachment.import') {
       const args = feature.id === 'attachment.import' ? { attachmentId: 'catalog-file', target: 'none' } : { attachmentId: 'catalog-file' };
-      const result = await getTool(tools, feature.directAction).execute(args, {});
+      // 导入一律先确认（2026-11-20）：按用户已允许执行
+      const preflight = await getTool(tools, feature.directAction).safety?.preflight?.(args, {});
+      const result = await getTool(tools, feature.directAction).execute(args, preflight?.kind ? { toolSafety: { decision: 'allow', request: { kind: preflight.kind } } } : {});
       assert.equal(result.ok, true, `${feature.id} direct action should succeed: ${JSON.stringify(result).slice(0, 200)}`);
       if (feature.id === 'attachment.import') assert.deepEqual([result.worldbookId, result.verified], ['目录测试', true]);
       return;
